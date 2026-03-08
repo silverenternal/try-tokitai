@@ -2,9 +2,17 @@
 
 set timeout 120
 
-# 设置环境变量
-set env(AI_API_URL) "https://ollama.com/v1/chat/completions"
-set env(AI_API_KEY) "645c36802a434774b0ff2101596e1c2d.Re7mAsiOwiRTGx6UNNk1sv_M"
+# 从 .env 文件加载环境变量（如果存在）
+# 注意：expect 无法直接读取 .env 文件，需要在运行前手动设置
+# 建议：运行此脚本前先执行 source .env 或 export 变量
+
+if {[info exists env(AI_API_KEY)] == 0} {
+    puts "⚠️  警告：未设置环境变量 AI_API_KEY"
+    puts "   请先运行：source .env 或手动 export AI_API_KEY=your_key"
+    puts ""
+}
+
+set env(AI_API_URL) [expr {[info exists env(AI_API_URL)] ? $env(AI_API_URL) : "https://ollama.com/v1/chat/completions"}]
 
 # 启动程序
 spawn cargo run --release

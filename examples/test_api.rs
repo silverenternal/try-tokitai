@@ -2,8 +2,10 @@ use reqwest::blocking::Client;
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let api_url = "https://ollama.com/v1/chat/completions";
-    let api_key = "645c36802a434774b0ff2101596e1c2d.Re7mAsiOwiRTGx6UNNk1sv_M";
+    let api_url = std::env::var("AI_API_URL")
+        .unwrap_or_else(|_| "https://ollama.com/v1/chat/completions".to_string());
+    let api_key = std::env::var("AI_API_KEY")
+        .expect("⚠️  未设置环境变量 AI_API_KEY，请创建 .env 文件或手动设置");
     
     let client = Client::new();
     

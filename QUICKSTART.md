@@ -9,8 +9,14 @@
 或者手动启动：
 
 ```bash
-export AI_API_URL="https://ollama.com/v1/chat/completions"
-export AI_API_KEY="645c36802a434774b0ff2101596e1c2d.Re7mAsiOwiRTGx6UNNk1sv_M"
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的 API key
+# AI_API_KEY=your_api_key_here
+
+# 加载环境变量并启动
+source .env
 cargo run --release
 ```
 

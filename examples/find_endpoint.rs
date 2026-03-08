@@ -48,7 +48,8 @@ fn test_endpoint(url: &str, api_key: &str) -> bool {
 }
 
 fn main() {
-    let api_key = "645c36802a434774b0ff2101596e1c2d.Re7mAsiOwiRTGx6UNNk1sv_M";
+    let api_key = std::env::var("AI_API_KEY")
+        .expect("⚠️  未设置环境变量 AI_API_KEY，请创建 .env 文件或手动设置");
     
     println!("🧪 测试可能的 Ollama 云端 API 端点...\n");
     
