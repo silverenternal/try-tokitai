@@ -4,21 +4,72 @@
 
 ## 🚀 快速开始
 
-### 一键启动演示
+### 1️⃣ 获取 API Key（首次使用必读）
+
+本项目使用 **Ollama Cloud** 作为默认 AI 服务，需要 API Key 才能运行。
+
+#### 如何获取 Ollama API Key：
+
+1. **访问官网**：打开 https://ollama.com
+2. **注册/登录**：点击右上角 "Sign In"，使用 GitHub 或邮箱注册账号
+3. **进入设置页面**：登录后点击右上角头像 → "API Keys"
+4. **创建新 Key**：点击 "Create API Key" 按钮
+5. **复制 Key**：生成的 Key 格式类似 `ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+6. **保存 Key**：⚠️ **立即复制并妥善保存**（页面刷新后将无法再次查看完整 Key）
+
+> 💡 **提示**：Ollama Cloud 目前提供免费额度，足够个人开发和测试使用。
+
+#### 可选：使用其他 AI 服务
+
+| 服务商 | API URL | 说明 |
+|--------|---------|------|
+| Ollama Cloud | `https://ollama.com/v1/chat/completions` | 默认推荐，支持多种开源模型 |
+| OpenAI | `https://api.openai.com/v1/chat/completions` | 需要 OpenAI 账号 |
+| Azure OpenAI | `https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT/chat/completions` | 需要 Azure 账号 |
+
+---
+
+### 2️⃣ 配置环境变量
+
+#### 方法一：临时设置（当前终端会话有效）
 
 ```bash
-./demo.sh
+# 设置 API Key（替换为你的真实 Key）
+export AI_API_KEY="ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 设置 API URL（可选，默认使用 Ollama Cloud）
+export AI_API_URL="https://ollama.com/v1/chat/completions"
+
+# 设置模型（可选，默认使用 qwen3.5:397b）
+export AI_MODEL="qwen3.5:397b"
 ```
 
-### 命令行模式
+#### 方法二：永久设置（推荐）
 
 ```bash
-export AI_API_URL="https://ollama.com/v1/chat/completions"
-export AI_API_KEY="你的 API key"
+# 复制示例文件
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的 API Key
+nano .env  # 或使用你喜欢的编辑器
+
+# 文件内容示例：
+# AI_API_KEY=ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# AI_API_URL=https://ollama.com/v1/chat/completions
+# AI_MODEL=qwen3.5:397b
+```
+
+---
+
+### 3️⃣ 启动程序
+
+#### 命令行模式
+
+```bash
 cargo run --release
 ```
 
-### TUI 界面模式（⚠️ 实验性功能）
+#### TUI 界面模式（⚠️ 实验性功能）
 
 > **注意**：TUI 功能目前处于实验性阶段，可能存在不稳定的情况。
 
@@ -28,6 +79,12 @@ cargo run --release -- --tui
 
 # 或使用短选项
 cargo run --release -- -t
+```
+
+#### 一键启动演示
+
+```bash
+./demo.sh
 ```
 
 ---
@@ -157,7 +214,41 @@ cargo run --release -- -t
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `AI_API_URL` | AI API 地址 | `https://ollama.com/v1/chat/completions` |
-| `AI_API_KEY` | API 密钥 | 无 |
+| `AI_API_KEY` | API 密钥（**必填**） | 无 |
+| `AI_MODEL` | 模型名称 | `qwen3.5:397b` |
+
+---
+
+## ❓ 常见问题
+
+### Q: 提示 "未设置 AI_API_KEY" 怎么办？
+
+A: 你需要先获取 Ollama API Key，参考上方「获取 API Key」步骤。
+
+### Q: API Key 安全吗？会上传到服务器吗？
+
+A: API Key 仅保存在本地 `.env` 文件中，不会上传到任何第三方服务器（除了你配置的 AI 服务提供商）。
+
+### Q: 可以使用本地 Ollama 服务吗？
+
+A: 可以。如果你本地运行了 Ollama 服务，设置：
+```bash
+export AI_API_URL="http://localhost:11434/v1/chat/completions"
+```
+
+### Q: 模型响应很慢怎么办？
+
+A: 尝试切换到较小的模型：
+```bash
+export AI_MODEL="qwen2.5:7b"
+```
+
+### Q: TUI 界面显示异常怎么办？
+
+A: TUI 目前处于实验性阶段，如遇问题请：
+1. 确保终端支持 UTF-8 编码
+2. 尝试调整终端窗口大小
+3. 使用命令行模式（更稳定）
 
 ---
 
