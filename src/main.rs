@@ -1,10 +1,15 @@
+mod config;
+mod sandbox;
 mod tools;
+mod tui;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
-use tools::{CodeTools, FileOperations, SystemTools, WebSearchTools};
+use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools};
 
 /// AI 助手 - 整合所有工具
 pub struct AiAssistant {
@@ -12,19 +17,25 @@ pub struct AiAssistant {
     system_tools: SystemTools,
     code_tools: CodeTools,
     web_search: WebSearchTools,
+    download_tools: DownloadTools,
+    git_ops: GitOperations,
     api_url: String,
     api_key: Option<String>,
+    model: String,
 }
 
 impl AiAssistant {
-    pub fn new(api_url: String, api_key: Option<String>) -> Self {
+    pub fn new(api_url: String, api_key: Option<String>, model: String) -> Self {
         Self {
             file_ops: FileOperations,
             system_tools: SystemTools,
             code_tools: CodeTools,
-            web_search: WebSearchTools,
+            web_search: WebSearchTools::new(),
+            download_tools: DownloadTools,
+            git_ops: GitOperations,
             api_url,
             api_key,
+            model,
         }
     }
 
@@ -77,25 +88,62 @@ impl AiAssistant {
             })
         }));
 
+        tools.extend(DownloadTools::TOOL_DEFINITIONS.iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(GitOperations::TOOL_DEFINITIONS.iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
         tools
     }
 
-    /// 调用工具
+    /// 调用工具（带日志）
     pub fn call_tool(&self, name: &str, args: &Value) -> Result<String> {
+        info!("🔧 执行工具：{} {:?}", name, args);
+
         // 尝试在各个工具集中查找并执行
         if let Ok(result) = self.file_ops.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
         if let Ok(result) = self.system_tools.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
         if let Ok(result) = self.code_tools.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
         if let Ok(result) = self.web_search.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.download_tools.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.git_ops.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
 
+        warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
     }
 
@@ -106,7 +154,7 @@ impl AiAssistant {
         let tools = self.get_tool_definitions();
 
         let request_body = json!({
-            "model": "qwen3.5:397b",
+            "model": self.model,
             "messages": messages,
             "tools": tools,
             "tool_choice": "auto"
@@ -211,22 +259,59 @@ impl AiAssistant {
 }
 
 fn main() -> Result<()> {
+    // 解析命令行参数
+    let args: Vec<String> = std::env::args().collect();
+    let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
+
+    // 如果指定了 --tui，启动 TUI 界面
+    if use_tui {
+        info!("🚀 启动 TUI 界面...");
+        tui::run_tui().map_err(|e| anyhow::anyhow!("TUI 错误：{}", e))?;
+        return Ok(());
+    }
+
+    // 初始化 tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::from_default_env()
+                .add_directive("ai_assistant=info".parse().unwrap())
+                .add_directive("tokitai=warn".parse().unwrap()),
+        )
+        .init();
+
+    info!("🚀 AI Assistant 启动中...");
+
+    // 加载配置
+    let config = config::Config::load(None).unwrap_or_else(|e| {
+        warn!("加载配置文件失败：{}，使用默认配置", e);
+        config::Config::default()
+    });
+
     println!("🤖 AI Assistant powered by Tokitai");
     println!("=====================================");
-    println!("模型：qwen3.5:397b (Ollama Cloud)");
+    println!("模型：{} (Ollama Cloud)", config.ai.model);
     println!("按 Ctrl+C 退出\n");
 
-    // 从环境变量或命令行参数获取配置
+    // 从环境变量或配置获取配置
     let api_url = std::env::var("AI_API_URL")
         .unwrap_or_else(|_| "https://ollama.com/v1/chat/completions".to_string());
     let api_key = std::env::var("AI_API_KEY").ok();
+    // 优先级：环境变量 > 配置文件 > 硬编码默认值
+    let model = std::env::var("AI_MODEL")
+        .unwrap_or_else(|_| {
+            if config.ai.model.is_empty() {
+                "qwen3.5:397b".to_string()
+            } else {
+                config.ai.model.clone()
+            }
+        });
 
     // 检查配置
     if api_key.is_none() {
         println!("⚠️  警告：未设置 AI_API_KEY，某些 API 可能无法使用\n");
     }
 
-    let assistant = AiAssistant::new(api_url, api_key);
+    let assistant = AiAssistant::new(api_url, api_key, model);
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
         "content": "你是一个强大的 AI 助手，可以调用各种工具来帮助用户完成任务。你可以：
@@ -248,7 +333,14 @@ fn main() -> Result<()> {
         stdout.flush()?;
 
         let mut input = String::new();
-        stdin.lock().read_line(&mut input)?;
+        let bytes_read = stdin.lock().read_line(&mut input)?;
+        
+        // 检测 EOF（管道输入结束）
+        if bytes_read == 0 {
+            println!("\n👋 再见！");
+            break;
+        }
+        
         let input = input.trim();
 
         if input.is_empty() {
@@ -271,6 +363,13 @@ fn main() -> Result<()> {
             println!("  • 复制文件：'复制 README.md 到 backup.md'");
             println!("  • 删除文件：'删除 /tmp/test.txt'");
             println!("  • 环境变量：'查看 PATH 环境变量'");
+            println!("  • 下载文件：'下载 https://example.com/file.pdf'");
+            println!("  • 下载论文：'从 arXiv 下载论文 2301.00001'");
+            println!("  • 搜索论文：'搜索关于 transformer 的 arXiv 论文'");
+            println!("  • 查看下载目录：'我的下载目录在哪里'");
+            println!("  • Git 状态：'查看 git 状态'");
+            println!("  • Git 日志：'查看最近的提交记录'");
+            println!("  • Git 分支：'查看当前分支'");
             println!();
             continue;
         }
@@ -373,7 +472,8 @@ mod tests {
         assert!(!CodeTools::TOOL_DEFINITIONS.is_empty());
         assert!(!SystemTools::TOOL_DEFINITIONS.is_empty());
         assert!(!WebSearchTools::TOOL_DEFINITIONS.is_empty());
-        
+        assert!(!DownloadTools::TOOL_DEFINITIONS.is_empty());
+
         // 验证工具定义格式
         for def in FileOperations::TOOL_DEFINITIONS.iter() {
             assert!(!def.name.is_empty());

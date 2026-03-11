@@ -64,7 +64,7 @@ fn main() {
     ];
     
     for endpoint in &endpoints {
-        test_endpoint(endpoint, api_key);
+        test_endpoint(endpoint, &api_key);
     }
     
     println!("\n💡 提示：请确认你使用的 Ollama 云端服务提供方和正确的 API 端点");

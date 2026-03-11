@@ -21,8 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {"role": "user", "content": "你好，请用一句话介绍你自己"}
         ]
     });
-    
-    let response = client.post(api_url)
+
+    let response = client.post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&messages)
@@ -76,15 +76,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "tool_choice": "auto"
     });
     
-    let response = client.post(api_url)
+    let response = client.post(&api_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&messages)
         .send()?;
-    
+
     let status = response.status();
     println!("响应状态：{}", status);
-    
+
     if status.is_success() {
         let result: serde_json::Value = response.json()?;
         println!("✅ 工具调用测试成功！\n");
@@ -94,8 +94,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let error_text = response.text()?;
         println!("❌ 工具调用测试失败：{}\n", error_text);
     }
-    
+
     println!("\n✅ 所有测试完成！");
-    
+
     Ok(())
 }

@@ -21,20 +21,26 @@ fi
 
 cd /home/hugo/codes/try-tokitai
 
-echo "========================================"
-echo "  🤖 AI Assistant - Tokitai Demo"
-echo "========================================"
-echo ""
-echo "API URL: $AI_API_URL"
-echo "Model: qwen3.5:397b"
-echo ""
-echo "可用命令:"
-echo "  - 直接输入问题与 AI 对话"
-echo "  - 输入 'help' 查看示例命令"
-echo "  - 输入 'exit' 或 'quit' 退出"
-echo ""
-echo "========================================"
-echo ""
-
-# 直接执行，确保环境变量传递
-exec cargo run --release
+# 检查是否使用 TUI 模式
+if [ "$1" = "--tui" ] || [ "$1" = "-t" ]; then
+    # TUI 模式：直接启动，不输出额外信息
+    exec cargo run --release -- --tui
+else
+    echo "========================================"
+    echo "  🤖 AI Assistant - 命令行模式"
+    echo "========================================"
+    echo ""
+    echo "API URL: $AI_API_URL"
+    echo "Model: qwen3.5:397b"
+    echo ""
+    echo "可用命令:"
+    echo "  - 直接输入问题与 AI 对话"
+    echo "  - 输入 'help' 查看示例命令"
+    echo "  - 输入 'exit' 或 'quit' 退出"
+    echo ""
+    echo "提示：使用 ./demo.sh --tui 启动 TUI 界面"
+    echo ""
+    echo "========================================"
+    echo ""
+    exec cargo run --release
+fi
