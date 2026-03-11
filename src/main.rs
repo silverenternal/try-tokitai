@@ -1,4 +1,6 @@
 mod config;
+mod command_resolver;
+mod path_resolver;
 mod sandbox;
 mod tools;
 mod tui;
@@ -6,10 +8,11 @@ mod tui;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use tokitai::ToolProvider;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools};
+use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools};
 
 /// AI 助手 - 整合所有工具
 pub struct AiAssistant {
@@ -19,6 +22,11 @@ pub struct AiAssistant {
     web_search: WebSearchTools,
     download_tools: DownloadTools,
     git_ops: GitOperations,
+    http_client: HttpClientTools,
+    json_tools: JsonTools,
+    file_search: FileSearchTools,
+    process_tools: ProcessTools,
+    network_tools: NetworkTools,
     api_url: String,
     api_key: Option<String>,
     model: String,
@@ -33,6 +41,11 @@ impl AiAssistant {
             web_search: WebSearchTools::new(),
             download_tools: DownloadTools,
             git_ops: GitOperations,
+            http_client: HttpClientTools,
+            json_tools: JsonTools,
+            file_search: FileSearchTools,
+            process_tools: ProcessTools,
+            network_tools: NetworkTools,
             api_url,
             api_key,
             model,
@@ -43,8 +56,8 @@ impl AiAssistant {
     pub fn get_tool_definitions(&self) -> Vec<Value> {
         let mut tools = Vec::new();
 
-        // 合并所有工具的 TOOl_DEFINITIONS
-        tools.extend(FileOperations::TOOL_DEFINITIONS.iter().map(|t| {
+        // 合并所有工具的 tool_definitions()
+        tools.extend(FileOperations::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -55,7 +68,7 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(SystemTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(SystemTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -66,7 +79,7 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(CodeTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(CodeTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -77,7 +90,7 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(WebSearchTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(WebSearchTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -88,7 +101,7 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(DownloadTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(DownloadTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -99,7 +112,62 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(GitOperations::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(GitOperations::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(HttpClientTools::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(JsonTools::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(FileSearchTools::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(ProcessTools::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
+        tools.extend(NetworkTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -139,6 +207,26 @@ impl AiAssistant {
             return Ok(result.to_string());
         }
         if let Ok(result) = self.git_ops.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.http_client.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.json_tools.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.file_search.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.process_tools.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.network_tools.call_tool(name, args) {
             info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
@@ -371,13 +459,40 @@ fn main() -> Result<()> {
             println!("  • Git 日志：'查看最近的提交记录'");
             println!("  • Git 分支：'查看当前分支'");
             println!();
+            println!("  🔥 新增功能：");
+            println!("  • HTTP 请求：'GET 请求 https://api.github.com'");
+            println!("  • POST 请求：'POST 数据到 https://api.example.com'");
+            println!("  • JSON 处理：'格式化这段 JSON'、'查询 JSON 中的 user.name'");
+            println!("  • 文件搜索：'在 src 目录搜索 .rs 文件'、'查找大文件'");
+            println!("  • 进程管理：'查看系统资源'、'列出占用 CPU 最高的进程'");
+            println!("  • 网络工具：'ping github.com'、'扫描 localhost 的开放端口'");
+            println!();
+            println!("  💡 使用 @ 快速引用文件");
+            println!("    示例：'@README.md 的内容是什么'");
+            println!("           '分析 @src/main.rs 的结构'");
+            println!("           '@file1.txt @file2.txt 比较这两个文件'");
+            println!();
             continue;
         }
 
-        // 添加用户消息
+        // 处理 @path 语法
+        let (processed_input, file_contents) = match path_resolver::resolve_paths(input) {
+            Ok(result) => result,
+            Err(e) => {
+                println!("\n❌ 路径解析错误：{}\n", e);
+                continue;
+            }
+        };
+
+        // 如果解析到了文件内容，给出提示
+        if !file_contents.is_empty() {
+            println!("📎 已加载 {} 个文件内容", file_contents.len());
+        }
+
+        // 添加用户消息（使用处理后的输入）
         messages.push(json!({
             "role": "user",
-            "content": input
+            "content": processed_input
         }));
 
         println!("\n🤖 AI 思考中...");
@@ -468,14 +583,14 @@ mod tests {
     #[test]
     fn test_tool_definitions_generation() {
         // 确保所有工具都有工具定义
-        assert!(!FileOperations::TOOL_DEFINITIONS.is_empty());
-        assert!(!CodeTools::TOOL_DEFINITIONS.is_empty());
-        assert!(!SystemTools::TOOL_DEFINITIONS.is_empty());
-        assert!(!WebSearchTools::TOOL_DEFINITIONS.is_empty());
-        assert!(!DownloadTools::TOOL_DEFINITIONS.is_empty());
+        assert!(!FileOperations::tool_definitions().is_empty());
+        assert!(!CodeTools::tool_definitions().is_empty());
+        assert!(!SystemTools::tool_definitions().is_empty());
+        assert!(!WebSearchTools::tool_definitions().is_empty());
+        assert!(!DownloadTools::tool_definitions().is_empty());
 
         // 验证工具定义格式
-        for def in FileOperations::TOOL_DEFINITIONS.iter() {
+        for def in FileOperations::tool_definitions().iter() {
             assert!(!def.name.is_empty());
             assert!(!def.description.is_empty());
             assert!(!def.input_schema.is_empty());

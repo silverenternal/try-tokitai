@@ -96,11 +96,53 @@ cargo run --release -- -t
 基于 [tokitai](https://github.com/silverenternal/tokitai) 库实现编译时工具定义：
 
 - **文件操作** - 读取/写入文件、列出目录、复制/删除文件
-- **系统命令** - 执行 shell 命令、获取环境变量、获取当前目录
+- **系统命令** - 执行 shell 命令（带安全检查）、获取环境变量、获取当前目录、获取系统信息
 - **代码分析** - 统计代码行数、查找函数定义、检测编程语言
 - **网络搜索** - 搜索网页内容、获取 URL 内容
 - **文件下载** - 下载网络文件、下载 arXiv 论文、搜索 arXiv 论文
 - **Git 操作** - 查看 git 状态、git 日志、git 分支信息
+- **HTTP 客户端** - 发送 HTTP GET/POST 请求、检查 URL 可用性、下载文件（带 SSRF 防护）
+- **JSON 处理** - 格式化/压缩 JSON、JSONPath 查询、JSON 验证、合并、JSON 转 CSV
+- **文件搜索** - grep 文本搜索（支持正则）、递归查找文件、统计文件类型、查找大文件
+- **进程管理** - 列出进程、查看进程详情、搜索进程、系统资源监控（带权限检查）
+- **网络工具** - Ping 测试、TCP/UDP 端口检查、端口扫描、路由追踪、获取公网 IP
+
+> 💡 **安全增强**：所有工具均经过安全加固，包括输入验证、SSRF 防护、符号链接循环检测、递归深度限制、速率限制等。
+
+### 🔐 命令执行安全机制
+
+为了保护系统安全，命令执行功能实现了多层安全防护：
+
+- **黑名单机制**：禁止执行危险命令（如 `rm`, `sudo`, `kill`, `chmod` 等）
+- **安全命令模式**：`run_safe_command` 只能执行只读命令
+- **确认机制**：执行非黑名单命令时需要 `confirmed=true` 参数
+- **系统信息隔离**：无法访问敏感目录（`/etc`, `/root`, `/proc` 等）
+
+#### 黑名单命令列表
+
+以下命令被禁止执行：
+- 文件操作：`rm`, `dd`, `shred`
+- 磁盘操作：`mkfs`, `fdisk`, `parted`
+- 权限修改：`chmod`, `chown`, `chgrp`
+- 提权命令：`sudo`, `su`, `pkexec`, `doas`
+- 网络工具：`wget`, `curl`, `nc`, `netcat`, `telnet`, `ssh`, `scp`, `rsync`
+- 进程控制：`kill`, `pkill`, `killall`, `xkill`
+- 系统控制：`shutdown`, `reboot`, `halt`, `poweroff`, `init`
+- 挂载操作：`mount`, `umount`, `losetup`
+- 防火墙：`iptables`, `firewall-cmd`, `ufw`, `nft`
+- 用户管理：`visudo`, `passwd`, `useradd`, `userdel`, `usermod`, `groupadd`, `groupdel`, `groupmod`
+- 内核模块：`insmod`, `rmmod`, `modprobe`
+
+### 📎 @ 路径引用功能
+
+快速引用文件内容，让 AI 直接读取和分析：
+
+- **单个文件**：`@README.md 的内容是什么`
+- **代码分析**：`分析 @src/main.rs 的结构`
+- **多个文件**：`@file1.txt @file2.txt 比较这两个文件`
+- **相对路径**：`@./config.toml 的配置项有哪些`
+
+> 💡 提示：使用 `@` 符号后跟文件路径，系统会自动读取文件内容并附加到问题中。
 
 ### 🤖 AI 集成
 
@@ -128,6 +170,7 @@ cargo run --release -- -t
 | `help` | 显示可用操作列表 |
 | `exit` / `quit` | 退出程序 |
 | 任意自然语言 | 与 AI 对话 |
+| `@<路径>` | 快速引用文件（如 `@README.md`） |
 
 ### TUI 界面模式
 
@@ -161,9 +204,13 @@ cargo run --release -- -t
 👤 你：读取 README.md 的内容
 ```
 
-### 4. 执行命令
+### 4. 执行安全命令
 ```
 👤 你：运行 cargo --version
+👤 你：查看当前目录的文件列表
+👤 你：显示系统信息
+👤 你：检查 python 命令是否可用
+👤 你：列出系统中可用的命令
 ```
 
 ### 5. 分析代码
@@ -174,6 +221,13 @@ cargo run --release -- -t
 ### 6. 多步骤任务
 ```
 👤 你：帮我看看 Cargo.toml 的内容，然后统计一下有多少行
+```
+
+### 7. 使用 @ 引用文件
+```
+👤 你：@README.md 的内容是什么
+👤 你：分析 @src/main.rs 的结构
+👤 你：@file1.txt @file2.txt 比较这两个文件
 ```
 
 ---
@@ -195,7 +249,12 @@ cargo run --release -- -t
 │   │   ├── code_analysis.rs # 代码分析工具
 │   │   ├── web_search.rs   # 网络搜索工具
 │   │   ├── download.rs     # 文件下载工具
-│   │   └── git_ops.rs      # Git 操作工具
+│   │   ├── git_ops.rs      # Git 操作工具
+│   │   ├── http_client.rs  # HTTP 客户端工具（SSRF 防护）
+│   │   ├── json_tools.rs   # JSON 处理工具
+│   │   ├── file_search.rs  # 文件搜索工具（grep/查找）
+│   │   ├── process_tools.rs # 进程管理工具
+│   │   └── network_tools.rs # 网络工具
 │   └── tui/                # TUI 界面模块（实验性）
 │       ├── mod.rs          # 模块导出
 │       ├── app.rs          # 应用状态管理

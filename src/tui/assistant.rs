@@ -1,12 +1,13 @@
 //! TUI 版本的 AI 助手 - 整合 tokitai 工具调用功能
 
+use crate::command_resolver::CommandResolver;
 use crate::tools::{
     CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools,
 };
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
+use tokitai::ToolProvider;
 use tracing::{info, warn};
 
 use super::api_client::{ApiConfig, StreamEvent};
@@ -27,6 +28,8 @@ pub struct Assistant {
     download_tools: DownloadTools,
     git_ops: GitOperations,
     api_config: ApiConfig,
+    /// 命令解析器（用于安全检查）
+    command_resolver: Arc<Mutex<CommandResolver>>,
 }
 
 impl Assistant {
@@ -39,6 +42,7 @@ impl Assistant {
             download_tools: DownloadTools,
             git_ops: GitOperations,
             api_config,
+            command_resolver: Arc::new(Mutex::new(CommandResolver::new())),
         }
     }
 
@@ -46,8 +50,8 @@ impl Assistant {
     pub fn get_tool_definitions(&self) -> Vec<Value> {
         let mut tools = Vec::new();
 
-        // 合并所有工具的 TOOL_DEFINITIONS
-        tools.extend(FileOperations::TOOL_DEFINITIONS.iter().map(|t| {
+        // 合并所有工具的 tool_definitions()
+        tools.extend(FileOperations::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -58,7 +62,7 @@ impl Assistant {
             })
         }));
 
-        tools.extend(SystemTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(SystemTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -69,7 +73,7 @@ impl Assistant {
             })
         }));
 
-        tools.extend(CodeTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(CodeTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -80,7 +84,7 @@ impl Assistant {
             })
         }));
 
-        tools.extend(WebSearchTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(WebSearchTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -91,7 +95,7 @@ impl Assistant {
             })
         }));
 
-        tools.extend(DownloadTools::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(DownloadTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -102,7 +106,7 @@ impl Assistant {
             })
         }));
 
-        tools.extend(GitOperations::TOOL_DEFINITIONS.iter().map(|t| {
+        tools.extend(GitOperations::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {

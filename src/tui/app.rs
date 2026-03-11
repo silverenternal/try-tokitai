@@ -15,6 +15,7 @@ use tui_input::{Input, InputRequest};
 
 use super::api_client::{ApiConfig, StreamEvent};
 use super::assistant::Assistant;
+use crate::path_resolver;
 
 /// ========== 配置常量 ==========
 
@@ -365,6 +366,15 @@ impl App {
 
         let user_input = self.input().value().to_string();
 
+        // 处理 @path 语法
+        let (processed_input, file_contents) = match path_resolver::resolve_paths(&user_input) {
+            Ok(result) => result,
+            Err(e) => {
+                self.add_message(Message::error(format!("路径解析失败：{}", e)));
+                return;
+            }
+        };
+
         // 添加到输入历史
         self.input_history.push_back(user_input.clone());
         if self.input_history.len() > MAX_INPUT_HISTORY {
@@ -372,8 +382,13 @@ impl App {
         }
         self.input_history_index = None;
 
-        // 添加用户消息
-        self.add_message(Message::user(&user_input));
+        // 添加用户消息（使用处理后的输入）
+        self.add_message(Message::user(&processed_input));
+
+        // 如果有文件内容被加载，添加系统提示
+        if !file_contents.is_empty() {
+            self.add_message(Message::system(format!("📎 已加载 {} 个文件内容", file_contents.len())));
+        }
 
         // 清空输入框
         self.input_mut().reset();

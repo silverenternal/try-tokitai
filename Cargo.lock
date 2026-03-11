@@ -28,9 +28,11 @@ dependencies = [
  "ctrlc",
  "dirs",
  "futures",
+ "libc",
  "moka",
  "once_cell",
  "ratatui",
+ "regex",
  "reqwest",
  "scraper",
  "serde",
@@ -39,11 +41,13 @@ dependencies = [
  "threadpool",
  "tokio",
  "tokitai",
+ "tokitai-core",
  "toml",
  "tracing",
  "tracing-subscriber",
  "tui-input",
  "ureq",
+ "url",
  "urlencoding",
 ]
 
@@ -1543,6 +1547,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex"
+version = "1.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2205,9 +2221,9 @@ dependencies = [
 
 [[package]]
 name = "tokitai"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08c82b08cf3bdc4096ef43cb46f8ab3beb42dfe783951cc09aa34bdd95baf773"
+checksum = "af6f475b04a8e0fdbe0e984ff2d17274a9f37ab8890e387b25862997725ce200"
 dependencies = [
  "serde",
  "serde_json",
@@ -2218,9 +2234,9 @@ dependencies = [
 
 [[package]]
 name = "tokitai-core"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6d73d2b32ad8a212ed145a81b2291c1aad9348633d2b6584fca0126d508aad0"
+checksum = "d669efe7230b80c81e2733f1f305b420943f290cb59dbfdc58a8f28ab0b6f018"
 dependencies = [
  "serde",
  "serde_json",
@@ -2228,10 +2244,11 @@ dependencies = [
 
 [[package]]
 name = "tokitai-macros"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ab465544d96f975a528760bca3fafadca667cb457e11bbb03893efa67a4ff7"
+checksum = "c4cdbfc5ed925687bdc3083285f28ebda3beb71df8c80aef90203c13b113755a"
 dependencies = [
+ "phf",
  "proc-macro2",
  "quote",
  "serde",
