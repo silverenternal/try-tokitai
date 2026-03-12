@@ -32,3 +32,15 @@ cache_ttl_secs = 3600
 [download]
 # 默认下载目录（可选，留空则使用系统下载目录）
 # default_dir = "/tmp/downloads"
+
+[context]
+# 上下文存储根目录（可选，留空则使用 ./.context）
+# root_dir = "./.context"
+# 短期层最大保留轮数（超出自动裁剪）
+max_short_term_rounds = 10
+# 是否启用 mmap 内存映射优化（大文件读取更高效）
+enable_mmap = true
+# 是否启用增量日志（记录所有上下文变更）
+enable_logging = true
+# 是否启用内容去重（相同内容只存储一次）
+enable_deduplication = true

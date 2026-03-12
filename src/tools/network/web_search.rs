@@ -11,7 +11,7 @@ use urlencoding::encode;
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("网络请求失败：{0}")]
-    Network(#[from] ureq::Error),
+    Network(#[from] Box<ureq::Error>),
 
     #[error("搜索 API 返回错误：{status} - {message}")]
     ApiError { status: u16, message: String },
@@ -445,7 +445,7 @@ fn parse_duckduckgo_results(html: &str, limit: usize) -> Result<Vec<SearchResult
             .select(&snippet_selector)
             .next()
             .map(|el| el.text().collect::<String>())
-            .unwrap_or_else(|| String::new());
+            .unwrap_or_else(String::new);
 
         results.push(SearchResult {
             title: trim_whitespace(&title),
@@ -472,7 +472,7 @@ fn parse_arxiv_results(xml: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let id = extract_xml_tag(entry, "id")
             .unwrap_or_else(|| "未知 URL".to_string());
         let summary = extract_xml_tag(entry, "summary")
-            .unwrap_or_else(|| String::new());
+            .unwrap_or_default();
         
         // 提取 arXiv ID
         let arxiv_id = id.split("/abs/").last().unwrap_or("unknown");

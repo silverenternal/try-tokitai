@@ -43,7 +43,7 @@ fn ensure_download_dir(path: &Path) -> Result<PathBuf, String> {
 /// 从 URL 提取文件名
 fn extract_filename_from_url(url: &str) -> Option<String> {
     // 尝试从 URL 路径部分提取文件名
-    if let Some(filename) = url.split('/').last() {
+    if let Some(filename) = url.split('/').next_back() {
         if !filename.is_empty() && filename.contains('.') {
             return Some(filename.to_string());
         }

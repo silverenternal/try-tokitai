@@ -6,18 +6,11 @@ use crate::tools::{
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use threadpool::ThreadPool;
 use tokitai::ToolProvider;
 use tracing::{info, warn};
 
-use super::api_client::{ApiConfig, StreamEvent};
+use super::api_client::{ApiConfig, StreamEvent, HTTP_CLIENT};
 use super::app::TuiError;
-
-/// 全局线程池（工作线程数 4）
-static ASSISTANT_THREAD_POOL: Lazy<ThreadPool> =
-    Lazy::new(|| ThreadPool::with_name("assistant-worker".to_string(), 4));
-
-use once_cell::sync::Lazy;
 
 /// AI 助手 - 整合所有工具（TUI 版本）
 pub struct Assistant {
@@ -29,6 +22,7 @@ pub struct Assistant {
     git_ops: GitOperations,
     api_config: ApiConfig,
     /// 命令解析器（用于安全检查）
+    #[allow(dead_code)]
     command_resolver: Arc<Mutex<CommandResolver>>,
 }
 
@@ -155,8 +149,8 @@ impl Assistant {
     }
 
     /// 同步对话（带工具调用支持）
+    #[allow(dead_code)]
     pub fn chat_sync(&self, messages: &[Value]) -> Result<String, TuiError> {
-        let client = reqwest::blocking::Client::new();
         let tools = self.get_tool_definitions();
 
         let request_body = json!({
@@ -166,22 +160,32 @@ impl Assistant {
             "tool_choice": "auto"
         });
 
-        let mut req = client.post(&self.api_config.api_url);
-        if let Some(key) = &self.api_config.api_key {
-            req = req.header("Authorization", format!("Bearer {}", key));
-        }
+        // 使用 tokio runtime 包装异步调用，复用全局 HTTP_CLIENT
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| TuiError::ApiRequest(format!("创建 runtime 失败：{}", e)))?;
+        
+        let response_json = rt.block_on(async {
+            let mut req = HTTP_CLIENT.post(&self.api_config.api_url);
+            if let Some(key) = &self.api_config.api_key {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
 
-        let response = req
-            .json(&request_body)
-            .send()
-            .map_err(|e| TuiError::ApiRequest(format!("发送请求失败：{}", e)))?;
+            let response = req
+                .json(&request_body)
+                .send()
+                .await
+                .map_err(|e| TuiError::ApiRequest(format!("发送请求失败：{}", e)))?;
 
-        let response_text = response
-            .text()
-            .map_err(|e| TuiError::ApiRequest(format!("读取响应失败：{}", e)))?;
+            let response_text = response
+                .text()
+                .await
+                .map_err(|e| TuiError::ApiRequest(format!("读取响应失败：{}", e)))?;
 
-        let response_json: Value = serde_json::from_str(&response_text)
-            .map_err(|e| TuiError::ApiRequest(format!("解析响应失败：{}", e)))?;
+            let response_json: Value = serde_json::from_str(&response_text)
+                .map_err(|e| TuiError::ApiRequest(format!("解析响应失败：{}", e)))?;
+
+            Ok::<Value, TuiError>(response_json)
+        })?;
 
         // 处理响应
         if let Some(choices) = response_json.get("choices").and_then(|c| c.as_array()) {
@@ -208,6 +212,7 @@ impl Assistant {
     }
 
     /// 处理工具调用（同步版本）
+    #[allow(dead_code)]
     fn handle_tool_calls_sync(
         &self,
         tool_calls: &[Value],
@@ -275,27 +280,12 @@ impl Assistant {
         messages: &[Value],
         tx: std::sync::mpsc::Sender<StreamEvent>,
     ) -> Result<(), TuiError> {
-        // 在线程池中执行异步流式请求，避免阻塞主线程
+        // 使用 tokio spawn 替代 threadpool，减少上下文切换开销
         let assistant = Self::new(self.api_config.clone());
         let messages = messages.to_vec();
-        let tx_clone = tx.clone();
 
-        ASSISTANT_THREAD_POOL.execute(move || {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    let _ = tx.send(StreamEvent::Error(format!("创建 runtime 失败：{}", e)));
-                    return;
-                }
-            };
-
-            let result = rt.block_on(async {
-                assistant.chat_stream_async(&messages, tx).await
-            });
-
-            if let Err(e) = result {
-                let _ = tx_clone.send(StreamEvent::Error(e.to_string()));
-            }
+        tokio::spawn(async move {
+            assistant.chat_stream_async(&messages, tx).await
         });
 
         Ok(())
@@ -307,7 +297,6 @@ impl Assistant {
         messages: &[Value],
         tx: std::sync::mpsc::Sender<StreamEvent>,
     ) -> Result<(), TuiError> {
-        let client = reqwest::Client::new();
         let tools = self.get_tool_definitions();
 
         let request_body = json!({
@@ -318,7 +307,7 @@ impl Assistant {
             "stream": true
         });
 
-        let mut req = client.post(&self.api_config.api_url);
+        let mut req = HTTP_CLIENT.post(&self.api_config.api_url);
         if let Some(key) = &self.api_config.api_key {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
@@ -351,8 +340,8 @@ impl Assistant {
 
             // 解析 SSE 格式：data: {...}
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = line[6..].trim();
+                if let Some(data) = line.strip_prefix("data: ") {
+                    let data = data.trim();
                     if data == "[DONE]" {
                         // 检查是否有工具调用需要处理
                         if !tool_calls.is_empty() {
@@ -383,11 +372,10 @@ impl Assistant {
                                     if let Some(content) =
                                         delta.get("content").and_then(|c| c.as_str())
                                     {
-                                        if !content.is_empty() {
-                                            if tx.send(StreamEvent::Text(content.to_string())).is_err()
-                                            {
-                                                return Ok(());
-                                            }
+                                        if !content.is_empty()
+                                            && tx.send(StreamEvent::Text(content.to_string())).is_err()
+                                        {
+                                            return Ok(());
                                         }
                                     }
                                 }
@@ -431,9 +419,7 @@ impl Assistant {
 
             match self.call_tool(name, &args) {
                 Ok(result) => {
-                    let _ = tx.send(StreamEvent::Text(format!(
-                        "✅ 工具执行成功\n"
-                    )));
+                    let _ = tx.send(StreamEvent::Text("✅ 工具执行成功\n".to_string()));
                     // 添加 assistant 的 tool_calls 消息
                     extended_messages.push(json!({
                         "role": "assistant",
@@ -497,14 +483,12 @@ impl Assistant {
 
     /// 内部同步对话（不带工具调用，用于获取最终回复）
     async fn chat_sync_internal(&self, messages: &[Value]) -> Result<String, TuiError> {
-        let client = reqwest::Client::new();
-
         let request_body = json!({
             "model": self.api_config.model,
             "messages": messages,
         });
 
-        let mut req = client.post(&self.api_config.api_url);
+        let mut req = HTTP_CLIENT.post(&self.api_config.api_url);
         if let Some(key) = &self.api_config.api_key {
             req = req.header("Authorization", format!("Bearer {}", key));
         }

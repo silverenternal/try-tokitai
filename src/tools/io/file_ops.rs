@@ -38,16 +38,14 @@ impl FileOperations {
     pub fn list_dir(&self, path: String) -> Result<String, String> {
         let entries = fs::read_dir(&path)
             .map_err(|e| format!("列出目录失败：{}", e))?;
-        
+
         let mut result = Vec::new();
-        for entry in entries {
-            if let Ok(e) = entry {
-                let name = e.file_name().to_string_lossy().to_string();
-                let is_dir = e.path().is_dir();
-                result.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
-            }
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let is_dir = e.path().is_dir();
+            result.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
         }
-        
+
         Ok(result.join("\n"))
     }
 

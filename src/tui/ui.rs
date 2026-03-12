@@ -212,7 +212,7 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
     };
 
     // 如果有正在流式传输的消息，添加到显示列表末尾
-    if let Some(ref stream_msg) = app.streaming_message() {
+    if let Some(stream_msg) = app.streaming_message() {
         display_messages.push(stream_msg);
     }
 

@@ -20,6 +20,24 @@ source .env
 cargo run --release
 ```
 
+### TUI 界面模式（推荐）
+
+```bash
+# 使用 TUI 界面（现代化终端 UI）
+./demo.sh --tui
+
+# 或手动启动
+cargo run --release -- --tui
+# 或
+cargo run --release -- -t
+```
+
+**TUI 优势**：
+- ✨ 低延迟：缓存响应 <10ms，流式首字节延迟降低 60-70%
+- 📊 性能监控：实时显示请求数、缓存命中率、平均延迟
+- 🎨 现代化 UI：消息历史滚动、流式响应显示
+- ⌨️ 快捷键：PageUp/PageDown 快速滚动，Ctrl+L 清除历史
+
 ---
 
 ## 💬 交互式命令

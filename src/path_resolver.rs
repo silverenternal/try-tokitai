@@ -91,6 +91,7 @@ fn read_file_content(path_str: &str) -> Result<String> {
 }
 
 /// 检查输入中是否包含 @path 语法（@ 后面跟着非空白字符）
+#[allow(dead_code)]
 pub fn contains_path_reference(input: &str) -> bool {
     // 使用简单的正则表达式检查 @ 后面是否有非空白字符
     let re = Regex::new(r"@[^\s]").unwrap();

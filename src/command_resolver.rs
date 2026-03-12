@@ -1,15 +1,30 @@
 //! 命令解析模块 - 解析系统可用命令
-//! 
+//!
 //! 功能：
 //! - 扫描系统 PATH 中的可执行命令
 //! - 提供命令自动补全建议
 //! - 命令安全性检查
+//! 
+//! 安全机制：
+//! - 命令白名单优先（推荐）
+//! - 命令黑名单阻止
+//! - Shell 注入防护
 
 use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, warn};
+
+/// 命令执行模式
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub enum CommandMode {
+    /// 白名单模式：只允许白名单中的命令（最安全）
+    Whitelist,
+    /// 黑名单模式：只阻止黑名单中的命令（默认）
+    Blacklist,
+}
 
 /// 命令解析器
 pub struct CommandResolver {
@@ -19,24 +34,52 @@ pub struct CommandResolver {
     whitelist: HashSet<String>,
     /// 命令黑名单（禁止执行的命令）
     blacklist: HashSet<String>,
+    /// 执行模式
+    #[allow(dead_code)]
+    mode: CommandMode,
 }
 
 impl CommandResolver {
-    /// 创建新的命令解析器
+    /// 创建新的命令解析器（默认黑名单模式）
     pub fn new() -> Self {
+        Self::with_mode(CommandMode::Blacklist)
+    }
+
+    /// 创建指定模式的命令解析器
+    pub fn with_mode(mode: CommandMode) -> Self {
         let mut resolver = Self {
             available_commands: HashSet::new(),
             whitelist: HashSet::new(),
             blacklist: HashSet::new(),
+            mode,
         };
-        
+
         // 初始化黑名单
         resolver.init_blacklist();
         
+        // 初始化默认白名单（安全命令）
+        resolver.init_default_whitelist();
+
         // 扫描可用命令
         resolver.scan_available_commands();
-        
+
         resolver
+    }
+
+    /// 初始化默认白名单（只读安全命令）
+    fn init_default_whitelist(&mut self) {
+        let safe_commands = vec![
+            "ls", "dir", "pwd", "whoami", "hostname",
+            "echo", "cat", "head", "tail", "less", "more",
+            "grep", "egrep", "fgrep",
+            "find", "which", "whereis", "man",
+            "uname", "uptime", "date", "cal",
+            "df", "du", "free", "top", "ps",
+            "git", "cargo", "rustc", "npm", "node", "python", "python3",
+        ];
+        for cmd in safe_commands {
+            self.whitelist.insert(cmd.to_string());
+        }
     }
 
     /// 初始化命令黑名单
@@ -142,31 +185,37 @@ impl CommandResolver {
     }
 
     /// 检查命令是否在白名单中
+    #[allow(dead_code)]
     pub fn is_whitelisted(&self, command: &str) -> bool {
         self.whitelist.contains(command)
     }
 
     /// 检查命令是否在黑名单中
+    #[allow(dead_code)]
     pub fn is_blacklisted(&self, command: &str) -> bool {
         self.blacklist.contains(command)
     }
 
     /// 添加到白名单
+    #[allow(dead_code)]
     pub fn add_to_whitelist(&mut self, command: String) {
         self.whitelist.insert(command);
     }
 
     /// 从白名单移除
+    #[allow(dead_code)]
     pub fn remove_from_whitelist(&mut self, command: &str) {
         self.whitelist.remove(command);
     }
 
     /// 检查命令是否可用
+    #[allow(dead_code)]
     pub fn is_command_available(&self, command: &str) -> bool {
         self.available_commands.contains(command)
     }
 
     /// 获取所有可用命令
+    #[allow(dead_code)]
     pub fn get_available_commands(&self) -> Vec<String> {
         let mut commands: Vec<String> = self.available_commands.iter().cloned().collect();
         commands.sort();
@@ -174,6 +223,7 @@ impl CommandResolver {
     }
 
     /// 获取安全的命令列表（排除黑名单）
+    #[allow(dead_code)]
     pub fn get_safe_commands(&self) -> Vec<String> {
         self.available_commands
             .iter()
@@ -183,6 +233,7 @@ impl CommandResolver {
     }
 
     /// 命令自动补全
+    #[allow(dead_code)]
     pub fn autocomplete(&self, prefix: &str) -> Vec<String> {
         self.available_commands
             .iter()
@@ -193,69 +244,102 @@ impl CommandResolver {
     }
 
     /// 查找命令的完整路径
+    #[allow(dead_code)]
     pub fn find_command_path(&self, command: &str) -> Option<PathBuf> {
         let paths = env::var_os("PATH")?;
-        
+
         for path in env::split_paths(&paths) {
             let full_path = path.join(command);
             if self.is_executable_file(&full_path) {
                 return Some(full_path);
             }
         }
-        
+
         None
     }
 
-    /// 验证命令是否安全可执行
+    /// 验证命令是否安全可执行（带 Shell 注入防护）
+    #[allow(dead_code)]
     pub fn is_safe_to_execute(&self, command: &str) -> Result<bool, String> {
-        // 检查黑名单
-        if self.is_blacklisted(command) {
-            return Ok(false);
+        // Shell 注入防护：检查危险字符
+        if Self::contains_shell_injection_chars(command) {
+            return Err(format!("命令包含危险字符：{}", command));
         }
-        
+
+        // 根据模式检查
+        match self.mode {
+            CommandMode::Whitelist => {
+                // 白名单模式：只允许白名单中的命令
+                if !self.whitelist.contains(command) {
+                    return Err(format!("命令 '{}' 不在白名单中", command));
+                }
+            }
+            CommandMode::Blacklist => {
+                // 黑名单模式：只阻止黑名单中的命令
+                if self.blacklist.contains(command) {
+                    return Ok(false);
+                }
+            }
+        }
+
         // 检查是否可用
         if !self.is_command_available(command) {
             return Err(format!("命令 '{}' 不存在", command));
         }
-        
-        // 白名单优先
-        if self.is_whitelisted(command) {
-            return Ok(true);
-        }
-        
-        // 默认允许非黑名单命令
+
         Ok(true)
     }
 
+    /// 检查命令是否包含 Shell 注入字符
+    #[allow(dead_code)]
+    fn contains_shell_injection_chars(command: &str) -> bool {
+        let dangerous_chars = [';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '\\', '\n', '\r'];
+        command.chars().any(|c| dangerous_chars.contains(&c))
+    }
+
+    /// 设置命令执行模式
+    #[allow(dead_code)]
+    pub fn set_mode(&mut self, mode: CommandMode) {
+        self.mode = mode;
+    }
+
+    /// 获取当前执行模式
+    #[allow(dead_code)]
+    pub fn get_mode(&self) -> &CommandMode {
+        &self.mode
+    }
+
     /// 获取命令帮助信息
+    #[allow(dead_code)]
     pub fn get_command_help(&self, command: &str) -> Option<String> {
         // 尝试 --help
         let output = Command::new(command)
             .arg("--help")
             .output()
             .ok()?;
-        
+
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             // 只返回前几行
             return Some(stdout.lines().take(10).collect::<Vec<_>>().join("\n"));
         }
-        
+
         // 尝试 -h
         let output = Command::new(command)
             .arg("-h")
             .output()
             .ok()?;
-        
+
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             return Some(stdout.lines().take(10).collect::<Vec<_>>().join("\n"));
         }
-        
+
         None
     }
 
     /// 获取命令统计信息
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> CommandStats {
         CommandStats {
             total_commands: self.available_commands.len(),
@@ -271,6 +355,7 @@ impl CommandResolver {
 
 /// 命令统计信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CommandStats {
     pub total_commands: usize,
     pub safe_commands: usize,

@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_validate_save_path() {
         // 当前目录内的路径应该有效
-        let valid_path = "./test_download.txt";
+        let _valid_path = "./test_download.txt";
         // 注意：这个测试可能会失败，因为文件可能不存在
         // assert!(validate_save_path(valid_path).is_ok() || validate_save_path(valid_path).is_err());
         

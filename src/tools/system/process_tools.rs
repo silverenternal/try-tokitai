@@ -202,13 +202,11 @@ impl ProcessTools {
 
         let mut files = Vec::new();
         const MAX_FILES: usize = 100;
-        
-        for entry in entries.take(MAX_FILES) {
-            if let Ok(e) = entry {
-                let fd_name = e.file_name().to_string_lossy().to_string();
-                if let Ok(link) = std::fs::read_link(e.path()) {
-                    files.push(format!("  FD {}: {}", fd_name, link.to_string_lossy()));
-                }
+
+        for e in entries.take(MAX_FILES).flatten() {
+            let fd_name = e.file_name().to_string_lossy().to_string();
+            if let Ok(link) = std::fs::read_link(e.path()) {
+                files.push(format!("  FD {}: {}", fd_name, link.to_string_lossy()));
             }
         }
 

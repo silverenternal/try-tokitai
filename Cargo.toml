@@ -36,3 +36,14 @@ tui-input = "0.11"
 regex = "1.10"
 libc = "0.2"
 url = "2.5"
+
+# Context storage
+memmap2 = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+pathdiff = "0.2"
+tempfile = "3.0"  # for tests
+
+# Chinese text segmentation for semantic indexing
+jieba-rs = "0.7"

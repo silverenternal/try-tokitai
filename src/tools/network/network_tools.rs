@@ -204,7 +204,7 @@ impl NetworkTools {
         let mut closed_ports = Vec::new();
 
         // 添加警告信息
-        let mut result = format!("⚠️ 警告：端口扫描可能违反目标网络的使用政策\n\n");
+        let mut result = "⚠️ 警告：端口扫描可能违反目标网络的使用政策\n\n".to_string();
         result.push_str(&format!("🔍 端口扫描结果：{}\n\n", host));
 
         for (port, service) in &common_ports {

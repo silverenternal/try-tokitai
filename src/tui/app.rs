@@ -18,7 +18,6 @@ use super::assistant::Assistant;
 use crate::path_resolver;
 
 /// ========== 配置常量 ==========
-
 /// 应用版本
 pub const APP_VERSION: &str = "0.2.0";
 
@@ -301,8 +300,8 @@ impl App {
     }
 
     /// 设置历史文件路径
-    pub fn with_history_file(mut self, path: &PathBuf) -> Self {
-        self.set_history_file(path.clone());
+    pub fn with_history_file(mut self, path: &Path) -> Self {
+        self.set_history_file(path.to_path_buf());
         self.load_history(path);
         self
     }
@@ -421,17 +420,13 @@ impl App {
         }
     }
 
-    /// 检查并处理流式响应（优化版：批量处理事件，提高响应速度）
+    /// 检查并处理流式响应（优化版：无限制处理所有可用事件，最大化响应速度）
     pub fn check_response(&mut self) {
         // 没有流式接收器时直接返回
         let stream_rx = match &mut self.stream_rx {
             Some(rx) => rx,
             None => return,
         };
-
-        // 批量处理所有可用事件（提高响应速度）
-        let mut processed_count = 0;
-        const MAX_EVENTS_PER_FRAME: usize = 100; // 每帧最多处理 100 个事件
 
         // 跟踪是否需要更新状态
         let is_first_chunk = self.streaming_message.is_none();
@@ -442,10 +437,10 @@ impl App {
         // 累积的文本块（在循环外处理，避免借用冲突）
         let mut accumulated_text: Vec<String> = Vec::new();
 
-        while processed_count < MAX_EVENTS_PER_FRAME {
+        // 处理所有可用事件（无限制，最大化响应速度）
+        loop {
             match stream_rx.try_recv() {
                 Ok(StreamEvent::Text(chunk)) => {
-                    processed_count += 1;
                     has_new_content = true;
                     accumulated_text.push(chunk);
                 }

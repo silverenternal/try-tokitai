@@ -11,35 +11,42 @@ use threadpool::ThreadPool;
 use tracing::{debug, info};
 
 /// ========== 配置常量 ==========
-
 /// HTTP 连接池最大空闲连接数
+#[allow(dead_code)]
 const HTTP_POOL_MAX_IDLE_PER_HOST: usize = 10;
 
 /// HTTP 连接池空闲超时时间（秒）
+#[allow(dead_code)]
 const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 90;
 
 /// HTTP TCP keepalive 时间（秒）
+#[allow(dead_code)]
 const HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
 
 /// HTTP 请求超时时间（秒）
+#[allow(dead_code)]
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 120;
 
 /// HTTP 连接超时时间（秒）
+#[allow(dead_code)]
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// 线程池工作线程数
+#[allow(dead_code)]
 const API_THREAD_POOL_SIZE: usize = 4;
 
 /// 缓存最大条目数
-const CACHE_MAX_CAPACITY: u64 = 100;
+#[allow(dead_code)]
+const CACHE_MAX_CAPACITY: u64 = 200;
 
-/// 缓存存活时间（秒）
-const CACHE_TTL_SECS: u64 = 3600;
+/// 缓存存活时间（秒）- 缩短为 5 分钟，避免过期数据
+#[allow(dead_code)]
+const CACHE_TTL_SECS: u64 = 300;
 
 /// ========== 全局单例 ==========
-
 /// 全局 HTTP 连接池（单例）
-static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+#[allow(dead_code)]
+pub(crate) static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     ClientBuilder::new()
         .pool_max_idle_per_host(HTTP_POOL_MAX_IDLE_PER_HOST)
         .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
@@ -52,11 +59,13 @@ static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 });
 
 /// 全局线程池（工作线程数由配置常量定义）
+#[allow(dead_code)]
 static API_THREAD_POOL: Lazy<ThreadPool> = Lazy::new(|| {
     ThreadPool::with_name("api-worker".to_string(), API_THREAD_POOL_SIZE)
 });
 
 /// 响应缓存（最大条目数和过期时间由配置常量定义）
+#[allow(dead_code)]
 static RESPONSE_CACHE: Lazy<Cache<String, String>> = Lazy::new(|| {
     Cache::builder()
         .max_capacity(CACHE_MAX_CAPACITY)
@@ -65,8 +74,13 @@ static RESPONSE_CACHE: Lazy<Cache<String, String>> = Lazy::new(|| {
 });
 
 /// 请求计数器（用于统计）
+#[allow(dead_code)]
 static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
+#[allow(dead_code)]
 static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+/// 累计请求延迟（毫秒）
+#[allow(dead_code)]
+static TOTAL_LATENCY_MS: AtomicU64 = AtomicU64::new(0);
 
 /// API 客户端配置
 #[derive(Debug, Clone)]
@@ -100,21 +114,29 @@ pub enum StreamEvent {
 }
 
 /// API 客户端
+#[allow(dead_code)]
 pub struct ApiClient {
     config: ApiConfig,
 }
 
+#[allow(dead_code)]
 impl ApiClient {
+    #[allow(dead_code)]
     pub fn new(config: ApiConfig) -> Self {
         Self { config }
     }
 
-    /// 获取统计信息
-    pub fn get_stats() -> (u64, u64) {
-        (
-            REQUEST_COUNT.load(Ordering::Relaxed),
-            CACHE_HITS.load(Ordering::Relaxed),
-        )
+    /// 获取统计信息（请求数、缓存命中、平均延迟）
+    pub fn get_stats() -> (u64, u64, f64) {
+        let request_count = REQUEST_COUNT.load(Ordering::Relaxed);
+        let cache_hits = CACHE_HITS.load(Ordering::Relaxed);
+        let total_latency = TOTAL_LATENCY_MS.load(Ordering::Relaxed);
+        let avg_latency = if request_count > 0 {
+            total_latency as f64 / request_count as f64
+        } else {
+            0.0
+        };
+        (request_count, cache_hits, avg_latency)
     }
 
     /// 同步调用（非流式，带缓存）
@@ -127,6 +149,9 @@ impl ApiClient {
         if let Some(cached) = RESPONSE_CACHE.get(&cache_key) {
             CACHE_HITS.fetch_add(1, Ordering::Relaxed);
             debug!("缓存命中：{}", message);
+            let elapsed = start.elapsed();
+            TOTAL_LATENCY_MS.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+            info!("缓存命中：{:.2}ms", elapsed.as_millis() as f64);
             return Ok(cached);
         }
 
@@ -140,7 +165,8 @@ impl ApiClient {
         }
 
         let elapsed = start.elapsed();
-        info!("API 请求完成：{:?}, 缓存：{}", elapsed, RESPONSE_CACHE.entry_count());
+        TOTAL_LATENCY_MS.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+        info!("API 请求完成：{:.2}ms, 缓存：{}", elapsed.as_millis() as f64, RESPONSE_CACHE.entry_count());
 
         rt
     }
@@ -227,13 +253,10 @@ impl ApiClient {
         let cache_key = normalize_query(message);
         if let Some(cached) = RESPONSE_CACHE.get(&cache_key) {
             CACHE_HITS.fetch_add(1, Ordering::Relaxed);
-            // 缓存命中，逐字发送模拟流式效果
-            for chunk in cached.chars().collect::<Vec<_>>().chunks(50) {
-                if tx.send(StreamEvent::Text(chunk.iter().collect())).is_err() {
-                    debug!("通道已关闭，停止发送缓存内容");
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_millis(10));
+            // 缓存命中，立即发送完整内容（无人为延迟）
+            if tx.send(StreamEvent::Text(cached)).is_err() {
+                debug!("通道已关闭，停止发送缓存内容");
+                return Ok(());
             }
             if tx.send(StreamEvent::Done).is_err() {
                 debug!("通道已关闭，无法发送 Done 事件");
@@ -320,8 +343,8 @@ impl ApiClient {
 
             // 解析 SSE 格式：data: {...}
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = line[6..].trim();
+                if let Some(data) = line.strip_prefix("data: ") {
+                    let data = data.trim();
                     if data == "[DONE]" {
                         let _ = tx.send(StreamEvent::Done);
                         return Ok(());
@@ -360,18 +383,21 @@ impl ApiClient {
     }
 
     /// 清空缓存
+    #[allow(dead_code)]
     pub fn clear_cache() {
         RESPONSE_CACHE.invalidate_all();
         info!("缓存已清空");
     }
 
     /// 获取缓存大小
+    #[allow(dead_code)]
     pub fn cache_size() -> u64 {
         RESPONSE_CACHE.entry_count()
     }
 }
 
 /// 归一化查询（用于缓存键）- 只 trim 空白，保留大小写
+#[allow(dead_code)]
 fn normalize_query(query: &str) -> String {
     query.trim().to_string()
 }

@@ -4,6 +4,7 @@ mod path_resolver;
 mod sandbox;
 mod tools;
 mod tui;
+mod context;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};

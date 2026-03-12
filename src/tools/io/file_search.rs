@@ -248,7 +248,7 @@ impl FileSearchTools {
             "modified_timestamp": modified,
             "created_timestamp": created,
             "accessed_timestamp": accessed,
-            "is_readable": metadata.permissions().readonly() == false,
+            "is_readable": !metadata.permissions().readonly(),
             "is_writable": !metadata.permissions().readonly()
         }))
     }
@@ -288,6 +288,7 @@ fn canonicalize_path(path: &Path) -> Option<PathBuf> {
 }
 
 /// 递归搜索目录（带符号链接检测和深度限制）
+#[allow(clippy::too_many_arguments)]
 fn search_directory_recursive(
     dir: &str,
     pattern: &Option<String>,
@@ -379,6 +380,7 @@ fn search_directory_recursive(
 }
 
 /// 递归统计文件（带符号链接检测和深度限制）
+#[allow(clippy::too_many_arguments)]
 fn count_files_recursive(
     dir: &str,
     stats: &mut std::collections::HashMap<String, u64>,

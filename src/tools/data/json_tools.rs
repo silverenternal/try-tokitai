@@ -243,7 +243,7 @@ fn navigate_json<'a>(value: &'a Value, path: &str, current_depth: usize, max_dep
     let mut current = value;
 
     for part in path.split('.') {
-        current = if let Some(index) = part.parse::<usize>().ok() {
+        current = if let Ok(index) = part.parse::<usize>() {
             current.as_array().and_then(|arr| arr.get(index))?
         } else {
             current.as_object().and_then(|obj| obj.get(part))?
@@ -278,7 +278,7 @@ fn collect_keys(value: &Value, keys: &mut Vec<String>, current_depth: usize, max
 /// CSV 字段转义（RFC 4180 兼容）
 fn escape_csv_field(s: &str) -> String {
     // 如果字段包含逗号、双引号、换行符或回车符，需要用双引号包裹
-    if s.contains(|c| c == ',' || c == '"' || c == '\n' || c == '\r') {
+    if s.contains([',', '"', '\n', '\r']) {
         // 双引号需要转义为两个双引号
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
