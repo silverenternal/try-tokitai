@@ -3,19 +3,102 @@ use tokitai::tool;
 use serde_json::json;
 use std::time::Duration;
 use url::Url;
+use std::sync::Arc;
+use crate::tools::network::request_monitor::{RequestMonitor, RequestLog};
 
 /// HTTP 客户端工具集
 /// 提供类似 curl 的功能，支持发送 HTTP 请求
-pub struct HttpClientTools;
+pub struct HttpClientTools {
+    /// 请求监控器
+    pub monitor: Arc<RequestMonitor>,
+}
 
 // 复用 reqwest Client 连接池，避免每次重建
+// 优化配置：连接池/Keep-Alive/HTTP2/重试机制
 static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
     reqwest::blocking::Client::builder()
+        // 连接池配置
+        .pool_max_idle_per_host(10)              // 每主机最大空闲连接数
+        .pool_idle_timeout(Duration::from_secs(90)) // 空闲连接超时时间
+        .tcp_keepalive(Duration::from_secs(30))     // TCP Keep-Alive
+
+        // 超时配置
         .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(5)) // 限制重定向次数
+        .connect_timeout(Duration::from_secs(10))
+
+        // 重定向配置 - 自定义策略防止 SSRF 绕过
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            // 每次重定向都检查 URL 安全性
+            let next_url = attempt.url().as_str();
+            if crate::tools::network::ssrf_protection::is_url_safe(next_url) {
+                attempt.follow()
+            } else {
+                tracing::warn!("阻止不安全的重定向 URL: {}", next_url);
+                attempt.stop()
+            }
+        }))
+
+        // User-Agent
+        .user_agent("AI-Assistant/0.1.0")
+
         .build()
         .expect("创建 HTTP 客户端失败")
 });
+
+impl HttpClientTools {
+    /// 创建新的 HTTP 客户端工具实例
+    pub fn new() -> Self {
+        Self {
+            monitor: Arc::new(RequestMonitor::new()),
+        }
+    }
+
+    /// 创建带自定义监控器的实例
+    pub fn with_monitor(monitor: Arc<RequestMonitor>) -> Self {
+        Self { monitor }
+    }
+
+    /// 包装请求并记录监控信息
+    fn request_with_monitor<F, T>(&self, method: &str, url: &str, f: F) -> Result<(T, u64), String>
+    where
+        F: FnOnce() -> Result<(T, u64), String>,
+    {
+        let start = std::time::Instant::now();
+        let result = f();
+        let duration = start.elapsed();
+
+        match &result {
+            Ok((_, bytes)) => {
+                self.monitor.record(RequestLog {
+                    url: url.to_string(),
+                    method: method.to_string(),
+                    status: 200,
+                    duration_ms: duration.as_millis() as u128,
+                    bytes: *bytes,
+                    timestamp: chrono::Utc::now(),
+                });
+            }
+            Err(_) => {
+                self.monitor.record(RequestLog {
+                    url: url.to_string(),
+                    method: method.to_string(),
+                    status: 500,
+                    duration_ms: duration.as_millis() as u128,
+                    bytes: 0,
+                    timestamp: chrono::Utc::now(),
+                });
+            }
+        }
+
+        result
+    }
+}
+
+impl Default for HttpClientTools {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // SSRF 防护：禁止访问的内网地址段
 fn is_safe_url(url: &str) -> Result<(), String> {
@@ -118,61 +201,68 @@ impl HttpClientTools {
     ) -> Result<serde_json::Value, String> {
         validate_url_length(&url)?;
         is_safe_url(&url)?;
-        
-        let client = &*HTTP_CLIENT;
-        
-        let mut req = client.get(&url);
-        
-        // 添加自定义 headers
-        if let Some(headers_val) = headers {
-            if let Some(headers_obj) = headers_val.as_object() {
-                for (key, value) in headers_obj {
-                    if let Some(value_str) = value.as_str() {
-                        req = req.header(key, value_str);
+
+        let url_clone = url.clone();
+        let result = self.request_with_monitor("GET", &url, || {
+            let client = &*HTTP_CLIENT;
+
+            let mut req = client.get(&url);
+
+            // 添加自定义 headers
+            if let Some(headers_val) = headers {
+                if let Some(headers_obj) = headers_val.as_object() {
+                    for (key, value) in headers_obj {
+                        if let Some(value_str) = value.as_str() {
+                            req = req.header(key, value_str);
+                        }
                     }
                 }
             }
-        }
-        
-        // 应用自定义超时（如果有）
-        if let Some(timeout_secs) = timeout {
-            req = req.timeout(Duration::from_secs(timeout_secs.min(300))); // 最大 5 分钟
-        }
 
-        let response = req
-            .send()
-            .map_err(|e| format!("发送请求失败：{}", e))?;
-        
-        // 检查 IP 安全性（防止重定向到内网）
-        if let Some(remote_addr) = response.remote_addr() {
-            check_ip_safety(&remote_addr.ip())?;
-        }
+            // 应用自定义超时（如果有）
+            if let Some(timeout_secs) = timeout {
+                req = req.timeout(Duration::from_secs(timeout_secs.min(300))); // 最大 5 分钟
+            }
 
-        let status = response.status().as_u16();
-        let headers_map: std::collections::HashMap<String, String> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.as_str().to_string(),
-                    v.to_str().unwrap_or("").to_string(),
-                )
-            })
-            .collect();
+            let response = req
+                .send()
+                .map_err(|e| format!("发送请求失败：{}", e))?;
 
-        let headers_json = serde_json::to_value(&headers_map)
-            .map_err(|e| format!("转换 headers 失败：{}", e))?;
+            // 检查 IP 安全性（防止重定向到内网）
+            if let Some(remote_addr) = response.remote_addr() {
+                check_ip_safety(&remote_addr.ip())?;
+            }
 
-        let body = response
-            .text()
-            .map_err(|e| format!("读取响应失败：{}", e))?;
+            let status = response.status().as_u16();
+            let headers_map: std::collections::HashMap<String, String> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_string(),
+                        v.to_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
 
-        Ok(json!({
-            "status": status,
-            "headers": headers_json,
-            "body": body,
-            "url": url
-        }))
+            let headers_json = serde_json::to_value(&headers_map)
+                .map_err(|e| format!("转换 headers 失败：{}", e))?;
+
+            let body = response
+                .text()
+                .map_err(|e| format!("读取响应失败：{}", e))?;
+
+            let bytes = body.len() as u64;
+
+            Ok((json!({
+                "status": status,
+                "headers": headers_json,
+                "body": body,
+                "url": url_clone
+            }), bytes))
+        });
+
+        result.map(|(data, _)| data)
     }
 
     /// 发送 HTTP POST 请求

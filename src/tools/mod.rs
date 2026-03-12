@@ -5,7 +5,7 @@ pub mod data;
 pub mod vcs;
 
 pub use io::{FileOperations, FileSearchTools};
-pub use network::{HttpClientTools, WebSearchTools, DownloadTools, NetworkTools};
+pub use network::{HttpClientTools, WebSearchTools, DownloadTools, NetworkTools, BrowserTools};
 pub use system::{SystemTools, ProcessTools, CodeTools};
 pub use data::JsonTools;
 pub use vcs::GitOperations;

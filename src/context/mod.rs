@@ -31,11 +31,14 @@ mod logger;
 mod hash_chain;
 mod distiller;
 mod semantic_index;
+mod knowledge_index;
+mod knowledge_watcher;
+mod path_resolver;
 
 #[allow(unused_imports)]
 pub use file_service::{FileContextService, FileContextConfig, CloudContextItem, CloudPayload};
 #[allow(unused_imports)]
-pub use layers::{StorageLayer, TransientLayer, ShortTermLayer, LongTermLayer, ContentMetadata, ContentType, StoredItem};
+pub use layers::{StorageLayer, TransientLayer, ShortTermLayer, LongTermLayer, LongTermConfig, ContentMetadata, ContentType, StoredItem};
 #[allow(unused_imports)]
 pub use hash_index::HashIndex;
 #[allow(unused_imports)]
@@ -46,9 +49,88 @@ pub use hash_chain::{HashChain, HashChainManager, ChainNode, HashChainSnapshot, 
 pub use distiller::{ContextDistiller, DistillerConfig, DistilledSummary, ToolDependency, ToolStatus, DistillationCache, CacheStats};
 #[allow(unused_imports)]
 pub use semantic_index::{SemanticIndex, SemanticIndexConfig, SemanticIndexManager, FingerprintIndexEntry as SearchIndexEntry, IndexStats, SearchResult};
+#[allow(unused_imports)]
+pub use knowledge_index::{KnowledgeIndex, KnowledgeNode, KnowledgeStats};
+#[allow(unused_imports)]
+pub use knowledge_watcher::KnowledgeWatcher;
+#[allow(unused_imports)]
+pub use path_resolver::resolve_paths;
+
+/// 知识管理器 - 整合知识索引、监听和推荐功能
+pub struct KnowledgeManager {
+    index: Option<KnowledgeIndex>,
+    #[allow(dead_code)]
+    watcher: Option<KnowledgeWatcher>,
+    auto_recommend: bool,
+    recommend_threshold: f32,
+    recommend_limit: usize,
+}
+
+impl KnowledgeManager {
+    /// 创建知识管理器
+    pub fn new(
+        knowledge_root: Option<&str>,
+        auto_recommend: bool,
+        recommend_threshold: f32,
+        recommend_limit: usize,
+    ) -> Result<Self> {
+        let (index, watcher) = if let Some(root) = knowledge_root {
+            let path = std::path::PathBuf::from(root);
+            if path.exists() {
+                let idx = KnowledgeIndex::from_directory(&path)?;
+                let arc_idx = std::sync::Arc::new(std::sync::RwLock::new(idx.clone()));
+                let watcher = match KnowledgeWatcher::new(&path, Arc::clone(&arc_idx)) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        tracing::warn!("创建知识监听器失败：{}", e);
+                        None
+                    }
+                };
+                (Some(idx), watcher)
+            } else {
+                tracing::warn!("知识库目录不存在：{}", root);
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        Ok(Self {
+            index,
+            watcher,
+            auto_recommend,
+            recommend_threshold,
+            recommend_limit,
+        })
+    }
+
+    /// 根据问题推荐相关知识
+    pub fn recommend(&self, query: &str) -> Vec<&KnowledgeNode> {
+        if !self.auto_recommend {
+            return Vec::new();
+        }
+
+        if let Some(ref idx) = self.index {
+            idx.recommend(query, self.recommend_limit)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// 获取知识索引
+    pub fn index(&self) -> Option<&KnowledgeIndex> {
+        self.index.as_ref()
+    }
+
+    /// 获取统计信息
+    pub fn stats(&self) -> Option<KnowledgeStats> {
+        self.index.as_ref().map(|idx| idx.stats())
+    }
+}
 
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
+use std::sync::Arc;
 
 /// 上下文存储根目录管理器
 pub struct ContextRoot {

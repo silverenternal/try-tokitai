@@ -30,34 +30,82 @@ impl ProcessTools {
     pub fn list_processes(&self, limit: Option<usize>) -> Result<String, String> {
         let limit = limit.unwrap_or(20).min(100); // 限制最大 100 个
 
-        // 使用 ps 命令获取进程列表
-        let output = Command::new("ps")
-            .args(["aux", "--sort=-%cpu"])
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("执行 ps 命令失败：{}", e))?;
+        #[cfg(target_os = "macos")]
+        {
+            // macOS 不支持 --sort，使用 ps aux 后手动排序
+            let output = Command::new("ps")
+                .args(["aux"])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("执行 ps 命令失败：{}", e))?;
 
-        if !output.status.success() {
-            return Err("获取进程列表失败".to_string());
+            if !output.status.success() {
+                return Err("获取进程列表失败".to_string());
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut lines: Vec<&str> = stdout.lines().collect();
+
+            // 手动按 CPU 排序（第 3 列）
+            let mut processes: Vec<&str> = lines.drain(1..).collect();
+            processes.sort_by(|a, b| {
+                let cpu_a = a.split_whitespace().nth(2).unwrap_or("0.0");
+                let cpu_b = b.split_whitespace().nth(2).unwrap_or("0.0");
+                cpu_b.parse::<f32>().unwrap_or(0.0).partial_cmp(&cpu_a.parse::<f32>().unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            let header = lines.first().copied().unwrap_or("");
+            let processes: Vec<&str> = processes.into_iter().take(limit).collect();
+
+            let mut result = format!("📊 进程列表 (前 {} 个按 CPU 排序)\n\n", limit);
+            result.push_str(&format!("{}\n", header));
+            result.push_str(&"-".repeat(80));
+            result.push('\n');
+
+            for proc in processes {
+                result.push_str(&format!("{}\n", proc));
+            }
+
+            Ok(result)
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = stdout.lines().collect();
+        #[cfg(target_os = "linux")]
+        {
+            // 使用 ps 命令获取进程列表
+            let output = Command::new("ps")
+                .args(["aux", "--sort=-%cpu"])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("执行 ps 命令失败：{}", e))?;
 
-        // 保留表头 + limit 个进程
-        let header = lines.first().copied().unwrap_or("");
-        let processes: Vec<&str> = lines.iter().skip(1).take(limit).copied().collect();
+            if !output.status.success() {
+                return Err("获取进程列表失败".to_string());
+            }
 
-        let mut result = format!("📊 进程列表 (前 {} 个按 CPU 排序)\n\n", limit);
-        result.push_str(&format!("{}\n", header));
-        result.push_str(&"-".repeat(80));
-        result.push('\n');
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = stdout.lines().collect();
 
-        for proc in processes {
-            result.push_str(&format!("{}\n", proc));
+            // 保留表头 + limit 个进程
+            let header = lines.first().copied().unwrap_or("");
+            let processes: Vec<&str> = lines.iter().skip(1).take(limit).copied().collect();
+
+            let mut result = format!("📊 进程列表 (前 {} 个按 CPU 排序)\n\n", limit);
+            result.push_str(&format!("{}\n", header));
+            result.push_str(&"-".repeat(80));
+            result.push('\n');
+
+            for proc in processes {
+                result.push_str(&format!("{}\n", proc));
+            }
+
+            Ok(result)
         }
 
-        Ok(result)
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            Err(format!("不支持的操作系统"))
+        }
     }
 
     /// 获取进程详细信息
@@ -190,35 +238,76 @@ impl ProcessTools {
         validate_pid(pid)?;
         verify_process_exists(pid)?;
         verify_process_ownership(pid)?;
-        
-        let fd_path = format!("/proc/{}/fd", pid);
 
-        if !Path::new(&fd_path).exists() {
-            return Err(format!("进程 {} 不存在或无权限访问", pid));
-        }
+        #[cfg(target_os = "linux")]
+        {
+            let fd_path = format!("/proc/{}/fd", pid);
 
-        let entries = std::fs::read_dir(&fd_path)
-            .map_err(|e| format!("读取文件描述符失败：{}", e))?;
-
-        let mut files = Vec::new();
-        const MAX_FILES: usize = 100;
-
-        for e in entries.take(MAX_FILES).flatten() {
-            let fd_name = e.file_name().to_string_lossy().to_string();
-            if let Ok(link) = std::fs::read_link(e.path()) {
-                files.push(format!("  FD {}: {}", fd_name, link.to_string_lossy()));
+            if !Path::new(&fd_path).exists() {
+                return Err(format!("进程 {} 不存在或无权限访问", pid));
             }
+
+            let entries = std::fs::read_dir(&fd_path)
+                .map_err(|e| format!("读取文件描述符失败：{}", e))?;
+
+            let mut files = Vec::new();
+            const MAX_FILES: usize = 100;
+
+            for e in entries.take(MAX_FILES).flatten() {
+                let fd_name = e.file_name().to_string_lossy().to_string();
+                if let Ok(link) = std::fs::read_link(e.path()) {
+                    files.push(format!("  FD {}: {}", fd_name, link.to_string_lossy()));
+                }
+            }
+
+            let truncated = files.len() >= MAX_FILES;
+
+            Ok(format!(
+                "📁 进程 {} 的打开文件 (共 {} 个{})\n\n{}",
+                pid,
+                files.len(),
+                if truncated { "，仅显示前 100 个" } else { "" },
+                files.join("\n")
+            ))
         }
 
-        let truncated = files.len() >= MAX_FILES;
-        
-        Ok(format!(
-            "📁 进程 {} 的打开文件 (共 {} 个{})\n\n{}",
-            pid,
-            files.len(),
-            if truncated { "，仅显示前 100 个" } else { "" },
-            files.join("\n")
-        ))
+        #[cfg(target_os = "macos")]
+        {
+            let output = Command::new("lsof")
+                .args(["-p", &pid.to_string()])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("执行 lsof 命令失败：{}", e))?;
+
+            if !output.status.success() {
+                return Err(format!("无法获取进程 {} 的文件信息", pid));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = stdout.lines().collect();
+
+            let mut files = Vec::new();
+            const MAX_FILES: usize = 100;
+
+            for line in lines.iter().skip(1).take(MAX_FILES) {
+                files.push(format!("  {}", line));
+            }
+
+            let truncated = lines.len() > MAX_FILES + 1;
+
+            Ok(format!(
+                "📁 进程 {} 的打开文件 (共 {} 个{})\n\n{}",
+                pid,
+                lines.len().saturating_sub(1),
+                if truncated { "，仅显示前 100 个" } else { "" },
+                files.join("\n")
+            ))
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            Err(format!("不支持的操作系统"))
+        }
     }
 
     /// 查看进程的环境变量
@@ -227,30 +316,66 @@ impl ProcessTools {
         validate_pid(pid)?;
         verify_process_exists(pid)?;
         verify_process_ownership(pid)?;
-        
-        let env_path = format!("/proc/{}/environ", pid);
 
-        let content = std::fs::read(&env_path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    format!("无权限读取进程 {} 的环境变量", pid)
-                } else {
-                    format!("读取环境变量失败：{}", e)
-                }
-            })?;
+        #[cfg(target_os = "linux")]
+        {
+            let env_path = format!("/proc/{}/environ", pid);
 
-        let vars: Vec<&str> = content
-            .split(|&b| b == 0)
-            .filter_map(|s| std::str::from_utf8(s).ok())
-            .filter(|s| !s.is_empty())
-            .collect();
+            let content = std::fs::read(&env_path)
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        format!("无权限读取进程 {} 的环境变量", pid)
+                    } else {
+                        format!("读取环境变量失败：{}", e)
+                    }
+                })?;
 
-        Ok(format!(
-            "🔧 进程 {} 的环境变量 (共 {} 个)\n\n{}",
-            pid,
-            vars.len(),
-            vars.join("\n")
-        ))
+            let vars: Vec<&str> = content
+                .split(|&b| b == 0)
+                .filter_map(|s| std::str::from_utf8(s).ok())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            Ok(format!(
+                "🔧 进程 {} 的环境变量 (共 {} 个)\n\n{}",
+                pid,
+                vars.len(),
+                vars.join("\n")
+            ))
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = Command::new("sh")
+                .args(["-c", &format!("ps eww {} | head -1", pid)])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("获取环境变量失败：{}", e))?;
+
+            if !output.status.success() {
+                return Err(format!("无法获取进程 {} 的环境变量", pid));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            
+            // 解析环境变量（格式为 VAR=value）
+            let vars: Vec<&str> = stdout
+                .split_whitespace()
+                .filter(|s| s.contains('='))
+                .collect();
+
+            Ok(format!(
+                "🔧 进程 {} 的环境变量 (共 {} 个)\n\n{}",
+                pid,
+                vars.len(),
+                vars.join("\n")
+            ))
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            Err(format!("不支持的操作系统"))
+        }
     }
 }
 
@@ -269,32 +394,108 @@ fn validate_pid(pid: u32) -> Result<(), String> {
 
 /// 验证进程是否存在
 fn verify_process_exists(pid: u32) -> Result<(), String> {
-    if !Path::new(&format!("/proc/{}", pid)).exists() {
-        return Err(format!("进程 {} 不存在", pid));
+    // macOS 使用 kill -0 检查进程是否存在
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("进程 {} 不存在", pid))
+                }
+            }
+            Err(_) => Err(format!("进程 {} 不存在", pid)),
+        }
     }
-    Ok(())
+    
+    // Linux 使用 /proc 文件系统
+    #[cfg(target_os = "linux")]
+    {
+        if !Path::new(&format!("/proc/{}", pid)).exists() {
+            return Err(format!("进程 {} 不存在", pid));
+        }
+        Ok(())
+    }
+    
+    // 其他系统默认通过
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Ok(())
+    }
 }
 
 /// 验证进程所有权（仅限自己的进程或 root）
 fn verify_process_ownership(pid: u32) -> Result<(), String> {
-    use std::os::unix::fs::MetadataExt;
-    
-    let proc_exe_path = format!("/proc/{}/exe", pid);
-    
-    if let Ok(metadata) = std::fs::metadata(&proc_exe_path) {
-        let current_uid = unsafe { libc::getuid() };
-        let process_uid = metadata.uid();
+    // macOS 使用 ps 命令获取进程用户
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("ps")
+            .args(["-o", "uid=", "-p", &pid.to_string()])
+            .stdin(Stdio::null())
+            .output();
         
-        // 如果不是 root 且进程不属于当前用户
-        if current_uid != 0 && process_uid != current_uid {
-            return Err(format!(
-                "无权限访问其他用户的进程 {} (UID: {})",
-                pid, process_uid
-            ));
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    let process_uid_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let current_uid = unsafe { libc::getuid() };
+                    
+                    if let Ok(process_uid) = process_uid_str.parse::<u32>() {
+                        // 如果不是 root 且进程不属于当前用户
+                        if current_uid != 0 && process_uid != current_uid {
+                            return Err(format!(
+                                "无权限访问其他用户的进程 {} (UID: {})",
+                                pid, process_uid
+                            ));
+                        }
+                        Ok(())
+                    } else {
+                        Err(format!("无法获取进程 {} 的用户 ID", pid))
+                    }
+                } else {
+                    Err(format!("无法访问进程 {}", pid))
+                }
+            }
+            Err(_) => Err(format!("无法访问进程 {}", pid)),
         }
     }
     
-    Ok(())
+    // Linux 使用 /proc 文件系统
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let proc_exe_path = format!("/proc/{}/exe", pid);
+
+        if let Ok(metadata) = std::fs::metadata(&proc_exe_path) {
+            let current_uid = unsafe { libc::getuid() };
+            let process_uid = metadata.uid();
+
+            // 如果不是 root 且进程不属于当前用户
+            if current_uid != 0 && process_uid != current_uid {
+                return Err(format!(
+                    "无权限访问其他用户的进程 {} (UID: {})",
+                    pid, process_uid
+                ));
+            }
+        }
+
+        Ok(())
+    }
+    
+    // 其他系统默认通过
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -305,21 +506,31 @@ mod tests {
     fn test_validate_pid() {
         // PID 0 应该无效
         assert!(validate_pid(0).is_err());
-        
+
         // 正常 PID 应该有效
         assert!(validate_pid(1).is_ok());
         assert!(validate_pid(1000).is_ok());
         assert!(validate_pid(MAX_PID).is_ok());
-        
+
         // 超出范围的 PID 应该无效
         assert!(validate_pid(MAX_PID + 1).is_err());
     }
 
     #[test]
     fn test_verify_process_exists() {
-        // PID 1 (init/systemd) 应该存在
-        assert!(verify_process_exists(1).is_ok());
+        // macOS 使用当前进程测试（肯定存在）
+        #[cfg(target_os = "macos")]
+        {
+            let current_pid = std::process::id();
+            assert!(verify_process_exists(current_pid).is_ok());
+        }
         
+        // Linux 使用 PID 1 (init/systemd) 测试
+        #[cfg(target_os = "linux")]
+        {
+            assert!(verify_process_exists(1).is_ok());
+        }
+
         // 非常大的 PID 应该不存在
         assert!(verify_process_exists(99999999).is_err());
     }
@@ -328,7 +539,7 @@ mod tests {
     fn test_get_system_resources() {
         let tools = ProcessTools;
         let result = tools.get_system_resources();
-        
+
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("CPU 信息"));
@@ -339,7 +550,7 @@ mod tests {
     fn test_list_processes() {
         let tools = ProcessTools;
         let result = tools.list_processes(Some(5));
-        
+
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("进程列表"));
@@ -351,7 +562,7 @@ mod tests {
         let tools = ProcessTools;
         // 搜索 bash 或 sh 进程（通常存在）
         let result = tools.search_processes("bash".to_string(), Some(5));
-        
+
         // 可能找到也可能找不到，但不应该出错
         assert!(result.is_ok());
     }
@@ -359,10 +570,10 @@ mod tests {
     #[test]
     fn test_get_process_info_for_pid_1() {
         let tools = ProcessTools;
-        
+
         // 尝试获取 PID 1 的信息（可能需要 root 权限）
         let result = tools.get_process_info(1);
-        
+
         // 如果成功，验证输出格式
         if let Ok(output) = result {
             assert!(output.contains("PID: 1"));

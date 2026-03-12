@@ -5,6 +5,9 @@
 
 set -e
 
+# 获取脚本所在目录（跨平台兼容）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # 从 .env 文件加载环境变量（如果存在）
 if [ -f ".env" ]; then
     export $(cat .env | grep -v "^#" | xargs)
@@ -19,7 +22,8 @@ if [ -z "$AI_API_KEY" ]; then
     echo ""
 fi
 
-cd /home/hugo/codes/try-tokitai
+# 切换到项目目录
+cd "$SCRIPT_DIR"
 
 # 检查是否使用 TUI 模式
 if [ "$1" = "--tui" ] || [ "$1" = "-t" ]; then

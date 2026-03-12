@@ -27,10 +27,13 @@ futures = "0.3"
 bytes = "1.5"
 
 # TUI dependencies
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 ctrlc = "3.4"
 tui-input = "0.11"
+
+# Headless browser support
+headless_chrome = "1.0"
 
 # Path resolver
 regex = "1.10"
@@ -47,3 +50,15 @@ tempfile = "3.0"  # for tests
 
 # Chinese text segmentation for semantic indexing
 jieba-rs = "0.7"
+
+# Base64 decoding for browser tools
+base64 = "0.22"
+
+# Directory walking for knowledge index
+walkdir = "2.4"
+
+# File system watcher for knowledge sync
+notify = "6.1"
+
+# Concurrent data structures for request monitoring
+parking_lot = "0.12"

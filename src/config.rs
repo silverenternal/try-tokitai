@@ -67,6 +67,73 @@ pub struct DownloadConfig {
     pub default_dir: Option<String>,
 }
 
+/// 上下文存储配置
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct ContextConfig {
+    /// 上下文存储根目录
+    pub root_dir: Option<String>,
+    /// 短期层最大保留轮数
+    #[serde(default = "default_max_short_term_rounds")]
+    pub max_short_term_rounds: usize,
+    /// 是否启用 mmap
+    #[serde(default = "default_true")]
+    pub enable_mmap: bool,
+    /// 是否启用日志
+    #[serde(default = "default_true")]
+    pub enable_logging: bool,
+    /// 是否启用知识索引
+    #[serde(default = "default_true")]
+    pub enable_knowledge_index: bool,
+    /// 知识库根目录
+    pub knowledge_root: Option<String>,
+    /// 是否从目录结构自动同步分类
+    #[serde(default = "default_true")]
+    pub auto_sync_categories: bool,
+    /// 是否自动推荐知识
+    #[serde(default = "default_true")]
+    pub auto_recommend_knowledge: bool,
+    /// 推荐阈值
+    #[serde(default = "default_recommend_threshold")]
+    pub recommend_threshold: f32,
+    /// 推荐数量限制
+    #[serde(default = "default_recommend_limit")]
+    pub recommend_limit: usize,
+}
+
+fn default_max_short_term_rounds() -> usize {
+    10
+}
+
+fn default_recommend_threshold() -> f32 {
+    0.5
+}
+
+fn default_recommend_limit() -> usize {
+    3
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: None,
+            max_short_term_rounds: default_max_short_term_rounds(),
+            enable_mmap: true,
+            enable_logging: true,
+            enable_knowledge_index: true,
+            knowledge_root: Some("./docs".to_string()),
+            auto_sync_categories: true,
+            auto_recommend_knowledge: true,
+            recommend_threshold: 0.5,
+            recommend_limit: 3,
+        }
+    }
+}
+
 /// 主配置结构
 #[derive(Debug, Deserialize, Clone, Default)]
 #[allow(dead_code)]
@@ -79,6 +146,8 @@ pub struct Config {
     pub search: Option<SearchConfig>,
     #[serde(default)]
     pub download: Option<DownloadConfig>,
+    #[serde(default)]
+    pub context: ContextConfig,
 }
 
 impl Config {
@@ -123,6 +192,7 @@ impl Config {
             tools: ToolsConfig::default(),
             search: None,
             download: None,
+            context: ContextConfig::default(),
         }
     }
 }

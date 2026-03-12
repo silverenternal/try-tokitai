@@ -63,8 +63,9 @@ fn extract_filename_from_url(url: &str) -> Option<String> {
     None
 }
 
-/// 生成安全的文件名
+/// 生成安全的文件名（防止路径遍历攻击）
 fn sanitize_filename(filename: &str) -> String {
+    // 移除所有路径分隔符和危险字符
     filename
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
@@ -73,6 +74,37 @@ fn sanitize_filename(filename: &str) -> String {
             '_'
         })
         .collect()
+}
+
+/// 验证下载路径是否安全（防止路径遍历）
+fn validate_download_path(base_dir: &std::path::Path, full_path: &std::path::Path) -> Result<(), String> {
+    // 确保最终路径在基础目录内
+    let canonical_base = base_dir.canonicalize()
+        .map_err(|e| format!("规范化基础目录失败：{}", e))?;
+    
+    // 如果文件已存在，规范化比较
+    if full_path.exists() {
+        let canonical_full = full_path.canonicalize()
+            .map_err(|e| format!("规范化完整路径失败：{}", e))?;
+        
+        if !canonical_full.starts_with(&canonical_base) {
+            return Err("路径遍历攻击检测：文件不在允许的目录内".to_string());
+        }
+    } else {
+        // 文件不存在，检查父目录
+        if let Some(parent) = full_path.parent() {
+            if parent.exists() {
+                let canonical_parent = parent.canonicalize()
+                    .map_err(|e| format!("规范化父目录失败：{}", e))?;
+                
+                if !canonical_parent.starts_with(&canonical_base) {
+                    return Err("路径遍历攻击检测：父目录不在允许的范围内".to_string());
+                }
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 #[tool]
@@ -119,6 +151,10 @@ impl DownloadTools {
         };
 
         let file_path = download_dir.join(&final_filename);
+
+        // 验证下载路径（防止路径遍历攻击）
+        validate_download_path(&download_dir, &file_path)
+            .map_err(|e| format!("安全验证失败：{}", e))?;
 
         // 下载文件
         let response = ureq::get(&url)

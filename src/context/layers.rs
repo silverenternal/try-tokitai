@@ -1,5 +1,5 @@
 //! 存储层级模块
-//! 
+//!
 //! 实现三层存储架构：
 //! - 瞬时层：单轮临时文件，会话结束删除
 //! - 短期层：最近 N 轮，支持自动裁剪
@@ -314,28 +314,77 @@ impl StorageLayer for ShortTermLayer {
 
 // ============= 长期层 =============
 
+/// 长期层配置
+#[derive(Debug, Clone)]
+pub struct LongTermConfig {
+    /// 知识库根目录
+    pub knowledge_root: Option<PathBuf>,
+    /// 是否从目录结构自动同步分类
+    pub auto_sync_categories: bool,
+    /// 手动配置的额外分类
+    pub custom_categories: Vec<String>,
+}
+
+impl Default for LongTermConfig {
+    fn default() -> Self {
+        Self {
+            knowledge_root: None,
+            auto_sync_categories: false,
+            custom_categories: vec!["git_rules".to_string(), "tool_configs".to_string(), "task_patterns".to_string()],
+        }
+    }
+}
+
 /// 长期层管理器
 pub struct LongTermLayer {
     dir: PathBuf,
     categories: Vec<String>,
+    config: LongTermConfig,
 }
 
 impl LongTermLayer {
     pub fn new<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        Self::with_config(dir, LongTermConfig::default())
+    }
+
+    /// 根据配置创建长期层
+    pub fn with_config<P: AsRef<Path>>(dir: P, config: LongTermConfig) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
+        let mut categories = Vec::new();
 
-        // 创建默认分类目录
-        let categories = vec!["git_rules", "tool_configs", "task_patterns"]
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        for category in &categories {
-            std::fs::create_dir_all(dir.join(category))
-                .with_context(|| format!("Failed to create category directory: {:?}", dir.join(category)))?;
+        // 自动从目录结构同步分类
+        if config.auto_sync_categories {
+            if let Some(ref root) = config.knowledge_root {
+                if root.exists() {
+                    for entry in std::fs::read_dir(root)
+                        .with_context(|| format!("Failed to read knowledge root: {:?}", root))?
+                    {
+                        let entry = entry?;
+                        if entry.file_type()?.is_dir() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if !categories.contains(&name) {
+                                categories.push(name);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        Ok(Self { dir, categories })
+        // 添加手动配置的分类
+        for cat in &config.custom_categories {
+            if !categories.contains(cat) {
+                categories.push(cat.clone());
+            }
+        }
+
+        // 创建分类目录
+        for cat in &categories {
+            std::fs::create_dir_all(dir.join(cat))
+                .with_context(|| format!("Failed to create category directory: {:?}", dir.join(cat)))?;
+        }
+
+        Ok(Self { dir, categories, config })
     }
 
     /// 添加分类
@@ -351,18 +400,44 @@ impl LongTermLayer {
         self.dir.join(category)
     }
 
+    /// 获取所有分类
+    pub fn categories(&self) -> &[String] {
+        &self.categories
+    }
+
+    /// 根据内容自动选择分类
+    pub fn select_category(&self, content: &str, tags: &[String]) -> String {
+        // 1. 优先匹配标签
+        for tag in tags {
+            if self.categories.iter().any(|c| c.to_lowercase() == tag.to_lowercase()) {
+                return tag.clone();
+            }
+        }
+
+        // 2. 基于关键词匹配
+        let keywords = extract_keywords(content);
+        for cat in &self.categories {
+            if keywords.iter().any(|k| k.to_lowercase() == cat.to_lowercase()) {
+                return cat.clone();
+            }
+        }
+
+        // 3. 默认分类
+        "task_patterns".to_string()
+    }
+
     /// 按关键词搜索
     pub fn search_by_keyword(&self, keyword: &str) -> Result<Vec<PathBuf>> {
         let mut results = Vec::new();
-        
+
         for category in &self.categories {
             let category_dir = self.dir.join(category);
-            
+
             if category_dir.exists() {
                 for entry in std::fs::read_dir(&category_dir)? {
                     let entry = entry?;
                     let path = entry.path();
-                    
+
                     if path.is_file() {
                         if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
                             if name.to_lowercase().contains(&keyword.to_lowercase()) {
@@ -373,7 +448,7 @@ impl LongTermLayer {
                 }
             }
         }
-        
+
         Ok(results)
     }
 
@@ -381,10 +456,10 @@ impl LongTermLayer {
     pub fn compact(&self) -> Result<usize> {
         // 简单实现：统计文件数量
         let mut count = 0;
-        
+
         for category in &self.categories {
             let category_dir = self.dir.join(category);
-            
+
             if category_dir.exists() {
                 for entry in std::fs::read_dir(&category_dir)? {
                     let _ = entry?;
@@ -392,9 +467,20 @@ impl LongTermLayer {
                 }
             }
         }
-        
+
         Ok(count)
     }
+}
+
+/// 从文本提取关键词（简化版）
+fn extract_keywords(text: &str) -> Vec<String> {
+    let stop_words = ["的", "了", "是", "在", "和", "与", "或", "怎么", "如何", "哪些", "什么"];
+    
+    text.split(|c: char| c.is_whitespace() || c == '?' || c == '？' || c == ',' || c == '，')
+        .filter(|s| !s.is_empty() && s.len() > 1)
+        .filter(|s| !stop_words.contains(s))
+        .map(|s| s.to_string())
+        .collect()
 }
 
 impl StorageLayer for LongTermLayer {

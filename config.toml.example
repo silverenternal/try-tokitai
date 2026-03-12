@@ -44,3 +44,19 @@ enable_mmap = true
 enable_logging = true
 # 是否启用内容去重（相同内容只存储一次）
 enable_deduplication = true
+
+# ⭐ 知识库配置（新增）
+# 知识库根目录（用于从目录结构构建知识索引）
+knowledge_root = "./docs"
+# 是否从目录结构自动同步分类到长期层
+auto_sync_categories = true
+# 是否启用知识索引（提问时自动推荐相关知识）
+enable_knowledge_index = true
+# 知识索引更新间隔（秒）
+index_update_interval_secs = 300
+# 自动推荐相关知识（提问时根据关键词匹配）
+auto_recommend_knowledge = true
+# 推荐阈值（0-1，越高越严格）
+recommend_threshold = 0.5
+# 最多推荐知识数量
+recommend_limit = 3

@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod config;
 mod command_resolver;
 mod path_resolver;
@@ -13,7 +15,7 @@ use tokitai::ToolProvider;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools};
+use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools, BrowserTools};
 
 /// AI 助手 - 整合所有工具
 pub struct AiAssistant {
@@ -28,6 +30,7 @@ pub struct AiAssistant {
     file_search: FileSearchTools,
     process_tools: ProcessTools,
     network_tools: NetworkTools,
+    browser_tools: BrowserTools,
     api_url: String,
     api_key: Option<String>,
     model: String,
@@ -42,11 +45,15 @@ impl AiAssistant {
             web_search: WebSearchTools::new(),
             download_tools: DownloadTools,
             git_ops: GitOperations,
-            http_client: HttpClientTools,
+            http_client: HttpClientTools::new(),
             json_tools: JsonTools,
             file_search: FileSearchTools,
             process_tools: ProcessTools,
             network_tools: NetworkTools,
+            browser_tools: BrowserTools::new().unwrap_or_else(|e| {
+                tracing::warn!("启动浏览器失败：{}，图片截图功能将不可用", e);
+                BrowserTools::new().unwrap_or_else(|_| std::process::exit(1))
+            }),
             api_url,
             api_key,
             model,
@@ -179,6 +186,17 @@ impl AiAssistant {
             })
         }));
 
+        tools.extend(BrowserTools::tool_definitions().iter().map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                }
+            })
+        }));
+
         tools
     }
 
@@ -187,53 +205,59 @@ impl AiAssistant {
         info!("🔧 执行工具：{} {:?}", name, args);
 
         // 尝试在各个工具集中查找并执行
-        if let Ok(result) = self.file_ops.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
+        // 注意：call_tool 返回 Result<Value, ToolError>，我们需要检查是否找到了工具
+        // 如果工具存在但执行失败，ToolError.kind 会是 InternalError 或 ValidationError
+        // 如果工具不存在，ToolError.kind 会是 NotFound
+        
+        use tokitai_core::ToolErrorKind;
+        
+        macro_rules! try_tool {
+            ($tools:expr, $tool_name:expr) => {
+                match $tools.call_tool(name, args) {
+                    Ok(result) => {
+                        info!("✅ 工具执行成功：{}", name);
+                        return Ok(result.to_string());
+                    }
+                    Err(e) => {
+                        if e.kind == ToolErrorKind::NotFound {
+                            // 工具不存在，继续尝试下一个
+                        } else {
+                            // 工具存在但执行失败
+                            info!("❌ 工具执行失败：{} - {:?}", name, e);
+                            return Err(anyhow::anyhow!("工具 {} 执行失败：{}", name, e));
+                        }
+                    }
+                }
+            };
         }
-        if let Ok(result) = self.system_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.code_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.web_search.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.download_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.git_ops.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.http_client.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.json_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.file_search.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.process_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
-        if let Ok(result) = self.network_tools.call_tool(name, args) {
-            info!("✅ 工具执行成功：{}", name);
-            return Ok(result.to_string());
-        }
+        
+        try_tool!(self.file_ops, "file_ops");
+        try_tool!(self.system_tools, "system_tools");
+        try_tool!(self.code_tools, "code_tools");
+        try_tool!(self.web_search, "web_search");
+        try_tool!(self.download_tools, "download_tools");
+        try_tool!(self.git_ops, "git_ops");
+        try_tool!(self.http_client, "http_client");
+        try_tool!(self.json_tools, "json_tools");
+        try_tool!(self.file_search, "file_search");
+        try_tool!(self.process_tools, "process_tools");
+        try_tool!(self.network_tools, "network_tools");
+        try_tool!(self.browser_tools, "browser_tools");
 
         warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
+    }
+
+    /// 与 AI 对话并处理工具调用（单次）
+    pub fn chat_and_handle_tools(&self, messages: &mut Vec<Value>, input: &str) -> Result<String> {
+        // 添加用户消息
+        messages.push(json!({
+            "role": "user",
+            "content": input
+        }));
+
+        // 发送请求并处理工具调用
+        self.chat(messages)
     }
 
     /// 与 AI 对话
@@ -408,11 +432,36 @@ fn main() -> Result<()> {
 - 执行系统命令
 - 分析代码
 - 搜索网络信息
+- 搜索和下载图片
+- 网页截图和获取渲染内容
 
 请根据用户需求选择合适的工具。
 
 当用户输入'help'时，请列出你可以执行的操作示例。"
     })];
+
+    // 检查是否有命令行参数直接输入
+    let non_arg_args: Vec<String> = args.iter()
+        .filter(|arg| !arg.starts_with('-'))
+        .skip(1)  // 跳过程序名
+        .cloned()
+        .collect();
+
+    if !non_arg_args.is_empty() {
+        // 有命令行参数，直接处理并退出
+        let input = non_arg_args.join(" ");
+        println!("👤 你：{}", input);
+        
+        match assistant.chat_and_handle_tools(&mut messages, &input) {
+            Ok(response) => {
+                println!("🤖 AI: {}", response);
+            }
+            Err(e) => {
+                println!("❌ 错误：{}", e);
+            }
+        }
+        return Ok(());
+    }
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();

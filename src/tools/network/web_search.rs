@@ -6,8 +6,9 @@ use std::time::Duration;
 use thiserror::Error;
 use tokitai::tool;
 use urlencoding::encode;
+use crate::tools::network::search_engine::SearchEngineManager;
 
-/// 搜索错误类型
+/// 搜索错误类型（兼容旧代码）
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("网络请求失败：{0}")]
@@ -55,6 +56,29 @@ struct SearxngResult {
     content: String,
     #[serde(default)]
     engine: String,
+    #[serde(default)]
+    img_src: Option<String>,
+    #[serde(default)]
+    thumbnail: Option<String>,
+}
+
+/// 图片搜索结果结构
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ImageSearchResult {
+    pub title: String,
+    pub url: String,
+    pub img_src: String,
+    pub thumbnail: Option<String>,
+    pub source: String,
+    pub engine: String,
+}
+
+/// 图片搜索响应结构
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImageSearchResponse {
+    pub query: String,
+    pub total: usize,
+    pub results: Vec<ImageSearchResult>,
 }
 
 /// 网络搜索工具集 - 支持多引擎搜索
@@ -62,24 +86,8 @@ pub struct WebSearchTools {
     client: ureq::Agent,
     max_retries: u32,
     cache: Cache<String, String>,
-    /// SearXNG 实例列表（按优先级排序）
-    searxng_instances: Vec<String>,
-}
-
-/// 获取推荐的 SearXNG 公共实例列表
-fn get_searxng_instances() -> Vec<String> {
-    vec![
-        // 如果用户配置了 SEARXNG_URL，优先使用
-        std::env::var("SEARXNG_URL").unwrap_or_default(),
-        // 公共实例（按可靠性排序）
-        "https://searx.be".to_string(),
-        "https://search.ononoki.org".to_string(),
-        "https://s.x.com".to_string(),
-        "https://searx.org".to_string(),
-    ]
-    .into_iter()
-    .filter(|s| !s.is_empty())
-    .collect()
+    /// 使用新的搜索引擎管理器
+    engine_manager: SearchEngineManager,
 }
 
 #[tool]
@@ -95,43 +103,40 @@ impl WebSearchTools {
     #[tool(default_limit = "null")]
     pub fn search_web(&self, query: String, limit: Option<usize>) -> Result<String> {
         let limit = limit.unwrap_or(5).min(20);
-        
+
         tracing::info!("🔍 搜索网页：{} (limit={})", query, limit);
-        
+
         // 检查缓存
         if let Some(cached) = self.cache.get(&query) {
             tracing::debug!("✅ 使用缓存结果");
             return Ok(cached);
         }
-        
-        // 策略 1：优先尝试 SearXNG 实例（更可靠）
-        for (i, searxng_url) in self.searxng_instances.iter().enumerate() {
-            tracing::debug!("尝试 SearXNG 实例 [{}/{}]: {}", i + 1, self.searxng_instances.len(), searxng_url);
-            match self.search_with_searxng(searxng_url, &query, limit) {
-                Ok(results) => {
-                    tracing::info!("✅ SearXNG 搜索成功 [{}]", searxng_url);
-                    // 存入缓存
-                    self.cache.insert(query.clone(), results.clone());
-                    return Ok(results);
-                }
-                Err(e) => {
-                    tracing::warn!("SearXNG [{}] 失败：{}", searxng_url, e);
-                    // 继续尝试下一个实例
-                }
-            }
-        }
-        
-        // 策略 2：回退到 DuckDuckGo
-        tracing::info!("所有 SearXNG 实例不可用，回退到 DuckDuckGo");
-        match self.search_with_duckduckgo(&query, limit) {
-            Ok(result) => {
+
+        // 使用新的搜索引擎管理器
+        match self.engine_manager.search(&query, limit) {
+            Ok(results) => {
+                tracing::info!("✅ 搜索成功，找到 {} 条结果", results.len());
+                
+                let response_obj = SearchResponse {
+                    query: query.clone(),
+                    total: results.len(),
+                    results: results.into_iter().map(|r| SearchResult {
+                        title: r.title,
+                        url: r.url,
+                        snippet: r.snippet,
+                        engine: r.engine,
+                    }).collect(),
+                };
+
+                let json = serde_json::to_string_pretty(&response_obj)
+                    .map_err(|e| anyhow::anyhow!("序列化失败：{}", e))?;
+                
                 // 存入缓存
-                self.cache.insert(query, result.clone());
-                Ok(result)
+                self.cache.insert(query, json.clone());
+                Ok(json)
             }
             Err(e) => {
-                // 所有搜索引擎都失败
-                tracing::error!("所有搜索引擎都失败：{}", e);
+                tracing::error!("搜索失败：{}", e);
                 Err(anyhow::anyhow!(
                     "搜索失败：{}。建议：1) 检查网络连接 2) 稍后重试",
                     e
@@ -173,9 +178,9 @@ impl WebSearchTools {
     #[tool(default_limit = "null")]
     pub fn search_arxiv(&self, query: String, limit: Option<usize>) -> Result<String> {
         let limit = limit.unwrap_or(5).min(20);
-        
+
         tracing::info!("📚 搜索 arXiv 论文：{} (limit={})", query, limit);
-        
+
         let base_url = "https://export.arxiv.org/api/query";
         let encoded_query = encode(&query);
         let url = format!(
@@ -193,7 +198,7 @@ impl WebSearchTools {
 
         let body = response.into_string()?;
         let results = parse_arxiv_results(&body, limit)?;
-        
+
         let response_obj = SearchResponse {
             query,
             total: results.len(),
@@ -201,6 +206,97 @@ impl WebSearchTools {
         };
 
         Ok(serde_json::to_string_pretty(&response_obj)?)
+    }
+
+    /// 搜索图片（使用 SearXNG 图片搜索引擎）
+    ///
+    /// # 参数
+    /// - `query`: 搜索关键词
+    /// - `limit`: 返回结果数量（默认 10，最大 50）
+    ///
+    /// # 返回
+    /// 返回 JSON 格式的图片列表，包含图片 URL、缩略图、来源等信息
+    #[tool(default_limit = "null")]
+    pub fn search_images(&self, query: String, limit: Option<usize>) -> Result<String> {
+        let limit = limit.unwrap_or(10).min(50);
+
+        tracing::info!("🖼️ 搜索图片：{} (limit={})", query, limit);
+
+        // 尝试从环境变量获取 SearXNG 实例
+        if let Ok(searxng_url) = std::env::var("SEARXNG_URL") {
+            match self.search_with_searxng_images(&searxng_url, &query, limit) {
+                Ok(results) => {
+                    tracing::info!("✅ SearXNG 图片搜索成功 [{}]", searxng_url);
+                    let response_obj = ImageSearchResponse {
+                        query: query.clone(),
+                        total: results.len(),
+                        results,
+                    };
+                    return Ok(serde_json::to_string_pretty(&response_obj)?);
+                }
+                Err(e) => {
+                    tracing::warn!("SearXNG 图片实例 [{}] 失败：{}", searxng_url, e);
+                }
+            }
+        }
+
+        // 所有 SearXNG 实例都失败
+        tracing::error!("所有 SearXNG 图片实例不可用");
+        Err(anyhow::anyhow!(
+            "图片搜索失败：所有 SearXNG 实例不可用。建议：1) 检查网络连接 2) 配置 SEARXNG_URL 环境变量 3) 稍后重试"
+        ))
+    }
+
+    /// 下载图片到本地
+    ///
+    /// # 参数
+    /// - `img_url`: 图片 URL
+    /// - `save_path`: 保存路径
+    ///
+    /// # 返回
+    /// 返回保存的文件路径
+    pub fn download_image(&self, img_url: String, save_path: String) -> Result<String> {
+        tracing::info!("🖼️ 下载图片：{} -> {}", img_url, save_path);
+
+        // 验证 URL 安全性
+        if !img_url.starts_with("http://") && !img_url.starts_with("https://") {
+            bail!("不支持的协议，仅支持 http/https");
+        }
+
+        // 验证保存路径
+        let save_path_buf = std::path::PathBuf::from(&save_path);
+        if let Some(parent) = save_path_buf.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("创建目录失败：{:?}", parent))?;
+        }
+
+        // 下载图片
+        let response = self.client.get(&img_url)
+            .call()
+            .context("下载请求失败")?;
+
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .read_to_end(&mut bytes)
+            .context("读取响应失败")?;
+
+        // 限制文件大小
+        const MAX_IMAGE_SIZE: usize = 50 * 1024 * 1024; // 50MB
+        if bytes.len() > MAX_IMAGE_SIZE {
+            bail!("图片过大 ({} > {} MB)", bytes.len() / 1024 / 1024, MAX_IMAGE_SIZE / 1024 / 1024);
+        }
+
+        // 写入文件
+        std::fs::write(&save_path_buf, &bytes)
+            .context("写入文件失败")?;
+
+        Ok(format!(
+            "✅ 图片下载成功\nURL: {}\n保存路径：{}\n文件大小：{} bytes",
+            img_url,
+            save_path,
+            bytes.len()
+        ))
     }
 
     /// 搜索新闻（使用 SearXNG news 引擎）
@@ -211,20 +307,18 @@ impl WebSearchTools {
     #[tool]
     pub fn search_news(&self, query: String, days: u32) -> Result<String> {
         let days = if days == 0 { 7 } else { days };
-        
+
         tracing::info!("📰 搜索新闻：{} (最近{}天)", query, days);
-        
-        // 策略 1：优先尝试 SearXNG 实例
-        for (i, searxng_url) in self.searxng_instances.iter().enumerate() {
-            tracing::debug!("尝试 SearXNG 新闻实例 [{}/{}]: {}", i + 1, self.searxng_instances.len(), searxng_url);
-            
+
+        // 尝试从环境变量获取 SearXNG 实例
+        if let Ok(searxng_url) = std::env::var("SEARXNG_URL") {
             let encoded_query = encode(&query);
             let url = format!(
                 "{}/search?q={}&format=json&engines=google_news,bing_news&categories=news",
                 searxng_url, encoded_query
             );
-            
-            match self.search_with_searxng_news(searxng_url, &url) {
+
+            match self.search_with_searxng_news(&searxng_url, &url) {
                 Ok(results) => {
                     tracing::info!("✅ SearXNG 新闻搜索成功 [{}]", searxng_url);
                     let response_obj = SearchResponse {
@@ -236,13 +330,12 @@ impl WebSearchTools {
                 }
                 Err(e) => {
                     tracing::warn!("SearXNG 新闻实例 [{}] 失败：{}", searxng_url, e);
-                    // 继续尝试下一个实例
                 }
             }
         }
-        
-        // 策略 2：回退到普通网页搜索
-        tracing::warn!("所有 SearXNG 新闻实例不可用，使用普通网页搜索");
+
+        // 回退到普通网页搜索
+        tracing::warn!("SearXNG 新闻实例不可用，使用普通网页搜索");
         self.search_web(query, Some(days as usize))
     }
 }
@@ -263,7 +356,7 @@ impl WebSearchTools {
             client,
             max_retries: 3,
             cache,
-            searxng_instances: get_searxng_instances(),
+            engine_manager: SearchEngineManager::new(),
         }
     }
 
@@ -288,6 +381,48 @@ impl WebSearchTools {
                 engine: r.engine,
             })
             .collect();
+
+        Ok(results)
+    }
+
+    /// 使用 SearXNG 搜索图片
+    fn search_with_searxng_images(&self, base_url: &str, query: &str, limit: usize) -> Result<Vec<ImageSearchResult>> {
+        let encoded_query = encode(query);
+        // 使用 SearXNG 图片搜索，启用多个图片引擎
+        let url = format!(
+            "{}/search?q={}&format=json&engines=google_images,bing_images,pixabay,peaks&categories=images",
+            base_url, encoded_query
+        );
+
+        let response = self.client.get(&url)
+            .timeout(Duration::from_secs(15))  // 图片搜索可能需要更长时间
+            .call()
+            .context("SearXNG 图片请求失败")?;
+
+        if response.status() != 200 {
+            bail!("SearXNG 图片 API 返回错误状态：{}", response.status());
+        }
+
+        let searxng_resp: SearxngResponse = response.into_json()?;
+        let results: Vec<ImageSearchResult> = searxng_resp.results
+            .into_iter()
+            .take(limit)
+            .filter_map(|r| {
+                // 过滤掉没有图片源的结果
+                r.img_src.map(|img_src| ImageSearchResult {
+                    title: r.title,
+                    url: r.url,
+                    img_src,
+                    thumbnail: r.thumbnail,
+                    source: r.content,
+                    engine: r.engine,
+                })
+            })
+            .collect();
+
+        if results.is_empty() {
+            bail!(SearchError::NoResults);
+        }
 
         Ok(results)
     }

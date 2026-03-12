@@ -147,3 +147,40 @@ impl GitOperations {
         Ok(stdout.trim().to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_git_status() {
+        let git = GitOperations;
+        let result = git.git_status(Some(".".to_string()));
+        assert!(result.is_ok(), "git status 应该成功：{:?}", result);
+        let output = result.unwrap();
+        assert!(output.contains("位于分支") || output.contains("On branch"));
+    }
+
+    #[test]
+    fn test_git_current_branch() {
+        let git = GitOperations;
+        let result = git.git_current_branch(Some(".".to_string()));
+        assert!(result.is_ok(), "获取当前分支应该成功：{:?}", result);
+        let branch = result.unwrap();
+        assert!(!branch.is_empty(), "分支名称不应为空");
+    }
+
+    #[test]
+    fn test_git_log() {
+        let git = GitOperations;
+        let result = git.git_log(Some(".".to_string()), Some(5));
+        assert!(result.is_ok(), "git log 应该成功：{:?}", result);
+    }
+
+    #[test]
+    fn test_git_branch() {
+        let git = GitOperations;
+        let result = git.git_branch(Some(".".to_string()));
+        assert!(result.is_ok(), "git branch 应该成功：{:?}", result);
+    }
+}

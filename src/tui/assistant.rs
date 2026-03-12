@@ -2,7 +2,7 @@
 
 use crate::command_resolver::CommandResolver;
 use crate::tools::{
-    CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools,
+    CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, BrowserTools,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,7 @@ pub struct Assistant {
     web_search: WebSearchTools,
     download_tools: DownloadTools,
     git_ops: GitOperations,
+    browser_tools: BrowserTools,
     api_config: ApiConfig,
     /// 命令解析器（用于安全检查）
     #[allow(dead_code)]
@@ -35,6 +36,10 @@ impl Assistant {
             web_search: WebSearchTools::new(),
             download_tools: DownloadTools,
             git_ops: GitOperations,
+            browser_tools: BrowserTools::new().unwrap_or_else(|e| {
+                tracing::warn!("启动浏览器失败：{}，图片截图功能将不可用", e);
+                BrowserTools::new().unwrap_or_else(|_| std::process::exit(1))
+            }),
             api_config,
             command_resolver: Arc::new(Mutex::new(CommandResolver::new())),
         }
@@ -140,6 +145,10 @@ impl Assistant {
             return Ok(result.to_string());
         }
         if let Ok(result) = self.git_ops.call_tool(name, args) {
+            info!("✅ 工具执行成功：{}", name);
+            return Ok(result.to_string());
+        }
+        if let Ok(result) = self.browser_tools.call_tool(name, args) {
             info!("✅ 工具执行成功：{}", name);
             return Ok(result.to_string());
         }
