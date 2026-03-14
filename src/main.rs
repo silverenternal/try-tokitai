@@ -7,6 +7,9 @@ mod sandbox;
 mod tools;
 mod tui;
 mod context;
+mod autonomy;
+mod observability;
+mod dialogue;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
