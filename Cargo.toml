@@ -62,3 +62,10 @@ notify = "6.1"
 
 # Concurrent data structures for request monitoring
 parking_lot = "0.12"
+
+# Benchmark dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "core_benchmarks"
+harness = false
