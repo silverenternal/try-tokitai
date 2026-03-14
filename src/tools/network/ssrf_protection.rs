@@ -95,17 +95,23 @@ impl Default for SsrfConfig {
 }
 
 /// URL 安全检查结果
+/// TODO: Phase 5 集成到 URL 验证流程
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum UrlSafety {
     Safe,
     Unsafe(SsrfError),
 }
 
 impl UrlSafety {
+    /// 检查是否安全
+    #[allow(dead_code)]
     pub fn is_safe(&self) -> bool {
         matches!(self, UrlSafety::Safe)
     }
 
+    /// 转换为 Result
+    #[allow(dead_code)]
     pub fn into_result(self) -> Result<(), SsrfError> {
         match self {
             UrlSafety::Safe => Ok(()),
@@ -157,6 +163,8 @@ pub fn validate_url_with_config(url: &str, config: &SsrfConfig) -> Result<(), Ss
 }
 
 /// 检查 IP 地址是否安全（非内网地址）
+/// TODO: Phase 5 集成到 URL 验证流程
+#[allow(dead_code)]
 pub fn check_ip_safety(ip: &IpAddr) -> Result<(), SsrfError> {
     check_ip_safety_with_config(ip, &SsrfConfig::default())
 }
@@ -247,16 +255,22 @@ pub fn validate_save_path_with_config(path: &str, config: &SsrfConfig) -> Result
 }
 
 /// 快速检查 URL 是否安全（返回布尔值）
+/// TODO: Phase 5 集成到 URL 验证流程
+#[allow(dead_code)]
 pub fn is_url_safe(url: &str) -> bool {
     validate_url(url).is_ok()
 }
 
 /// 快速检查 IP 是否安全（返回布尔值）
+/// TODO: Phase 5 集成到 URL 验证流程
+#[allow(dead_code)]
 pub fn is_ip_safe(ip: &IpAddr) -> bool {
     check_ip_safety(ip).is_ok()
 }
 
 /// 快速检查路径是否安全（返回布尔值）
+/// TODO: Phase 5 集成到文件下载验证
+#[allow(dead_code)]
 pub fn is_path_safe(path: &str) -> bool {
     validate_save_path(path).is_ok()
 }

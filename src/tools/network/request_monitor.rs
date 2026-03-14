@@ -68,16 +68,22 @@ impl RequestMonitor {
     }
 
     /// 获取统计信息
+    /// TODO: Phase 5 集成到监控面板
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> RequestStats {
         self.stats.read().clone()
     }
 
     /// 获取最近请求日志
+    /// TODO: Phase 5 集成到监控面板
+    #[allow(dead_code)]
     pub fn get_recent_logs(&self, limit: usize) -> Vec<RequestLog> {
         self.logs.read().iter().rev().take(limit).cloned().collect()
     }
 
     /// 获取失败率
+    /// TODO: Phase 5 集成到监控面板
+    #[allow(dead_code)]
     pub fn get_failure_rate(&self) -> f64 {
         let stats = self.stats.read();
         if stats.total_requests == 0 {
@@ -88,6 +94,8 @@ impl RequestMonitor {
     }
 
     /// 清空统计
+    /// TODO: Phase 5 集成到监控面板
+    #[allow(dead_code)]
     pub fn clear_stats(&self) {
         let mut stats = self.stats.write();
         stats.total_requests = 0;

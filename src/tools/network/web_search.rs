@@ -314,7 +314,7 @@ impl WebSearchTools {
         if let Ok(searxng_url) = std::env::var("SEARXNG_URL") {
             let encoded_query = encode(&query);
             let url = format!(
-                "{}/search?q={}&format=json&engines=google_news,bing_news&categories=news",
+                "{}/search?q={}&format=json&engines=bing_news&categories=news",
                 searxng_url, encoded_query
             );
 
@@ -390,7 +390,7 @@ impl WebSearchTools {
         let encoded_query = encode(query);
         // 使用 SearXNG 图片搜索，启用多个图片引擎
         let url = format!(
-            "{}/search?q={}&format=json&engines=google_images,bing_images,pixabay,peaks&categories=images",
+            "{}/search?q={}&format=json&engines=bing_images,pixabay&categories=images",
             base_url, encoded_query
         );
 
@@ -427,11 +427,33 @@ impl WebSearchTools {
         Ok(results)
     }
 
-    /// 使用 SearXNG 搜索
-    fn search_with_searxng(&self, base_url: &str, query: &str, limit: usize) -> Result<String> {
-        let encoded_query = encode(query);
+    /// 使用 SearXNG 搜索（隐私优先的元搜索引擎）
+    ///
+    /// # 参数
+    /// - `query`: 搜索关键词
+    /// - `limit`: 返回结果数量（默认 5，最大 20）
+    /// - `searxng_url`: SearXNG 实例 URL（可选，默认使用环境变量 SEARXNG_URL）
+    ///
+    /// # 返回
+    /// 返回 JSON 格式的搜索结果列表
+    ///
+    /// # 示例
+    /// 使用默认 SearXNG 实例：`search_with_searxng(query="rust programming", limit=Some(10), searxng_url=None)`
+    /// 使用自定义实例：`search_with_searxng(query="rust", limit=Some(5), searxng_url=Some("https://searx.example.org"))`
+    #[allow(dead_code)]
+    #[tool(default_limit = "null", default_searxng_url = "null")]
+    pub fn search_with_searxng(&self, query: String, limit: Option<usize>, searxng_url: Option<String>) -> Result<String> {
+        let limit = limit.unwrap_or(5).min(20);
+        
+        // 获取 SearXNG 实例 URL
+        let base_url = searxng_url.or_else(|| std::env::var("SEARXNG_URL").ok())
+            .unwrap_or_else(|| "https://searx.be".to_string());
+
+        tracing::info!("🔍 SearXNG 搜索：{} (limit={}, url={})", query, limit, base_url);
+
+        let encoded_query = encode(&query);
         let url = format!(
-            "{}/search?q={}&format=json&engines=google,bing,duckduckgo&categories=general",
+            "{}/search?q={}&format=json&engines=bing,duckduckgo&categories=general",
             base_url, encoded_query
         );
 
@@ -456,7 +478,7 @@ impl WebSearchTools {
             .collect();
 
         let response_obj = SearchResponse {
-            query: query.to_string(),
+            query: query.clone(),
             total: results.len(),
             results,
         };
@@ -464,11 +486,27 @@ impl WebSearchTools {
         Ok(serde_json::to_string_pretty(&response_obj)?)
     }
 
-    /// 使用 DuckDuckGo 搜索（带重试）
-    fn search_with_duckduckgo(&self, query: &str, limit: usize) -> Result<String> {
-        let encoded_query = encode(query);
+    /// 使用 DuckDuckGo 搜索（隐私保护搜索引擎，带自动重试）
+    ///
+    /// # 参数
+    /// - `query`: 搜索关键词
+    /// - `limit`: 返回结果数量（默认 5，最大 20）
+    ///
+    /// # 返回
+    /// 返回 JSON 格式的搜索结果列表
+    ///
+    /// # 特性
+    /// - 隐私保护：不追踪用户
+    /// - 自动重试：失败时指数退避重试
+    /// - 无需配置：开箱即用
+    #[allow(dead_code)]
+    #[tool(default_limit = "null")]
+    pub fn search_with_duckduckgo(&self, query: String, limit: Option<usize>) -> Result<String> {
+        let limit = limit.unwrap_or(5).min(20);
+        let encoded_query = encode(&query);
         let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
 
+        tracing::info!("🔍 DuckDuckGo 搜索：{} (limit={})", query, limit);
         tracing::debug!("DuckDuckGo 搜索 URL: {}", url);
 
         // 指数退避重试
@@ -478,7 +516,7 @@ impl WebSearchTools {
                 Ok(results) => {
                     tracing::info!("✅ DuckDuckGo 搜索成功，找到 {} 条结果", results.len());
                     let response_obj = SearchResponse {
-                        query: query.to_string(),
+                        query: query.clone(),
                         total: results.len(),
                         results,
                     };
@@ -499,6 +537,7 @@ impl WebSearchTools {
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("搜索失败")))
     }
 
+    #[allow(dead_code)]
     fn search_ddg_inner(&self, url: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let response = self.client.get(url)
             .call()
@@ -546,6 +585,7 @@ impl Default for WebSearchTools {
 }
 
 /// 解析 DuckDuckGo HTML 搜索结果
+#[allow(dead_code)]
 fn parse_duckduckgo_results(html: &str, limit: usize) -> Result<Vec<SearchResult>> {
     let document = Html::parse_document(html);
     let mut results = Vec::new();

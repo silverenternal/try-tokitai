@@ -1,6 +1,5 @@
 use tokitai::tool;
 use std::process::{Command, Stdio};
-use std::path::Path;
 
 /// 验证搜索模式
 fn validate_search_pattern(pattern: &str) -> Result<(), String> {

@@ -78,6 +78,11 @@ fn sanitize_filename(filename: &str) -> String {
 
 /// 验证下载路径是否安全（防止路径遍历）
 fn validate_download_path(base_dir: &std::path::Path, full_path: &std::path::Path) -> Result<(), String> {
+    // 使用 ssrf_protection 模块统一验证
+    let path_str = full_path.to_string_lossy();
+    crate::tools::network::ssrf_protection::validate_save_path(&path_str)
+        .map_err(|e| format!("安全验证失败：{}", e))?;
+    
     // 确保最终路径在基础目录内
     let canonical_base = base_dir.canonicalize()
         .map_err(|e| format!("规范化基础目录失败：{}", e))?;

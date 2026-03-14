@@ -110,9 +110,8 @@ impl GitWorkflow {
             let file = line[3..].trim().to_string();
 
             match status {
-                "M " => modified.push(file),
-                " M" => modified.push(file),
-                "A " | "M " => staged.push(file),
+                "M " | " M" => modified.push(file),
+                "A " => staged.push(file),
                 "?? " => untracked.push(file),
                 "D " => deleted.push(file),
                 _ => {}

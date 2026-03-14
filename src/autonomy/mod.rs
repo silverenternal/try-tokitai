@@ -26,7 +26,5 @@ pub mod iteration_tracker;
 pub mod git_workflow;
 pub mod agents;
 
-pub use task_decomposer::{Task, TaskStatus, TaskGraph, TaskDecomposer};
-pub use iteration_tracker::{IterationState, IterationTracker, IterationEvent, IterationSession};
 pub use git_workflow::GitWorkflow;
-pub use agents::{PlannerAgent, ExecutorAgent, ReviewerAgent, AgentCoordinator};
+pub use agents::AgentCoordinator;

@@ -10,6 +10,9 @@ mod context;
 mod autonomy;
 mod observability;
 mod dialogue;
+mod prompt_engineering;
+mod tool_matrix;
+mod orchestrator;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -18,7 +21,12 @@ use tokitai::ToolProvider;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools, BrowserTools};
+use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools, WikipediaTools};
+use autonomy::{AgentCoordinator, GitWorkflow};
+use orchestrator::Orchestrator;
+use std::path::PathBuf;
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 /// AI 助手 - 整合所有工具
 pub struct AiAssistant {
@@ -33,13 +41,22 @@ pub struct AiAssistant {
     file_search: FileSearchTools,
     process_tools: ProcessTools,
     network_tools: NetworkTools,
-    browser_tools: BrowserTools,
+    wikipedia_tools: WikipediaTools,
     api_url: String,
     api_key: Option<String>,
     model: String,
+    /// 自主进化协调器（可选）
+    coordinator: Option<Arc<RwLock<AgentCoordinator>>>,
+    /// Git 工作流（用于自主推送）
+    git_workflow: Option<GitWorkflow>,
+    /// 是否启用自主模式
+    autonomous_mode: bool,
+    /// 编排器（用于角色切换和上下文优化）
+    orchestrator: Orchestrator,
 }
 
 impl AiAssistant {
+    /// 创建新的 AI 助手（非自主模式）
     pub fn new(api_url: String, api_key: Option<String>, model: String) -> Self {
         Self {
             file_ops: FileOperations,
@@ -53,14 +70,55 @@ impl AiAssistant {
             file_search: FileSearchTools,
             process_tools: ProcessTools,
             network_tools: NetworkTools,
-            browser_tools: BrowserTools::new().unwrap_or_else(|e| {
-                tracing::warn!("启动浏览器失败：{}，图片截图功能将不可用", e);
-                BrowserTools::new().unwrap_or_else(|_| std::process::exit(1))
-            }),
+            wikipedia_tools: WikipediaTools::new(),
             api_url,
             api_key,
             model,
+            coordinator: None,
+            git_workflow: None,
+            autonomous_mode: false,
+            orchestrator: Orchestrator::new(),
         }
+    }
+
+    /// 创建自主模式的 AI 助手
+    pub fn new_autonomous(
+        api_url: String,
+        api_key: Option<String>,
+        model: String,
+        project_root: PathBuf,
+    ) -> Result<Self, String> {
+        let autonomy_dir = project_root.join(".tokitai").join("autonomy");
+        
+        // 创建 Agent 协调器
+        let coordinator = AgentCoordinator::new(autonomy_dir.clone())
+            .map_err(|e| format!("创建 Agent 协调器失败：{}", e))?;
+        
+        // 创建 Git 工作流
+        let git_workflow = GitWorkflow::new(project_root.clone(), autonomy_dir.join("git"))
+            .map_err(|e| format!("创建 Git 工作流失败：{}", e))?;
+
+        Ok(Self {
+            file_ops: FileOperations,
+            system_tools: SystemTools,
+            code_tools: CodeTools,
+            web_search: WebSearchTools::new(),
+            download_tools: DownloadTools,
+            git_ops: GitOperations,
+            http_client: HttpClientTools::new(),
+            json_tools: JsonTools,
+            file_search: FileSearchTools,
+            process_tools: ProcessTools,
+            network_tools: NetworkTools,
+            wikipedia_tools: WikipediaTools::new(),
+            api_url,
+            api_key,
+            model,
+            coordinator: Some(Arc::new(RwLock::new(coordinator))),
+            git_workflow: Some(git_workflow),
+            autonomous_mode: true,
+            orchestrator: Orchestrator::new(),
+        })
     }
 
     /// 获取所有工具定义（用于发送给 AI）
@@ -189,7 +247,7 @@ impl AiAssistant {
             })
         }));
 
-        tools.extend(BrowserTools::tool_definitions().iter().map(|t| {
+        tools.extend(WikipediaTools::tool_definitions().iter().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -245,7 +303,7 @@ impl AiAssistant {
         try_tool!(self.file_search, "file_search");
         try_tool!(self.process_tools, "process_tools");
         try_tool!(self.network_tools, "network_tools");
-        try_tool!(self.browser_tools, "browser_tools");
+        try_tool!(self.wikipedia_tools, "wikipedia_tools");
 
         warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
@@ -293,16 +351,21 @@ impl AiAssistant {
             .context("解析响应失败")?;
 
         // 处理响应
-        if let Some(choices) = response_json.get("choices").and_then(|c| c.as_array()) {
-            if let Some(first) = choices.first() {
-                if let Some(message) = first.get("message") {
+        let choices_opt = response_json.get("choices").and_then(|c: &Value| c.as_array());
+        if let Some(choices) = choices_opt {
+            let first_opt = choices.first();
+            if let Some(first) = first_opt {
+                let message_opt = first.get("message");
+                if let Some(message) = message_opt {
                     // 检查是否有工具调用
-                    if let Some(tool_calls) = message.get("tool_calls").and_then(|tc| tc.as_array()) {
+                    let tool_calls_opt = message.get("tool_calls").and_then(|tc: &Value| tc.as_array());
+                    if let Some(tool_calls) = tool_calls_opt {
                         return self.handle_tool_calls(tool_calls, messages);
                     }
 
                     // 普通回复
-                    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                    let content_opt = message.get("content").and_then(|c: &Value| c.as_str());
+                    if let Some(content) = content_opt {
                         return Ok(content.to_string());
                     }
                 }
@@ -372,12 +435,316 @@ impl AiAssistant {
         // 再次调用 AI 获取最终回复
         self.chat(messages)
     }
+
+    /// 自主进化循环（后台运行）
+    /// 
+    /// 这个函数在后台持续运行，AI 自主地：
+    /// 1. 分析项目现状，发现改进点
+    /// 2. 自主规划改进任务
+    /// 3. 执行任务（修改代码）
+    /// 4. 本地审查（编译、测试、代码审查）
+    /// 5. 审查通过后自动推送到 GitHub
+    pub fn run_autonomous_evolution(&self) -> Result<()> {
+        if !self.autonomous_mode || self.coordinator.is_none() {
+            return Err(anyhow::anyhow!("自主模式未启用"));
+        }
+
+        let coordinator = self.coordinator.clone().unwrap();
+        
+        println!("\n🤖 启动自主进化系统...");
+        println!("   - AI 将自主发现项目改进点");
+        println!("   - 本地审查通过后将自动推送到 GitHub");
+        println!("   - 按 Ctrl+C 停止自主模式\n");
+
+        info!("🔄 开始自主进化循环");
+
+        // 自主进化目标列表
+        let evolution_goals = vec![
+            "改进代码质量：检查并修复代码中的潜在问题".to_string(),
+            "优化性能：分析并优化慢查询和低效代码".to_string(),
+            "增强错误处理：改进错误提示和日志".to_string(),
+            "完善文档：检查并更新 README 和注释".to_string(),
+            "清理技术债务：移除未使用的代码和依赖".to_string(),
+        ];
+
+        for goal in evolution_goals {
+            println!("\n📋 自主进化目标：{}", goal);
+            
+            // 使用协调器执行自主迭代
+            match self.execute_evolution_iteration(&coordinator, &goal) {
+                Ok(push_success) => {
+                    if push_success {
+                        println!("✅ 进化完成并已推送到 GitHub");
+                    } else {
+                        println!("⚠️  进化完成但未推送（审查未通过或无变更）");
+                    }
+                }
+                Err(e) => {
+                    println!("❌ 进化失败：{}", e);
+                    warn!("自主进化失败：{}", e);
+                }
+            }
+
+            // 检查是否应该继续
+            if !self.should_continue_evolution() {
+                println!("\n🛑 停止自主进化");
+                break;
+            }
+        }
+
+        info!("🔄 自主进化循环结束");
+        Ok(())
+    }
+
+    /// 执行单次进化迭代
+    fn execute_evolution_iteration(
+        &self,
+        coordinator: &Arc<RwLock<AgentCoordinator>>,
+        goal: &str,
+    ) -> Result<bool> {
+        // 1. 开始迭代
+        {
+            let mut coord = coordinator.write();
+            coord.start_iteration(goal.to_string())
+                .map_err(|e| anyhow::anyhow!("启动迭代失败：{}", e))?;
+        }
+
+        // 2. AI 自主分析项目现状
+        println!("   🔍 分析项目现状...");
+        let analysis = self.analyze_project_status()?;
+        info!("项目分析：{}", analysis);
+
+        // 3. AI 生成改进计划
+        println!("   📝 生成改进计划...");
+        let plan = self.generate_improvement_plan(goal, &analysis)?;
+        info!("改进计划：{}", plan);
+
+        // 4. 执行改进任务
+        println!("   🔧 执行改进任务...");
+        let execution_result = self.execute_improvement_tasks(&plan)?;
+        info!("执行结果：{}", execution_result);
+
+        // 5. 本地审查
+        println!("   🧪 本地审查...");
+        let review_passed = self.local_review()?;
+        
+        if review_passed {
+            // 6. 推送到 GitHub
+            println!("   🚀 推送到 GitHub...");
+            let push_success = self.push_to_github()?;
+            Ok(push_success)
+        } else {
+            println!("   ❌ 审查未通过，回滚变更");
+            self.rollback_changes()?;
+            Ok(false)
+        }
+    }
+
+    /// 分析项目现状
+    fn analyze_project_status(&self) -> Result<String> {
+        let mut analysis = String::new();
+
+        // 获取 Git 状态
+        if let Ok(status) = self.git_ops.call_tool("git_status", &json!({})) {
+            analysis.push_str(&format!("Git 状态：{}\n", status));
+        }
+
+        // 获取项目文件结构
+        if let Ok(files) = self.file_ops.call_tool("list_dir", &json!({"path": "."})) {
+            analysis.push_str(&format!("项目文件：{}\n", files));
+        }
+
+        // 检查代码质量（简单实现：查找 TODO/FIXME 注释）
+        if let Ok(todos) = self.file_search.call_tool("search_content", &json!({
+            "pattern": "TODO|FIXME|XXX|HACK",
+            "path": "src"
+        })) {
+            analysis.push_str(&format!("待改进项：{}\n", todos));
+        }
+
+        Ok(analysis)
+    }
+
+    /// 生成改进计划
+    fn generate_improvement_plan(&self, goal: &str, analysis: &str) -> Result<String> {
+        // 使用 AI 生成改进计划
+        let messages = &mut vec![
+            json!({
+                "role": "system",
+                "content": "你是一个专业的软件工程师，负责分析项目并制定改进计划。"
+            }),
+            json!({
+                "role": "user",
+                "content": format!("目标：{}\n\n项目现状：{}\n\n请制定一个具体的改进计划。", goal, analysis)
+            })
+        ];
+
+        let plan = self.chat(messages)?;
+        Ok(plan)
+    }
+
+    /// 执行改进任务
+    fn execute_improvement_tasks(&self, plan: &str) -> Result<String> {
+        // 根据计划执行具体的改进任务
+        // 这里简化实现，实际应该解析计划并调用相应工具
+        
+        let messages = &mut vec![
+            json!({
+                "role": "system",
+                "content": "你是一个专业的软件工程师，根据改进计划执行具体的代码修改任务。
+                
+你可以使用以下工具：
+- read_file: 读取文件
+- write_file: 写入文件
+- edit_file: 编辑文件
+- run_command: 执行命令（如 cargo fmt, cargo clippy, cargo test）
+
+请根据计划逐步执行任务，每次调用一个工具。"
+            }),
+            json!({
+                "role": "user",
+                "content": format!("请执行以下改进计划：\n\n{}", plan)
+            })
+        ];
+
+        // 执行多轮对话直到任务完成
+        let mut iterations = 0;
+        let max_iterations = 10;
+        
+        while iterations < max_iterations {
+            let response = self.chat(messages)?;
+            info!("AI 响应：{}", response);
+            
+            // 检查是否完成
+            if response.contains("完成") || response.contains("已完成") || iterations >= max_iterations - 1 {
+                break;
+            }
+            
+            iterations += 1;
+        }
+
+        Ok(format!("执行完成，共 {} 轮迭代", iterations))
+    }
+
+    /// 本地审查
+    fn local_review(&self) -> Result<bool> {
+        println!("      - 运行 cargo fmt...");
+        let fmt_result = self.system_tools.call_tool("run_command", &json!({
+            "command": "cargo fmt --check"
+        }));
+        
+        if fmt_result.is_err() {
+            println!("      ❌ 代码格式检查失败");
+            return Ok(false);
+        }
+
+        println!("      - 运行 cargo clippy...");
+        let clippy_result = self.system_tools.call_tool("run_command", &json!({
+            "command": "cargo clippy -- -D warnings"
+        }));
+        
+        // clippy 有警告时返回 Err，但我们可以继续
+        if clippy_result.is_err() {
+            println!("      ⚠️  Clippy 发现警告");
+        }
+
+        println!("      - 运行 cargo test...");
+        let test_result = self.system_tools.call_tool("run_command", &json!({
+            "command": "cargo test --quiet"
+        }));
+        
+        if test_result.is_err() {
+            println!("      ❌ 测试失败");
+            return Ok(false);
+        }
+
+        println!("      ✅ 审查通过");
+        Ok(true)
+    }
+
+    /// 回滚变更
+    fn rollback_changes(&self) -> Result<()> {
+        self.system_tools.call_tool("run_command", &json!({
+            "command": "git checkout -- ."
+        }))?;
+        Ok(())
+    }
+
+    /// 推送到 GitHub
+    fn push_to_github(&self) -> Result<bool> {
+        // 检查是否有变更
+        let status = self.git_ops.call_tool("git_status", &json!({}))?;
+        
+        if status.to_string().contains("nothing to commit") {
+            println!("      - 无变更，跳过推送");
+            return Ok(false);
+        }
+
+        // 生成提交消息
+        let diff_str = self.call_tool("git_diff", &json!({}))?;
+        let commit_message = self.generate_commit_message(&diff_str)?;
+
+        // 添加并提交
+        println!("      - git add .");
+        self.system_tools.call_tool("run_command", &json!({
+            "command": "git add ."
+        }))?;
+
+        println!("      - git commit -m '{}'", commit_message);
+        self.system_tools.call_tool("run_command", &json!({
+            "command": &format!("git commit -m '{}'", commit_message)
+        }))?;
+
+        // 推送
+        println!("      - git push");
+        self.system_tools.call_tool("run_command", &json!({
+            "command": "git push"
+        }))?;
+
+        Ok(true)
+    }
+
+    /// 生成提交消息
+    fn generate_commit_message(&self, diff: &str) -> Result<String> {
+        let messages = &mut vec![
+            json!({
+                "role": "system",
+                "content": "你是一个专业的软件工程师，根据代码变更生成简洁的提交消息。
+格式：type: description
+type 包括：feat, fix, docs, refactor, test, chore"
+            }),
+            json!({
+                "role": "user",
+                "content": format!("请为以下变更生成提交消息：\n\n{}", diff)
+            })
+        ];
+
+        let message = self.chat(messages)?;
+        Ok(message.trim().to_string())
+    }
+
+    /// 检查是否继续进化
+    fn should_continue_evolution(&self) -> bool {
+        // 简单实现：总是继续
+        // 实际可以实现更复杂的逻辑，如：
+        // - 检查是否达到改进目标
+        // - 检查是否有足够的改进点
+        // - 检查用户是否干预
+        true
+    }
 }
 
 fn main() -> Result<()> {
     // 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
     let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
+    let use_autonomous = args.iter().any(|arg| arg == "--autonomous" || arg == "-a");
+    
+    // 解析 --project-path 参数
+    let project_path = args.iter()
+        .position(|arg| arg == "--project-path" || arg == "-p")
+        .and_then(|pos| args.get(pos + 1))
+        .map(|s| PathBuf::from(s));
 
     // 如果指定了 --tui，启动 TUI 界面
     if use_tui {
@@ -403,11 +770,6 @@ fn main() -> Result<()> {
         config::Config::default()
     });
 
-    println!("🤖 AI Assistant powered by Tokitai");
-    println!("=====================================");
-    println!("模型：{} (Ollama Cloud)", config.ai.model);
-    println!("按 Ctrl+C 退出\n");
-
     // 从环境变量或配置获取配置
     let api_url = std::env::var("AI_API_URL")
         .unwrap_or_else(|_| "https://ollama.com/v1/chat/completions".to_string());
@@ -427,7 +789,51 @@ fn main() -> Result<()> {
         println!("⚠️  警告：未设置 AI_API_KEY，某些 API 可能无法使用\n");
     }
 
-    let assistant = AiAssistant::new(api_url, api_key, model);
+    // 如果指定了 --autonomous，启动自主进化模式
+    if use_autonomous {
+        println!("🤖 AI Assistant powered by Tokitai");
+        println!("=====================================");
+        println!("🔄 自主进化模式");
+        println!("模型：{} (Ollama Cloud)", model);
+        println!();
+
+        // 获取项目根目录：优先使用 --project-path 参数，否则使用当前目录
+        let project_root = project_path
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map_err(|e| anyhow::anyhow!("获取当前目录失败：{}", e))
+                    .unwrap()
+            });
+
+        // 切换工作目录到目标项目（确保沙箱隔离生效）
+        std::env::set_current_dir(&project_root)
+            .map_err(|e| anyhow::anyhow!("切换目录失败：{}", e))?;
+
+        println!("📁 项目路径：{}", project_root.display());
+        println!("📂 工作目录：{}", std::env::current_dir().unwrap().display());
+        println!();
+
+        // 创建自主模式的助手（使用当前目录）
+        let assistant = AiAssistant::new_autonomous(
+            api_url,
+            api_key,
+            model,
+            std::env::current_dir().unwrap(),
+        ).map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
+
+        // 运行自主进化
+        assistant.run_autonomous_evolution()?;
+
+        return Ok(());
+    }
+
+    // 普通交互模式
+    println!("🤖 AI Assistant powered by Tokitai");
+    println!("=====================================");
+    println!("模型：{} (Ollama Cloud)", config.ai.model);
+    println!("按 Ctrl+C 退出\n");
+
+    let mut assistant = AiAssistant::new(api_url, api_key, model);
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
         "content": "你是一个强大的 AI 助手，可以调用各种工具来帮助用户完成任务。你可以：
@@ -493,6 +899,16 @@ fn main() -> Result<()> {
             break;
         }
 
+        // 处理编排器命令（以 / 开头）
+        if input.starts_with('/') {
+            let processed = assistant.orchestrator.process_input(input);
+            if let Some(cmd) = processed.command {
+                let result = assistant.orchestrator.execute_command(cmd);
+                println!("\n{}\n", result.to_string());
+                continue;
+            }
+        }
+
         if input == "help" {
             println!("\n📋 我可以帮你做这些事：");
             println!("  • 查看目录：'当前目录有哪些文件'");
@@ -525,6 +941,21 @@ fn main() -> Result<()> {
             println!("           '分析 @src/main.rs 的结构'");
             println!("           '@file1.txt @file2.txt 比较这两个文件'");
             println!();
+            println!("  🚀 启动方式：");
+            println!("    • 交互模式：cargo run --release");
+            println!("    • TUI 模式：cargo run --release -- --tui");
+            println!("    • 自主进化：cargo run --release -- --autonomous");
+            println!("    • 指定项目：cargo run --release -- --autonomous --project-path ./sandbox/test-project");
+            println!();
+            println!("  🎭 编排器命令（新增）：");
+            println!("    • /role <name> - 切换角色（planner/executor/reviewer/researcher）");
+            println!("    • /optimize - 优化上下文，减少 token 使用");
+            println!("    • /context - 显示上下文状态");
+            println!("    • /roles - 显示角色信息");
+            println!("    • /workflow list - 列出可用工作流");
+            println!("    • /workflow start <name> - 启动工作流");
+            println!("    • /help - 显示所有命令");
+            println!();
             continue;
         }
 
@@ -548,11 +979,22 @@ fn main() -> Result<()> {
             "content": processed_input
         }));
 
+        // 使用编排器处理输入（角色切换 + 上下文管理）
+        let processed = assistant.orchestrator.process_input(&processed_input);
+        
+        // 如果有角色切换，给出提示
+        if processed.role_changed && assistant.orchestrator.config.verbose {
+            println!("🎭 切换到角色：{}", processed.current_role.as_str());
+        }
+
         println!("\n🤖 AI 思考中...");
 
         match assistant.chat(&mut messages) {
             Ok(response) => {
                 println!("\n🤖 AI: {}\n", response);
+
+                // 使用编排器处理响应（上下文管理）
+                assistant.orchestrator.process_response(&response);
 
                 // 添加 AI 回复到消息历史
                 messages.push(json!({

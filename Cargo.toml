@@ -32,9 +32,6 @@ crossterm = "0.29"
 ctrlc = "3.4"
 tui-input = "0.11"
 
-# Headless browser support
-headless_chrome = "1.0"
-
 # Path resolver
 regex = "1.10"
 libc = "0.2"

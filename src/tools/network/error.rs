@@ -1,30 +1,33 @@
 //! 统一网络错误类型
-//! 
+//!
 //! 整合所有网络相关工具的错误类型，提供统一的错误处理
+//! TODO: Phase 5 集成到统一错误处理系统
 
 use std::fmt;
 
 /// 网络操作统一错误类型
+/// TODO: Phase 5 集成到统一错误处理系统
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum NetworkError {
     /// SSRF 防护错误
     Ssrf(crate::tools::network::ssrf_protection::SsrfError),
-    
+
     /// HTTP 请求错误
     Http(String),
-    
+
     /// 搜索错误
     Search(String),
-    
+
     /// 下载错误
     Download(String),
-    
+
     /// 浏览器错误
     Browser(String),
-    
+
     /// 网络诊断错误
     NetworkTool(String),
-    
+
     /// IO 错误
     Io(std::io::Error),
     
@@ -74,6 +77,12 @@ impl From<crate::tools::network::ssrf_protection::SsrfError> for NetworkError {
     }
 }
 
+impl From<crate::tools::network::web_search::SearchError> for NetworkError {
+    fn from(err: crate::tools::network::web_search::SearchError) -> Self {
+        NetworkError::Search(err.to_string())
+    }
+}
+
 impl From<std::io::Error> for NetworkError {
     fn from(err: std::io::Error) -> Self {
         NetworkError::Io(err)
@@ -105,10 +114,14 @@ impl From<&str> for NetworkError {
 }
 
 /// 统一结果类型
+/// TODO: Phase 5 集成到统一错误处理系统
+#[allow(dead_code)]
 pub type NetworkResult<T> = Result<T, NetworkError>;
 
 /// 错误辅助信息
+/// TODO: Phase 5 集成到统一错误处理系统
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct ErrorContext {
     pub url: Option<String>,
     pub method: Option<String>,
@@ -185,8 +198,6 @@ macro_rules! network_err {
         $crate::tools::network::error::NetworkError::$kind(format!($fmt, $($args)*))
     };
 }
-
-pub use network_err;
 
 #[cfg(test)]
 mod tests {

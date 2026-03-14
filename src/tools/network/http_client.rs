@@ -30,11 +30,12 @@ static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             // 每次重定向都检查 URL 安全性
             let next_url = attempt.url().as_str();
-            if crate::tools::network::ssrf_protection::is_url_safe(next_url) {
-                attempt.follow()
-            } else {
-                tracing::warn!("阻止不安全的重定向 URL: {}", next_url);
-                attempt.stop()
+            match crate::tools::network::ssrf_protection::validate_url(next_url) {
+                Ok(_) => attempt.follow(),
+                Err(e) => {
+                    tracing::warn!("阻止不安全的重定向 URL: {} - {}", next_url, e);
+                    attempt.stop()
+                }
             }
         }))
 
@@ -54,6 +55,8 @@ impl HttpClientTools {
     }
 
     /// 创建带自定义监控器的实例
+    /// TODO: Phase 5 集成到配置系统
+    #[allow(dead_code)]
     pub fn with_monitor(monitor: Arc<RequestMonitor>) -> Self {
         Self { monitor }
     }

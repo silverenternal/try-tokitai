@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use moka::sync::Cache;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ impl SearchEngine for SearxngEngine {
     fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
         let encoded_query = urlencoding::encode(query);
         let url = format!(
-            "{}/search?q={}&format=json&engines=google,bing,duckduckgo",
+            "{}/search?q={}&format=json&engines=bing,duckduckgo",
             self.url, encoded_query
         );
 
@@ -172,8 +172,6 @@ impl SearchEngine for DuckDuckGoEngine {
     }
 
     fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
-        use scraper::{Html, Selector};
-
         let encoded_query = urlencoding::encode(query);
         let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
 
@@ -367,6 +365,8 @@ impl SearchEngineManager {
     }
 
     /// 获取引擎健康状态
+    /// TODO: Phase 5 集成到 /health 命令
+    #[allow(dead_code)]
     pub fn get_health_status(&self) -> Vec<(String, bool)> {
         let health = self.health_status.read();
         self.engines
@@ -377,11 +377,15 @@ impl SearchEngineManager {
     }
 
     /// 清空缓存
+    /// TODO: Phase 5 集成到 /optimize 命令
+    #[allow(dead_code)]
     pub fn clear_cache(&self) {
         self.cache.invalidate_all();
     }
 
     /// 获取缓存大小
+    /// TODO: Phase 5 集成到 /stats 命令
+    #[allow(dead_code)]
     pub fn cache_size(&self) -> u64 {
         self.cache.entry_count()
     }

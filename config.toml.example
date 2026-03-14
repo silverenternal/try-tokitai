@@ -23,7 +23,7 @@ max_tokens = 4096
 # 所有 SearXNG 不可用时，自动回退到 DuckDuckGo
 # searxng_url = "https://searx.be"
 # 搜索引擎列表
-engines = ["google", "bing", "duckduckgo"]
+engines = ["bing", "duckduckgo"]
 # 搜索缓存容量（条数）
 cache_capacity = 100
 # 缓存过期时间（秒）
