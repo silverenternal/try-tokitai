@@ -6,11 +6,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::TcpStream;
 use std::time::Duration;
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use crate::orchestrator::{
     ContextOptimizer, ContextMessage, OptimizerConfig,
     RoleSwitcher, AgentRole, Workflow, WorkflowEngine,
 };
+use crate::provider_config::ProviderManager;
 
 /// 编排器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +67,8 @@ pub struct Orchestrator {
     pub config: OrchestratorConfig,
     /// 当前工作流引擎（如果有）
     workflow_engine: Option<WorkflowEngine>,
+    /// 供应商管理器（可选）
+    provider_manager: Option<Arc<RwLock<ProviderManager>>>,
 }
 
 impl Orchestrator {
@@ -80,11 +85,17 @@ impl Orchestrator {
             ContextOptimizer::new()
         };
 
+        // 尝试加载供应商管理器
+        let provider_manager = ProviderManager::from_env_file(None)
+            .ok()
+            .map(|pm| Arc::new(RwLock::new(pm)));
+
         Self {
             role_switcher: RoleSwitcher::new(),
             context_optimizer,
             config,
             workflow_engine: None,
+            provider_manager,
         }
     }
 
@@ -185,6 +196,21 @@ impl Orchestrator {
             return Some(OrchestratorCommand::OptimizeCache);
         }
 
+        // 工具箱状态命令
+        if input == "/toolbox" {
+            return Some(OrchestratorCommand::Toolbox);
+        }
+
+        // AI 供应商切换命令
+        if input == "/switch" || input == "/provider" {
+            return Some(OrchestratorCommand::SwitchProvider);
+        }
+
+        // AI 供应商列表命令
+        if input == "/providers" || input == "/provider list" {
+            return Some(OrchestratorCommand::ShowProviders);
+        }
+
         None
     }
 
@@ -242,6 +268,15 @@ impl Orchestrator {
             }
             OrchestratorCommand::OptimizeCache => {
                 self.execute_optimize_cache()
+            }
+            OrchestratorCommand::Toolbox => {
+                CommandResult::Success("工具箱状态：请使用 AiAssistant::get_toolbox_stats() 获取详细信息".to_string())
+            }
+            OrchestratorCommand::SwitchProvider => {
+                self.execute_switch_provider()
+            }
+            OrchestratorCommand::ShowProviders => {
+                self.execute_show_providers()
             }
         }
     }
@@ -657,7 +692,7 @@ impl Orchestrator {
     /// 启动工作流
     fn start_workflow(&mut self, workflow: Workflow) -> CommandResult {
         let workflow_name = workflow.name.clone();
-        let workflow_id = workflow.id.clone();
+        let _workflow_id = workflow.id.clone();
 
         let mut engine = WorkflowEngine::new(workflow);
         if self.config.verbose {
@@ -677,6 +712,47 @@ impl Orchestrator {
             Err(e) => {
                 CommandResult::Error(format!("工作流执行失败：{}", e))
             }
+        }
+    }
+
+    /// 执行供应商切换
+    fn execute_switch_provider(&mut self) -> CommandResult {
+        if let Some(ref pm) = self.provider_manager {
+            let mut pm = pm.write();
+            let new_provider = pm.switch_to_next();
+            
+            // 更新环境变量
+            std::env::set_var("AI_API_URL", &new_provider.api_url);
+            if let Some(ref key) = new_provider.api_key {
+                std::env::set_var("AI_API_KEY", key);
+            }
+            std::env::set_var("AI_MODEL", &new_provider.model);
+            
+            CommandResult::ProviderInfo(ProviderInfo {
+                current_name: new_provider.name.clone(),
+                current_url: new_provider.api_url.clone(),
+                current_model: new_provider.model.clone(),
+                all_providers: pm.providers().iter().map(|p| p.name.clone()).collect(),
+            })
+        } else {
+            CommandResult::Error("未找到供应商配置，请检查 .env 文件".to_string())
+        }
+    }
+
+    /// 执行供应商显示
+    fn execute_show_providers(&self) -> CommandResult {
+        if let Some(ref pm) = self.provider_manager {
+            let pm = pm.read();
+            let current = pm.current();
+            
+            CommandResult::ProviderInfo(ProviderInfo {
+                current_name: current.name.clone(),
+                current_url: current.api_url.clone(),
+                current_model: current.model.clone(),
+                all_providers: pm.providers().iter().map(|p| p.name.clone()).collect(),
+            })
+        } else {
+            CommandResult::Error("未找到供应商配置，请检查 .env 文件".to_string())
         }
     }
 
@@ -754,6 +830,12 @@ pub enum OrchestratorCommand {
     Stats,
     /// 优化缓存
     OptimizeCache,
+    /// 显示工具箱状态
+    Toolbox,
+    /// 切换 AI 供应商（到下一个）
+    SwitchProvider,
+    /// 显示供应商列表
+    ShowProviders,
 }
 
 /// 命令执行结果
@@ -771,6 +853,17 @@ pub enum CommandResult {
     WorkflowList(WorkflowListInfo),
     /// 帮助信息
     Help(HelpInfo),
+    /// 供应商信息
+    ProviderInfo(ProviderInfo),
+}
+
+/// 供应商信息
+#[derive(Debug, Clone)]
+pub struct ProviderInfo {
+    pub current_name: String,
+    pub current_url: String,
+    pub current_model: String,
+    pub all_providers: Vec<String>,
 }
 
 /// 上下文信息
@@ -856,6 +949,29 @@ impl CommandResult {
                     output.push_str(&format!("  {:<20} {}\n", cmd, desc));
                 }
                 output
+            }
+            CommandResult::ProviderInfo(info) => {
+                let ProviderInfo { current_name, current_url, current_model, all_providers } = info;
+                
+                if all_providers.len() > 1 {
+                    // 多供应商模式 - 简洁显示
+                    let mut output = format!("✅ 已切换到：{}\n", current_name);
+                    output.push_str(&format!("   模型：{}\n", current_model));
+                    
+                    output.push_str("\n📋 可用供应商:\n");
+                    for (i, name) in all_providers.iter().enumerate() {
+                        let marker = if name == current_name { "👉" } else { "  " };
+                        output.push_str(&format!("  {} {}\n", marker, name));
+                    }
+                    output.push_str("\n💡 下次请求将使用新供应商\n");
+                    output
+                } else {
+                    // 单供应商模式
+                    format!(
+                        "🔌 当前供应商：{}\n  模型：{}\n  URL: {}\n",
+                        current_name, current_model, current_url
+                    )
+                }
             }
         }
     }

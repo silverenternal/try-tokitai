@@ -495,8 +495,8 @@ mod tests {
             Some(2),
             Some("test".to_string()),
         );
-        
-        // 应该返回某种结果（成功或失败）
-        assert!(result.is_ok() || result.is_err());
+
+        // 验证方法不 panic（网络请求可能成功或失败）
+        let _ = result;
     }
 }

@@ -248,6 +248,14 @@ impl ReviewerAgent {
     pub fn review_file(&mut self, file_path: &Path, content: &str) -> Result<&ReviewReport, ReviewerError> {
         let mut report = ReviewReport::new(file_path.to_string_lossy().to_string());
 
+        // 辅助函数：计算维度得分（避免溢出）
+        let calc_score = |checks: &[CheckItem]| -> u8 {
+            if checks.is_empty() {
+                return 0;
+            }
+            (checks.iter().filter(|c| c.passed).count() as u16 * 100 / checks.len() as u16) as u8
+        };
+
         // 1. 正确性检查 (30%)
         let correctness_checks = vec![
             CheckItem {
@@ -266,7 +274,7 @@ impl ReviewerAgent {
                 details: None,
             },
         ];
-        let correctness_score = correctness_checks.iter().filter(|c| c.passed).count() as u8 * 100 / correctness_checks.len() as u8;
+        let correctness_score = calc_score(&correctness_checks);
         report.add_dimension(
             "正确性".to_string(),
             0.3,
@@ -288,7 +296,7 @@ impl ReviewerAgent {
                 details: None,
             },
         ];
-        let performance_score = performance_checks.iter().filter(|c| c.passed).count() as u8 * 100 / performance_checks.len() as u8;
+        let performance_score = calc_score(&performance_checks);
         report.add_dimension(
             "性能".to_string(),
             0.2,
@@ -310,7 +318,7 @@ impl ReviewerAgent {
                 details: None,
             },
         ];
-        let security_score = security_checks.iter().filter(|c| c.passed).count() as u8 * 100 / security_checks.len() as u8;
+        let security_score = calc_score(&security_checks);
         report.add_dimension(
             "安全性".to_string(),
             0.2,
@@ -337,7 +345,7 @@ impl ReviewerAgent {
                 details: None,
             },
         ];
-        let maintainability_score = maintainability_checks.iter().filter(|c| c.passed).count() as u8 * 100 / maintainability_checks.len() as u8;
+        let maintainability_score = calc_score(&maintainability_checks);
         report.add_dimension(
             "可维护性".to_string(),
             0.2,
@@ -359,7 +367,7 @@ impl ReviewerAgent {
                 details: None,
             },
         ];
-        let design_score = design_checks.iter().filter(|c| c.passed).count() as u8 * 100 / design_checks.len() as u8;
+        let design_score = calc_score(&design_checks);
         report.add_dimension(
             "设计".to_string(),
             0.1,
@@ -431,17 +439,35 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut reviewer = ReviewerAgent::new(temp_dir.path().to_path_buf()).unwrap();
 
+        // 使用更完整的代码示例，确保所有审查维度都能正常评分
         let code = r#"
-/// 一个简单的函数
+/// 加法函数
+/// 
+/// # Examples
+/// 
+/// ```
+/// let result = add(2, 3);
+/// assert_eq!(result, 5);
+/// ```
 pub fn add(a: i32, b: i32) -> i32 {
     a + b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        assert_eq!(add(2, 3), 5);
+    }
 }
 "#;
 
         let report = reviewer.review_file(Path::new("test.rs"), code).unwrap();
 
         assert!(report.overall_score > 0);
-        // 等级取决于具体得分，这里只验证有等级
+        assert!(report.overall_score <= 100);
         assert!(matches!(report.grade, ReviewGrade::A | ReviewGrade::B | ReviewGrade::C | ReviewGrade::D | ReviewGrade::F));
     }
 

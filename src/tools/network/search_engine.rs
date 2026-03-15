@@ -79,7 +79,7 @@ pub struct SearxngEngine {
 impl SearxngEngine {
     pub fn new(url: &str) -> Self {
         let client = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(5))  // 降低超时到 5 秒
             .user_agent("Mozilla/5.0 (compatible; AI Assistant/1.0)")
             .build();
 
@@ -139,8 +139,12 @@ impl SearchEngine for SearxngEngine {
     }
 
     fn health_check(&self) -> bool {
+        // 健康检查使用更短的超时（2 秒）
+        let client = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(2))
+            .build();
         let url = format!("{}/healthz", self.url);
-        self.client.get(&url).call().is_ok()
+        client.get(&url).call().is_ok()
     }
 }
 
@@ -152,7 +156,7 @@ pub struct DuckDuckGoEngine {
 impl DuckDuckGoEngine {
     pub fn new() -> Self {
         let client = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(5))  // 降低超时到 5 秒
             .user_agent("Mozilla/5.0 (compatible; AI Assistant/1.0)")
             .build();
 
@@ -211,7 +215,11 @@ impl SearchEngine for DuckDuckGoEngine {
     }
 
     fn health_check(&self) -> bool {
-        self.client.get("https://duckduckgo.com").call().is_ok()
+        // 健康检查使用更短的超时（2 秒）
+        let client = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(2))
+            .build();
+        client.get("https://duckduckgo.com").call().is_ok()
     }
 }
 
@@ -331,13 +339,17 @@ impl SearchEngineManager {
 
         engine_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
+        // 仅尝试前 2 个最健康的引擎（避免长时间等待）
+        engine_indices.truncate(2);
+
         // 依次尝试引擎
         let mut last_error = None;
         for (idx, _score) in engine_indices {
             let engine = &self.engines[idx];
 
-            if !engine.health_check() {
-                tracing::debug!("跳过不健康引擎：{}", engine.name());
+            // 跳过健康度为 0 的引擎
+            if _score < 0.5 {
+                tracing::debug!("跳过健康度低的引擎：{} (score={})", engine.name(), _score);
                 continue;
             }
 

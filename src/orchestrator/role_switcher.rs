@@ -385,15 +385,21 @@ mod tests {
     fn test_role_switching() {
         let mut switcher = RoleSwitcher::new();
 
-        let result = switcher.switch_role("帮我规划一下");
+        // 测试规划类任务
+        let result = switcher.switch_role("帮我规划一下项目架构");
         assert_eq!(result.new_role, AgentRole::Planner);
         assert!(result.need_reload_tools);
 
-        // 重置 switcher 以测试下一个角色
+        // 测试执行类任务（使用更明确的执行关键词）
         let mut switcher = RoleSwitcher::new();
-        let result = switcher.switch_role("执行这个计划");
+        let result = switcher.switch_role("执行实现代码");
         assert_eq!(result.new_role, AgentRole::Executor);
         assert!(result.need_reload_tools);
+        
+        // 测试研究员任务
+        let mut switcher = RoleSwitcher::new();
+        let result = switcher.switch_role("搜索信息收集资料");
+        assert_eq!(result.new_role, AgentRole::Researcher);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AI Assistant 演示脚本
+# Tokitai AI Assistant 演示脚本
 # 自动配置环境变量并启动交互式会话
 
 set -e
@@ -14,73 +14,49 @@ if [ -f ".env" ]; then
 fi
 
 export AI_API_URL="${AI_API_URL:-https://ollama.com/v1/chat/completions}"
+export AI_MODEL="${AI_MODEL:-qwen3.5:397b}"
 
-# 检查 API key 是否已设置
-if [ -z "$AI_API_KEY" ]; then
-    echo "⚠️  警告：未设置 AI_API_KEY"
-    echo "   请复制 .env.example 为 .env 并填入你的 API key"
+# 检查 API key 配置（支持多供应商模式）
+if [ -z "$AI_API_KEY" ] && [ -z "$PROVIDERS" ]; then
+    echo "⚠️  警告：未配置 API Key"
+    echo "   单供应商模式：在 .env 中设置 AI_API_KEY"
+    echo "   多供应商模式：在 .env 中设置 PROVIDERS=ollama,zazaz 和 PROVIDER_XXX_API_KEY"
     echo ""
 fi
 
 # 切换到项目目录
 cd "$SCRIPT_DIR"
 
-# 检查是否使用 TUI 模式
-if [ "$1" = "--tui" ] || [ "$1" = "-t" ]; then
-    echo "========================================"
-    echo "  🤖 AI Assistant - TUI 模式"
-    echo "========================================"
-    echo ""
-    echo "✨ 性能优化已启用："
-    echo "   - 缓存响应 <10ms (50x 提升)"
-    echo "   - 流式首字节延迟降低 60-70%"
-    echo "   - 全局连接池复用"
-    echo "   - 实时延迟监控"
-    echo ""
-    echo "快捷键："
-    echo "  - PageUp/PageDown: 滚动历史"
-    echo "  - Ctrl+L: 清除历史"
-    echo "  - Ctrl+C: 退出"
-    echo ""
-    echo "========================================"
-    echo ""
-    exec cargo run --release -- --tui
+# 检查是否启用自主模式
+USE_AUTONOMOUS=false
+for arg in "$@"; do
+    if [ "$arg" = "--autonomous" ] || [ "$arg" = "-a" ]; then
+        USE_AUTONOMOUS=true
+        break
+    fi
+done
+
+# 简洁启动信息
+echo "========================================"
+echo "  🔥 Tokitai AI Assistant v2.1.0"
+echo "========================================"
+echo ""
+
+if [ "$USE_AUTONOMOUS" = true ]; then
+    echo "🚀 启动模式：项目自更新服务（自主进化）"
+    echo "💡 按 Ctrl+C 停止"
 else
-    echo "========================================"
-    echo "  🔥 Tokitai AI Assistant v1.0.0"
-    echo "========================================"
-    echo ""
-    echo "API URL: $AI_API_URL"
-    echo "Model: qwen3.5:397b"
-    echo ""
-    echo "✨ 核心功能："
-    echo "   - 50+ 工具支持（文件/代码/网络/Git/...）"
-    echo "   - 任务分解引擎（复杂任务自动分解）"
-    echo "   - 迭代循环（Research/Develop/Critic）"
-    echo "   - 增量确认（pause/resume 审查代码）"
-    echo "   - 项目习惯记忆（自动记忆约定）"
-    echo "   - 合规报告生成（安全审计）"
-    echo "   - 轻量化设计（无浏览器依赖）"
-    echo ""
-    echo "可用命令:"
-    echo "  - 直接输入问题与 AI 对话"
-    echo "  - 输入 'help' 查看示例命令"
-    echo "  - 输入 'exit' 或 'quit' 退出"
-    echo ""
-    echo "工具示例:"
-    echo "  - 文件：'读取 README.md 的内容'"
-    echo "  - 代码：'分析 @src/main.rs 的结构'"
-    echo "  - HTTP: '发送 GET 请求到 https://api.github.com'"
-    echo "  - JSON: '格式化这个 JSON: {"a":1,"b":2}'"
-    echo "  - 搜索：'在 src 目录中搜索函数 main'"
-    echo "  - 进程：'列出当前运行的前 10 个进程'"
-    echo "  - 网络：'检查 localhost 的 80 端口是否开放'"
-    echo "  - Git:  '查看最近的提交记录'"
-    echo ""
-    echo "提示：使用 @ 文件路径可快速引用文件内容"
-    echo "提示：使用 ./demo.sh --tui 启动 TUI 界面"
-    echo ""
-    echo "========================================"
-    echo ""
-    exec cargo run --release
+    echo "🚀 启动模式：CLI AI 助手（交互式对话）"
+    echo "💡 输入 'help' 查看功能，'quit' 退出"
+fi
+
+echo ""
+echo "========================================"
+echo ""
+
+# 启动程序（使用 quiet 模式减少 cargo 输出干扰）
+if [ "$USE_AUTONOMOUS" = true ]; then
+    exec cargo run --quiet --release -- --autonomous
+else
+    exec cargo run --quiet --release
 fi

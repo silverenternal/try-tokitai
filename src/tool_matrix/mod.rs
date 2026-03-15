@@ -12,6 +12,11 @@
 //! - `registry`: 工具注册表，支持运行时注册
 //! - `skills_manager`: Skills 文件管理器
 //! - `selector`: 动态工具选择器
+//! - `tool_selector`: 轻量级工具选择器（AI 原生，新增）
+//! - `ai_classifier`: AI 工具箱分类器（新增）
+//! - `dependency_analyzer`: AI 依赖关系分析器（新增）
+//! - `dispatcher`: 工具调用分发器（新增）
+//! - `metadata_enhancer`: tokitai 元数据增强器（新增）
 //!
 //! ## 使用示例
 //! ```rust,ignore
@@ -37,4 +42,49 @@ pub mod matrix;
 pub mod registry;
 pub mod skills_manager;
 pub mod selector;
+pub mod tool_selector;
+pub mod ai_classifier;
+pub mod dependency_analyzer;
+pub mod dispatcher;
+pub mod metadata_enhancer;
+
+// 注意：以下导出保留，供未来功能扩展使用
+#[allow(unused_imports)]
+pub use tool_selector::{
+    LightweightToolSelector,
+    ToolIndex,
+    ToolSearchResult,
+    SearchResultSource,
+    SelectorConfig,
+};
+#[allow(unused_imports)]
+pub use ai_classifier::{
+    AIToolboxClassifier,
+    LLMClient as AILLMClient,
+    ToolboxAssignment,
+    ToolboxAction,
+    NewToolbox,
+    ToolboxSummary,
+    DefaultLLMClient,
+};
+#[allow(unused_imports)]
+pub use dependency_analyzer::{
+    AIDependencyAnalyzer,
+    LLMClient as DependencyLLMClient,
+    DependencyAnalysis,
+    DependencyRelation,
+    ToolCombination,
+    ToolDependencyGraph,
+    ToolCallSequence,
+    SmartToolRecommender,
+    ToolRecommendation,
+};
+#[allow(unused_imports)]
+pub use dispatcher::{
+    ToolDispatcher,
+    ToolExecutor,
+    DefaultToolExecutor,
+};
+#[allow(unused_imports)]
+pub use metadata_enhancer::MetadataEnhancer;
 

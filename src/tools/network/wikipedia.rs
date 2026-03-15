@@ -222,10 +222,10 @@ mod tests {
     }
     
     #[test]
-    fn test_wikipedia_tools_creation() {
+    fn test_wikipedia_tools_methods() {
         let tools = WikipediaTools::new();
-        // 仅测试创建，不进行网络请求
-        assert!(true);
+        // 测试方法不 panic（网络请求可能成功或失败）
+        let _ = tools.search_wikipedia("rust programming".to_string(), Some(3));
     }
     
     #[test]

@@ -33,6 +33,15 @@ cache_ttl_secs = 3600
 # 默认下载目录（可选，留空则使用系统下载目录）
 # default_dir = "/tmp/downloads"
 
+[user_tools]
+# 默认工作目录（文件操作、项目模板等）
+# 留空表示使用当前工作目录
+# workspace_dir = "./workspace"
+
+# 默认下载目录（优先级高于 download.default_dir）
+# 留空表示使用系统下载目录（或回退到 ./downloads）
+# download_dir = "./downloads"
+
 [context]
 # 上下文存储根目录（可选，留空则使用 ./.context）
 # root_dir = "./.context"

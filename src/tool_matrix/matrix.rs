@@ -4,20 +4,40 @@
 //! - 工具箱（ToolBox）：按领域分类的工具集合（如文件操作箱、网络工具箱）
 //! - Skills 文件：每个工具箱的"说明书"，告诉 AI 如何正确使用工具
 //! - 动态注册：支持运行时添加新工具到工具箱
+//!
+//! ## 服务化架构
+//! - ToolDefinition 包含 ServiceMetadata 支持 QoS、依赖、分类
+//! - ServiceLifecycle trait 支持服务生命周期管理
+//! - ServiceStats 提供运行时统计
+//! - ServiceMetricsCollector 统一指标收集
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-/// 工具定义（与 tokitai 兼容）
+// ============================================================================
+// 服务化元数据
+// ============================================================================
+
+/// 工具定义（与 tokitai 兼容，服务化增强版）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
+    // === 基础信息（现有）===
     /// 工具名称（唯一标识）
     pub name: String,
     /// 工具描述
     pub description: String,
     /// 输入参数 schema（JSON Schema）
     pub input_schema: String,
+
+    // === 服务元数据（新增）===
+    /// 服务元数据
+    #[serde(default)]
+    pub metadata: ServiceMetadata,
+
+    // === 原有字段（保持兼容）===
     /// 工具标签（用于分类和过滤）
     #[serde(default)]
     pub tags: Vec<String>,
@@ -37,6 +57,107 @@ fn default_tool_source() -> String {
     "builtin".to_string()
 }
 
+/// 服务元数据
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServiceMetadata {
+    /// 服务分类
+    #[serde(default)]
+    pub category: ServiceCategory,
+
+    /// 服务质量指标
+    #[serde(default)]
+    pub qos: QualityOfService,
+
+    /// 服务依赖（依赖的其他工具）
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+
+    /// 速率限制
+    #[serde(default)]
+    pub rate_limit: Option<RateLimitConfig>,
+
+    /// 服务版本
+    #[serde(default = "default_version")]
+    pub version: String,
+
+    /// 标签（用于服务发现）
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// 服务分类
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceCategory {
+    #[default]
+    Utility,      // 通用工具
+    File,         // 文件操作
+    Network,      // 网络操作
+    System,       // 系统操作
+    Data,         // 数据处理
+    Ai,           // AI 相关
+    Vcs,          // 版本控制
+    Dialogue,     // 对话管理
+    Development,  // 开发工具
+    VersionControl, // 版本控制（Git 等）
+    Default,      // 默认（未分类）
+}
+
+/// 风险等级
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    #[default]
+    Safe,
+    Moderate,
+    Dangerous,
+}
+
+/// 服务质量指标
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityOfService {
+    /// P99 延迟（毫秒）
+    #[serde(default = "default_latency")]
+    pub latency_p99_ms: u64,
+
+    /// 成功率（0-1）
+    #[serde(default = "default_success_rate")]
+    pub success_rate: f32,
+
+    /// 最大并发度
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+
+    /// 是否幂等
+    #[serde(default)]
+    pub idempotent: bool,
+}
+
+fn default_latency() -> u64 { 1000 }
+fn default_success_rate() -> f32 { 0.99 }
+fn default_concurrency() -> usize { 10 }
+fn default_version() -> String { "1.0.0".to_string() }
+
+impl Default for QualityOfService {
+    fn default() -> Self {
+        Self {
+            latency_p99_ms: default_latency(),
+            success_rate: default_success_rate(),
+            concurrency: default_concurrency(),
+            idempotent: false,
+        }
+    }
+}
+
+/// 速率限制配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    /// 每秒最大请求数
+    pub requests_per_second: u32,
+    /// 突发容量
+    pub burst_size: u32,
+}
+
 impl ToolDefinition {
     /// 创建新的工具定义
     pub fn new(
@@ -51,6 +172,7 @@ impl ToolDefinition {
             tags: Vec::new(),
             risk_level: "safe".to_string(),
             source: "builtin".to_string(),
+            metadata: ServiceMetadata::default(),
         }
     }
 
@@ -72,6 +194,36 @@ impl ToolDefinition {
         self
     }
 
+    /// 设置服务分类
+    pub fn with_category(mut self, category: ServiceCategory) -> Self {
+        self.metadata.category = category;
+        self
+    }
+
+    /// 设置 QoS
+    pub fn with_qos(mut self, qos: QualityOfService) -> Self {
+        self.metadata.qos = qos;
+        self
+    }
+
+    /// 添加依赖
+    pub fn with_dependency(mut self, dependency: impl Into<String>) -> Self {
+        self.metadata.dependencies.push(dependency.into());
+        self
+    }
+
+    /// 设置速率限制
+    pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.metadata.rate_limit = Some(config);
+        self
+    }
+
+    /// 添加元数据标签
+    pub fn with_metadata_tag(mut self, tag: impl Into<String>) -> Self {
+        self.metadata.tags.push(tag.into());
+        self
+    }
+
     /// 转换为 AI API 格式
     pub fn to_api_format(&self) -> Value {
         json!({
@@ -80,6 +232,18 @@ impl ToolDefinition {
                 "name": self.name,
                 "description": self.description,
                 "parameters": serde_json::from_str::<Value>(&self.input_schema).unwrap_or_default()
+            },
+            "metadata": {
+                "category": format!("{:?}", self.metadata.category),
+                "qos": {
+                    "latency_p99_ms": self.metadata.qos.latency_p99_ms,
+                    "success_rate": self.metadata.qos.success_rate,
+                    "concurrency": self.metadata.qos.concurrency,
+                    "idempotent": self.metadata.qos.idempotent
+                },
+                "dependencies": self.metadata.dependencies,
+                "version": self.metadata.version,
+                "tags": self.metadata.tags
             }
         })
     }
@@ -399,6 +563,239 @@ impl SkillsFile {
         }
 
         prompt
+    }
+}
+
+// ============================================================================
+// 服务生命周期管理
+// ============================================================================
+
+/// 服务健康状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServiceHealth {
+    /// 健康
+    Healthy,
+    /// 降级（部分功能可用）
+    Degraded,
+    /// 不健康（不可用）
+    Unhealthy,
+    /// 未知（未检查）
+    Unknown,
+}
+
+/// 服务生命周期接口
+pub trait ServiceLifecycle {
+    /// 服务名称
+    fn service_name(&self) -> &str;
+
+    /// 初始化（连接池、缓存预热等）
+    fn init(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// 健康检查
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::Unknown
+    }
+
+    /// 优雅关闭
+    fn shutdown(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// 服务统计
+    fn stats(&self) -> ServiceStats {
+        ServiceStats::default()
+    }
+}
+
+/// 服务运行时统计
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ServiceStats {
+    /// 总请求数
+    pub total_requests: u64,
+    /// 成功数
+    pub success_count: u64,
+    /// 失败数
+    pub failure_count: u64,
+    /// 平均延迟（毫秒）
+    pub avg_latency_ms: f64,
+    /// P99 延迟（毫秒）
+    pub p99_latency_ms: u64,
+    /// 最后调用时间
+    pub last_called_at: Option<String>,
+    /// 最近延迟样本（用于更精确的 P99 计算）
+    #[serde(skip)]
+    pub recent_latencies: Vec<u64>,
+}
+
+impl ServiceStats {
+    /// 创建新的服务统计
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 记录请求
+    pub fn record(&mut self, success: bool, latency_ms: u64) {
+        self.total_requests += 1;
+        if success {
+            self.success_count += 1;
+        } else {
+            self.failure_count += 1;
+        }
+
+        // 更新平均延迟
+        let total = self.total_requests as f64;
+        self.avg_latency_ms = (self.avg_latency_ms * (total - 1.0) + latency_ms as f64) / total;
+
+        // 记录最近延迟（保留最近 1000 个样本用于 P99 计算）
+        self.recent_latencies.push(latency_ms);
+        if self.recent_latencies.len() > 1000 {
+            self.recent_latencies.remove(0);
+        }
+
+        // 计算 P99 延迟
+        self.p99_latency_ms = self.calculate_p99();
+
+        self.last_called_at = Some(chrono::Local::now().to_rfc3339());
+    }
+
+    /// 计算 P99 延迟
+    fn calculate_p99(&self) -> u64 {
+        if self.recent_latencies.is_empty() {
+            return 0;
+        }
+
+        let mut sorted = self.recent_latencies.clone();
+        sorted.sort();
+
+        let p99_index = (sorted.len() as f64 * 0.99) as usize;
+        *sorted.get(p99_index.min(sorted.len() - 1)).unwrap_or(&0)
+    }
+
+    /// 获取成功率
+    pub fn success_rate(&self) -> f32 {
+        if self.total_requests == 0 {
+            0.0
+        } else {
+            self.success_count as f32 / self.total_requests as f32
+        }
+    }
+
+    /// 获取错误率
+    pub fn error_rate(&self) -> f32 {
+        1.0 - self.success_rate()
+    }
+}
+
+// ============================================================================
+// 服务指标收集器
+// ============================================================================
+
+/// 服务指标收集器
+#[derive(Debug, Clone)]
+pub struct ServiceMetricsCollector {
+    metrics: Arc<RwLock<HashMap<String, ServiceStats>>>,
+}
+
+impl ServiceMetricsCollector {
+    /// 创建新的指标收集器
+    pub fn new() -> Self {
+        Self {
+            metrics: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// 记录工具调用
+    pub async fn record_call(&self, tool_name: &str, success: bool, latency_ms: u64) {
+        let mut metrics = self.metrics.write().await;
+        let entry = metrics
+            .entry(tool_name.to_string())
+            .or_insert_with(ServiceStats::new);
+        entry.record(success, latency_ms);
+    }
+
+    /// 获取服务指标
+    pub async fn get_metrics(&self, tool_name: &str) -> Option<ServiceStats> {
+        self.metrics.read().await.get(tool_name).cloned()
+    }
+
+    /// 获取所有服务指标
+    pub async fn get_all_metrics(&self) -> Vec<ServiceStats> {
+        self.metrics.read().await.values().cloned().collect()
+    }
+
+    /// 获取服务健康报告
+    pub async fn get_health_report(&self) -> ServiceHealthReport {
+        let metrics = self.metrics.read().await;
+        let mut report = ServiceHealthReport::default();
+
+        for (name, stats) in metrics.iter() {
+            let health = if stats.total_requests == 0 {
+                ServiceHealth::Unknown
+            } else if stats.error_rate() < 0.01 {
+                ServiceHealth::Healthy
+            } else if stats.error_rate() < 0.1 {
+                ServiceHealth::Degraded
+            } else {
+                ServiceHealth::Unhealthy
+            };
+
+            report.services.insert(name.clone(), health);
+        }
+
+        report
+    }
+}
+
+impl Default for ServiceMetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 服务健康报告
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServiceHealthReport {
+    /// 各服务的健康状态
+    pub services: HashMap<String, ServiceHealth>,
+    /// 生成时间
+    pub generated_at: Option<String>,
+}
+
+impl ServiceHealthReport {
+    /// 创建新的健康报告
+    pub fn new() -> Self {
+        Self {
+            services: HashMap::new(),
+            generated_at: Some(chrono::Local::now().to_rfc3339()),
+        }
+    }
+
+    /// 获取整体健康状态
+    pub fn overall_health(&self) -> ServiceHealth {
+        if self.services.is_empty() {
+            return ServiceHealth::Unknown;
+        }
+
+        let mut has_unhealthy = false;
+        let mut has_degraded = false;
+
+        for health in self.services.values() {
+            match health {
+                ServiceHealth::Unhealthy => has_unhealthy = true,
+                ServiceHealth::Degraded => has_degraded = true,
+                _ => {}
+            }
+        }
+
+        if has_unhealthy {
+            ServiceHealth::Unhealthy
+        } else if has_degraded {
+            ServiceHealth::Degraded
+        } else {
+            ServiceHealth::Healthy
+        }
     }
 }
 

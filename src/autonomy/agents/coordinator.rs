@@ -1,12 +1,19 @@
 //! Agent 协调器
 //!
 //! 协调 Planner-Executor-Reviewer 三个 Agent 的协作
+//!
+//! ## 工具矩阵集成
+//! Coordinator 现在通过 ToolRegistry 创建 ExecutorAgent，
+//! 使得执行 Agent 可以通过工具矩阵动态调用工具。
 
 use super::{PlannerAgent, ExecutorAgent, ReviewerAgent};
 use super::planner::RiskLevel;
 use crate::autonomy::iteration_tracker::{IterationTracker, IterationState};
+use crate::tool_matrix::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
+use parking_lot::RwLock;
 use thiserror::Error;
 
 /// 协调器错误类型
@@ -43,13 +50,15 @@ pub struct AgentCoordinator {
     pub reviewer: ReviewerAgent,
     /// 迭代追踪器
     pub tracker: IterationTracker,
+    /// 工具注册表（用于动态工具调用）
+    pub tool_registry: Arc<RwLock<ToolRegistry>>,
     /// 当前状态
     pub state: CoordinatorState,
 }
 
 impl AgentCoordinator {
     /// 创建新的协调器
-    pub fn new(base_dir: PathBuf) -> Result<Self, CoordinatorError> {
+    pub fn new(base_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, CoordinatorError> {
         let planner_dir = base_dir.join("planner");
         let executor_dir = base_dir.join("executor");
         let reviewer_dir = base_dir.join("reviewer");
@@ -57,11 +66,17 @@ impl AgentCoordinator {
 
         Ok(Self {
             planner: PlannerAgent::new(planner_dir).map_err(|e| CoordinatorError::PlanningFailed(e.to_string()))?,
-            executor: ExecutorAgent::new(executor_dir).map_err(|e| CoordinatorError::ExecutionFailed(e.to_string()))?,
+            executor: ExecutorAgent::new(executor_dir, tool_registry.clone()).map_err(|e| CoordinatorError::ExecutionFailed(e.to_string()))?,
             reviewer: ReviewerAgent::new(reviewer_dir).map_err(|e| CoordinatorError::ReviewFailed(e.to_string()))?,
             tracker: IterationTracker::new(tracker_dir).map_err(|e| CoordinatorError::IterationFailed(e.to_string()))?,
+            tool_registry,
             state: CoordinatorState::Idle,
         })
+    }
+
+    /// 创建协调器（带自定义工具注册表）
+    pub fn with_registry(base_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, CoordinatorError> {
+        Self::new(base_dir, tool_registry)
     }
 
     /// 开始自主迭代
@@ -97,8 +112,8 @@ impl AgentCoordinator {
     ) -> Result<(), CoordinatorError> {
         if let Some(plan) = self.planner.last_plan() {
             let plan_id = plan.id.clone();
-            drop(plan); // 释放借用
-            
+            let _ = plan; // 释放借用
+
             self.planner.add_step_to_plan(
                 &plan_id,
                 description,
@@ -124,8 +139,8 @@ impl AgentCoordinator {
         // 开始执行
         if let Some(plan) = self.planner.last_plan() {
             let plan_id = plan.id.clone();
-            drop(plan);
-            
+            let _ = plan;
+
             self.executor.start_execution(plan_id);
         }
 
@@ -196,10 +211,15 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn create_test_registry() -> Arc<RwLock<ToolRegistry>> {
+        Arc::new(RwLock::new(ToolRegistry::new()))
+    }
+
     #[test]
     fn test_coordinator_lifecycle() {
         let temp_dir = TempDir::new().unwrap();
-        let mut coordinator = AgentCoordinator::new(temp_dir.path().to_path_buf()).unwrap();
+        let registry = create_test_registry();
+        let mut coordinator = AgentCoordinator::new(temp_dir.path().to_path_buf(), registry).unwrap();
 
         // 开始迭代
         coordinator.start_iteration("测试目标".to_string()).unwrap();

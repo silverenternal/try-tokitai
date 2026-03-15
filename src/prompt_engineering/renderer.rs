@@ -93,8 +93,8 @@ impl PromptRenderer {
     fn render_loops(&self, template: &str, variables: &Value) -> Result<String> {
         let mut result = template.to_string();
 
-        // 正则匹配 {{#each items}}...{{/each}}
-        let each_pattern = regex::Regex::new(r"\{\{#each\s+(\w+)\}\}(.*?)\{\{/each\}\}")?;
+        // 正则匹配 {{#each items}}...{{/each}}，使用 (?s) 启用 dotall 模式
+        let each_pattern = regex::Regex::new(r"(?s)\{\{#each\s+(\w+)\}\}(.*?)\{\{/each\}\}")?;
 
         while let Some(caps) = each_pattern.captures(&result) {
             let full_match = caps.get(0).unwrap().as_str();

@@ -35,7 +35,7 @@ pub struct ToolsConfig {
 }
 
 /// 搜索配置
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct SearchConfig {
     #[serde(default)]
@@ -60,11 +60,50 @@ fn default_cache_ttl_secs() -> u64 {
     3600
 }
 
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            searxng_url: None,
+            engines: default_engines(),
+            cache_capacity: default_cache_capacity(),
+            cache_ttl_secs: default_cache_ttl_secs(),
+        }
+    }
+}
+
 /// 下载配置
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct DownloadConfig {
+    /// 默认下载目录
     pub default_dir: Option<String>,
+}
+
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            default_dir: None,
+        }
+    }
+}
+
+/// 用户工具配置（工作目录、下载目录等）
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct UserToolsConfig {
+    /// 默认工作目录（文件操作、项目模板等）
+    pub workspace_dir: Option<String>,
+    /// 默认下载目录
+    pub download_dir: Option<String>,
+}
+
+impl Default for UserToolsConfig {
+    fn default() -> Self {
+        Self {
+            workspace_dir: None,
+            download_dir: None,
+        }
+    }
 }
 
 /// 上下文存储配置
@@ -143,9 +182,11 @@ pub struct Config {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
-    pub search: Option<SearchConfig>,
+    pub search: SearchConfig,
     #[serde(default)]
-    pub download: Option<DownloadConfig>,
+    pub download: DownloadConfig,
+    #[serde(default)]
+    pub user_tools: UserToolsConfig,
     #[serde(default)]
     pub context: ContextConfig,
 }
@@ -170,6 +211,32 @@ impl Config {
         Ok(config)
     }
 
+    /// 获取默认工作目录
+    /// 优先级：配置 > 当前目录
+    pub fn get_workspace_dir(&self) -> PathBuf {
+        self.user_tools.workspace_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// 获取默认下载目录
+    /// 优先级：配置 > 系统下载目录 > ./downloads
+    pub fn get_download_dir(&self) -> PathBuf {
+        // 1. 使用配置的下载目录
+        if let Some(dir) = self.user_tools.download_dir.as_ref() {
+            return PathBuf::from(dir);
+        }
+
+        // 2. 使用系统下载目录
+        if let Some(dir) = dirs::download_dir() {
+            return dir;
+        }
+
+        // 3. 回退到 ./downloads
+        PathBuf::from("./downloads")
+    }
+
     /// 从环境变量加载 AI 配置
     #[allow(dead_code)]
     pub fn load_from_env() -> Self {
@@ -190,8 +257,9 @@ impl Config {
                 max_tokens,
             },
             tools: ToolsConfig::default(),
-            search: None,
-            download: None,
+            search: SearchConfig::default(),
+            download: DownloadConfig::default(),
+            user_tools: UserToolsConfig::default(),
             context: ContextConfig::default(),
         }
     }

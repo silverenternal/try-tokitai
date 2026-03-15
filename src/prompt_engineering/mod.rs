@@ -20,4 +20,8 @@
 pub mod template;
 pub mod manager;
 pub mod renderer;
+pub mod prompt_tools;
+
+pub use prompt_tools::PromptTools;
+pub use manager::PromptTemplateManager;
 

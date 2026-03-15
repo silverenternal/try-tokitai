@@ -10,6 +10,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -445,6 +446,9 @@ impl WorkflowEngine {
                 .flat_map(|s| s.steps.iter())
                 .filter(|s| s.status == StepStatus::Failed)
                 .count(),
+            step_results: HashMap::new(),
+            error: None,
+            duration_ms: None,
         })
     }
 
@@ -730,6 +734,183 @@ impl WorkflowEngine {
     }
 }
 
+// ============================================================================
+// WorkflowEngine 扩展 - 声明式工作流支持
+// ============================================================================
+
+impl WorkflowEngine {
+    /// 执行声明式工作流
+    pub async fn execute_declarative(
+        &mut self,
+        workflow: &DeclarativeWorkflow,
+        input: &Value,
+    ) -> Result<WorkflowResult> {
+        let start_time = Instant::now();
+
+        self.log("执行声明式工作流", &workflow.name);
+
+        let mut step_results: HashMap<String, Value> = HashMap::new();
+        let mut executed_steps: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // 执行步骤（按依赖顺序）
+        loop {
+            // 检查是否所有步骤都已执行
+            if executed_steps.len() >= workflow.steps.len() {
+                break;
+            }
+
+            // 获取可执行的步骤（依赖已满足）
+            let ready_steps: Vec<&DeclarativeWorkflowStep> = workflow
+                .steps
+                .iter()
+                .filter(|step| {
+                    !executed_steps.contains(&step.id)
+                        && step
+                            .depends_on
+                            .iter()
+                            .all(|dep| executed_steps.contains(dep))
+                })
+                .collect();
+
+            if ready_steps.is_empty() {
+                // 没有可执行的步骤，但还有未执行的步骤，说明存在循环依赖
+                if executed_steps.len() < workflow.steps.len() {
+                    return Err(anyhow::anyhow!(
+                        "检测到循环依赖或无法执行的步骤"
+                    ));
+                }
+                break;
+            }
+
+            // 并行执行可执行的步骤
+            for step in ready_steps {
+                match self.execute_step_with_retry(step, &step_results, input).await {
+                    Ok(result) => {
+                        step_results.insert(step.id.clone(), result);
+                        executed_steps.insert(step.id.clone());
+                    }
+                    Err(e) => {
+                        // 错误处理
+                        match &step.on_error {
+                            Some(handler) => match handler.strategy {
+                                ErrorStrategy::Skip => {
+                                    self.log("跳过步骤", &format!("{}: {}", step.id, e));
+                                    executed_steps.insert(step.id.clone());
+                                }
+                                ErrorStrategy::Fail => {
+                                    return Ok(WorkflowResult::failure(
+                                        workflow.id.clone(),
+                                        format!("步骤 {} 执行失败：{}", step.id, e),
+                                    ));
+                                }
+                                ErrorStrategy::Retry => {
+                                    // 已经重试过了，还是失败
+                                    return Ok(WorkflowResult::failure(
+                                        workflow.id.clone(),
+                                        format!("步骤 {} 重试后仍失败：{}", step.id, e),
+                                    ));
+                                }
+                                ErrorStrategy::Fallback => {
+                                    // TODO: 执行 fallback 工具
+                                    return Ok(WorkflowResult::failure(
+                                        workflow.id.clone(),
+                                        format!("步骤 {} 执行失败，fallback 未实现：{}", step.id, e),
+                                    ));
+                                }
+                            },
+                            None => {
+                                if self.stop_on_error {
+                                    return Ok(WorkflowResult::failure(
+                                        workflow.id.clone(),
+                                        format!("步骤 {} 执行失败：{}", step.id, e),
+                                    ));
+                                } else {
+                                    executed_steps.insert(step.id.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        Ok(WorkflowResult {
+            workflow_id: workflow.id.clone(),
+            step_results,
+            status: WorkflowStatus::Completed,
+            error: None,
+            duration_ms: Some(duration_ms),
+            total_duration_ms: duration_ms,
+            stages_completed: 0,
+            steps_completed: executed_steps.len(),
+            steps_failed: 0,
+        })
+    }
+
+    /// 执行单个步骤（带重试）
+    async fn execute_step_with_retry(
+        &self,
+        step: &DeclarativeWorkflowStep,
+        _step_results: &HashMap<String, Value>,
+        _input: &Value,
+    ) -> Result<Value> {
+        let mut attempts = 0;
+        let mut delay = step.retry.retry_interval_ms;
+
+        loop {
+            match self.execute_single_step(step).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= step.retry.max_retries {
+                        return Err(e);
+                    }
+
+                    // 等待重试
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+
+                    // 指数退避
+                    if step.retry.exponential_backoff {
+                        delay *= 2;
+                    }
+
+                    self.log("重试步骤", &format!("{} (第 {}/{} 次)", step.id, attempts, step.retry.max_retries));
+                }
+            }
+        }
+    }
+
+    /// 执行单个步骤
+    async fn execute_single_step(&self, step: &DeclarativeWorkflowStep) -> Result<Value> {
+        // 设置超时
+        let timeout = step.timeout_secs.or(Some(self.timeout_secs)).unwrap_or(60);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(timeout),
+            self.do_execute_step(step),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("步骤 {} 执行超时 ({}s)", step.id, timeout))??;
+
+        Ok(result)
+    }
+
+    /// 实际执行步骤（调用工具）
+    async fn do_execute_step(&self, step: &DeclarativeWorkflowStep) -> Result<Value> {
+        // TODO: 实际调用工具矩阵执行工具
+        // 这里返回模拟结果
+        self.log("执行步骤", &format!("{}: 调用工具 {}", step.id, step.tool));
+
+        Ok(json!({
+            "tool": step.tool,
+            "status": "simulated",
+            "message": format!("步骤 {} 执行完成", step.id)
+        }))
+    }
+}
+
 /// 工作流执行结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowResult {
@@ -745,6 +926,47 @@ pub struct WorkflowResult {
     pub steps_completed: usize,
     /// 失败的步骤数
     pub steps_failed: usize,
+    /// 步骤执行结果（声明式工作流使用）
+    #[serde(default)]
+    pub step_results: HashMap<String, Value>,
+    /// 错误信息
+    #[serde(default)]
+    pub error: Option<String>,
+    /// 执行耗时（毫秒）
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
+impl WorkflowResult {
+    /// 创建成功结果
+    pub fn success(workflow_id: String, step_results: HashMap<String, Value>) -> Self {
+        Self {
+            workflow_id,
+            step_results,
+            status: WorkflowStatus::Completed,
+            error: None,
+            duration_ms: None,
+            total_duration_ms: 0,
+            stages_completed: 0,
+            steps_completed: 0,
+            steps_failed: 0,
+        }
+    }
+
+    /// 创建失败结果
+    pub fn failure(workflow_id: String, error: String) -> Self {
+        Self {
+            workflow_id,
+            step_results: HashMap::new(),
+            status: WorkflowStatus::Failed,
+            error: Some(error),
+            duration_ms: None,
+            total_duration_ms: 0,
+            stages_completed: 0,
+            steps_completed: 0,
+            steps_failed: 0,
+        }
+    }
 }
 
 /// 获取当前时间戳（秒）
@@ -901,6 +1123,261 @@ pub mod templates {
         workflow
     }
 }
+
+// ============================================================================
+// 声明式工作流定义（服务化架构）
+// ============================================================================
+
+/// 重试配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// 最大重试次数
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// 重试间隔（毫秒）
+    #[serde(default = "default_retry_interval")]
+    pub retry_interval_ms: u64,
+    /// 是否指数退避
+    #[serde(default)]
+    pub exponential_backoff: bool,
+}
+
+fn default_max_retries() -> u32 { 3 }
+fn default_retry_interval() -> u64 { 1000 }
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: default_max_retries(),
+            retry_interval_ms: default_retry_interval(),
+            exponential_backoff: true,
+        }
+    }
+}
+
+/// 错误处理策略
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorStrategy {
+    /// 重试
+    Retry,
+    /// 跳过
+    Skip,
+    /// 失败
+    Fail,
+    /// 使用 fallback 工具
+    Fallback,
+}
+
+impl Default for ErrorStrategy {
+    fn default() -> Self {
+        Self::Fail
+    }
+}
+
+/// 错误处理器
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ErrorHandler {
+    /// 错误处理策略
+    #[serde(default)]
+    pub strategy: ErrorStrategy,
+    /// fallback 工具（可选）
+    pub fallback_tool: Option<String>,
+    /// 最大错误数（超过则终止工作流）
+    pub max_errors: Option<u32>,
+}
+
+/// 声明式工作流步骤
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeclarativeWorkflowStep {
+    /// 步骤 ID
+    pub id: String,
+    /// 步骤描述
+    pub description: String,
+    /// 使用的工具
+    pub tool: String,
+    /// 工具参数（支持模板）
+    pub arguments: Value,
+    /// 前置步骤依赖
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    /// 重试配置
+    #[serde(default)]
+    pub retry: RetryConfig,
+    /// 超时配置（秒）
+    pub timeout_secs: Option<u64>,
+    /// 错误处理
+    #[serde(default)]
+    pub on_error: Option<ErrorHandler>,
+    /// 执行角色
+    #[serde(default = "default_executor_role")]
+    pub role: AgentRole,
+}
+
+fn default_executor_role() -> AgentRole {
+    AgentRole::Executor
+}
+
+impl DeclarativeWorkflowStep {
+    /// 创建新的步骤
+    pub fn new(id: String, tool: String, arguments: Value) -> Self {
+        Self {
+            id,
+            description: String::new(),
+            tool,
+            arguments,
+            depends_on: Vec::new(),
+            retry: RetryConfig::default(),
+            timeout_secs: None,
+            on_error: None,
+            role: AgentRole::Executor,
+        }
+    }
+
+    /// 设置描述
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+
+    /// 设置依赖
+    pub fn with_dependencies(mut self, deps: Vec<String>) -> Self {
+        self.depends_on = deps;
+        self
+    }
+
+    /// 设置重试配置
+    pub fn with_retry(mut self, retry: RetryConfig) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// 设置超时
+    pub fn with_timeout(mut self, secs: u64) -> Self {
+        self.timeout_secs = Some(secs);
+        self
+    }
+
+    /// 设置错误处理
+    pub fn with_error_handler(mut self, handler: ErrorHandler) -> Self {
+        self.on_error = Some(handler);
+        self
+    }
+
+    /// 设置角色
+    pub fn with_role(mut self, role: AgentRole) -> Self {
+        self.role = role;
+        self
+    }
+}
+
+/// 声明式工作流定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeclarativeWorkflow {
+    /// 工作流 ID
+    pub id: String,
+    /// 工作流名称
+    pub name: String,
+    /// 工作流描述
+    pub description: String,
+    /// 工作流版本
+    #[serde(default = "default_workflow_version")]
+    pub version: String,
+    /// 工作流步骤
+    pub steps: Vec<DeclarativeWorkflowStep>,
+    /// 工作流变量
+    #[serde(default)]
+    pub variables: HashMap<String, String>,
+    /// 全局超时（秒）
+    pub timeout_secs: Option<u64>,
+    /// 全局错误处理
+    #[serde(default)]
+    pub on_error: Option<ErrorHandler>,
+    /// 标签
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+fn default_workflow_version() -> String {
+    "1.0.0".to_string()
+}
+
+impl DeclarativeWorkflow {
+    /// 创建新的声明式工作流
+    pub fn new(id: String, name: String, description: String) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            version: default_workflow_version(),
+            steps: Vec::new(),
+            variables: HashMap::new(),
+            timeout_secs: None,
+            on_error: None,
+            tags: Vec::new(),
+        }
+    }
+
+    /// 添加步骤
+    pub fn add_step(mut self, step: DeclarativeWorkflowStep) -> Self {
+        self.steps.push(step);
+        self
+    }
+
+    /// 设置变量
+    pub fn with_variable(mut self, key: String, value: String) -> Self {
+        self.variables.insert(key, value);
+        self
+    }
+
+    /// 设置全局超时
+    pub fn with_timeout(mut self, secs: u64) -> Self {
+        self.timeout_secs = Some(secs);
+        self
+    }
+
+    /// 设置全局错误处理
+    pub fn with_error_handler(mut self, handler: ErrorHandler) -> Self {
+        self.on_error = Some(handler);
+        self
+    }
+
+    /// 添加标签
+    pub fn with_tag(mut self, tag: String) -> Self {
+        self.tags.push(tag);
+        self
+    }
+
+    /// 转换为传统 Workflow
+    pub fn to_workflow(&self) -> Workflow {
+        let mut workflow = Workflow::new(
+            self.id.clone(),
+            self.name.clone(),
+            self.description.clone(),
+        );
+
+        // 创建一个包含所有步骤的阶段
+        let mut stage = Stage::new(
+            "default".to_string(),
+            "执行阶段".to_string(),
+            "执行声明式工作流步骤".to_string(),
+        );
+
+        for step in &self.steps {
+            let mut wf_step = Step::new(
+                step.id.clone(),
+                step.description.clone(),
+                step.role.clone(),
+            );
+            wf_step.dependencies = step.depends_on.clone();
+            stage.add_step(wf_step);
+        }
+
+        workflow.add_stage(stage);
+        workflow
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

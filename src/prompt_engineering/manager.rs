@@ -52,7 +52,7 @@ impl PromptTemplateManager {
     /// 创建带自定义目录的模板管理器
     pub fn with_path<P: AsRef<Path>>(templates_dir: P) -> Result<Self> {
         let path = templates_dir.as_ref().to_path_buf();
-        
+
         // 确保目录存在
         if !path.exists() {
             fs::create_dir_all(&path)
@@ -65,6 +65,11 @@ impl PromptTemplateManager {
             renderer: PromptRenderer::new(),
             use_cache: true,
         })
+    }
+
+    /// 获取模板存储目录
+    pub fn get_templates_dir(&self) -> &PathBuf {
+        &self.templates_dir
     }
 
     /// 加载模板

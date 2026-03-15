@@ -86,16 +86,6 @@ nano .env  # 或使用你喜欢的编辑器
 cargo run --release
 ```
 
-#### TUI 界面模式
-
-```bash
-# 使用命令行参数启动
-cargo run --release -- --tui
-
-# 或使用短选项
-cargo run --release -- -t
-```
-
 #### 一键启动演示
 
 ```bash
@@ -165,19 +155,9 @@ cargo run --release -- -t
 - 自动工具调用（Function Calling）
 - 多轮对话历史记忆
 
-### 🖥️ TUI 界面
-
-- 现代化的终端用户界面
-- 消息历史滚动浏览
-- 流式响应显示
-- 快捷键支持（PageUp/PageDown 快速滚动、Ctrl+L 清除历史等）
-- **低延迟优化**：移除人为延迟，无限制事件处理，异步 IO
-
 ---
 
 ## 💬 交互命令
-
-### 命令行模式
 
 | 命令 | 说明 |
 |------|------|
@@ -185,19 +165,6 @@ cargo run --release -- -t
 | `exit` / `quit` | 退出程序 |
 | 任意自然语言 | 与 AI 对话 |
 | `@<路径>` | 快速引用文件（如 `@README.md`） |
-
-### TUI 界面模式
-
-| 快捷键 | 说明 |
-|--------|------|
-| `Enter` | 发送消息 |
-| `↑` / `↓` | 滚动消息历史 |
-| `PageUp` / `PageDown` | 快速滚动 |
-| `End` | 滚动到底部 |
-| `Ctrl+L` | 清除历史记录 |
-| `Ctrl+C` / `Ctrl+Q` | 退出程序 |
-
-**性能监控**：TUI 模式下可查看实时延迟统计（请求数、缓存命中率、平均延迟）
 
 ---
 
@@ -287,17 +254,23 @@ cargo run --release -- -t
 │   │   └── vcs/            # 版本控制工具
 │   │       ├── mod.rs
 │   │       └── git_ops.rs      # Git 操作
-│   └── tui/                # TUI 界面模块（实验性）
-│       ├── mod.rs          # 模块导出
-│       ├── app.rs          # 应用状态管理
-│       ├── ui.rs           # UI 渲染
-│       ├── event.rs        # 事件处理
-│       ├── api_client.rs   # API 客户端
-│       └── assistant.rs    # AI 助手集成
 ├── examples/               # 示例代码
 ├── CONTEXT_STORAGE.md      # 上下文存储系统详细文档
 └── README.md
 ```
+
+### 运行时文件夹（已添加到 .gitignore）
+
+以下文件夹在运行时自动创建，已添加到 `.gitignore` 中，不会被提交到版本控制：
+
+| 文件夹 | 用途 | 说明 |
+|--------|------|------|
+| `sandbox/` | 沙箱测试目录 | 用于测试文件操作、项目模板等功能 |
+| `downloads/` | 下载文件目录 | 使用下载工具时，文件默认保存到此目录 |
+| `.context/` | 上下文存储 | 三层存储架构（瞬时/短期/长期）的持久化数据 |
+| `.tokitai/` | 运行时数据 | 对话状态、追踪日志、自主进化数据等 |
+
+> 💡 **提示**：这些文件夹会在首次运行程序时自动创建，无需手动创建。如需清理缓存，可直接删除这些文件夹。
 
 ---
 
@@ -335,17 +308,6 @@ A: 尝试切换到较小的模型：
 export AI_MODEL="qwen2.5:7b"
 ```
 
-### Q: TUI 界面显示异常怎么办？
-
-A: 确保终端支持 UTF-8 编码，尝试调整终端窗口大小。
-
-### Q: 如何查看性能指标？
-
-A: TUI 模式下会显示实时延迟统计，包括：
-- **请求数**：总请求次数
-- **缓存命中率**：缓存命中百分比
-- **平均延迟**：平均响应时间（ms）
-
 ---
 
 ## 可用模型
@@ -365,8 +327,31 @@ A: TUI 模式下会显示实时延迟统计，包括：
 - **reqwest** - HTTP 客户端
 - **serde_json** - JSON 处理
 - **anyhow** - 错误处理
-- **ratatui** - TUI 框架（实验性）
-- **crossterm** - 终端操作（实验性）
+- **tracing** - 日志和追踪
+
+---
+
+## 文档
+
+### 入门文档
+| 文档 | 说明 |
+|------|------|
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | 快速启动指南 |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
+| [docs/DEMO.md](docs/DEMO.md) | 演示指南 |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 更新日志 |
+
+### 开发者文档
+| 文档 | 说明 |
+|------|------|
+| [structure_ensure/README.md](structure_ensure/README.md) | 结构文档索引 |
+| [structure_ensure/QUICK_REFERENCE.md](structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
+| [structure_ensure/PROJECT_STRUCTURE.md](structure_ensure/PROJECT_STRUCTURE.md) | 完整项目结构详解 |
+
+### 技术报告
+| 文档 | 说明 |
+|------|------|
+| [docs/archive/](docs/archive/) | 技术报告归档（集成/优化/审查报告） |
 
 ---
 
@@ -376,4 +361,4 @@ MIT OR Apache-2.0
 
 ## 致谢
 
-- [tokitai](https://github.com/silverenternal/tokitai) - 优秀的 AI 工具集成库
+- [tokitai](https://github.com/silverenternal/tokitai) - 优秀的 AI 工具集成框架

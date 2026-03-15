@@ -1,0 +1,385 @@
+{
+  "project_name": "try-tokitai",
+  "package_name": "ai-assistant",
+  "version": "0.1.0",
+  "edition": "2021",
+  "description": "基于 Tokitai 的 AI 助手项目，整合多种工具和能力，支持服务化架构和 AI 原生工具选择",
+  "last_updated": "2026-03-15",
+
+  "quick_stats": {
+    "total_source_lines": 26600,
+    "total_source_files": 78,
+    "core_modules": 10,
+    "toolboxes": 11,
+    "tool_functions": 63
+  },
+
+  "architecture_layers": [
+    {
+      "name": "用户界面层",
+      "components": ["CLI 交互", "演示脚本", "自主进化模式"]
+    },
+    {
+      "name": "编排调度层",
+      "components": ["Orchestrator", "RoleSwitcher", "WorkflowEngine", "ToolMatrix", "PromptEng", "IntegratedModules", "ServiceLifecycle", "ToolDispatcher"]
+    },
+    {
+      "name": "核心功能层",
+      "components": ["Context Storage", "Autonomy Agents", "Dialogue FSM (已集成)", "Observability (已集成)", "Prompt Engineering (已集成)", "Service Registry (已集成)", "AI Tool Selector (新增)"]
+    },
+    {
+      "name": "工具执行层",
+      "components": ["File Tools", "Net Tools", "System Tools", "Git Tools", "Data Tools", "Sandbox"],
+      "notes": "服务化封装，支持 QoS/健康检查"
+    },
+    {
+      "name": "基础设施层",
+      "components": ["Config Mgr", "Command Resolver", "Path Resolver", "Security", "Tracing (tokitai)", "TOML 工作流加载器"]
+    }
+  ],
+
+  "src_modules": {
+    "main": {
+      "file": "main.rs",
+      "lines": 1230,
+      "description": "主程序入口，AiAssistant 结构体整合所有工具",
+      "features": ["服务生命周期管理", "集成模块管理", "AI 工具选择器初始化"]
+    },
+    "integration": {
+      "lines": 325,
+      "percentage": 1.2,
+      "status": "已集成",
+      "files": ["mod.rs", "modules_manager.rs"],
+      "description": "集成模块管理器，统一管理 dialogue/observability/prompt_engineering"
+    },
+    "dialogue": {
+      "lines": 720,
+      "percentage": 2.7,
+      "status": "已集成",
+      "files": ["mod.rs", "state_machine.rs", "dialogue_tools.rs"],
+      "features": ["对话状态机", "tokitai ToolProvider", "与 autonomy 同步"]
+    },
+    "observability": {
+      "lines": 830,
+      "percentage": 3.1,
+      "status": "已集成",
+      "files": ["mod.rs", "tracing.rs", "observability_tools.rs"],
+      "features": ["全链路追踪", "tokitai ToolProvider", "多维度查询"]
+    },
+    "prompt_engineering": {
+      "lines": 965,
+      "percentage": 3.6,
+      "status": "已集成",
+      "files": ["mod.rs", "manager.rs", "renderer.rs", "template.rs", "prompt_tools.rs"],
+      "features": ["模板管理", "tokitai ToolProvider", "渲染统计"]
+    },
+    "tools": {
+      "lines": 7114,
+      "percentage": 26.7,
+      "submodules": {
+        "io": { "lines": 1517, "tools": 15 },
+        "network": { "lines": 4139, "tools": 20, "service_lifecycle": true },
+        "system": { "lines": 924, "tools": 13 },
+        "data": { "lines": 382, "tools": 5 },
+        "vcs": { "lines": 189, "tools": 4 }
+      }
+    },
+    "context": {
+      "lines": 4794,
+      "percentage": 18.0,
+      "features": ["ICHC", "HCD", "LSFI", "三层存储"]
+    },
+    "autonomy": {
+      "lines": 2684,
+      "percentage": 10.1,
+      "status": "部分集成",
+      "features": ["多 Agent 协作", "任务分解", "迭代追踪", "Git 工作流", "智能工具推荐"]
+    },
+    "orchestrator": {
+      "lines": 3528,
+      "percentage": 13.3,
+      "files": ["mod.rs", "orchestrator.rs", "role_switcher.rs", "workflow.rs", "workflow_loader.rs"],
+      "features": ["工作流引擎", "角色切换", "上下文优化", "TOML 工作流加载器"]
+    },
+    "tool_matrix": {
+      "lines": 3362,
+      "percentage": 12.6,
+      "files": [
+        "mod.rs",
+        "matrix.rs",
+        "registry.rs",
+        "selector.rs",
+        "skills_manager.rs",
+        "tool_selector.rs",
+        "ai_classifier.rs",
+        "dependency_analyzer.rs",
+        "dispatcher.rs",
+        "metadata_enhancer.rs"
+      ],
+      "features": [
+        "工具箱分类",
+        "工具注册表",
+        "智能选择",
+        "技能管理",
+        "服务元数据",
+        "服务生命周期",
+        "服务指标收集",
+        "轻量级工具选择器 (AI 原生)",
+        "AI 工具箱分类器",
+        "AI 依赖关系分析器",
+        "工具调用分发器",
+        "tokitai 元数据增强器"
+      ]
+    }
+  },
+
+  "integration_status": {
+    "completed": [
+      "main",
+      "tools/*",
+      "context/*",
+      "tool_matrix/*",
+      "orchestrator/*",
+      "dialogue/*",
+      "observability/*",
+      "prompt_engineering/*",
+      "integration/*"
+    ],
+    "partial": [
+      "autonomy/*"
+    ]
+  },
+
+  "new_features": {
+    "service_architecture": {
+      "description": "服务化架构，将工具矩阵演进为服务注册表",
+      "features": [
+        "服务元数据 (ServiceMetadata)",
+        "服务分类 (ServiceCategory)",
+        "QoS 指标 (QualityOfService)",
+        "服务生命周期 (ServiceLifecycle)",
+        "服务健康状态 (ServiceHealth)",
+        "服务统计 (ServiceStats)",
+        "服务指标收集 (ServiceMetricsCollector)"
+      ],
+      "files": [
+        "src/tool_matrix/matrix.rs"
+      ]
+    },
+    "ai_tool_selector": {
+      "description": "AI 原生轻量级工具选择器系统（深化落实）",
+      "features": [
+        "ToolIndex: 倒排索引（关键词/分类/工具箱）",
+        "LightweightToolSelector: 快速搜索 <10ms，AI 搜索 <2s",
+        "LRU 搜索缓存：1000 条，缓存命中后 ~3ms",
+        "SelectorMetrics: 完整监控指标",
+        "后台异步索引重建：批量处理优化",
+        "AIToolboxClassifier: AI 自主管理工具箱",
+        "AIDependencyAnalyzer: AI 自主维护依赖关系",
+        "运行时日志学习：record_call_sequence + learn_from_runtime_logs",
+        "ToolDispatcher: 统一工具调用分发器"
+      ],
+      "files": [
+        "src/tool_matrix/tool_selector.rs",
+        "src/tool_matrix/ai_classifier.rs",
+        "src/tool_matrix/dependency_analyzer.rs",
+        "src/tool_matrix/dispatcher.rs"
+      ],
+      "performance": {
+        "fast_search_latency_ms": "<10ms (目标)",
+        "fast_search_cached_ms": "~3ms (缓存命中)",
+        "ai_search_latency_ms": "<2s (含 LLM 调用)",
+        "background_rebuild_100_tools_ms": "~600ms",
+        "memory_10k_tools_mb": "~15MB (含缓存)"
+      }
+    },
+    "declarative_workflow": {
+      "description": "声明式工作流定义，支持 TOML 配置",
+      "features": [
+        "DeclarativeWorkflow",
+        "DeclarativeWorkflowStep",
+        "RetryConfig",
+        "ErrorHandler",
+        "ErrorStrategy"
+      ],
+      "files": [
+        "src/orchestrator/workflow.rs"
+      ]
+    },
+    "toml_workflow_loader": {
+      "description": "TOML 工作流加载器",
+      "features": [
+        "load_from_file",
+        "load_from_str",
+        "load_from_dir"
+      ],
+      "files": [
+        "src/orchestrator/workflow_loader.rs"
+      ]
+    },
+    "workflow_examples": {
+      "description": "TOML 工作流示例",
+      "files": [
+        "workflows/research_and_write.toml",
+        "workflows/code_review.toml"
+      ]
+    },
+    "integrated_modules": {
+      "description": "统一管理 dialogue、observability、prompt_engineering 三个模块",
+      "features": [
+        "共享状态管理 (Arc<RwLock>)",
+        "统一生命周期管理",
+        "与 autonomy 模块状态同步",
+        "优雅的错误处理和降级"
+      ],
+      "files": ["src/integration/mod.rs", "src/integration/modules_manager.rs"]
+    },
+    "dialogue_tools": {
+      "description": "对话状态管理工具集",
+      "tools": [
+        "get_state", "get_context", "get_history",
+        "set_goal", "set_plan", "record_tool_execution",
+        "transition", "reset", "get_stats",
+        "sync_with_autonomy"
+      ],
+      "states": ["Idle", "Clarifying", "Planning", "Executing", "Reviewing", "Completed", "Error", "WaitingForConfirmation"]
+    },
+    "observability_tools": {
+      "description": "可观测性工具集",
+      "tools": [
+        "get_recent_traces", "get_stats", "query_trace",
+        "query_errors", "export_traces", "cleanup_old_traces"
+      ],
+      "span_types": [
+        "UserRequest", "IntentClassification", "ToolSelection",
+        "ToolExecution", "ResponseGeneration", "StateTransition",
+        "AutonomousIteration", "CodeReview", "GitOperation"
+      ]
+    },
+    "prompt_tools": {
+      "description": "提示词工程工具集",
+      "tools": [
+        "load_role_template", "list_available_templates", "has_template",
+        "render_template", "render_task_template", "clear_cache",
+        "reload_template", "get_render_stats", "warmup_cache",
+        "get_all_roles", "get_all_task_templates"
+      ]
+    }
+  },
+
+  "service_metadata": {
+    "categories": [
+      "Utility", "File", "Network", "System", "Data",
+      "Ai", "Vcs", "Dialogue", "Observability", "Prompt"
+    ],
+    "qos_metrics": [
+      "latency_p99_ms", "success_rate", "concurrency", "idempotent"
+    ],
+    "lifecycle_methods": [
+      "service_name", "init", "health", "shutdown", "stats"
+    ],
+    "health_states": [
+      "Healthy", "Degraded", "Unhealthy", "Unknown"
+    ],
+    "error_strategies": [
+      "Retry", "Skip", "Fail", "Fallback"
+    ]
+  },
+
+  "ai_selector_features": {
+    "tool_index": {
+      "description": "倒排索引结构",
+      "indexes": [
+        "keyword_index: HashMap<String, HashSet<String>>",
+        "category_index: HashMap<ServiceCategory, HashSet<String>>",
+        "toolbox_index: HashMap<String, HashSet<String>>"
+      ]
+    },
+    "search_cache": {
+      "description": "LRU 搜索缓存",
+      "capacity": 1000,
+      "hit_latency_us": "~3000 (3ms)"
+    },
+    "metrics": {
+      "description": "SelectorMetrics 监控指标",
+      "fields": [
+        "total_searches",
+        "cache_hits",
+        "ai_searches",
+        "fast_searches",
+        "avg_latency_us",
+        "rebuild_count"
+      ],
+      "derived": [
+        "cache_hit_rate: f64",
+        "ai_search_ratio: f64"
+      ]
+    },
+    "ai_search_triggers": {
+      "query_length_threshold": 20,
+      "question_words": ["如何", "怎么", "怎样", "为什么", "什么", "哪个"],
+      "action_verbs": ["创建", "读取", "写入", "删除", "修改", "分析", "搜索", "下载", "上传"]
+    },
+    "runtime_learning": {
+      "description": "运行时日志学习",
+      "methods": [
+        "record_call_sequence: 记录工具调用序列",
+        "learn_from_runtime_logs: 从日志学习依赖关系"
+      ],
+      "max_sequences": 1000
+    }
+  },
+
+  "test_status": {
+    "total_tests": 236,
+    "passed": 236,
+    "failed": 0,
+    "coverage_modules": [
+      "autonomy",
+      "context",
+      "tool_matrix",
+      "tool_matrix::tool_selector",
+      "tool_matrix::ai_classifier",
+      "tool_matrix::dependency_analyzer",
+      "tool_matrix::dispatcher",
+      "dialogue",
+      "observability",
+      "prompt_engineering",
+      "integration",
+      "orchestrator::workflow_loader"
+    ]
+  },
+
+  "build_status": {
+    "release": "success",
+    "warnings": "minor (unused imports)"
+  },
+
+  "documentation": {
+    "user_docs": [
+      "docs/QUICKSTART.md",
+      "docs/USER_GUIDE.md",
+      "docs/DEMO.md",
+      "docs/CHANGELOG.md"
+    ],
+    "technical_reports": [
+      "docs/archive/MODULE_INTEGRATION_REPORT.md",
+      "docs/archive/MODULE_IMPROVEMENT_REPORT.md",
+      "docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md",
+      "docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md",
+      "docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md",
+      "docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md"
+    ],
+    "structure_docs": [
+      "structure_ensure/README.md",
+      "structure_ensure/QUICK_REFERENCE.md",
+      "structure_ensure/PROJECT_STRUCTURE.md",
+      "structure_ensure/project_structure.json",
+      "structure_ensure/TOOL_SELECTOR_GUIDE.md"
+    ],
+    "workflow_examples": [
+      "workflows/research_and_write.toml",
+      "workflows/code_review.toml"
+    ]
+  }
+}

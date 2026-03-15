@@ -1,11 +1,33 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokitai::tool;
 use urlencoding::encode;
 
 /// 下载工具集 - 支持下载 PDF 论文等文件
-pub struct DownloadTools;
+pub struct DownloadTools {
+    /// HTTP 客户端（带超时配置）
+    client: ureq::Agent,
+}
+
+impl Default for DownloadTools {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DownloadTools {
+    /// 创建新的下载工具（带超时配置）
+    pub fn new() -> Self {
+        let client = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(60))  // 下载超时 60 秒（PDF 文件较大）
+            .user_agent("Mozilla/5.0 (compatible; AI Assistant/1.0)")
+            .build();
+
+        Self { client }
+    }
+}
 
 /// 获取默认下载目录路径（跨平台支持）
 fn get_default_download_dir() -> PathBuf {
@@ -17,18 +39,16 @@ fn get_default_download_dir() -> PathBuf {
         }
     }
 
-    // 使用用户主目录下的 Downloads 文件夹
-    if let Some(home_dir) = dirs::download_dir() {
-        return home_dir;
+    // 使用当前工作目录下的 downloads 文件夹（沙箱安全）
+    if let Ok(current_dir) = std::env::current_dir() {
+        let downloads_dir = current_dir.join("downloads");
+        if downloads_dir.exists() || std::fs::create_dir_all(&downloads_dir).is_ok() {
+            return downloads_dir;
+        }
     }
 
-    // 回退到主目录
-    if let Some(home_dir) = dirs::home_dir() {
-        return home_dir.join("Downloads");
-    }
-
-    // 最后回退到当前目录
-    PathBuf::from("./downloads")
+    // 回退到临时目录
+    PathBuf::from("/tmp")
 }
 
 /// 确保下载目录存在
@@ -162,8 +182,7 @@ impl DownloadTools {
             .map_err(|e| format!("安全验证失败：{}", e))?;
 
         // 下载文件
-        let response = ureq::get(&url)
-            .set("User-Agent", "Mozilla/5.0 (compatible; AI Assistant)")
+        let response = self.client.get(&url)
             .call()
             .map_err(|e| format!("下载请求失败：{}", e))?;
 
@@ -223,8 +242,7 @@ impl DownloadTools {
         let file_path = download_dir.join(&final_filename);
 
         // 下载文件
-        let response = ureq::get(&url)
-            .set("User-Agent", "Mozilla/5.0 (compatible; AI Assistant)")
+        let response = self.client.get(&url)
             .call()
             .map_err(|e| format!("下载请求失败：{}", e))?;
 

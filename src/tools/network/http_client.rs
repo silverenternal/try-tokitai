@@ -103,6 +103,67 @@ impl Default for HttpClientTools {
     }
 }
 
+// ============================================================================
+// ServiceLifecycle 实现
+// ============================================================================
+
+use crate::tool_matrix::matrix::{ServiceLifecycle, ServiceHealth, ServiceStats};
+
+impl ServiceLifecycle for HttpClientTools {
+    fn service_name(&self) -> &str {
+        "http_client"
+    }
+
+    fn init(&mut self) -> Result<(), String> {
+        // HTTP 客户端使用静态 Lazy 初始化，连接池已自动管理
+        // 这里只记录日志
+        tracing::info!("HTTP 客户端服务初始化完成（连接池已就绪）");
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        // 检查 HTTP 客户端是否可用
+        // 简单检查：监控器是否正常工作
+        let stats = self.monitor.get_stats();
+        
+        // 如果最近有成功请求，认为服务健康
+        if stats.total_requests > 0 {
+            let error_rate = stats.failed_requests as f32 / stats.total_requests as f32;
+            if error_rate < 0.01 {
+                ServiceHealth::Healthy
+            } else if error_rate < 0.1 {
+                ServiceHealth::Degraded
+            } else {
+                ServiceHealth::Unhealthy
+            }
+        } else {
+            // 没有请求记录，尝试简单检查
+            ServiceHealth::Healthy
+        }
+    }
+
+    fn shutdown(&mut self) -> Result<(), String> {
+        // reqwest Client 使用静态 Lazy，不需要显式关闭
+        // 但可以清理监控器数据
+        self.monitor.clear_stats();
+        tracing::info!("HTTP 客户端服务已关闭");
+        Ok(())
+    }
+
+    fn stats(&self) -> ServiceStats {
+        let monitor_stats = self.monitor.get_stats();
+        ServiceStats {
+            total_requests: monitor_stats.total_requests,
+            success_count: monitor_stats.successful_requests,
+            failure_count: monitor_stats.failed_requests,
+            avg_latency_ms: monitor_stats.avg_response_time_ms,
+            p99_latency_ms: 0,  // RequestStats 没有 P99
+            last_called_at: None,  // RequestStats 没有时间戳
+            recent_latencies: vec![],
+        }
+    }
+}
+
 // SSRF 防护：禁止访问的内网地址段
 fn is_safe_url(url: &str) -> Result<(), String> {
     use std::net::IpAddr;

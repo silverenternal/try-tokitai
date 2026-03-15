@@ -310,8 +310,20 @@ impl WebSearchTools {
 
         tracing::info!("📰 搜索新闻：{} (最近{}天)", query, days);
 
-        // 尝试从环境变量获取 SearXNG 实例
+        // 收集所有要尝试的 SearXNG 实例
+        let mut instances_to_try = Vec::new();
+
+        // 1. 优先使用环境变量
         if let Ok(searxng_url) = std::env::var("SEARXNG_URL") {
+            instances_to_try.push(searxng_url);
+        }
+
+        // 2. 添加公共实例
+        instances_to_try.push("https://searx.be".to_string());
+        instances_to_try.push("https://search.ononoki.org".to_string());
+
+        // 依次尝试每个实例
+        for searxng_url in instances_to_try {
             let encoded_query = encode(&query);
             let url = format!(
                 "{}/search?q={}&format=json&engines=bing_news&categories=news",
@@ -334,16 +346,16 @@ impl WebSearchTools {
             }
         }
 
-        // 回退到普通网页搜索
-        tracing::warn!("SearXNG 新闻实例不可用，使用普通网页搜索");
-        self.search_web(query, Some(days as usize))
+        // 所有 SearXNG 实例都失败，回退到普通网页搜索
+        tracing::warn!("所有 SearXNG 新闻实例不可用，使用普通网页搜索");
+        self.search_web(query, Some(days.min(5) as usize))
     }
 }
 
 impl WebSearchTools {
     pub fn new() -> Self {
         let client = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(5))  // 降低超时到 5 秒
             .user_agent("Mozilla/5.0 (compatible; AI Assistant/1.0)")
             .build();
 

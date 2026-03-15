@@ -218,6 +218,18 @@ impl DialogueStateMachine {
 
         Ok(machine)
     }
+    
+    /// 创建不带持久化的状态机（用于测试）
+    pub fn new_without_persistence() -> Self {
+        use std::env;
+        let temp_dir = env::temp_dir().join("dialogue_test");
+        Self::new(temp_dir.clone()).unwrap_or_else(|_| Self {
+            current_state: DialogueState::Idle,
+            context: DialogueContext::new(),
+            history: DialogueHistory::new(),
+            storage_dir: temp_dir,
+        })
+    }
 
     /// 转换状态
     pub fn transition(&mut self, new_state: DialogueState, reason: Option<String>) -> Result<(), DialogueError> {
@@ -269,6 +281,74 @@ impl DialogueStateMachine {
     /// 获取历史
     pub fn history(&self) -> &DialogueHistory {
         &self.history
+    }
+    
+    /// 获取状态转换历史
+    pub fn get_history(&self) -> &Vec<StateTransition> {
+        &self.history.transitions
+    }
+    
+    /// 设置任务目标
+    pub fn set_goal(&mut self, goal: String) -> Result<(), DialogueError> {
+        self.context.current_goal = Some(goal);
+        self.save_state()
+    }
+    
+    /// 设置任务计划
+    pub fn set_plan(&mut self, plan: String) -> Result<(), DialogueError> {
+        self.context.plan = Some(plan);
+        self.save_state()
+    }
+    
+    /// 记录工具执行
+    pub fn record_tool(&mut self, tool_name: String) -> Result<(), DialogueError> {
+        self.context.executed_tools.push(tool_name);
+        self.save_state()
+    }
+    
+    /// 添加待确认事项
+    pub fn add_confirmation(&mut self, item: String) -> Result<(), DialogueError> {
+        self.context.pending_confirmations.push(item);
+        self.save_state()
+    }
+    
+    /// 清除待确认事项
+    pub fn clear_confirmations(&mut self) -> Result<(), DialogueError> {
+        self.context.pending_confirmations.clear();
+        self.save_state()
+    }
+    
+    /// 设置变量
+    pub fn set_variable(&mut self, key: String, value: String) -> Result<(), DialogueError> {
+        self.context.variables.insert(key, value);
+        self.save_state()
+    }
+    
+    /// 获取变量
+    pub fn get_variable(&self, key: &str) -> Option<&String> {
+        self.context.variables.get(key)
+    }
+    
+    /// 保存到文件
+    pub fn save_to_file(&self, path: &str) -> Result<(), DialogueError> {
+        let state = DialogueStateFile {
+            current_state: self.current_state.clone(),
+            context: self.context.clone(),
+            history: self.history.clone(),
+        };
+        let content = serde_json::to_string_pretty(&state)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+    
+    /// 从文件加载
+    pub fn load_from_file(&mut self, path: &str) -> Result<(), DialogueError> {
+        let content = fs::read_to_string(path)?;
+        let state: DialogueStateFile = serde_json::from_str(&content)?;
+        self.current_state = state.current_state;
+        self.context = state.context;
+        self.history = state.history;
+        Ok(())
     }
 
     /// 重置状态机

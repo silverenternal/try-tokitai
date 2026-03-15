@@ -706,7 +706,7 @@ mod tests {
         // 搜索应该能找到一些结果
         let results = index.search("programming language").unwrap();
         // SimHash 可能找不到结果，这取决于阈值
-        assert!(results.len() >= 0);
+        // 验证不 panic 即可
     }
 
     #[test]
