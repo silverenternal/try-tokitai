@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "edition": "2021",
   "description": "基于 Tokitai 的 AI 助手项目，整合多种工具和能力，支持服务化架构和 AI 原生工具选择",
-  "last_updated": "2026-03-15",
+  "last_updated": "2026-03-18",
 
   "quick_stats": {
-    "total_source_lines": 26600,
-    "total_source_files": 78,
+    "total_source_lines": 27500,
+    "total_source_files": 99,
     "core_modules": 10,
     "toolboxes": 11,
     "tool_functions": 63
@@ -25,7 +25,7 @@
     },
     {
       "name": "核心功能层",
-      "components": ["Context Storage", "Autonomy Agents", "Dialogue FSM (已集成)", "Observability (已集成)", "Prompt Engineering (已集成)", "Service Registry (已集成)", "AI Tool Selector (新增)"]
+      "components": ["Context Storage", "Autonomy Agents", "Dialogue FSM (已集成)", "Observability (已集成)", "Prompt Engineering (已集成)", "Service Registry (已集成)", "AI Tool Selector (已集成)"]
     },
     {
       "name": "工具执行层",
@@ -41,9 +41,9 @@
   "src_modules": {
     "main": {
       "file": "main.rs",
-      "lines": 1230,
+      "lines": 1884,
       "description": "主程序入口，AiAssistant 结构体整合所有工具",
-      "features": ["服务生命周期管理", "集成模块管理", "AI 工具选择器初始化"]
+      "features": ["服务生命周期管理", "集成模块管理", "AI 工具选择器初始化", "双轨服务架构"]
     },
     "integration": {
       "lines": 325,
@@ -54,28 +54,28 @@
     },
     "dialogue": {
       "lines": 720,
-      "percentage": 2.7,
+      "percentage": 2.6,
       "status": "已集成",
       "files": ["mod.rs", "state_machine.rs", "dialogue_tools.rs"],
       "features": ["对话状态机", "tokitai ToolProvider", "与 autonomy 同步"]
     },
     "observability": {
       "lines": 830,
-      "percentage": 3.1,
+      "percentage": 3.0,
       "status": "已集成",
       "files": ["mod.rs", "tracing.rs", "observability_tools.rs"],
       "features": ["全链路追踪", "tokitai ToolProvider", "多维度查询"]
     },
     "prompt_engineering": {
       "lines": 965,
-      "percentage": 3.6,
+      "percentage": 3.5,
       "status": "已集成",
       "files": ["mod.rs", "manager.rs", "renderer.rs", "template.rs", "prompt_tools.rs"],
       "features": ["模板管理", "tokitai ToolProvider", "渲染统计"]
     },
     "tools": {
       "lines": 7114,
-      "percentage": 26.7,
+      "percentage": 25.9,
       "submodules": {
         "io": { "lines": 1517, "tools": 15 },
         "network": { "lines": 4139, "tools": 20, "service_lifecycle": true },
@@ -86,24 +86,24 @@
     },
     "context": {
       "lines": 4794,
-      "percentage": 18.0,
+      "percentage": 17.4,
       "features": ["ICHC", "HCD", "LSFI", "三层存储"]
     },
     "autonomy": {
       "lines": 2684,
-      "percentage": 10.1,
+      "percentage": 9.8,
       "status": "部分集成",
       "features": ["多 Agent 协作", "任务分解", "迭代追踪", "Git 工作流", "智能工具推荐"]
     },
     "orchestrator": {
       "lines": 3528,
-      "percentage": 13.3,
+      "percentage": 12.8,
       "files": ["mod.rs", "orchestrator.rs", "role_switcher.rs", "workflow.rs", "workflow_loader.rs"],
       "features": ["工作流引擎", "角色切换", "上下文优化", "TOML 工作流加载器"]
     },
     "tool_matrix": {
-      "lines": 3362,
-      "percentage": 12.6,
+      "lines": 4200,
+      "percentage": 15.3,
       "files": [
         "mod.rs",
         "matrix.rs",
@@ -114,7 +114,12 @@
         "ai_classifier.rs",
         "dependency_analyzer.rs",
         "dispatcher.rs",
-        "metadata_enhancer.rs"
+        "metadata_enhancer.rs",
+        "rule_classifier.rs",
+        "query_enhancer.rs",
+        "tool_generator.rs",
+        "trie_index.rs",
+        "dynamic_registry.rs"
       ],
       "features": [
         "工具箱分类",
@@ -128,7 +133,12 @@
         "AI 工具箱分类器",
         "AI 依赖关系分析器",
         "工具调用分发器",
-        "tokitai 元数据增强器"
+        "tokitai 元数据增强器",
+        "规则分类器 (分层缓存 L3)",
+        "查询增强器 (同义词/意图识别)",
+        "工具生成器 (模板系统)",
+        "Trie 树索引 (IMP-003)",
+        "动态工具注册表 (IMP-004)"
       ]
     }
   },
@@ -192,6 +202,73 @@
         "background_rebuild_100_tools_ms": "~600ms",
         "memory_10k_tools_mb": "~15MB (含缓存)"
       }
+    },
+    "rule_classifier": {
+      "description": "规则分类器（分层缓存 L3）",
+      "features": [
+        "HierarchicalClassifier: 分层分类器",
+        "RuleClassifier: 规则分类器核心",
+        "ToolboxRulesConfig: 工具箱规则配置",
+        "CacheStats: 缓存统计",
+        "from_tool_tags: 从工具标签自动构建规则",
+        "merge_from_tool_tags: 合并工具标签规则"
+      ],
+      "files": [
+        "src/tool_matrix/rule_classifier.rs"
+      ]
+    },
+    "query_enhancer": {
+      "description": "查询增强器（同义词/意图识别）",
+      "features": [
+        "QueryEnhancer: 查询增强核心",
+        "EnhancedQuery: 增强查询结果",
+        "IntentRecognition: 意图识别",
+        "SynonymsConfig: 同义词配置",
+        "IntentPatternsConfig: 意图模式配置"
+      ],
+      "files": [
+        "src/tool_matrix/query_enhancer.rs"
+      ]
+    },
+    "tool_generator": {
+      "description": "工具生成器（模板系统）",
+      "features": [
+        "ToolGenerator: 工具生成核心",
+        "ToolTemplate: 工具模板",
+        "ToolGenerationRequest: 生成请求",
+        "ToolGenerationResult: 生成结果",
+        "CodeTemplate: 代码模板",
+        "TestTemplate: 测试模板",
+        "generate_with_tokitai_macro: 使用 tokitai 宏生成"
+      ],
+      "files": [
+        "src/tool_matrix/tool_generator.rs"
+      ]
+    },
+    "trie_index": {
+      "description": "Trie 树索引和 BK-Tree 拼写纠正（IMP-003）",
+      "features": [
+        "TrieIndex: Trie 树索引",
+        "BKTree: BK-Tree 拼写纠正",
+        "HybridIndex: 混合索引",
+        "TrieIndexStats: 索引统计",
+        "BKTreeStats: BK-Tree 统计"
+      ],
+      "files": [
+        "src/tool_matrix/trie_index.rs"
+      ]
+    },
+    "dynamic_registry": {
+      "description": "动态工具注册表（IMP-004 热加载）",
+      "features": [
+        "DynamicToolRegistry: 动态注册表核心",
+        "DynamicToolMetadata: 动态工具元数据",
+        "DynamicRegistryStats: 注册表统计",
+        "DynamicToolBuilder: 动态工具构建器"
+      ],
+      "files": [
+        "src/tool_matrix/dynamic_registry.rs"
+      ]
     },
     "declarative_workflow": {
       "description": "声明式工作流定义，支持 TOML 配置",
@@ -375,7 +452,8 @@
       "structure_ensure/QUICK_REFERENCE.md",
       "structure_ensure/PROJECT_STRUCTURE.md",
       "structure_ensure/project_structure.json",
-      "structure_ensure/TOOL_SELECTOR_GUIDE.md"
+      "structure_ensure/TOOL_SELECTOR_GUIDE.md",
+      "structure_ensure/SERVICES.md"
     ],
     "workflow_examples": [
       "workflows/research_and_write.toml",

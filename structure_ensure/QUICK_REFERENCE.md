@@ -1,7 +1,7 @@
 # try-tokitai 快速参考卡片
 
-> **最新版本**: AI 原生工具选择器深化落实版
-> **最后更新**: 2026-03-15
+> **最新版本**: AI 原生工具选择器深化落实版 + 完整工具矩阵
+> **最后更新**: 2026-03-18
 > **测试状态**: 236/236 通过 ✅
 
 ## 🚀 常用命令
@@ -21,10 +21,15 @@ cargo test                       # 所有测试
 cargo test autonomy              # 测试自主进化模块
 cargo test context               # 测试上下文存储
 cargo test tool_matrix           # 测试工具矩阵/服务化
-cargo test tool_selector         # 测试轻量级工具选择器（新增）
-cargo test ai_classifier         # 测试 AI 工具箱分类器（新增）
-cargo test dependency_analyzer   # 测试 AI 依赖分析器（新增）
-cargo test dispatcher            # 测试工具调用分发器（新增）
+cargo test tool_selector         # 测试轻量级工具选择器
+cargo test ai_classifier         # 测试 AI 工具箱分类器
+cargo test dependency_analyzer   # 测试 AI 依赖分析器
+cargo test dispatcher            # 测试工具调用分发器
+cargo test rule_classifier       # 测试规则分类器（新增）
+cargo test query_enhancer        # 测试查询增强器（新增）
+cargo test tool_generator        # 测试工具生成器（新增）
+cargo test trie_index            # 测试 Trie 索引（新增）
+cargo test dynamic_registry      # 测试动态注册表（新增）
 cargo test integration           # 测试集成模块
 cargo test dialogue              # 测试对话状态机
 cargo test observability         # 测试可观测性
@@ -44,7 +49,7 @@ cargo build --release
 
 | 文件 | 说明 |
 |------|------|
-| `src/main.rs` | 程序入口，AiAssistant 结构体 |
+| `src/main.rs` | 程序入口，AiAssistant 结构体 (1,884 行) |
 | `src/config.rs` | 配置管理 |
 | `src/sandbox.rs` | 沙箱系统 |
 | `src/integration/modules_manager.rs` | 集成模块管理器 |
@@ -54,13 +59,18 @@ cargo build --release
 | `src/tool_matrix/ai_classifier.rs` | AI 工具箱分类器 |
 | `src/tool_matrix/dependency_analyzer.rs` | AI 依赖关系分析器 |
 | `src/tool_matrix/dispatcher.rs` | 工具调用分发器 |
+| `src/tool_matrix/rule_classifier.rs` | 规则分类器（分层缓存 L3，IMP-001） |
+| `src/tool_matrix/query_enhancer.rs` | 查询增强器（同义词/意图识别） |
+| `src/tool_matrix/tool_generator.rs` | 工具生成器（模板系统，IMP-002） |
+| `src/tool_matrix/trie_index.rs` | Trie 树索引和 BK-Tree 拼写纠正（IMP-003） |
+| `src/tool_matrix/dynamic_registry.rs` | 动态工具注册表（IMP-004 热加载） |
 | `src/orchestrator/workflow.rs` | 声明式工作流定义和执行引擎 |
 | `src/orchestrator/workflow_loader.rs` | TOML 工作流加载器 |
 | `src/tools/` | 工具集合 (7,114 行) |
 | `src/context/` | 上下文存储 (4,794 行) |
 | `src/autonomy/` | 自主进化 (2,684 行) |
 | `src/orchestrator/` | 编排调度 (3,528 行) |
-| `src/tool_matrix/` | 工具矩阵/服务注册表 (3,362 行) |
+| `src/tool_matrix/` | 工具矩阵/服务注册表 (4,200 行) |
 | `src/dialogue/` | 对话状态机 (已集成) |
 | `src/observability/` | 可观测性 (已集成) |
 | `src/prompt_engineering/` | 提示词工程 (已集成) |
@@ -339,19 +349,19 @@ let workflows = WorkflowLoader::load_from_dir("workflows/")?;
 ## 📊 模块规模
 
 ```
-tools/           26.7%  (7,114 行)
-context/         18.0%  (4,794 行)
-orchestrator/    13.3%  (3,528 行)
-autonomy/        10.1%  (2,684 行)
-tool_matrix/     12.6%  (3,362 行)  ← AI 工具选择器新增
-main_core         8.7%  (2,326 行)
+tools/           25.9%  (7,114 行)
+context/         17.4%  (4,794 行)
+orchestrator/    12.8%  (3,528 行)
+tool_matrix/     15.3%  (4,200 行)  ← +838 行 (新增模块)
+autonomy/         9.8%  (2,684 行)
+main_core         6.9%  (1,884 行)
 observability/    1.7%  (  456 行)
-dialogue/         1.7%  (  443 行)
-prompt_eng/       1.5%  (  395 行)
+dialogue/         1.6%  (  443 行)
+prompt_eng/       1.4%  (  395 行)
 integration/      1.2%  (  325 行)
-其他              6.5%  (1,733 行)
+其他              6.0%  (1,676 行)
 ────────────────────────────────
-总计                    ~26,600 行
+总计                    ~27,500 行
 ```
 
 ---
@@ -405,12 +415,40 @@ integration/      1.2%  (  325 行)
 - **重试/超时**: 内置支持
 - **错误处理**: Retry/Skip/Fail/Fallback
 
-### AI 原生工具选择器（新增）
+### AI 原生工具选择器
 - **ToolIndex**: 倒排索引，关键词/分类/工具箱检索
 - **LightweightToolSelector**: 快速搜索 <10ms，AI 搜索 <2s
 - **AIToolboxClassifier**: AI 自主管理工具箱
 - **AIDependencyAnalyzer**: AI 自主维护依赖关系
 - **后台异步重建**: 不阻塞主线程
+
+### 规则分类器（IMP-001）
+- **HierarchicalClassifier**: 分层分类器（L1 精确缓存 → L2 模糊缓存 → L3 规则 → L4 LLM）
+- **RuleClassifier**: 规则分类器核心
+- **from_tool_tags**: 从工具标签自动构建规则
+- **merge_from_tool_tags**: 合并工具标签规则
+
+### 查询增强器
+- **QueryEnhancer**: 查询增强核心
+- **EnhancedQuery**: 增强查询结果
+- **IntentRecognition**: 意图识别
+- **SynonymsConfig**: 同义词配置
+
+### 工具生成器（IMP-002）
+- **ToolGenerator**: 工具生成核心
+- **generate_with_tokitai_macro**: 使用 tokitai 宏生成
+- **CodeTemplate**: 代码模板
+- **TestTemplate**: 测试模板
+
+### Trie 索引（IMP-003）
+- **TrieIndex**: Trie 树索引
+- **BKTree**: BK-Tree 拼写纠正
+- **HybridIndex**: 混合索引
+
+### 动态注册表（IMP-004）
+- **DynamicToolRegistry**: 动态注册表核心
+- **DynamicToolBuilder**: 动态工具构建器
+- **热加载**: 运行时添加/移除工具
 
 ---
 
@@ -441,9 +479,12 @@ test result: ok. 236 passed; 0 failed
 | 文档 | 说明 |
 |------|------|
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 完整项目结构 |
+| [SERVICES.md](SERVICES.md) | 服务双轨架构说明 |
 | [../docs/USER_GUIDE.md](../docs/USER_GUIDE.md) | 用户指南 |
 | [../docs/QUICKSTART.md](../docs/QUICKSTART.md) | 快速启动 |
-| [../docs/archive/MODULE_IMPROVEMENT_REPORT.md](../docs/archive/MODULE_IMPROVEMENT_REPORT.md) | 改进报告 |
+| [../docs/ARCHITECTURE_IMPROVEMENT_PLAN.md](../docs/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划 |
+| [../docs/ARCHITECTURE_IMPROVEMENT_REPORT.md](../docs/ARCHITECTURE_IMPROVEMENT_REPORT.md) | 架构改进报告 |
+| [../docs/archive/MODULE_IMPROVEMENT_REPORT.md](../docs/archive/MODULE_IMPROVEMENT_REPORT.md) | 模块改进报告 |
 | [../docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md](../docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md) | 服务化架构实施报告 |
 | [../docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md](../docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md) | 工具选择器设计 |
 | [../docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md](../docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md) | 深化落实报告 |
@@ -466,6 +507,6 @@ test result: ok. 236 passed; 0 failed
 
 ---
 
-**最后更新**: 2026-03-15
+**最后更新**: 2026-03-18
 **测试**: 236/236 ✅
 **构建**: Release ✅

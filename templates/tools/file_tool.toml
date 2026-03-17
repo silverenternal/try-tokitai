@@ -1,0 +1,56 @@
+[template]
+id = "file_tool"
+name = "文件操作工具模板"
+description = "用于读取/写入/复制/删除文件的工具模板"
+category = "file_ops"
+version = "1.0.0"
+
+[parameters]
+path = { type = "string", description = "文件路径", required = true }
+content = { type = "string", description = "文件内容（写入时使用）", required = false }
+operation = { type = "string", description = "操作类型：read/write/copy/delete", required = true }
+
+[code]
+language = "rust"
+template = '''
+use anyhow::Result;
+use std::path::Path;
+use tokio::fs;
+
+/// {{tool_name}} - {{tool_description}}
+pub async fn {{tool_name}}(&self, {{param_names}}: {{param_types}}) -> Result<{{return_type}}> {
+    // 安全检查：验证路径在沙箱范围内
+    self.sandbox.validate_path(&{{path_param}})?;
+    
+    // 工具逻辑
+    {{tool_body}}
+    
+    // 日志记录
+    tracing::info!("{{tool_name}} called with {:?}", {{param_names}});
+    
+    Ok(result)
+}
+'''
+
+[tests]
+language = "rust"
+template = '''
+#[tokio::test]
+async fn test_{{tool_name}}() {
+    let tool = Toolset::new();
+    let result = tool.{{tool_name}}({{test_input}}).await;
+    assert!(result.is_ok());
+}
+'''
+
+[examples]
+usage = '''
+// 读取文件
+let content = read_file("/path/to/file.txt").await?;
+
+// 写入文件
+write_file("/path/to/file.txt", "content").await?;
+
+// 复制文件
+copy_file("/src/file.txt", "/dst/file.txt").await?;
+'''

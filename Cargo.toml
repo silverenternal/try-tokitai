@@ -60,6 +60,9 @@ notify = "6.1"
 # PDF processing for PDF tools
 lopdf = "0.34"
 
+# HMAC for dynamic tool signature verification
+hmac = "0.12"
+
 # Concurrent data structures for request monitoring
 parking_lot = "0.12"
 
@@ -71,6 +74,15 @@ async-trait = "0.1"
 
 # Terminal UI for interactive input
 crossterm = "0.27"
+
+# Template engine for tool generator
+tera = "1.19"
+
+# Trie index for tool search optimization (IMP-003)
+fst = "0.4"
+
+# BK-Tree for spell correction (IMP-003)
+bk-tree = "0.5"
 
 # Benchmark dependencies
 criterion = { version = "0.5", features = ["html_reports"] }

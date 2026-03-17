@@ -1,0 +1,63 @@
+[template]
+id = "network_tool"
+name = "网络工具模板"
+description = "用于 HTTP 请求/下载/上传的网络工具模板"
+category = "network_ops"
+version = "1.0.0"
+
+[parameters]
+url = { type = "string", description = "目标 URL", required = true }
+method = { type = "string", description = "HTTP 方法：GET/POST/PUT/DELETE", required = false, default = "GET" }
+body = { type = "string", description = "请求体（POST/PUT 时使用）", required = false }
+timeout_secs = { type = "u64", description = "超时时间（秒）", required = false, default = "30" }
+
+[code]
+language = "rust"
+template = '''
+use anyhow::Result;
+use reqwest::Client;
+use std::time::Duration;
+
+/// {{tool_name}} - {{tool_description}}
+pub async fn {{tool_name}}(&self, {{param_names}}: {{param_types}}) -> Result<{{return_type}}> {
+    // SSRF 防护：检查 URL 是否指向内网
+    self.sandbox.validate_url(&{{url_param}})?;
+    
+    // 创建 HTTP 客户端
+    let client = Client::builder()
+        .timeout(Duration::from_secs({{timeout_secs}}))
+        .build()?;
+    
+    // 工具逻辑
+    {{tool_body}}
+    
+    // 日志记录
+    tracing::info!("{{tool_name}} called with URL: {}", {{url_param}});
+    
+    Ok(result)
+}
+'''
+
+[tests]
+language = "rust"
+template = '''
+#[tokio::test]
+async fn test_{{tool_name}}() {
+    let tool = Toolset::new();
+    // 使用测试 URL
+    let result = tool.{{tool_name}}("https://httpbin.org/get").await;
+    assert!(result.is_ok());
+}
+'''
+
+[examples]
+usage = '''
+// GET 请求
+let response = http_get("https://api.example.com/data").await?;
+
+// POST 请求
+let response = http_post("https://api.example.com/data", json_body).await?;
+
+// 下载文件
+download_file("https://example.com/file.zip", "/path/to/save.zip").await?;
+'''

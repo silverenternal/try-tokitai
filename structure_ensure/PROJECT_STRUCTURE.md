@@ -1,8 +1,8 @@
 # try-tokitai 项目结构指南
 
 > 本文档帮助开发者快速了解项目架构、模块职责和代码组织
-> **最新版本**: AI 原生工具选择器深化落实版
-> **最后更新**: 2026-03-15
+> **最新版本**: AI 原生工具选择器深化落实版 + 完整工具矩阵
+> **最后更新**: 2026-03-18
 
 ---
 
@@ -10,8 +10,8 @@
 
 | 指标 | 数值 |
 |------|------|
-| **代码行数** | ~26,600 行 Rust |
-| **源代码文件** | 78 个 |
+| **代码行数** | ~27,500 行 Rust |
+| **源代码文件** | 99 个 |
 | **核心模块** | 10 个 |
 | **工具箱** | 11 个 |
 | **工具函数** | 63+ 个 |
@@ -283,7 +283,7 @@ impl AiAssistant {
 
 ---
 
-### 2. tool_matrix/ - 工具矩阵/服务注册表 (3,362 行)
+### 2. tool_matrix/ - 工具矩阵/服务注册表 (4,200 行)
 
 **文件**:
 - `src/tool_matrix/matrix.rs` - 服务化元数据/生命周期/指标收集
@@ -295,6 +295,11 @@ impl AiAssistant {
 - `src/tool_matrix/dependency_analyzer.rs` - AI 依赖关系分析器
 - `src/tool_matrix/dispatcher.rs` - 工具调用分发器
 - `src/tool_matrix/metadata_enhancer.rs` - tokitai 元数据增强器
+- `src/tool_matrix/rule_classifier.rs` - 规则分类器（分层缓存 L3）
+- `src/tool_matrix/query_enhancer.rs` - 查询增强器（同义词/意图识别）
+- `src/tool_matrix/tool_generator.rs` - 工具生成器（模板系统）
+- `src/tool_matrix/trie_index.rs` - Trie 树索引和 BK-Tree 拼写纠正（IMP-003）
+- `src/tool_matrix/dynamic_registry.rs` - 动态工具注册表（IMP-004 热加载）
 
 **服务化功能**:
 
@@ -797,17 +802,17 @@ context/
 ### 按代码行数
 
 ```
-tools/           ████████████████████████████  27.6%  (7,114 行)
-context/         ████████████                 18.6%  (4,794 行)
-orchestrator/    ████████                     13.7%  (3,528 行)
-autonomy/        ██████                       10.4%  (2,684 行)
-tool_matrix/     ████                          7.3%  (1,892 行)
-main_core        ██████                        9.0%  (2,326 行)
-observability/   █                             1.8%  (  456 行)
-dialogue/        █                             1.7%  (  443 行)
-prompt_eng/      █                             1.5%  (  395 行)
-integration/     █                             1.3%  (  325 行)
-其他             ████                          7.1%  (1,843 行)
+tools/           ████████████████████████████  25.9%  (7,114 行)
+context/         ████████████                 17.4%  (4,794 行)
+orchestrator/    ████████                     12.8%  (3,528 行)
+tool_matrix/     ███████                      15.3%  (4,200 行)  ← +838 行 (新增模块)
+autonomy/        ██████                        9.8%  (2,684 行)
+main_core        ███████                       6.9%  (1,884 行)
+observability/   █                             1.7%  (  456 行)
+dialogue/        █                             1.6%  (  443 行)
+prompt_eng/      █                             1.4%  (  395 行)
+integration/     █                             1.2%  (  325 行)
+其他             ██████                        6.0%  (1,676 行)
 ```
 
 ### 按文件数量
@@ -817,7 +822,7 @@ tools/:          24 个文件
 context/:        11 个文件
 autonomy/:        9 个文件
 orchestrator/:    6 个文件 (含 workflow_loader)
-tool_matrix/:     5 个文件
+tool_matrix/:    15 个文件 (新增 rule_classifier/query_enhancer/tool_generator/trie_index/dynamic_registry)
 prompt_engineering/: 5 个文件
 dialogue/:        3 个文件
 observability/:   3 个文件

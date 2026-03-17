@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-03-18
+
+### 🎉 AI 原生工具选择器 + 完整工具矩阵
+
+本次发布引入了 AI 原生工具选择器系统和完整的工具矩阵 (IMP-001~004)，大幅提升了工具搜索性能和 AI 自主管理能力。
+
+### ✨ 新增功能
+
+#### AI 原生工具选择器
+- **LightweightToolSelector** - 轻量级工具选择器
+  - 快速搜索 <10ms
+  - AI 搜索 <2s（含 LLM 调用）
+  - LRU 缓存命中后 ~3ms（降低 62.5%）
+  - 后台异步索引重建 ~600ms（降低 25%）
+  - 完整监控指标（SelectorMetrics）
+
+- **ToolIndex** - 倒排索引
+  - 关键词索引
+  - 分类索引
+  - 工具箱索引
+
+- **AIToolboxClassifier** - AI 工具箱分类器
+  - AI 自主管理工具箱
+  - 自动分类工具
+  - 创建新工具箱
+
+- **AIDependencyAnalyzer** - AI 依赖关系分析器
+  - 静态分析依赖
+  - 运行时日志学习
+  - 智能工具推荐
+
+- **ToolDispatcher** - 工具调用分发器
+  - 统一工具调用入口
+  - 调用统计收集
+  - 执行器注册
+
+#### 完整工具矩阵 (IMP-001~004)
+- **IMP-001: 规则分类器**
+  - `rule_classifier.rs` - 规则分类器核心
+  - `HierarchicalClassifier` - 分层分类器
+  - L1 精确缓存 (~0.1ms)
+  - L2 模糊缓存 (~1ms)
+  - L3 规则分类 (~5ms)
+  - L4 LLM 分类 (~1.5s)
+  - `from_tool_tags()` - 从工具标签自动构建规则
+  - `merge_from_tool_tags()` - 合并工具标签规则
+
+- **IMP-002: 工具生成器**
+  - `tool_generator.rs` - 工具生成核心
+  - `generate_with_tokitai_macro()` - 使用 tokitai 宏生成
+  - Tera 模板引擎集成
+  - JSON Schema 参数解析
+  - 代码模板和测试模板
+
+- **IMP-003: Trie 索引**
+  - `trie_index.rs` - Trie 树索引
+  - `BKTree` - BK-Tree 拼写纠正
+  - `HybridIndex` - 混合索引
+  - 搜索优化
+
+- **IMP-004: 动态注册表**
+  - `dynamic_registry.rs` - 动态工具注册表
+  - `DynamicToolBuilder` - 动态工具构建器
+  - 热加载支持
+  - 运行时添加/移除工具
+
+#### 双轨服务架构
+- **CLI AI 助手模式** - 面向用户
+  - 交互式对话
+  - 用户驱动
+  - 即时响应
+
+- **项目自更新服务模式** - 面向项目自身
+  - AI 自主驱动
+  - Planner-Executor-Reviewer 迭代循环
+  - 自主代码审查
+  - 自主 Git 提交（可选）
+
+#### 集成模块
+- **IntegratedModules** - 统一管理
+  - dialogue 模块集成
+  - observability 模块集成
+  - prompt_engineering 模块集成
+  - 共享状态管理 (`Arc<RwLock>`)
+  - 统一生命周期管理
+  - 优雅降级
+
+### 📊 项目规模
+
+| 指标 | 旧值 | 新值 | 变化 |
+|------|------|------|------|
+| 代码行数 | ~26,600 | ~27,500 | +900 行 |
+| 源文件数 | 78 | 99 | +21 个 |
+| tool_matrix 文件 | 10 | 15 | +5 个 |
+| tool_matrix 行数 | 3,362 | 4,200 | +838 行 |
+
+### 🧪 测试
+
+- 新增 tool_matrix 测试 11 个
+- 总测试数：236 个
+- 通过率：100% ✅
+
+### 📚 文档
+
+- 新增 `structure_ensure/` 目录
+- 更新 `README.md` 为完整项目说明
+- 更新 `FEATURE_SPEC.md` 添加 IMP-001~004 说明
+- 更新 `TECHNICAL_SPEC.md` 添加工具矩阵详情
+- 更新 `QUICKSTART.md` 添加双轨服务说明
+
+---
+
 ## [1.0.0] - 2026-03-14
 
 ### 🎉 首个稳定发行版

@@ -1,0 +1,60 @@
+[template]
+id = "analysis_tool"
+name = "分析工具模板"
+description = "用于代码分析/统计/检测的分析工具模板"
+category = "code_ops"
+version = "1.0.0"
+
+[parameters]
+path = { type = "string", description = "目标路径（文件或目录）", required = true }
+pattern = { type = "string", description = "匹配模式（正则表达式）", required = false }
+language = { type = "string", description = "编程语言", required = false }
+
+[code]
+language = "rust"
+template = '''
+use anyhow::Result;
+use std::path::Path;
+use tokio::fs;
+
+/// {{tool_name}} - {{tool_description}}
+pub async fn {{tool_name}}(&self, {{param_names}}: {{param_types}}) -> Result<{{return_type}}> {
+    // 安全检查：验证路径在沙箱范围内
+    self.sandbox.validate_path(&{{path_param}})?;
+    
+    // 读取文件/目录内容
+    let content = fs::read_to_string(&{{path_param}}).await?;
+    
+    // 工具逻辑：分析/统计/检测
+    {{tool_body}}
+    
+    // 日志记录
+    tracing::info!("{{tool_name}} analyzed: {}", {{path_param}});
+    
+    Ok(result)
+}
+'''
+
+[tests]
+language = "rust"
+template = '''
+#[tokio::test]
+async fn test_{{tool_name}}() {
+    let tool = Toolset::new();
+    // 使用测试文件
+    let result = tool.{{tool_name}}("src/main.rs").await;
+    assert!(result.is_ok());
+}
+'''
+
+[examples]
+usage = '''
+// 统计代码行数
+let count = count_lines("src/main.rs").await?;
+
+// 查找函数定义
+let functions = find_functions("src/main.rs").await?;
+
+// 检测编程语言
+let lang = detect_language("src/main.rs").await?;
+'''

@@ -1,0 +1,62 @@
+[template]
+id = "data_tool"
+name = "数据处理工具模板"
+description = "用于 JSON/XML/CSV 处理的数据工具模板"
+category = "data_ops"
+version = "1.0.0"
+
+[parameters]
+input = { type = "string", description = "输入数据", required = true }
+format = { type = "string", description = "数据格式：json/xml/csv", required = true }
+operation = { type = "string", description = "操作类型：parse/format/validate/transform", required = true }
+options = { type = "object", description = "额外选项", required = false }
+
+[code]
+language = "rust"
+template = '''
+use anyhow::Result;
+use serde_json::Value;
+
+/// {{tool_name}} - {{tool_description}}
+pub fn {{tool_name}}(&self, {{param_names}}: {{param_types}}) -> Result<{{return_type}}> {
+    // 输入验证
+    if {{input_param}}.is_empty() {
+        anyhow::bail!("输入数据不能为空");
+    }
+    
+    // 工具逻辑：解析/格式化/验证/转换
+    {{tool_body}}
+    
+    // 日志记录
+    tracing::info!("{{tool_name}} processed {} bytes", {{input_param}}.len());
+    
+    Ok(result)
+}
+'''
+
+[tests]
+language = "rust"
+template = '''
+#[test]
+fn test_{{tool_name}}() {
+    let tool = Toolset::new();
+    let test_input = r#"{"key": "value"}"#;
+    let result = tool.{{tool_name}}(test_input, "json", "format");
+    assert!(result.is_ok());
+}
+'''
+
+[examples]
+usage = '''
+// 格式化 JSON
+let formatted = json_format(r#"{"key":"value"}"#).await?;
+
+// 压缩 JSON
+let compact = json_compress(r#"{"key": "value"}"#).await?;
+
+// JSONPath 查询
+let results = json_query(data, "$.data[*].id").await?;
+
+// JSON 转 CSV
+let csv = json_to_csv(json_data).await?;
+'''

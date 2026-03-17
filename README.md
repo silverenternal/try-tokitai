@@ -1,159 +1,180 @@
-# AI Assistant powered by Tokitai
+# try-tokitai
 
-一个使用 Rust 和 Tokitai 构建的强大 AI 助手，可以让 AI 调用各种工具来完成实际任务。
+> **AI 原生工具选择器 + 双轨服务架构**
+> 
+> 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互** 和 **自主进化** 双模式，配备 63+ 工具和 AI 原生工具选择系统。
+
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-236%20passed-brightgreen)]()
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
+
+---
+
+## 🎯 双轨服务架构
+
+本项目采用独特的**双轨服务架构**，两种模式共享底层能力但定位不同：
+
+| 模式 | 启动命令 | 服务对象 | 典型场景 |
+|------|----------|----------|----------|
+| **📱 CLI AI 助手** | `cargo run --release` | 用户（开发者） | 查询、分析、临时任务 |
+| **🤖 项目自更新** | `cargo run --release -- --autonomous` | 项目自身 | 代码改进、技术债务清理 |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Tokitai 双轨服务                          │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐              ┌─────────────────────────┐   │
+│  │  CLI AI 助手     │              │  项目自更新服务          │   │
+│  │  (面向用户)     │              │  (面向项目自身)         │   │
+│  │                 │              │                         │   │
+│  │  • 交互式对话   │              │  • 自主进化循环         │   │
+│  │  • 用户驱动     │              │  • AI 驱动              │   │
+│  │  • 即时响应     │              │  • Planner-Executor-    │   │
+│  │  • 完成任务     │              │    Reviewer 迭代        │   │
+│  └─────────────────┘              └─────────────────────────┘   │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              共享底层能力                                     ││
+│  │  ToolMatrix │ Context Storage │ Orchestrator │ Autonomy    ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+详细架构说明：[structure_ensure/SERVICES.md](structure_ensure/SERVICES.md)
+
+---
 
 ## ✨ 核心特性
 
-- **📁 纯文件上下文存储**：无数据库依赖，三层存储架构（瞬时/短期/长期），自动裁剪，哈希去重
-- **🔒 安全沙箱**：路径验证、命令黑名单、SSRF 防护、内网 IP 过滤
-- **🛠️ 丰富工具集**：文件操作、网络请求、代码分析、Git 操作、进程管理
-- **🚀 极致性能**：
-  - 缓存响应延迟 **<10ms**（50x 提升）
-  - 首次请求延迟 **降低 50%**（2x 提升）
-  - 流式首字节延迟 **降低 60-70%**（2-3x 提升）
-  - 缓存容量 **200 条目**，TTL **5 分钟**，避免过期数据
-  - 全局 HTTP 连接池复用，零连接开销
-  - 纯异步线程模型（`tokio::spawn`），无线程阻塞
-  - 实时延迟监控，平均延迟指标可视化
-- **📊 增量日志**：所有上下文变更可追溯、可审计
+### 🤖 AI 原生工具选择器
+
+- **ToolIndex**: 倒排索引，支持关键词/分类/工具箱检索
+- **LightweightToolSelector**: 快速搜索 <10ms，AI 搜索 <2s，LRU 缓存命中后 ~3ms
+- **AIToolboxClassifier**: AI 自主管理工具箱体系
+- **AIDependencyAnalyzer**: AI 自主维护工具依赖关系（静态分析 + 运行时学习）
+- **后台异步重建**: 不阻塞主线程，批量处理优化（100 工具 ~600ms）
+
+### 🛠️ 完整工具矩阵 (IMP-001~004)
+
+| 改进项目 | 功能 | 状态 |
+|---------|------|------|
+| **IMP-001** | 规则分类器（分层缓存 L1→L2→L3→L4） | ✅ |
+| **IMP-002** | 工具生成器（tokitai 宏生成） | ✅ |
+| **IMP-003** | Trie 索引 + BK-Tree 拼写纠正 | ✅ |
+| **IMP-004** | 动态注册表（热加载） | ✅ |
+
+### 📁 纯文件上下文存储
+
+- **无数据库依赖**：纯文件存储，轻量级
+- **三层存储架构**：瞬时层 → 短期层 → 长期层
+- **增量哈希链 (ICHC)**：不可篡改的链式哈希结构
+- **上下文蒸馏 (HCD)**：提取核心意图，过滤冗余
+- **语义索引 (LSFI)**：基于 SimHash 的语义搜索
+
+### 🔒 安全沙箱
+
+- 路径验证、命令黑名单
+- SSRF 防护、内网 IP 过滤
+- 符号链接循环检测
+- 递归深度限制、速率限制
+
+### 🌐 服务化架构
+
+- **服务元数据**: 分类、QoS、依赖、版本、标签
+- **生命周期管理**: init/health/shutdown/stats
+- **健康检查**: Healthy/Degraded/Unhealthy
+- **声明式工作流**: TOML 定义，支持重试/超时/错误处理
+
+### 🧩 集成模块
+
+- **IntegratedModules**: 统一管理 dialogue/observability/prompt_engineering
+- **共享状态管理**: `Arc<RwLock>` 跨模块同步
+- **优雅降级**: 单模块失败不影响其他
 
 ---
 
 ## 🚀 快速开始
 
-### 1️⃣ 获取 API Key（首次使用必读）
+### 1️⃣ 获取 API Key
 
-本项目使用 **Ollama Cloud** 作为默认 AI 服务，需要 API Key 才能运行。
+本项目使用 **Ollama Cloud** 作为默认 AI 服务：
 
-#### 如何获取 Ollama API Key：
+1. 访问 https://ollama.com
+2. 注册/登录账号
+3. 进入 Settings → API Keys
+4. 创建新 Key 并复制（格式：`ollama-xxxxxxxx...`）
 
-1. **访问官网**：打开 https://ollama.com
-2. **注册/登录**：点击右上角 "Sign In"，使用 GitHub 或邮箱注册账号
-3. **进入设置页面**：登录后点击右上角头像 → "API Keys"
-4. **创建新 Key**：点击 "Create API Key" 按钮
-5. **复制 Key**：生成的 Key 格式类似 `ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-6. **保存 Key**：⚠️ **立即复制并妥善保存**（页面刷新后将无法再次查看完整 Key）
-
-> 💡 **提示**：Ollama Cloud 目前提供免费额度，足够个人开发和测试使用。
-
-#### 可选：使用其他 AI 服务
-
-| 服务商 | API URL | 说明 |
-|--------|---------|------|
-| Ollama Cloud | `https://ollama.com/v1/chat/completions` | 默认推荐，支持多种开源模型 |
-| OpenAI | `https://api.openai.com/v1/chat/completions` | 需要 OpenAI 账号 |
-| Azure OpenAI | `https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT/chat/completions` | 需要 Azure 账号 |
-
----
+> 💡 Ollama Cloud 目前提供免费额度，足够个人开发和测试使用。
 
 ### 2️⃣ 配置环境变量
 
-#### 方法一：临时设置（当前终端会话有效）
-
 ```bash
-# 设置 API Key（替换为你的真实 Key）
+# 方法一：临时设置
 export AI_API_KEY="ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-# 设置 API URL（可选，默认使用 Ollama Cloud）
 export AI_API_URL="https://ollama.com/v1/chat/completions"
-
-# 设置模型（可选，默认使用 qwen3.5:397b）
 export AI_MODEL="qwen3.5:397b"
-```
 
-#### 方法二：永久设置（推荐）
-
-```bash
-# 复制示例文件
+# 方法二：永久设置（推荐）
 cp .env.example .env
-
 # 编辑 .env 文件，填入你的 API Key
-nano .env  # 或使用你喜欢的编辑器
-
-# 文件内容示例：
-# AI_API_KEY=ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# AI_API_URL=https://ollama.com/v1/chat/completions
-# AI_MODEL=qwen3.5:397b
 ```
-
----
 
 ### 3️⃣ 启动程序
 
-#### 命令行模式
-
 ```bash
+# CLI AI 助手模式（默认）
 cargo run --release
+
+# 项目自更新模式（自主进化）
+cargo run --release -- --autonomous
+
+# 指定项目路径
+cargo run --release -- -p ./sandbox/test-project
 ```
 
-#### 一键启动演示
+### 4️⃣ 运行测试
 
 ```bash
-./demo.sh
+# 所有测试
+cargo test
+
+# 特定模块测试
+cargo test tool_matrix
+cargo test tool_selector
+cargo test ai_classifier
+cargo test autonomy
 ```
 
 ---
 
-## 功能特性
+## 🛠️ 工具箱
 
-### 🛠️ 工具系统
+项目提供 **63+ 工具函数**，分为 **11 个工具箱**：
 
-基于 [tokitai](https://github.com/silverenternal/tokitai) 库实现编译时工具定义：
+| 工具箱 | 工具数 | 功能 |
+|--------|--------|------|
+| `file_ops` | 15 | 文件读写、搜索、PDF 处理、项目模板 |
+| `web` | 20 | HTTP 请求、网页搜索、下载、网络诊断、Wikipedia |
+| `system` | 13 | 命令执行、进程管理、代码分析、对话状态、可观测性、提示词 |
+| `code` | 4 | 代码分析、语言检测 |
+| `git` | 4 | Git 状态、日志、分支管理 |
+| `data` | 5 | JSON 格式化、查询、转换 |
+| `autonomy` | 2 | 自主进化（仅自主模式） |
 
-- **文件操作** - 读取/写入文件、列出目录、复制/删除文件
-- **系统命令** - 执行 shell 命令（带安全检查）、获取环境变量、获取当前目录、获取系统信息
-- **代码分析** - 统计代码行数、查找函数定义、检测编程语言
-- **网络搜索** - 搜索网页内容、获取 URL 内容
-- **文件下载** - 下载网络文件、下载 arXiv 论文、搜索 arXiv 论文
-- **Git 操作** - 查看 git 状态、git 日志、git 分支信息
-- **HTTP 客户端** - 发送 HTTP GET/POST 请求、检查 URL 可用性、下载文件（带 SSRF 防护）
-- **JSON 处理** - 格式化/压缩 JSON、JSONPath 查询、JSON 验证、合并、JSON 转 CSV
-- **文件搜索** - grep 文本搜索（支持正则）、递归查找文件、统计文件类型、查找大文件
-- **进程管理** - 列出进程、查看进程详情、搜索进程、系统资源监控（带权限检查）
-- **网络工具** - Ping 测试、TCP/UDP 端口检查、端口扫描、路由追踪、获取公网 IP
+### 新增工具（已集成到 system 工具箱）
 
-> 💡 **安全增强**：所有工具均经过安全加固，包括输入验证、SSRF 防护、符号链接循环检测、递归深度限制、速率限制等。
+#### 对话状态管理 (DialogueTools)
+- `get_state()`, `get_context()`, `get_history()`
+- `set_goal()`, `set_plan()`, `record_tool_execution()`
+- `transition()`, `reset()`, `get_stats()`, `sync_with_autonomy()`
 
-### 🔐 命令执行安全机制
+#### 可观测性 (ObservabilityTools)
+- `get_recent_traces()`, `get_stats()`, `query_trace()`
+- `query_errors()`, `export_traces()`, `cleanup_old_traces()`
 
-为了保护系统安全，命令执行功能实现了多层安全防护：
-
-- **黑名单机制**：禁止执行危险命令（如 `rm`, `sudo`, `kill`, `chmod` 等）
-- **安全命令模式**：`run_safe_command` 只能执行只读命令
-- **确认机制**：执行非黑名单命令时需要 `confirmed=true` 参数
-- **系统信息隔离**：无法访问敏感目录（`/etc`, `/root`, `/proc` 等）
-
-#### 黑名单命令列表
-
-以下命令被禁止执行：
-- 文件操作：`rm`, `dd`, `shred`
-- 磁盘操作：`mkfs`, `fdisk`, `parted`
-- 权限修改：`chmod`, `chown`, `chgrp`
-- 提权命令：`sudo`, `su`, `pkexec`, `doas`
-- 网络工具：`wget`, `curl`, `nc`, `netcat`, `telnet`, `ssh`, `scp`, `rsync`
-- 进程控制：`kill`, `pkill`, `killall`, `xkill`
-- 系统控制：`shutdown`, `reboot`, `halt`, `poweroff`, `init`
-- 挂载操作：`mount`, `umount`, `losetup`
-- 防火墙：`iptables`, `firewall-cmd`, `ufw`, `nft`
-- 用户管理：`visudo`, `passwd`, `useradd`, `userdel`, `usermod`, `groupadd`, `groupdel`, `groupmod`
-- 内核模块：`insmod`, `rmmod`, `modprobe`
-
-### 📎 @ 路径引用功能
-
-快速引用文件内容，让 AI 直接读取和分析：
-
-- **单个文件**：`@README.md 的内容是什么`
-- **代码分析**：`分析 @src/main.rs 的结构`
-- **多个文件**：`@file1.txt @file2.txt 比较这两个文件`
-- **相对路径**：`@./config.toml 的配置项有哪些`
-
-> 💡 提示：使用 `@` 符号后跟文件路径，系统会自动读取文件内容并附加到问题中。
-
-### 🤖 AI 集成
-
-- 支持 OpenAI 兼容 API（Ollama Cloud、OpenAI、Azure 等）
-- 自动工具调用（Function Calling）
-- 多轮对话历史记忆
+#### 提示词工程 (PromptTools)
+- `load_role_template()`, `render_template()`, `has_template()`
+- `list_available_templates()`, `get_render_stats()`, `warmup_cache()`
 
 ---
 
@@ -163,175 +184,128 @@ cargo run --release
 |------|------|
 | `help` | 显示可用操作列表 |
 | `exit` / `quit` | 退出程序 |
-| 任意自然语言 | 与 AI 对话 |
+| `/role <name>` | 切换角色（planner/executor/reviewer/researcher） |
+| `/optimize` | 优化上下文 |
+| `/context` | 显示上下文状态 |
+| `/workflow list` | 列出可用工作流 |
+| `/workflow start` | 启动工作流 |
+| `/toolbox` | 显示工具箱状态 |
 | `@<路径>` | 快速引用文件（如 `@README.md`） |
 
 ---
 
 ## 📋 演示示例
 
-### 1. 查看帮助
-```
-👤 你：help
-```
+### CLI 模式示例
 
-### 2. 查看目录
 ```
 👤 你：当前目录有哪些文件
-```
+🤖 AI：当前目录包含以下文件...
 
-### 3. 读取文件
-```
 👤 你：读取 README.md 的内容
+🤖 AI：README.md 的内容如下...
+
+👤 你：@src/main.rs 的结构是什么
+🤖 AI：main.rs 的结构分析如下...
+
+👤 你：帮我创建一个新文件 test.txt，写入 Hello World
+🤖 AI：已创建文件 test.txt...
 ```
 
-### 4. 执行安全命令
-```
-👤 你：运行 cargo --version
-👤 你：查看当前目录的文件列表
-👤 你：显示系统信息
-👤 你：检查 python 命令是否可用
-👤 你：列出系统中可用的命令
-```
+### 自主模式示例
 
-### 5. 分析代码
 ```
-👤 你：分析 src/main.rs 的结构
-```
+$ cargo run --release -- --autonomous
 
-### 6. 多步骤任务
-```
-👤 你：帮我看看 Cargo.toml 的内容，然后统计一下有多少行
-```
+[Planner] 分析项目状态...
+[Planner] 发现改进点：修复 Clippy 警告
+[Planner] 制定改进计划...
 
-### 7. 使用 @ 引用文件
-```
-👤 你：@README.md 的内容是什么
-👤 你：分析 @src/main.rs 的结构
-👤 你：@file1.txt @file2.txt 比较这两个文件
+[Executor] 执行任务 1/5: 修复 src/main.rs 的警告
+[Executor] 执行任务 2/5: 添加缺失的单元测试
+...
+
+[Reviewer] 代码审查通过
+[Reviewer] 运行测试... 236/236 passed ✅
+[GitWorkflow] 自动提交：fix: resolve Clippy warnings
+
+[Planner] 开始下一轮迭代...
 ```
 
 ---
 
-## 项目结构
+## 📊 项目规模
 
 ```
-.
-├── Cargo.toml              # 项目依赖配置
+tools/           25.9%  (7,114 行)
+context/         17.4%  (4,794 行)
+tool_matrix/     15.3%  (4,200 行)  ← AI 工具选择器 + 完整工具矩阵
+orchestrator/    12.8%  (3,528 行)
+autonomy/         9.8%  (2,684 行)
+main_core         6.9%  (1,884 行)
+其他             11.9%  (3,296 行)
+────────────────────────────────────
+总计                   ~27,500 行 Rust
+                       99 个源文件
+```
+
+---
+
+## 🏗️ 项目结构
+
+```
+try-tokitai/
+├── Cargo.toml              # 项目配置
+├── config.toml             # 应用配置
+├── .env.example            # 环境变量模板
 ├── demo.sh                 # 一键启动脚本
-├── src/
-│   ├── main.rs             # 主程序入口
+│
+├── docs/                   # 用户文档
+│   ├── QUICKSTART.md       # 快速启动
+│   ├── USER_GUIDE.md       # 用户指南
+│   ├── DEMO.md             # 演示指南
+│   ├── CHANGELOG.md        # 更新日志
+│   └── archive/            # 技术报告归档
+│
+├── workflows/              # TOML 工作流定义
+│   ├── research_and_write.toml
+│   └── code_review.toml
+│
+├── src/                    # 源代码
+│   ├── main.rs             # 程序入口 (1,884 行)
 │   ├── config.rs           # 配置管理
-│   ├── sandbox.rs          # 沙箱模块
-│   ├── command_resolver.rs # 命令解析器（黑名单/白名单）
-│   ├── path_resolver.rs    # 路径解析器
-│   ├── context/            # 纯文件上下文存储系统（NEW）
-│   │   ├── mod.rs          # 模块导出
-│   │   ├── file_service.rs # 核心服务 trait 及实现
-│   │   ├── hash_index.rs   # 哈希索引（符号链接映射）
-│   │   ├── layers.rs       # 三层存储管理（瞬时/短期/长期）
-│   │   └── logger.rs       # 增量日志系统
-│   ├── tools/              # 工具模块（分类组织）
-│   │   ├── mod.rs          # 模块导出
-│   │   ├── io/             # I/O 相关工具
-│   │   │   ├── mod.rs
-│   │   │   ├── file_ops.rs     # 文件操作（读/写/复制/删除）
-│   │   │   └── file_search.rs  # 文件搜索（grep/查找）
-│   │   ├── network/        # 网络相关工具
-│   │   │   ├── mod.rs
-│   │   │   ├── http_client.rs  # HTTP 客户端（SSRF 防护）
-│   │   │   ├── web_search.rs   # 网络搜索
-│   │   │   ├── download.rs     # 文件下载
-│   │   │   └── network_tools.rs # 网络工具（ping/端口扫描）
-│   │   ├── system/         # 系统相关工具
-│   │   │   ├── mod.rs
-│   │   │   ├── system.rs       # 系统命令/信息
-│   │   │   ├── process_tools.rs # 进程管理
-│   │   │   └── code_analysis.rs # 代码分析
-│   │   ├── data/           # 数据处理工具
-│   │   │   ├── mod.rs
-│   │   │   └── json_tools.rs   # JSON 处理
-│   │   └── vcs/            # 版本控制工具
-│   │       ├── mod.rs
-│   │       └── git_ops.rs      # Git 操作
-├── examples/               # 示例代码
-├── CONTEXT_STORAGE.md      # 上下文存储系统详细文档
-└── README.md
-```
-
-### 运行时文件夹（已添加到 .gitignore）
-
-以下文件夹在运行时自动创建，已添加到 `.gitignore` 中，不会被提交到版本控制：
-
-| 文件夹 | 用途 | 说明 |
-|--------|------|------|
-| `sandbox/` | 沙箱测试目录 | 用于测试文件操作、项目模板等功能 |
-| `downloads/` | 下载文件目录 | 使用下载工具时，文件默认保存到此目录 |
-| `.context/` | 上下文存储 | 三层存储架构（瞬时/短期/长期）的持久化数据 |
-| `.tokitai/` | 运行时数据 | 对话状态、追踪日志、自主进化数据等 |
-
-> 💡 **提示**：这些文件夹会在首次运行程序时自动创建，无需手动创建。如需清理缓存，可直接删除这些文件夹。
-
----
-
-## 环境变量
-
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `AI_API_URL` | AI API 地址 | `https://ollama.com/v1/chat/completions` |
-| `AI_API_KEY` | API 密钥（**必填**） | 无 |
-| `AI_MODEL` | 模型名称 | `qwen3.5:397b` |
-
----
-
-## ❓ 常见问题
-
-### Q: 提示 "未设置 AI_API_KEY" 怎么办？
-
-A: 你需要先获取 Ollama API Key，参考上方「获取 API Key」步骤。
-
-### Q: API Key 安全吗？会上传到服务器吗？
-
-A: API Key 仅保存在本地 `.env` 文件中，不会上传到任何第三方服务器（除了你配置的 AI 服务提供商）。
-
-### Q: 可以使用本地 Ollama 服务吗？
-
-A: 可以。如果你本地运行了 Ollama 服务，设置：
-```bash
-export AI_API_URL="http://localhost:11434/v1/chat/completions"
-```
-
-### Q: 模型响应很慢怎么办？
-
-A: 尝试切换到较小的模型：
-```bash
-export AI_MODEL="qwen2.5:7b"
+│   ├── sandbox.rs          # 沙箱系统
+│   │
+│   ├── tools/              # 工具集合 (7,114 行)
+│   │   ├── io/             # 文件 IO 工具
+│   │   ├── network/        # 网络工具
+│   │   ├── system/         # 系统工具
+│   │   ├── data/           # 数据处理
+│   │   └── vcs/            # 版本控制
+│   │
+│   ├── context/            # 上下文存储 (4,794 行)
+│   ├── autonomy/           # 自主进化 (2,684 行)
+│   ├── orchestrator/       # 编排调度 (3,528 行)
+│   ├── tool_matrix/        # 工具矩阵 (4,200 行)
+│   ├── integration/        # 集成模块 (325 行)
+│   ├── dialogue/           # 对话状态机 (443 行)
+│   ├── observability/      # 可观测性 (456 行)
+│   └── prompt_engineering/ # 提示词工程 (395 行)
+│
+├── structure_ensure/       # 项目结构文档
+│   ├── README.md           # 结构文档索引
+│   ├── SERVICES.md         # 服务架构说明
+│   ├── QUICK_REFERENCE.md  # 快速参考卡片
+│   ├── PROJECT_STRUCTURE.md # 完整项目结构
+│   └── TOOL_SELECTOR_GUIDE.md # 工具选择器指南
+│
+└── .context/               # 运行时上下文存储
+└── .tokitai/               # 运行时数据
 ```
 
 ---
 
-## 可用模型
-
-在 Ollama Cloud 上可用的模型：
-- `qwen3.5:397b` - 通义千问 3.5（397B 参数）
-- `qwen3-coder:480b` - 通义千问代码版（480B 参数）
-- `deepseek-v3.2` - DeepSeek V3.2
-- `gemma3` 系列 - Google Gemma 3
-
----
-
-## 技术栈
-
-- **Rust** - 系统编程语言
-- **tokitai** - AI 工具集成框架
-- **reqwest** - HTTP 客户端
-- **serde_json** - JSON 处理
-- **anyhow** - 错误处理
-- **tracing** - 日志和追踪
-
----
-
-## 文档
+## 📚 文档导航
 
 ### 入门文档
 | 文档 | 说明 |
@@ -339,26 +313,116 @@ export AI_MODEL="qwen2.5:7b"
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | 快速启动指南 |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
 | [docs/DEMO.md](docs/DEMO.md) | 演示指南 |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 更新日志 |
 
-### 开发者文档
+### 架构文档
 | 文档 | 说明 |
 |------|------|
-| [structure_ensure/README.md](structure_ensure/README.md) | 结构文档索引 |
+| [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 🆕 服务双轨架构 |
 | [structure_ensure/QUICK_REFERENCE.md](structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
-| [structure_ensure/PROJECT_STRUCTURE.md](structure_ensure/PROJECT_STRUCTURE.md) | 完整项目结构详解 |
+| [structure_ensure/PROJECT_STRUCTURE.md](structure_ensure/PROJECT_STRUCTURE.md) | 完整项目结构 |
+| [structure_ensure/TOOL_SELECTOR_GUIDE.md](structure_ensure/TOOL_SELECTOR_GUIDE.md) | 工具选择器指南 |
 
 ### 技术报告
 | 文档 | 说明 |
 |------|------|
-| [docs/archive/](docs/archive/) | 技术报告归档（集成/优化/审查报告） |
+| [docs/ARCHITECTURE_IMPROVEMENT_PLAN.json](docs/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划 |
+| [docs/ARCHITECTURE_IMPROVEMENT_REPORT.md](docs/ARCHITECTURE_IMPROVEMENT_REPORT.md) | 架构改进报告 |
+| [docs/archive/](docs/archive/) | 技术报告归档 |
 
 ---
 
-## 许可证
+## 🔧 技术栈
+
+| 类别 | 依赖 |
+|------|------|
+| **AI 框架** | tokitai 0.4.0, tokitai-core 0.4.0 |
+| **异步运行时** | tokio 1.x (full features) |
+| **HTTP 客户端** | reqwest 0.12, ureq 2.9 |
+| **序列化** | serde 1.0, serde_json 1.0, toml 0.8 |
+| **错误处理** | anyhow 1.0, thiserror 2.0 |
+| **日志追踪** | tracing 0.1, tracing-subscriber 0.3 |
+| **并发** | parking_lot 0.12, threadpool 1.8 |
+| **缓存** | moka 0.12 |
+| **中文分词** | jieba-rs 0.7 |
+| **模板引擎** | tera 1.19 |
+| **索引优化** | fst 0.4, bk-tree 0.5 |
+| **PDF 处理** | lopdf 0.34 |
+
+---
+
+## 📈 性能指标
+
+| 操作 | 延迟 | 说明 |
+|------|------|------|
+| 快速搜索 | ~8ms | 关键词匹配 |
+| 快速搜索 (缓存命中) | ~3ms | LRU 缓存 1000 条 |
+| AI 搜索 | ~1.5s | 含 LLM 调用 |
+| 后台重建 (100 工具) | ~600ms | 批量处理优化 |
+| 内存占用 (10,000 工具) | ~15MB | 含缓存 |
+
+---
+
+## 🧪 测试状态
+
+```
+running 236 tests
+✅ autonomy::...
+✅ context::...
+✅ tool_matrix::...
+✅ tool_matrix::tool_selector::... (5 个测试)
+✅ tool_matrix::ai_classifier::... (1 个测试)
+✅ tool_matrix::dependency_analyzer::... (2 个测试)
+✅ tool_matrix::dispatcher::... (3 个测试)
+✅ dialogue::...
+✅ observability::...
+✅ prompt_engineering::...
+✅ integration::...
+✅ orchestrator::workflow_loader::...
+
+test result: ok. 236 passed; 0 failed
+```
+
+---
+
+## ❓ 常见问题
+
+### Q: 提示 "未设置 AI_API_KEY" 怎么办？
+A: 参考上方「获取 API Key」步骤，获取 Ollama API Key 并设置环境变量。
+
+### Q: 可以使用本地 Ollama 服务吗？
+A: 可以。设置 `AI_API_URL="http://localhost:11434/v1/chat/completions"`
+
+### Q: 模型响应很慢怎么办？
+A: 尝试切换到较小的模型：`export AI_MODEL="qwen2.5:7b"`
+
+### Q: 自主模式安全吗？
+A: 自主模式在本地执行代码审查（fmt/clippy/test），失败时自动回滚，可配置为仅提交不推送。
+
+---
+
+## 📁 运行时文件夹
+
+以下文件夹在运行时自动创建，已添加到 `.gitignore`：
+
+| 文件夹 | 用途 |
+|--------|------|
+| `sandbox/` | 沙箱测试目录 |
+| `downloads/` | 下载文件目录 |
+| `.context/` | 上下文存储数据 |
+| `.tokitai/` | 运行时数据（对话状态、追踪日志等） |
+
+---
+
+## 📄 许可证
 
 MIT OR Apache-2.0
 
-## 致谢
+## 🙏 致谢
 
 - [tokitai](https://github.com/silverenternal/tokitai) - 优秀的 AI 工具集成框架
+
+---
+
+**最后更新**: 2026-03-18  
+**测试状态**: 236/236 ✅  
+**构建状态**: Release ✅

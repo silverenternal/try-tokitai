@@ -10,6 +10,11 @@
 //! ├── iteration_tracker.rs    # 迭代状态追踪器（事件溯源）
 //! ├── git_workflow.rs         # 自主 Git 工作流
 //! ├── git_workflow_tools.rs   # Git 工作流工具包装器（tokitai ToolProvider）
+//! ├── self_improvement_loop.rs # 自进化闭环系统（PEND-008）
+//! ├── gap_detector.rs         # 工具缺口检测器
+//! ├── tool_optimizer.rs       # 工具优化器
+//! ├── system_reflector.rs     # 系统反思器
+//! ├── tool_creator.rs         # 工具创建器
 //! └── agents/
 //!     ├── mod.rs              # Agent 系统导出
 //!     ├── planner.rs          # 规划 Agent
@@ -22,12 +27,18 @@
 //! - 事件溯源，支持回放
 //! - 状态机驱动，支持暂停/恢复
 //! - **工具矩阵集成**：通过 tokitai ToolProvider 统一调度
+//! - **自进化能力**：从任务历史中发现工具缺口并自动创造
 
 pub mod task_decomposer;
 pub mod iteration_tracker;
 pub mod git_workflow;
 pub mod git_workflow_tools;
 pub mod agents;
+pub mod self_improvement_loop;
+pub mod gap_detector;
+pub mod tool_optimizer;
+pub mod system_reflector;
+pub mod tool_creator;
 
 pub use git_workflow::GitWorkflow;
 pub use git_workflow_tools::GitWorkflowTools;

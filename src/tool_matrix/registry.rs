@@ -8,6 +8,12 @@
 //! - 支持 AI 动态创建新工具箱
 //! - 后台异步索引重建
 //! - 运行时日志学习依赖关系
+//!
+//! ## 分层分类集成 (IMP-001)
+//! - L1: 精确匹配缓存 (~0.1ms)
+//! - L2: 模糊匹配缓存 (~1ms)
+//! - L3: 规则分类器 (~5ms)
+//! - L4: LLM 分类 (~1.5s)
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -15,8 +21,9 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::tool_matrix::matrix::{ToolDefinition, ToolBox, ToolUsageStats, ServiceMetadata};
-use crate::tool_matrix::ai_classifier::{AIToolboxClassifier, DefaultLLMClient, ToolboxAction};
+use crate::tool_matrix::ai_classifier::{AIToolboxClassifier, DefaultLLMClient, ToolboxAction, ToolboxAssignment};
 use crate::tool_matrix::dependency_analyzer::{AIDependencyAnalyzer, ToolCallSequence};
+use crate::tool_matrix::rule_classifier::{HierarchicalClassifier, RuleClassifier};
 use tracing::{info, warn, debug};
 
 /// 工具来源
@@ -56,6 +63,8 @@ pub struct ToolRegistry {
     ai_dependency_analyzer: Option<Arc<AIDependencyAnalyzer<DefaultLLMClient>>>,
     /// 运行时工具调用序列（用于依赖学习）
     runtime_call_sequences: Arc<RwLock<Vec<ToolCallSequence>>>,
+    /// 分层分类器 (IMP-001)
+    hierarchical_classifier: Option<Arc<HierarchicalClassifier>>,
 }
 
 impl Default for ToolRegistry {
@@ -67,6 +76,11 @@ impl Default for ToolRegistry {
 impl ToolRegistry {
     /// 创建新的工具注册表（不带 AI）
     pub fn new() -> Self {
+        Self::new_without_ai()
+    }
+
+    /// 创建不带 AI 的工具注册表
+    pub fn new_without_ai() -> Self {
         Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
             toolboxes: Arc::new(RwLock::new(HashMap::new())),
@@ -74,6 +88,7 @@ impl ToolRegistry {
             ai_classifier: None,
             ai_dependency_analyzer: None,
             runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: None,
         }
     }
 
@@ -93,6 +108,7 @@ impl ToolRegistry {
             ai_classifier: Some(classifier),
             ai_dependency_analyzer: None,
             runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: None,
         }
     }
 
@@ -109,6 +125,7 @@ impl ToolRegistry {
             ai_classifier: None,
             ai_dependency_analyzer: Some(analyzer),
             runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: None,
         }
     }
 
@@ -130,6 +147,97 @@ impl ToolRegistry {
             ai_classifier: Some(classifier),
             ai_dependency_analyzer: Some(analyzer),
             runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: None,
+        }
+    }
+
+    /// 创建带分层分类器的工具注册表 (IMP-001)
+    pub fn with_hierarchical_classifier(
+        rule_classifier: RuleClassifier,
+    ) -> Self {
+        let registry = Self::new();
+        let hierarchical = Arc::new(HierarchicalClassifier::new(rule_classifier));
+        Self {
+            tools: Arc::new(RwLock::new(HashMap::new())),
+            toolboxes: Arc::new(RwLock::new(HashMap::new())),
+            usage_stats: Arc::new(RwLock::new(HashMap::new())),
+            ai_classifier: None,
+            ai_dependency_analyzer: None,
+            runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: Some(hierarchical),
+        }
+    }
+
+    /// 创建带分层分类器的工具注册表（从工具标签自动构建）(IMP-001)
+    ///
+    /// 此方法会遍历所有已注册的工具，从它们的 tags 字段自动构建分类规则
+    pub fn with_auto_hierarchical_classifier(
+        tools: &[ToolDefinition],
+    ) -> Self {
+        // 从工具标签自动构建规则分类器
+        let rule_classifier = RuleClassifier::from_tool_tags(tools);
+        let registry = Self::new();
+        let hierarchical = Arc::new(HierarchicalClassifier::new(rule_classifier));
+        Self {
+            tools: Arc::new(RwLock::new(HashMap::new())),
+            toolboxes: Arc::new(RwLock::new(HashMap::new())),
+            usage_stats: Arc::new(RwLock::new(HashMap::new())),
+            ai_classifier: None,
+            ai_dependency_analyzer: None,
+            runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: Some(hierarchical),
+        }
+    }
+
+    /// 创建带完整功能的工具注册表 (AI + 分层分类)
+    pub fn with_full_features(
+        classifier_llm: Arc<DefaultLLMClient>,
+        analyzer_llm: Arc<DefaultLLMClient>,
+        rule_classifier: RuleClassifier,
+    ) -> Self {
+        let registry = Self::new();
+        let classifier = Arc::new(AIToolboxClassifier::new(
+            classifier_llm,
+            registry.toolboxes.clone(),
+        ));
+        let analyzer = Arc::new(AIDependencyAnalyzer::new(analyzer_llm));
+        let hierarchical = Arc::new(HierarchicalClassifier::new(rule_classifier).with_llm());
+        Self {
+            tools: Arc::new(RwLock::new(HashMap::new())),
+            toolboxes: Arc::new(RwLock::new(HashMap::new())),
+            usage_stats: Arc::new(RwLock::new(HashMap::new())),
+            ai_classifier: Some(classifier),
+            ai_dependency_analyzer: Some(analyzer),
+            runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: Some(hierarchical),
+        }
+    }
+
+    /// 创建带完整功能的工具注册表（AI + 自动分层分类）(IMP-001)
+    ///
+    /// 从工具标签自动构建分类规则，无需手动配置
+    pub fn with_full_features_auto(
+        classifier_llm: Arc<DefaultLLMClient>,
+        analyzer_llm: Arc<DefaultLLMClient>,
+        tools: &[ToolDefinition],
+    ) -> Self {
+        // 从工具标签自动构建规则分类器
+        let rule_classifier = RuleClassifier::from_tool_tags(tools);
+        let registry = Self::new();
+        let classifier = Arc::new(AIToolboxClassifier::new(
+            classifier_llm,
+            registry.toolboxes.clone(),
+        ));
+        let analyzer = Arc::new(AIDependencyAnalyzer::new(analyzer_llm));
+        let hierarchical = Arc::new(HierarchicalClassifier::new(rule_classifier).with_llm());
+        Self {
+            tools: Arc::new(RwLock::new(HashMap::new())),
+            toolboxes: Arc::new(RwLock::new(HashMap::new())),
+            usage_stats: Arc::new(RwLock::new(HashMap::new())),
+            ai_classifier: Some(classifier),
+            ai_dependency_analyzer: Some(analyzer),
+            runtime_call_sequences: Arc::new(RwLock::new(Vec::new())),
+            hierarchical_classifier: Some(hierarchical),
         }
     }
 
@@ -142,11 +250,45 @@ impl ToolRegistry {
             anyhow::bail!("工具 {} 已存在", tool_name);
         }
 
-        // AI 自主分类（如果启用了分类器）
-        let toolbox_assignment = if let Some(classifier) = &self.ai_classifier {
+        // 使用分层分类器进行工具箱分配 (IMP-001)
+        let toolbox_assignment = if let Some(hierarchical) = &self.hierarchical_classifier {
+            // 使用分层分类器：L1/L2/L3 → L4(LLM)
+            match hierarchical.classify(&tool_name) {
+                Some(match_result) => {
+                    // L1/L2/L3 匹配成功
+                    debug!("分层分类器匹配：{} -> {} (置信度：{:.2})",
+                        tool_name, match_result.toolbox_id, match_result.confidence);
+                    Some(ToolboxAssignment {
+                        action: ToolboxAction::AddToExisting,
+                        toolbox_id: Some(match_result.toolbox_id),
+                        new_toolbox: None,
+                        confidence: match_result.confidence,
+                        reason: format!("规则匹配：{}", match_result.matched_item),
+                    })
+                }
+                None => {
+                    // L1/L2/L3 未匹配，使用 AI 分类器 (L4)
+                    if let Some(classifier) = &self.ai_classifier {
+                        match classifier.classify_tool(&tool).await {
+                            Ok(assignment) => {
+                                debug!("AI 分类器匹配：{} -> {:?}", tool_name, assignment.action);
+                                Some(assignment)
+                            }
+                            Err(e) => {
+                                warn!("AI 分类失败，使用默认分类：{}", e);
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                }
+            }
+        } else if let Some(classifier) = &self.ai_classifier {
+            // 仅使用 AI 分类器
             match classifier.classify_tool(&tool).await {
                 Ok(assignment) => {
-                    info!("AI 分类工具 {}: {:?}", tool_name, assignment.action);
+                    debug!("AI 分类器匹配：{} -> {:?}", tool_name, assignment.action);
                     Some(assignment)
                 }
                 Err(e) => {
@@ -521,6 +663,20 @@ impl ToolRegistry {
         self.toolboxes.write().clear();
         self.usage_stats.write().clear();
         self.runtime_call_sequences.write().clear();
+    }
+
+    /// 获取分层分类器统计信息 (IMP-001)
+    pub fn get_classifier_stats(&self) -> Option<crate::tool_matrix::rule_classifier::CacheStats> {
+        self.hierarchical_classifier
+            .as_ref()
+            .map(|h| h.get_cache_stats())
+    }
+
+    /// 清除分类器缓存 (IMP-001)
+    pub fn clear_classifier_cache(&self) {
+        if let Some(hierarchical) = &self.hierarchical_classifier {
+            hierarchical.clear_cache();
+        }
     }
 
     /// 记录工具调用序列（用于依赖学习）

@@ -20,6 +20,7 @@
 //! - **增量式哈希链（ICHC）**: 链式哈希结构，支持快照回溯
 //! - **分层上下文蒸馏（HCD）**: 意图驱动的结构化摘要，减少 60%+ 云端传输
 //! - **本地语义指纹索引（LSFI）**: SimHash 语义检索，准确率提升 30%+
+//! - **上下文窗口管理（PEND-001）**: 基于重要性的上下文保留策略
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -34,6 +35,8 @@ mod semantic_index;
 mod knowledge_index;
 mod knowledge_watcher;
 mod path_resolver;
+mod window_manager;
+mod unified_manager;
 
 #[allow(unused_imports)]
 pub use file_service::{FileContextService, FileContextConfig, CloudContextItem, CloudPayload};
@@ -55,6 +58,16 @@ pub use knowledge_index::{KnowledgeIndex, KnowledgeNode, KnowledgeStats};
 pub use knowledge_watcher::KnowledgeWatcher;
 #[allow(unused_imports)]
 pub use path_resolver::resolve_paths;
+#[allow(unused_imports)]
+pub use window_manager::{
+    WindowManager, WindowManagerConfig, ImportanceWeights,
+    ContextItem, ContextItemType, ImportanceScore, WindowState, WindowStats,
+};
+#[allow(unused_imports)]
+pub use unified_manager::{
+    UnifiedContextManager, UnifiedManagerConfig, MergeStrategy,
+    UnifiedContextItem, ContextLayerType, ContextSource, UnifiedStats,
+};
 
 /// 知识管理器 - 整合知识索引、监听和推荐功能
 pub struct KnowledgeManager {

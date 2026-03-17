@@ -1,0 +1,537 @@
+{
+  "metadata": {
+    "title": "待落实改进建议",
+    "version": "2.0",
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "AI Assistant (P11 Review)",
+    "source_documents": [
+      "DUAL_LOOP_IMPROVEMENT_PLAN.json (已删除，内容整合至此)",
+      "PROMPT_TOOL_MATRIX_DEVELOPMENT_PLAN.json (已删除，内容整合至此)",
+      "ARCHITECTURE_IMPROVEMENT_PLAN.json"
+    ],
+    "filter_criteria": [
+      "必须是真正有价值的改进",
+      "必须符合项目轻量化纯文件架构原则",
+      "必须能显著提升用户体验或项目自进化能力",
+      "排除过度工程化的建议",
+      "排除与现有功能重复的建议",
+      "排除已经实现的功能"
+    ],
+    "correction_note": "v2.0 修正：提示词工程服务和角色切换器已完整实现并在使用中，不应列为待落实项目"
+  },
+
+  "already_completed_and_valuable": {
+    "description": "已完成且有价值的核心功能",
+    "items": [
+      {
+        "id": "DONE-001",
+        "name": "提示词工程服务",
+        "status": "✅ 已完成并在使用",
+        "evidence": [
+          "src/prompt_engineering/ 模块完整",
+          ".context/prompt_templates/roles/*.json (4 个角色模板)",
+          ".context/prompt_templates/tasks/*.json (4 个任务模板)",
+          "PromptTools 已封装为 tokitai ToolProvider"
+        ],
+        "value": "提升用户侧体验的核心功能，支持多角色提示词模板管理和渲染"
+      },
+      {
+        "id": "DONE-002",
+        "name": "角色切换器",
+        "status": "✅ 已完成并在使用",
+        "evidence": [
+          "src/orchestrator/role_switcher.rs 完整实现",
+          "集成到 Orchestrator",
+          "支持 Planner/Executor/Reviewer/Researcher 4 种角色"
+        ],
+        "value": "根据任务类型自动切换角色，提升 AI 响应专业性"
+      },
+      {
+        "id": "DONE-003",
+        "name": "分层缓存 AI 分类器",
+        "status": "✅ 已完成",
+        "evidence": ["src/tool_matrix/rule_classifier.rs", "config/toolbox_rules.json"]
+      },
+      {
+        "id": "DONE-004",
+        "name": "工具模板系统",
+        "status": "✅ 已完成",
+        "evidence": ["src/tool_matrix/tool_generator.rs", "templates/tools/*.toml"]
+      },
+      {
+        "id": "DONE-005",
+        "name": "Trie 树索引 + 拼写纠错",
+        "status": "✅ 已完成",
+        "evidence": ["src/tool_matrix/trie_index.rs", "src/tool_matrix/query_enhancer.rs"]
+      },
+      {
+        "id": "DONE-006",
+        "name": "动态工具注册",
+        "status": "✅ 已完成",
+        "evidence": ["src/tool_matrix/dynamic_registry.rs"]
+      },
+      {
+        "id": "DONE-007",
+        "name": "任务分解引擎",
+        "status": "✅ 已完成",
+        "evidence": ["src/autonomy/task_decomposer.rs"]
+      },
+      {
+        "id": "DONE-008",
+        "name": "多 Agent 系统",
+        "status": "✅ 已完成",
+        "evidence": ["src/autonomy/agents/planner.rs", "executor.rs", "reviewer.rs"]
+      },
+      {
+        "id": "DONE-009",
+        "name": "迭代状态追踪器",
+        "status": "✅ 已完成",
+        "evidence": ["src/autonomy/iteration_tracker.rs"]
+      },
+      {
+        "id": "DONE-010",
+        "name": "自主 Git 工作流",
+        "status": "✅ 已完成",
+        "evidence": ["src/autonomy/git_workflow.rs"]
+      },
+      {
+        "id": "DONE-011",
+        "name": "集成模块管理器",
+        "status": "✅ 已完成",
+        "evidence": ["src/integration/modules_manager.rs"],
+        "value": "统一管理 dialogue、observability、prompt_engineering 生命周期"
+      }
+    ]
+  },
+
+  "pending_improvements": [
+    {
+      "id": "PEND-001",
+      "name": "上下文窗口智能管理",
+      "priority": "P1",
+      "category": "用户交互循环优化",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (UI-005)",
+      "current_status": "⚠️ 部分实现 - 有 context 模块但缺少重要性评分",
+      "description": "基于重要性的上下文保留策略，防止关键上下文被裁剪",
+      "why_necessary": [
+        "长对话中 token 消耗快，简单 FIFO 裁剪会丢失关键信息",
+        "用户明确引用的文件应该始终保留",
+        "工具调用结果应按相关性评分保留",
+        "直接影响长对话质量和 AI 决策准确性"
+      ],
+      "implementation": {
+        "file_to_create": "src/context/window_manager.rs",
+        "core_algorithm": {
+          "scoring_factors": [
+            "recency - 时间衰减因子",
+            "relevance - 与当前话题相关性",
+            "user_referenced - 用户是否引用过",
+            "tool_result - 是否是工具执行结果",
+            "decision_critical - 是否影响关键决策"
+          ],
+          "storage": "纯文件存储，使用 .context/window_state/ 目录"
+        },
+        "integration_point": "与现有 FileContextService 集成，增强上下文裁剪策略"
+      },
+      "expected_benefit": "关键上下文丢失率降低 80%，长对话质量提升",
+      "effort_estimate": "3-5 天",
+      "risk_level": "低"
+    },
+
+    {
+      "id": "PEND-002",
+      "name": "共享上下文管理",
+      "priority": "P1",
+      "category": "双循环协同优化",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (SYN-002)",
+      "current_status": "❌ 未实现",
+      "description": "用户交互循环和自主迭代循环共享统一的上下文存储，避免信息孤岛",
+      "why_necessary": [
+        "两种循环的上下文独立管理会导致信息不互通",
+        "自主迭代中产生的上下文在用户交互时不可见",
+        "用户无法了解 AI 自主迭代的进展和发现",
+        "影响双循环协同效果和用户体验"
+      ],
+      "implementation": {
+        "file_to_create": "src/context/unified_manager.rs",
+        "context_layers": [
+          {"name": "shared", "description": "双循环共享", "ttl": "会话级", "storage": ".context/shared/"},
+          {"name": "interactive", "description": "用户交互专属", "ttl": "对话级", "storage": ".context/interactive/"},
+          {"name": "autonomous", "description": "自主迭代专属", "ttl": "迭代级", "storage": ".context/autonomous/"}
+        ],
+        "merge_strategy": "时间戳优先 + 用户确认",
+        "storage_note": "所有上下文层均使用纯文件存储，通过目录结构隔离"
+      },
+      "expected_benefit": "上下文一致性提升 70%，信息重复减少",
+      "effort_estimate": "4-6 天",
+      "risk_level": "中"
+    },
+
+    {
+      "id": "PEND-003",
+      "name": "用户干预协议",
+      "priority": "P1",
+      "category": "双循环协同优化",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (SYN-003)",
+      "current_status": "❌ 未实现",
+      "description": "定义用户在自主迭代中介入的标准协议，支持检查点审批",
+      "why_necessary": [
+        "自主迭代中用户无法有效干预，缺乏控制感",
+        "关键决策点（如规划完成、审查完成）需要用户确认",
+        "用户可能需要插入新任务或调整优先级",
+        "影响用户对自主进化系统的信任度"
+      ],
+      "implementation": {
+        "file_to_create": "src/orchestrator/intervention_protocol.rs",
+        "checkpoint_types": [
+          "PlanReady - 规划完成待审批",
+          "ReviewComplete - 审查完成待确认",
+          "IterationDone - 迭代完成待验收",
+          "ErrorRecovery - 错误恢复待决策"
+        ],
+        "user_actions": [
+          "approve - 批准继续",
+          "modify - 修改后继续",
+          "reject - 驳回重来",
+          "abort - 终止迭代"
+        ],
+        "integration_point": "与现有 Orchestrator 和 AgentCoordinator 集成",
+        "storage": ".context/interventions/ 纯文件存储"
+      },
+      "expected_benefit": "用户控制感提升 80%，迭代方向更准确",
+      "effort_estimate": "3-5 天",
+      "risk_level": "低"
+    },
+
+    {
+      "id": "PEND-004",
+      "name": "迭代回放系统",
+      "priority": "P2",
+      "category": "可观测性与调试",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (OBS-002)",
+      "current_status": "❌ 未实现",
+      "description": "支持回放自主迭代的完整过程用于调试和学习",
+      "why_necessary": [
+        "迭代过程无法复现，难以分析和优化",
+        "用户想了解 AI 自主迭代的决策过程",
+        "调试 AI 行为需要完整的执行历史",
+        "支持从成功/失败案例中学习"
+      ],
+      "implementation": {
+        "file_to_create": "src/observability/replay.rs",
+        "recording_format": {
+          "header": "迭代元数据（目标、开始时间、结束时间）",
+          "events": "按时间排序的事件列表",
+          "snapshots": "关键状态快照"
+        },
+        "playback_controls": [
+          "play - 播放",
+          "pause - 暂停",
+          "step_forward - 单步前进",
+          "step_back - 单步后退",
+          "jump_to - 跳转到指定事件"
+        ],
+        "integration_point": "与现有 TracingRecorder 集成",
+        "storage": ".context/replays/ 纯文件存储，支持压缩"
+      },
+      "expected_benefit": "调试效率提升 60%，AI 行为可分析",
+      "effort_estimate": "5-7 天",
+      "risk_level": "中"
+    },
+
+    {
+      "id": "PEND-005",
+      "name": "性能指标仪表盘",
+      "priority": "P2",
+      "category": "可观测性与调试",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (OBS-003)",
+      "current_status": "❌ 未实现",
+      "description": "实时监控系统性能和 AI 行为指标，TUI 显示",
+      "why_necessary": [
+        "缺乏性能可视化，优化缺乏数据支撑",
+        "用户无法了解 AI 的工作效率",
+        "无法主动发现性能瓶颈",
+        "影响项目持续改进能力"
+      ],
+      "implementation": {
+        "file_to_create": "src/tui/metrics_dashboard.rs",
+        "metrics_categories": {
+          "latency": [
+            "user_input_to_first_token",
+            "tool_call_latency",
+            "iteration_cycle_time"
+          ],
+          "throughput": [
+            "requests_per_minute",
+            "tools_per_request",
+            "iterations_per_hour"
+          ],
+          "quality": [
+            "task_completion_rate",
+            "iteration_success_rate",
+            "user_satisfaction_score"
+          ]
+        },
+        "integration_point": "与现有 ToolRegistry 和 observability_tools 集成",
+        "storage": ".context/metrics/ 纯文件存储，支持自动轮转"
+      },
+      "expected_benefit": "性能问题主动发现，优化方向明确",
+      "effort_estimate": "4-6 天",
+      "risk_level": "低"
+    },
+
+    {
+      "id": "PEND-006",
+      "name": "工具调用链可视化",
+      "priority": "P2",
+      "category": "用户交互循环优化",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (UI-003)",
+      "current_status": "❌ 未实现",
+      "description": "TUI 中添加工具调用时间线面板，显示 AI 的工具选择决策过程",
+      "why_necessary": [
+        "工具调用是黑盒，用户不知道 AI 为什么选择某个工具",
+        "缺乏可解释性影响用户信任",
+        "用户无法了解工具调用的依赖关系",
+        "不利于调试和学习 AI 行为"
+      ],
+      "implementation": {
+        "file_to_create": "src/tui/tool_timeline.rs",
+        "ui_components": {
+          "timeline_view": "按时间顺序显示工具调用",
+          "dependency_graph": "DAG 展示工具调用关系",
+          "decision_explanation": "AI 生成选择原因"
+        },
+        "integration_point": "与现有 TUI 集成，添加新面板",
+        "data_source": "从 ToolRegistry 使用统计和 TracingRecorder 获取数据"
+      },
+      "expected_benefit": "提升 AI 可解释性，用户信任度提升 40%",
+      "effort_estimate": "3-5 天",
+      "risk_level": "低"
+    },
+
+    {
+      "id": "PEND-007",
+      "name": "增量响应流优化",
+      "priority": "P2",
+      "category": "用户交互循环优化",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (UI-004)",
+      "current_status": "❌ 未实现",
+      "description": "分阶段流式响应 + 进度指示，减少用户感知延迟",
+      "why_necessary": [
+        "AI 思考期间用户看到空白，体验差",
+        "工具执行期间无进度反馈，用户焦虑",
+        "流式首字节延迟影响用户感知",
+        "直接影响用户体验满意度"
+      ],
+      "implementation": {
+        "file_to_modify": "src/main.rs, src/tui/assistant.rs",
+        "phases": [
+          "思考阶段：流式输出 AI 的思考过程",
+          "工具调用前：显示即将执行的工具和参数",
+          "工具执行中：显示进度条和预计剩余时间",
+          "结果返回：增量显示工具输出"
+        ],
+        "performance_target": {
+          "time_to_first_token": "<200ms",
+          "tool_call_feedback": "<100ms",
+          "progress_update_interval": "500ms"
+        }
+      },
+      "expected_benefit": "用户感知延迟降低 60%，等待焦虑减少",
+      "effort_estimate": "3-4 天",
+      "risk_level": "低"
+    },
+
+    {
+      "id": "PEND-008",
+      "name": "自进化闭环系统",
+      "priority": "P0",
+      "category": "项目自进化",
+      "source": "ARCHITECTURE_IMPROVEMENT_PLAN.json (IMP-003)",
+      "current_status": "❌ 未实现",
+      "description": "实现 ToolGapDetector + ToolOptimizer + SystemReflector + ToolCreator 闭环",
+      "why_necessary": [
+        "当前 AI 自主进化缺少系统化的工具缺口发现机制",
+        "无法从任务历史中学习需要创造什么新工具",
+        "缺少工具优化和废弃的自动化决策",
+        "影响项目自进化能力的完整性"
+      ],
+      "implementation": {
+        "components": [
+          {
+            "name": "ToolGapDetector",
+            "responsibility": "从失败任务、低效任务中发现工具缺口",
+            "file": "src/autonomy/gap_detector.rs"
+          },
+          {
+            "name": "ToolOptimizer",
+            "responsibility": "分析工具使用率、失败率、冗余度，决定合并/废弃/改进",
+            "file": "src/autonomy/tool_optimizer.rs"
+          },
+          {
+            "name": "SystemReflector",
+            "responsibility": "定期生成系统体检报告，发现覆盖不足的领域",
+            "file": "src/autonomy/system_reflector.rs"
+          },
+          {
+            "name": "ToolCreator",
+            "responsibility": "根据 ToolGap 创造新工具并使用 tokitai 宏注册",
+            "file": "src/autonomy/tool_creator.rs"
+          }
+        ],
+        "files_to_create": [
+          "src/autonomy/gap_detector.rs",
+          "src/autonomy/tool_optimizer.rs",
+          "src/autonomy/system_reflector.rs",
+          "src/autonomy/tool_creator.rs",
+          "src/autonomy/self_improvement_loop.rs"
+        ],
+        "integration_point": "与现有 ToolRegistry 和 AgentCoordinator 集成"
+      },
+      "expected_benefit": "真正的运行时自进化，从 0 到 1 发现并创造工具",
+      "effort_estimate": "7-10 天",
+      "risk_level": "中"
+    }
+  ],
+
+  "rejected_suggestions_and_reasons": [
+    {
+      "id": "REJ-001",
+      "name": "多 Agent 协作系统",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (LT-001)",
+      "reason": "过度工程化 - 当前 Planner/Executor/Reviewer 已完整实现，更多 Agent 角色会增加不必要的复杂度",
+      "alternative": "保持当前三 Agent 架构，通过工具矩阵和角色切换实现专业化"
+    },
+    {
+      "id": "REJ-002",
+      "name": "持续学习系统",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (LT-002)",
+      "reason": "过度工程化 - 当前上下文存储和追踪日志已足够，显式的'学习系统'会增加不必要的复杂度",
+      "alternative": "通过改进上下文蒸馏和语义索引实现类似效果"
+    },
+    {
+      "id": "REJ-003",
+      "name": "跨项目知识迁移",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (LT-003)",
+      "reason": "超出项目范围 - 当前项目聚焦单项目自进化，跨项目迁移是未来愿景而非当前需求",
+      "alternative": "先完善单项目能力，后续再考虑扩展"
+    },
+    {
+      "id": "REJ-004",
+      "name": "智能意图识别",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (UI-001)",
+      "reason": "功能重复 - query_enhancer.rs 已实现意图识别功能，role_switcher.rs 也有基于关键词的意图判断",
+      "alternative": "增强现有 query_enhancer 和 role_switcher 功能即可"
+    },
+    {
+      "id": "REJ-005",
+      "name": "循环切换机制",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (SYN-001)",
+      "reason": "功能重复 - role_switcher.rs 已实现角色切换，orchestrator.rs 已集成，loop_selector 是概念重复",
+      "alternative": "扩展 role_switcher 支持循环模式切换即可"
+    },
+    {
+      "id": "REJ-006",
+      "name": "全链路追踪系统",
+      "source": "DUAL_LOOP_IMPROVEMENT_PLAN.json (OBS-001)",
+      "reason": "功能重复 - observability 模块已存在，TracingRecorder 已集成到 tokitai",
+      "alternative": "增强现有 observability 模块功能即可"
+    },
+    {
+      "id": "REJ-007",
+      "name": "提示词工程服务",
+      "source": "PROMPT_TOOL_MATRIX_DEVELOPMENT_PLAN.json",
+      "reason": "✅ 已完成 - prompt_engineering/ 模块已完整实现并在使用中",
+      "evidence": [
+        "src/prompt_engineering/ 目录完整",
+        ".context/prompt_templates/ 有 8 个模板文件",
+        "PromptTools 已封装为 tokitai ToolProvider"
+      ]
+    },
+    {
+      "id": "REJ-008",
+      "name": "工具矩阵服务",
+      "source": "PROMPT_TOOL_MATRIX_DEVELOPMENT_PLAN.json",
+      "reason": "✅ 已完成 - tool_matrix/ 模块已完整实现",
+      "evidence": "src/tool_matrix/ 目录包含所有计划文件"
+    },
+    {
+      "id": "REJ-009",
+      "name": "编排器实现",
+      "source": "PROMPT_TOOL_MATRIX_DEVELOPMENT_PLAN.json",
+      "reason": "✅ 已完成 - orchestrator/ 模块已完整实现并在使用中",
+      "evidence": "src/orchestrator/ 目录完整，集成到 main.rs"
+    },
+    {
+      "id": "REJ-010",
+      "name": "角色切换器",
+      "source": "PROMPT_TOOL_MATRIX_DEVELOPMENT_PLAN.json",
+      "reason": "✅ 已完成 - role_switcher.rs 已完整实现并在使用中",
+      "evidence": [
+        "src/orchestrator/role_switcher.rs 完整",
+        "支持 4 种角色识别和切换",
+        "集成到 Orchestrator 和 WorkflowEngine"
+      ]
+    }
+  ],
+
+  "implementation_priority": {
+    "phase_0_self_improvement": {
+      "name": "P0 - 自进化核心能力",
+      "items": ["PEND-008"],
+      "duration": "7-10 天",
+      "rationale": "这是项目自进化能力的核心，实现从 0 到 1 的工具发现和创造"
+    },
+    "phase_1_high_priority": {
+      "name": "P1 - 直接影响用户体验和双循环协同",
+      "items": ["PEND-001", "PEND-002", "PEND-003"],
+      "duration": "10-16 天",
+      "rationale": "这些改进直接影响长对话质量、双循环信息同步和用户控制感"
+    },
+    "phase_2_medium_priority": {
+      "name": "P2 - 提升可观测性和可解释性",
+      "items": ["PEND-004", "PEND-005", "PEND-006", "PEND-007"],
+      "duration": "15-22 天",
+      "rationale": "这些改进提升调试效率、性能可视化和用户感知体验"
+    }
+  },
+
+  "design_principles_reminder": [
+    {
+      "principle": "不引入数据库",
+      "rationale": "所有新增功能必须使用纯文件存储（JSON/JSONL）"
+    },
+    {
+      "principle": "tokitai 优先",
+      "rationale": "充分利用 tokitai 宏的自动元数据提取能力，避免手动定义"
+    },
+    {
+      "principle": "复用现有模块",
+      "rationale": "优先扩展现有模块（如 IntegratedModules）而非创建新模块"
+    },
+    {
+      "principle": "用户控制感",
+      "rationale": "自主进化必须保持用户最终控制权"
+    },
+    {
+      "principle": "轻量化优先",
+      "rationale": "避免过度工程化，每个模块做好一件事"
+    }
+  ],
+
+  "tokitai_integration_opportunities": [
+    {
+      "opportunity": "使用 tokitai::tool 宏生成 PEND-008 中的新工具",
+      "benefit": "零手动定义 ToolDefinition，宏自动生成元数据"
+    },
+    {
+      "opportunity": "使用 ToolProvider trait 统一 PEND-008 的工具发现",
+      "benefit": "编译时工具注册，~10ms 完成"
+    },
+    {
+      "opportunity": "从 tool.tags 自动构建分类规则（IMP-001 优化）",
+      "benefit": "消除手动 toolbox_rules.json 配置"
+    }
+  ]
+}

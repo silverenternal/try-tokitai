@@ -8,25 +8,17 @@
 //! - `workflow`: 工作流程引擎（声明式工作流定义）
 //! - `workflow_loader`: TOML 工作流加载器
 //! - `orchestrator`: 统一编排器入口
+//! - `intervention_protocol`: 用户干预协议（PEND-003）
 
 pub mod context_optimizer;
 pub mod role_switcher;
 pub mod workflow;
 pub mod workflow_loader;
 pub mod orchestrator;
+pub mod intervention_protocol;
 
-pub use context_optimizer::{
-    ContextMessage, ContextOptimizer, MessageType, OptimizerConfig,
-};
-pub use orchestrator::{
-    Orchestrator,
-};
+pub use orchestrator::Orchestrator;
 pub use role_switcher::{AgentRole, RoleSwitcher, RoleSwitchResult};
+pub use context_optimizer::{ContextMessage, ContextOptimizer, MessageType, OptimizerConfig};
 #[allow(unused_imports)]
-pub use workflow::{
-    Workflow, WorkflowEngine, templates,
-    DeclarativeWorkflow, DeclarativeWorkflowStep, RetryConfig, ErrorHandler, ErrorStrategy,
-    WorkflowResult, WorkflowStatus,
-};
-#[allow(unused_imports)]
-pub use workflow_loader::WorkflowLoader;
+pub use workflow::{Workflow, WorkflowEngine, templates};

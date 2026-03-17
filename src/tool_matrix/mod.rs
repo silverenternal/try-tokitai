@@ -12,11 +12,16 @@
 //! - `registry`: 工具注册表，支持运行时注册
 //! - `skills_manager`: Skills 文件管理器
 //! - `selector`: 动态工具选择器
-//! - `tool_selector`: 轻量级工具选择器（AI 原生，新增）
-//! - `ai_classifier`: AI 工具箱分类器（新增）
-//! - `dependency_analyzer`: AI 依赖关系分析器（新增）
-//! - `dispatcher`: 工具调用分发器（新增）
-//! - `metadata_enhancer`: tokitai 元数据增强器（新增）
+//! - `tool_selector`: 轻量级工具选择器（AI 原生）
+//! - `ai_classifier`: AI 工具箱分类器
+//! - `dependency_analyzer`: AI 依赖关系分析器
+//! - `dispatcher`: 工具调用分发器
+//! - `metadata_enhancer`: tokitai 元数据增强器
+//! - `rule_classifier`: 规则分类器（分层缓存 L3）
+//! - `query_enhancer`: 查询增强器（同义词/意图识别）
+//! - `tool_generator`: 工具生成器（模板系统）
+//! - `trie_index`: Trie 树索引（IMP-003 搜索优化）
+//! - `dynamic_registry`: 动态工具注册表（IMP-004 热加载）
 //!
 //! ## 使用示例
 //! ```rust,ignore
@@ -47,6 +52,11 @@ pub mod ai_classifier;
 pub mod dependency_analyzer;
 pub mod dispatcher;
 pub mod metadata_enhancer;
+pub mod rule_classifier;
+pub mod query_enhancer;
+pub mod tool_generator;
+pub mod trie_index;
+pub mod dynamic_registry;
 
 // 注意：以下导出保留，供未来功能扩展使用
 #[allow(unused_imports)]
@@ -87,4 +97,56 @@ pub use dispatcher::{
 };
 #[allow(unused_imports)]
 pub use metadata_enhancer::MetadataEnhancer;
+
+// 新增模块导出
+#[allow(unused_imports)]
+pub use rule_classifier::{
+    RuleClassifier,
+    HierarchicalClassifier,
+    RuleMatchResult,
+    MatchType,
+    ToolboxRulesConfig,
+    ToolboxRule,
+    CacheStats,
+};
+#[allow(unused_imports)]
+pub use query_enhancer::{
+    QueryEnhancer,
+    EnhancedQuery,
+    IntentRecognition,
+    SynonymsConfig,
+    IntentPatternsConfig,
+    IntentPattern,
+};
+#[allow(unused_imports)]
+pub use tool_generator::{
+    ToolGenerator,
+    ToolTemplate,
+    ToolGenerationRequest,
+    ToolGenerationResult,
+    TemplateMetadata,
+    ParameterDefinition,
+    CodeTemplate,
+    TestTemplate,
+};
+
+// Trie 索引模块导出
+#[allow(unused_imports)]
+pub use trie_index::{
+    TrieIndex,
+    TrieIndexStats,
+    BKTree,
+    BKTreeStats,
+    HybridIndex,
+    HybridIndexStats,
+};
+
+// 动态注册表模块导出
+#[allow(unused_imports)]
+pub use dynamic_registry::{
+    DynamicToolRegistry,
+    DynamicToolMetadata,
+    DynamicRegistryStats,
+    DynamicToolBuilder,
+};
 

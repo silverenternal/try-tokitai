@@ -1,0 +1,34 @@
+{
+  "file_ops": {
+    "keywords": ["文件", "读取", "写入", "复制", "删除", "file", "read", "write", "copy", "delete", "创建", "修改", "移动", "重命名"],
+    "patterns": ["(?i)file|read|write|copy|delete|move|rename"]
+  },
+  "git_ops": {
+    "keywords": ["git", "提交", "分支", "合并", "commit", "branch", "merge", "push", "pull", "checkout", "rebase", "stash", "diff", "log"],
+    "patterns": ["(?i)git|commit|branch|merge|push|pull|checkout"]
+  },
+  "network_ops": {
+    "keywords": ["网络", "HTTP", "GET", "POST", "下载", "上传", "http", "download", "upload", "请求", "响应", "url", "api", "ping", "端口"],
+    "patterns": ["(?i)http|get|post|download|upload|url|api|ping|port"]
+  },
+  "system_ops": {
+    "keywords": ["系统", "命令", "进程", "环境变量", "路径", "system", "command", "process", "env", "path", "执行", "shell"],
+    "patterns": ["(?i)system|command|process|env|path|exec|shell"]
+  },
+  "data_ops": {
+    "keywords": ["数据", "JSON", "XML", "CSV", "解析", "格式化", "转换", "data", "json", "xml", "csv", "parse", "format", "serialize"],
+    "patterns": ["(?i)data|json|xml|csv|parse|format"]
+  },
+  "code_ops": {
+    "keywords": ["代码", "分析", "统计", "函数", "检测", "语言", "code", "analyze", "count", "function", "detect", "language", "行数"],
+    "patterns": ["(?i)code|analyze|count|function|detect|language"]
+  },
+  "search_ops": {
+    "keywords": ["搜索", "查找", "grep", "查找文件", "递归", "search", "find", "grep", "lookup", "query"],
+    "patterns": ["(?i)search|find|grep|lookup|query"]
+  },
+  "pdf_ops": {
+    "keywords": ["PDF", "pdf", "文档", "document", "阅读 pdf", "提取"],
+    "patterns": ["(?i)pdf|document"]
+  }
+}

@@ -1752,15 +1752,27 @@ fn main() -> Result<()> {
             println!("切换到角色：{}\n", processed.current_role.as_str());
         }
 
-        // 显示等待指示器
-        print!("等待响应");
+        // 显示等待指示器（增强版 - 分阶段显示）
+        print!("🤔 思考中");
         let _ = std::io::stdout().flush();
+        let spin_start = std::time::Instant::now();
 
-        // 使用 chat_and_handle_tools 处理工具调用
+        // 使用 chat_and_handle_tools 处理工具调用（带进度监控）
         match assistant.chat_and_handle_tools(&mut messages, &processed_input) {
             Ok(response) => {
                 // 清除等待指示器
                 print!("\r\x1b[K");
+                
+                // 显示响应时间统计
+                let elapsed = spin_start.elapsed();
+                if elapsed.as_millis() < 500 {
+                    println!("✅ 完成 ({:.0}ms)", elapsed.as_millis() as f64);
+                } else if elapsed.as_millis() < 2000 {
+                    println!("✅ 完成 ({:.1}s)", elapsed.as_secs_f64());
+                } else {
+                    println!("✅ 完成 ({:.1}s)", elapsed.as_secs_f64());
+                }
+                
                 println!("\n{}\n", response);
 
                 // 添加 AI 响应到消息历史
@@ -1775,7 +1787,10 @@ fn main() -> Result<()> {
             Err(e) => {
                 // 清除等待指示器
                 print!("\r\x1b[K");
-                println!("\n请求失败：{}", e);
+                
+                // 显示错误响应时间
+                let elapsed = spin_start.elapsed();
+                println!("❌ 请求失败 ({:.1}s): {}", elapsed.as_secs_f64(), e);
                 println!("提示：可能是网络问题或 API 配置错误，检查 .env 文件后重试\n");
                 // 出错时移除最后添加的用户消息
                 messages.pop();

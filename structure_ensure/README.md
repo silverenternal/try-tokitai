@@ -1,7 +1,7 @@
 # structure_ensure - 项目结构文档
 
-> **最新版本**: AI 原生工具选择器深化落实版 + 服务双轨架构
-> **最后更新**: 2026-03-15
+> **最新版本**: AI 原生工具选择器深化落实版 + 完整工具矩阵 + 服务双轨架构
+> **最后更新**: 2026-03-18
 
 本目录包含项目结构和架构文档，帮助开发者快速了解项目组织。
 
@@ -16,6 +16,7 @@
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | 完整项目结构详解 - 架构分层、模块职责、集成状态 | 新加入开发者、架构师 |
 | [TOOL_SELECTOR_GUIDE.md](TOOL_SELECTOR_GUIDE.md) | 工具选择器使用指南 - API、配置、性能指标 | 工具开发者 |
 | [project_structure.json](project_structure.json) | 结构化项目数据 - JSON 格式，可用于工具集成 | 工具开发者 |
+| [ARCHITECTURE_IMPROVEMENT_PLAN.md](../docs/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划 | 架构师 |
 
 ---
 
@@ -91,17 +92,17 @@
 
 | 模块 | 行数 | 占比 | 状态 | 说明 |
 |------|------|------|------|------|
-| `tools/` | 7,114 | 26.7% | ✅ | 工具集合（文件/网络/系统/Git/数据） |
-| `context/` | 4,794 | 18.0% | ✅ | 上下文存储（三层架构/哈希链/语义索引） |
-| `orchestrator/` | 3,528 | 13.3% | ✅ | 编排调度（工作流/角色切换/TOML 加载器） |
-| `autonomy/` | 2,684 | 10.1% | ⚠️ | 自主进化（多 Agent 协作/智能工具推荐） |
-| `tool_matrix/` | 3,362 | 12.6% | ✅ | 工具矩阵（服务注册表/选择器/AI 分类器/AI 分析器） |
+| `tools/` | 7,114 | 25.9% | ✅ | 工具集合（文件/网络/系统/Git/数据） |
+| `context/` | 4,794 | 17.4% | ✅ | 上下文存储（三层架构/哈希链/语义索引） |
+| `orchestrator/` | 3,528 | 12.8% | ✅ | 编排调度（工作流/角色切换/TOML 加载器） |
+| `tool_matrix/` | 4,200 | 15.3% | ✅ | 工具矩阵（服务注册表/选择器/AI 分类器/AI 分析器/规则分类器/查询增强器/工具生成器/Trie 索引/动态注册表） |
+| `autonomy/` | 2,684 | 9.8% | ⚠️ | 自主进化（多 Agent 协作/智能工具推荐） |
+| `main_core` | 1,884 | 6.9% | ✅ | 主程序入口和核心逻辑 |
 | `integration/` | 325 | 1.2% | ✅ | 集成模块管理器 |
-| `dialogue/` | 443 | 1.7% | ✅ | 对话状态机（已集成） |
+| `dialogue/` | 443 | 1.6% | ✅ | 对话状态机（已集成） |
 | `observability/` | 456 | 1.7% | ✅ | 可观测性（已集成） |
-| `prompt_eng/` | 395 | 1.5% | ✅ | 提示词工程（已集成） |
-| `main_core` | 2,326 | 8.7% | ✅ | 主程序入口和核心逻辑 |
-| 其他 | 1,733 | 6.5% | ✅ | 配置/沙箱/解析器等 |
+| `prompt_eng/` | 395 | 1.4% | ✅ | 提示词工程（已集成） |
+| 其他 | 1,676 | 6.0% | ✅ | 配置/沙箱/解析器等 |
 
 **状态说明**: ✅ 已完全集成 | ⚠️ 部分集成
 
@@ -120,9 +121,11 @@
   - `MODULE_INTEGRATION_REPORT.md` - 模块集成报告
   - `MODULE_IMPROVEMENT_REPORT.md` - 模块改进报告（P11 级）
   - `SERVICE_ARCHITECTURE_IMPLEMENTATION.md` - 服务化架构实施报告
+  - `ARCHITECTURE_IMPROVEMENT_PLAN.json` - 架构改进计划
+  - `ARCHITECTURE_IMPROVEMENT_REPORT.md` - 架构改进报告
   - `LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md` - 轻量级工具选择器设计文档
-  - `LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md` - 深化落实报告（新增）
-  - `LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md` - 总结报告（新增）
+  - `LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md` - 深化落实报告
+  - `LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md` - 总结报告
 
 ---
 
@@ -192,7 +195,7 @@
 - **TOML 工作流**: 支持重试/超时/错误处理
 - **TOML 工作流加载器**: WorkflowLoader 从文件/目录加载工作流
 
-**AI 原生工具选择器**（深化落实）:
+**AI 原生工具选择器**:
 - **ToolIndex**: 倒排索引，支持关键词/分类/工具箱检索
 - **LightweightToolSelector**: 快速搜索 <10ms，AI 搜索 <2s，LRU 缓存命中后 ~3ms
 - **AIToolboxClassifier**: AI 自主管理工具箱体系（深度集成到 ToolRegistry）
@@ -202,10 +205,27 @@
 - **SelectorMetrics**: 完整监控指标（搜索次数/缓存命中率/平均延迟）
 - **运行时日志学习**: record_call_sequence + learn_from_runtime_logs
 
-**性能改进**（深化落实后）:
+**规则分类器（IMP-001）**:
+- **HierarchicalClassifier**: 分层分类器（L1 精确缓存 → L2 模糊缓存 → L3 规则 → L4 LLM）
+- **from_tool_tags**: 从工具标签自动构建规则
+- **merge_from_tool_tags**: 合并工具标签规则
+
+**工具生成器（IMP-002）**:
+- **generate_with_tokitai_macro**: 使用 tokitai 宏生成工具代码
+- **CodeTemplate/TestTemplate**: 代码和测试模板
+
+**Trie 索引（IMP-003）**:
+- **TrieIndex**: Trie 树索引优化搜索
+- **BKTree**: BK-Tree 拼写纠正
+
+**动态注册表（IMP-004）**:
+- **DynamicToolRegistry**: 动态工具注册表
+- **热加载**: 运行时添加/移除工具
+
+**性能改进**:
 - 缓存命中后搜索延迟：~8ms → ~3ms（降低 62.5%）
 - 后台重建延迟：~800ms → ~600ms（降低 25%）
-- 内存占用（10,000 工具）：~8MB → ~15MB（含缓存，可控）
+- 内存占用（10,000 工具）：~15MB（含缓存）
 
 ---
 
@@ -239,7 +259,7 @@
 3. 查看 `src/orchestrator/workflow_loader.rs` 了解 TOML 工作流
 4. 查看 `workflows/` 目录中的工作流示例
 
-### 了解工具选择器（深化落实）
+### 了解工具选择器
 1. 阅读 `docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md`（深化落实报告）
 2. 阅读 `docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md`（总结报告）
 3. 查看 `src/tool_matrix/tool_selector.rs` 了解核心实现（LRU 缓存/监控指标）
@@ -247,6 +267,14 @@
 5. 查看 `src/tool_matrix/ai_classifier.rs` 了解 AI 分类器（parking_lot RwLock）
 6. 查看 `src/tool_matrix/dependency_analyzer.rs` 了解依赖分析器（运行时学习）
 7. 查看 `src/tool_matrix/dispatcher.rs` 了解工具调用分发器
+
+### 了解 IMP-001~004 实现
+1. **IMP-001 (规则分类器)**: `src/tool_matrix/rule_classifier.rs`
+2. **IMP-002 (工具生成器)**: `src/tool_matrix/tool_generator.rs`
+3. **IMP-003 (Trie 索引)**: `src/tool_matrix/trie_index.rs`
+4. **IMP-004 (动态注册表)**: `src/tool_matrix/dynamic_registry.rs`
+5. 阅读 `docs/ARCHITECTURE_IMPROVEMENT_PLAN.json` 了解完整计划
+6. 阅读 `docs/ARCHITECTURE_IMPROVEMENT_REPORT.md` 了解实施报告
 
 ---
 
@@ -257,10 +285,10 @@ running 236 tests
 ✅ autonomy::...
 ✅ context::...
 ✅ tool_matrix::...
-✅ tool_matrix::tool_selector::... (新增 5 个测试)
-✅ tool_matrix::ai_classifier::... (新增 1 个测试)
-✅ tool_matrix::dependency_analyzer::... (新增 2 个测试)
-✅ tool_matrix::dispatcher::... (新增 3 个测试)
+✅ tool_matrix::tool_selector::... (5 个测试)
+✅ tool_matrix::ai_classifier::... (1 个测试)
+✅ tool_matrix::dependency_analyzer::... (2 个测试)
+✅ tool_matrix::dispatcher::... (3 个测试)
 ✅ dialogue::...
 ✅ observability::...
 ✅ prompt_engineering::...
@@ -272,6 +300,6 @@ test result: ok. 236 passed; 0 failed
 
 ---
 
-**最后更新**: 2026-03-15
+**最后更新**: 2026-03-18
 **测试状态**: 236/236 ✅
 **构建状态**: Release ✅
