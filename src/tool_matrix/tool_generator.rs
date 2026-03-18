@@ -792,12 +792,23 @@ notes = ""
         let params = ToolGenerator::parse_json_schema(schema).unwrap();
 
         assert_eq!(params.len(), 6);
-        assert_eq!(params[0], ("path".to_string(), "String".to_string()));
-        assert_eq!(params[1], ("count".to_string(), "i64".to_string()));
-        assert_eq!(params[2], ("ratio".to_string(), "f64".to_string()));
-        assert_eq!(params[3], ("enabled".to_string(), "bool".to_string()));
-        assert_eq!(params[4], ("tags".to_string(), "Vec<String>".to_string()));
-        assert_eq!(params[5], ("metadata".to_string(), "serde_json::Value".to_string()));
+        // 验证包含所有期望的参数（不依赖顺序）
+        let param_names: Vec<&String> = params.iter().map(|(name, _)| name).collect();
+        assert!(param_names.contains(&&"path".to_string()));
+        assert!(param_names.contains(&&"count".to_string()));
+        assert!(param_names.contains(&&"ratio".to_string()));
+        assert!(param_names.contains(&&"enabled".to_string()));
+        assert!(param_names.contains(&&"tags".to_string()));
+        assert!(param_names.contains(&&"metadata".to_string()));
+        
+        // 验证类型映射
+        let params_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(params_map.get("path"), Some(&"String".to_string()));
+        assert_eq!(params_map.get("count"), Some(&"i64".to_string()));
+        assert_eq!(params_map.get("ratio"), Some(&"f64".to_string()));
+        assert_eq!(params_map.get("enabled"), Some(&"bool".to_string()));
+        assert_eq!(params_map.get("tags"), Some(&"Vec<String>".to_string()));
+        assert_eq!(params_map.get("metadata"), Some(&"serde_json::Value".to_string()));
     }
 
     #[test]

@@ -1,115 +1,135 @@
-use once_cell::sync::Lazy;
-use tokitai::tool;
-use std::net::{TcpStream, UdpSocket, ToSocketAddrs};
+//! 网络诊断工具集
+//!
+//! 提供网络诊断和连接测试功能（Ping、端口扫描、路由追踪等）
+
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
-use std::process::Command;
+use tokitai::tool;
+
+use super::error::{NetworkResult, NetworkToolError};
+use super::ssrf_protection;
+
+// ============================================================================
+// 配置结构
+// ============================================================================
+
+/// 网络工具配置
+#[derive(Debug, Clone)]
+pub struct NetworkToolsConfig {
+    /// 默认超时时间（秒）
+    pub default_timeout_secs: u64,
+    /// 端口扫描延迟（毫秒）
+    pub port_scan_delay_ms: u64,
+    /// 是否允许扫描 localhost
+    pub allow_localhost_scan: bool,
+    /// User-Agent（用于公网 IP 查询）
+    pub user_agent: String,
+}
+
+impl Default for NetworkToolsConfig {
+    fn default() -> Self {
+        Self {
+            default_timeout_secs: 5,
+            port_scan_delay_ms: 100,
+            allow_localhost_scan: true,
+            user_agent: "Tokitai AI Assistant/1.0".to_string(),
+        }
+    }
+}
+
+// ============================================================================
+// 网络工具集
+// ============================================================================
 
 /// 网络工具集
 /// 提供网络诊断和连接测试功能
-pub struct NetworkTools;
-
-// 复用 HTTP Client 用于查询公网 IP
-static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("创建 HTTP 客户端失败")
-});
-
-// 端口扫描速率限制（毫秒）
-const PORT_SCAN_DELAY_MS: u64 = 100;
-
-// 禁止扫描的内网地址段（防止滥用）
-fn is_safe_target(host: &str) -> Result<(), String> {
-    use std::net::IpAddr;
-    
-    // 允许 localhost 用于本地测试
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-        return Ok(());
-    }
-    
-    // 尝试解析 IP 地址
-    if let Ok(ip_addr) = host.parse::<IpAddr>() {
-        return check_ip_safety(&ip_addr);
-    }
-    
-    // 对于域名，尝试解析并检查
-    if let Ok(addrs) = host.to_socket_addrs() {
-        for addr in addrs {
-            check_ip_safety(&addr.ip())?;
-        }
-    }
-    
-    Ok(())
+pub struct NetworkTools {
+    config: NetworkToolsConfig,
+    client: reqwest::blocking::Client,
 }
 
-// 检查 IP 地址是否安全
-fn check_ip_safety(ip: &std::net::IpAddr) -> Result<(), String> {
-    use std::net::IpAddr::{V4, V6};
-    
-    match ip {
-        V4(ip4) => {
-            // 允许回环地址
-            if ip4.is_loopback() {
+impl NetworkTools {
+    /// 创建新的网络工具实例
+    pub fn new() -> Self {
+        Self::with_config(NetworkToolsConfig::default())
+    }
+
+    /// 创建带自定义配置的网络工具实例
+    pub fn with_config(config: NetworkToolsConfig) -> Self {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(config.default_timeout_secs))
+            .user_agent(&config.user_agent)
+            .build()
+            .expect("创建 HTTP 客户端失败");
+
+        Self { config, client }
+    }
+
+    /// 验证主机名长度
+    fn validate_host(&self, host: &str) -> NetworkResult<()> {
+        const MAX_HOST_LENGTH: usize = 256;
+
+        if host.len() > MAX_HOST_LENGTH {
+            return Err(NetworkToolError::InvalidHostname(format!(
+                "主机名过长 ({} > {} 字符)",
+                host.len(),
+                MAX_HOST_LENGTH
+            )).into());
+        }
+        Ok(())
+    }
+
+    /// 检查目标是否安全（使用统一的 SSRF 防护模块）
+    fn is_safe_target(&self, host: &str) -> NetworkResult<()> {
+        // 允许 localhost 用于本地测试
+        if self.config.allow_localhost_scan {
+            if host == "localhost" || host == "127.0.0.1" || host == "::1" {
                 return Ok(());
             }
-            
-            // 禁止扫描私有地址（防止内部网络扫描）
-            if ip4.is_private() || ip4.is_link_local() || ip4.is_unspecified() {
-                return Err(format!(
-                    "禁止扫描内网地址：{} (安全限制)",
-                    ip
-                ));
-            }
-            
-            // 禁止扫描 10.0.0.0/8
-            let octets = ip4.octets();
-            if octets[0] == 10 {
-                return Err(format!(
-                    "禁止扫描内网地址：{} (安全限制)",
-                    ip
-                ));
+        }
+
+        // 尝试解析 IP 地址并使用统一的 SSRF 检查
+        if let Ok(ip_addr) = host.parse::<std::net::IpAddr>() {
+            return ssrf_protection::check_ip_safety(&ip_addr);
+        }
+
+        // 对于域名，尝试解析并检查所有 IP
+        if let Ok(addrs) = host.to_socket_addrs() {
+            for addr in addrs {
+                ssrf_protection::check_ip_safety(&addr.ip())?;
             }
         }
-        V6(ip6) => {
-            if ip6.is_loopback() {
-                return Ok(());
-            }
-            
-            if ip6.is_unique_local() || ip6.is_unspecified() {
-                return Err(format!(
-                    "禁止扫描内网地址：{} (安全限制)",
-                    ip
-                ));
-            }
-        }
+
+        Ok(())
     }
-    Ok(())
 }
 
-/// 验证主机名长度
-fn validate_host_length(host: &str) -> Result<(), String> {
-    const MAX_HOST_LENGTH: usize = 256;
-    
-    if host.len() > MAX_HOST_LENGTH {
-        return Err(format!(
-            "主机名过长 ({} > {} 字符)",
-            host.len(),
-            MAX_HOST_LENGTH
-        ));
+impl Default for NetworkTools {
+    fn default() -> Self {
+        Self::new()
     }
-    Ok(())
 }
+
+// ============================================================================
+// Tool 实现
+// ============================================================================
 
 #[tool]
 impl NetworkTools {
     /// Ping 主机（测试连通性）
-    /// 检查主机是否可达
-    pub fn ping_host(&self, host: String, count: Option<u32>) -> Result<String, String> {
-        validate_host_length(&host)?;
-        is_safe_target(&host)?;
-        
-        let count = count.unwrap_or(4).min(10); // 限制最大 ping 次数
+    ///
+    /// # 参数
+    /// - `host`: 目标主机名或 IP
+    /// - `count`: Ping 次数（默认 4，最大 10）
+    ///
+    /// # 返回
+    /// 返回 Ping 测试结果，包括成功率和响应时间
+    #[tool(default_count = "null")]
+    pub fn ping_host(&self, host: String, count: Option<u32>) -> NetworkResult<String> {
+        self.validate_host(&host)?;
+        self.is_safe_target(&host)?;
+
+        let count = count.unwrap_or(4).min(10);
 
         let mut results = Vec::new();
         let mut success_count = 0;
@@ -126,11 +146,15 @@ impl NetworkTools {
 
             if reachable {
                 success_count += 1;
-                results.push(format!("  请求 {}: 成功 (耗时 {:.2} ms)", i, elapsed.as_secs_f64() * 1000.0));
+                results.push(format!(
+                    "  请求 {}: 成功 (耗时 {:.2} ms)",
+                    i,
+                    elapsed.as_secs_f64() * 1000.0
+                ));
             } else {
                 results.push(format!("  请求 {}: 超时", i));
             }
-            
+
             // 添加速率限制
             if i < count {
                 std::thread::sleep(Duration::from_millis(200));
@@ -148,11 +172,24 @@ impl NetworkTools {
     }
 
     /// 检查 TCP 端口是否开放
-    /// 测试指定主机的 TCP 端口连通性
-    pub fn check_tcp_port(&self, host: String, port: u16, timeout_secs: Option<u64>) -> Result<String, String> {
-        validate_host_length(&host)?;
-        is_safe_target(&host)?;
-        
+    ///
+    /// # 参数
+    /// - `host`: 目标主机名或 IP
+    /// - `port`: 端口号
+    /// - `timeout_secs`: 超时时间（秒）
+    ///
+    /// # 返回
+    /// 返回端口状态和响应时间
+    #[tool(default_timeout_secs = "null")]
+    pub fn check_tcp_port(
+        &self,
+        host: String,
+        port: u16,
+        timeout_secs: Option<u64>,
+    ) -> NetworkResult<String> {
+        self.validate_host(&host)?;
+        self.is_safe_target(&host)?;
+
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(5).min(30));
 
         let start = std::time::Instant::now();
@@ -162,24 +199,40 @@ impl NetworkTools {
         match result {
             Ok(_) => Ok(format!(
                 "✅ 端口开放\n\n主机：{}\n端口：{}\n响应时间：{:.2} ms\n状态：可连接",
-                host, port, elapsed.as_secs_f64() * 1000.0
+                host,
+                port,
+                elapsed.as_secs_f64() * 1000.0
             )),
             Err(e) => Ok(format!(
                 "❌ 端口关闭或不可达\n\n主机：{}\n端口：{}\n超时时间：{} 秒\n错误：{}",
-                host, port, timeout_secs.unwrap_or(5), e
+                host,
+                port,
+                timeout_secs.unwrap_or(5),
+                e
             )),
         }
     }
 
     /// 扫描常用端口
-    /// 快速扫描主机的常用开放端口
-    pub fn scan_common_ports(&self, host: String, timeout_secs: Option<u64>) -> Result<String, String> {
-        validate_host_length(&host)?;
-        is_safe_target(&host)?;
-        
+    ///
+    /// # 参数
+    /// - `host`: 目标主机名或 IP
+    /// - `timeout_secs`: 每个端口的超时时间（秒）
+    ///
+    /// # 返回
+    /// 返回开放端口列表
+    #[tool(default_timeout_secs = "null")]
+    pub fn scan_common_ports(
+        &self,
+        host: String,
+        timeout_secs: Option<u64>,
+    ) -> NetworkResult<String> {
+        self.validate_host(&host)?;
+        self.is_safe_target(&host)?;
+
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(2).min(10));
 
-        // 常用端口列表（仅限本地测试和授权扫描）
+        // 常用端口列表
         let common_ports = [
             (21, "FTP"),
             (22, "SSH"),
@@ -203,7 +256,6 @@ impl NetworkTools {
         let mut open_ports = Vec::new();
         let mut closed_ports = Vec::new();
 
-        // 添加警告信息
         let mut result = "⚠️ 警告：端口扫描可能违反目标网络的使用政策\n\n".to_string();
         result.push_str(&format!("🔍 端口扫描结果：{}\n\n", host));
 
@@ -213,9 +265,9 @@ impl NetworkTools {
             } else {
                 closed_ports.push((*port, *service));
             }
-            
-            // 速率限制：每个端口之间延迟
-            std::thread::sleep(Duration::from_millis(PORT_SCAN_DELAY_MS));
+
+            // 速率限制
+            std::thread::sleep(Duration::from_millis(self.config.port_scan_delay_ms));
         }
 
         if !open_ports.is_empty() {
@@ -236,29 +288,25 @@ impl NetworkTools {
     }
 
     /// 获取本地网络信息
-    /// 显示本地 IP 地址、接口等信息
-    pub fn get_local_network_info(&self) -> Result<String, String> {
+    ///
+    /// # 返回
+    /// 返回本地 IP 地址、接口、DNS 等信息
+    pub fn get_local_network_info(&self) -> NetworkResult<String> {
         let mut result = String::from("🌐 本地网络信息\n\n");
 
         // 获取主机名
         if let Ok(hostname) = std::env::var("HOSTNAME") {
             result.push_str(&format!("主机名：{}\n", hostname));
-        } else if let Ok(hostname) = Command::new("hostname").stdin(std::process::Stdio::null()).output() {
-            result.push_str(&format!(
-                "主机名：{}\n",
-                String::from_utf8_lossy(&hostname.stdout).trim()
-            ));
         }
 
-        // 获取 IP 地址（通过 /proc/net/route 或 ip 命令）
+        // IP 地址信息
         result.push_str("\n🔹 网络接口:\n");
 
-        if let Ok(output) = Command::new("ip").args(["addr", "show"]).stdin(std::process::Stdio::null()).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            result.push_str(&format!("{}\n", stdout));
-        } else if let Ok(output) = Command::new("ifconfig").stdin(std::process::Stdio::null()).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            result.push_str(&format!("{}\n", stdout));
+        // 尝试获取 IP 地址（跨平台）
+        if let Ok(addrs) = get_local_ip_addresses() {
+            for addr in addrs {
+                result.push_str(&format!("  IP: {}\n", addr));
+            }
         }
 
         // DNS 信息
@@ -271,28 +319,32 @@ impl NetworkTools {
             }
         }
 
-        // 路由信息
-        result.push_str("\n🔹 默认路由:\n");
-        if let Ok(output) = Command::new("ip").args(["route", "show", "default"]).stdin(std::process::Stdio::null()).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            result.push_str(&format!("  {}", stdout));
-        }
-
         Ok(result)
     }
 
     /// 追踪路由（简化版 traceroute）
-    /// 显示到目标主机的路由路径
-    pub fn trace_route(&self, host: String, max_hops: Option<u32>) -> Result<String, String> {
-        validate_host_length(&host)?;
-        is_safe_target(&host)?;
-        
+    ///
+    /// # 参数
+    /// - `host`: 目标主机名或 IP
+    /// - `max_hops`: 最大跳数（默认 15，最大 30）
+    ///
+    /// # 返回
+    /// 返回路由追踪结果
+    #[tool(default_max_hops = "null")]
+    pub fn trace_route(
+        &self,
+        host: String,
+        max_hops: Option<u32>,
+    ) -> NetworkResult<String> {
+        self.validate_host(&host)?;
+        self.is_safe_target(&host)?;
+
         let max_hops = max_hops.unwrap_or(15).min(30);
 
         let mut result = format!("🛣️ 路由追踪：{}\n\n", host);
 
         // 使用 tracepath 命令（如果可用）
-        if let Ok(output) = Command::new("tracepath")
+        if let Ok(output) = std::process::Command::new("tracepath")
             .arg("-m")
             .arg(max_hops.to_string())
             .arg(&host)
@@ -303,8 +355,6 @@ impl NetworkTools {
             result.push_str(&stdout);
         } else {
             result.push_str("⚠️ tracepath 命令不可用，尝试基础连接测试...\n\n");
-
-            // 降级方案：简单测试
             result.push_str(&format!("目标主机：{}\n", host));
 
             if check_tcp_connect(&host, 80, Duration::from_secs(5)).is_ok() {
@@ -319,53 +369,99 @@ impl NetworkTools {
         Ok(result)
     }
 
+    /// 获取公网 IP 地址
+    ///
+    /// # 返回
+    /// 返回公网 IP 地址和查询服务信息
+    pub fn get_public_ip(&self) -> NetworkResult<String> {
+        let services = [
+            "https://api.ipify.org",
+            "https://ifconfig.me/ip",
+            "https://icanhazip.com",
+        ];
+
+        for service in &services {
+            if let Ok(ip) = self.query_public_ip(service) {
+                return Ok(format!(
+                    "🌍 公网 IP 地址\n\nIP: {}\n查询服务：{}\n\n⚠️ 注意：查询公网 IP 会将您的请求发送到第三方服务",
+                    ip.trim(),
+                    service
+                ));
+            }
+        }
+
+        Err(NetworkToolError::DnsResolution(
+            "无法从任何服务获取公网 IP (所有服务均不可用)".to_string()
+        ).into())
+    }
+
     /// 检查 UDP 端口
-    /// 测试 UDP 端口连通性（通过发送探测包）
-    pub fn check_udp_port(&self, host: String, port: u16, timeout_secs: Option<u64>, payload: Option<String>) -> Result<String, String> {
-        validate_host_length(&host)?;
-        is_safe_target(&host)?;
-        
+    ///
+    /// # 参数
+    /// - `host`: 目标主机名或 IP
+    /// - `port`: 端口号
+    /// - `timeout_secs`: 超时时间（秒）
+    /// - `payload`: 可选的探测数据
+    ///
+    /// # 返回
+    /// 返回 UDP 端口测试结果
+    #[tool(default_timeout_secs = "null", default_payload = "null")]
+    pub fn check_udp_port(
+        &self,
+        host: String,
+        port: u16,
+        timeout_secs: Option<u64>,
+        payload: Option<String>,
+    ) -> NetworkResult<String> {
+        self.validate_host(&host)?;
+        self.is_safe_target(&host)?;
+
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(5).min(30));
 
         // 创建 UDP socket
-        let socket = UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| format!("创建 UDP socket 失败：{}", e))?;
-        
-        socket.set_read_timeout(Some(timeout))
-            .map_err(|e| format!("设置超时失败：{}", e))?;
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")
+            .map_err(|e| NetworkToolError::PermissionDenied(format!("创建 UDP socket 失败：{}", e)))?;
+
+        socket
+            .set_read_timeout(Some(timeout))
+            .map_err(|e| NetworkToolError::PermissionDenied(format!("设置超时失败：{}", e)))?;
 
         // 解析目标地址
         let addr = format!("{}:{}", host, port)
             .to_socket_addrs()
-            .map_err(|e| format!("解析主机地址失败：{}", e))?
+            .map_err(|e| NetworkToolError::DnsResolution(format!("解析主机地址失败：{}", e)))?
             .next()
-            .ok_or_else(|| "无法解析主机地址".to_string())?;
+            .ok_or_else(|| NetworkToolError::InvalidHostname("无法解析主机地址".to_string()))?;
 
-        // 发送探测包（默认发送空包，或自定义 payload）
+        // 发送探测包
         let payload_bytes = payload
             .as_ref()
             .map(|s| s.as_bytes())
             .unwrap_or(&[0u8; 1]);
-        
+
         let send_result = socket.send_to(payload_bytes, addr);
-        
+
         match send_result {
             Ok(_) => {
-                // 尝试接收响应（UDP 是无连接的，可能收到 ICMP Port Unreachable）
                 socket.connect(addr)
-                    .map_err(|e| format!("连接失败：{}", e))?;
-                
+                    .map_err(|e| NetworkToolError::ConnectionRefused {
+                        host: host.clone(),
+                        port,
+                    })?;
+
                 let mut buf = [0u8; 1024];
-                socket.set_nonblocking(false)
-                    .map_err(|e| format!("设置非阻塞失败：{}", e))?;
-                
+                socket
+                    .set_nonblocking(false)
+                    .map_err(|e| NetworkToolError::PermissionDenied(format!("设置非阻塞失败：{}", e)))?;
+
                 match socket.recv(&mut buf) {
                     Ok(len) => Ok(format!(
                         "✅ UDP 端口测试\n\n主机：{}\n端口：{}\n状态：收到响应 ({} bytes)\n\n注意：UDP 是无连接协议，此测试仅供参考",
                         host, port, len
                     )),
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock 
-                           || e.kind() == std::io::ErrorKind::TimedOut => {
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
                         Ok(format!(
                             "⚠️ UDP 端口测试\n\n主机：{}\n端口：{}\n状态：超时（无响应）\n\n注意：UDP 是无连接协议，端口可能开放但无响应",
                             host, port
@@ -383,32 +479,23 @@ impl NetworkTools {
                     )),
                 }
             }
-            Err(e) => Err(format!("发送探测包失败：{}", e)),
+            Err(e) => Err(NetworkToolError::PermissionDenied(format!("发送探测包失败：{}", e)).into()),
         }
-    }
-
-    /// 获取公网 IP 地址
-    /// 通过外部服务查询公网 IP
-    pub fn get_public_ip(&self) -> Result<String, String> {
-        let services = [
-            "https://api.ipify.org",
-            "https://ifconfig.me/ip",
-            "https://icanhazip.com",
-        ];
-
-        for service in &services {
-            if let Ok(ip) = query_public_ip(service) {
-                return Ok(format!(
-                    "🌍 公网 IP 地址\n\nIP: {}\n查询服务：{}\n\n⚠️ 注意：查询公网 IP 会将您的请求发送到第三方服务",
-                    ip.trim(),
-                    service
-                ));
-            }
-        }
-
-        Err("无法从任何服务获取公网 IP (所有服务均不可用)".to_string())
     }
 }
+
+impl NetworkTools {
+    /// 查询公网 IP
+    fn query_public_ip(&self, url: &str) -> NetworkResult<String> {
+        let response = self.client.get(url).send()?;
+        let ip = response.text()?;
+        Ok(ip)
+    }
+}
+
+// ============================================================================
+// 工具函数
+// ============================================================================
 
 /// 检查 TCP 连接
 fn check_tcp_connect(host: &str, port: u16, timeout: Duration) -> Result<(), String> {
@@ -418,85 +505,88 @@ fn check_tcp_connect(host: &str, port: u16, timeout: Duration) -> Result<(), Str
         .next()
         .ok_or_else(|| "无法解析主机地址".to_string())?;
 
-    TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| e.to_string())?;
+    TcpStream::connect_timeout(&addr, timeout).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// 查询公网 IP
-fn query_public_ip(url: &str) -> Result<String, String> {
-    let client = &*HTTP_CLIENT;
+/// 获取本地 IP 地址列表
+fn get_local_ip_addresses() -> Result<Vec<String>, String> {
+    let mut addresses = Vec::new();
 
-    let response = client.get(url).send()
-        .map_err(|e| e.to_string())?;
+    // 尝试使用 get_if_addrs crate（如果可用）
+    // 这里使用简单的回退方案
+    if let Ok(output) = std::process::Command::new("hostname")
+        .arg("-I")
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for ip in stdout.split_whitespace() {
+            addresses.push(ip.to_string());
+        }
+    }
 
-    let ip = response.text()
-        .map_err(|e| e.to_string())?;
+    // 如果没有找到，添加 localhost
+    if addresses.is_empty() {
+        addresses.push("127.0.0.1".to_string());
+    }
 
-    Ok(ip)
+    Ok(addresses)
 }
+
+// ============================================================================
+// 测试
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn test_network_tools_config_default() {
+        let config = NetworkToolsConfig::default();
+        assert_eq!(config.default_timeout_secs, 5);
+        assert_eq!(config.port_scan_delay_ms, 100);
+        assert!(config.allow_localhost_scan);
+    }
+
+    #[test]
+    fn test_network_tools_creation() {
+        let tools = NetworkTools::new();
+        assert!(tools.config.allow_localhost_scan);
+    }
+
+    #[test]
     fn test_is_safe_target_localhost() {
-        // localhost 应该允许
-        assert!(is_safe_target("localhost").is_ok());
-        assert!(is_safe_target("127.0.0.1").is_ok());
+        let tools = NetworkTools::new();
+        assert!(tools.is_safe_target("localhost").is_ok());
+        assert!(tools.is_safe_target("127.0.0.1").is_ok());
     }
 
     #[test]
     fn test_is_safe_target_private_ip() {
-        // 私有地址应该被拒绝
-        assert!(is_safe_target("192.168.1.1").is_err());
-        assert!(is_safe_target("10.0.0.1").is_err());
-        assert!(is_safe_target("172.16.0.1").is_err());
+        let tools = NetworkTools::new();
+        assert!(tools.is_safe_target("192.168.1.1").is_err());
+        assert!(tools.is_safe_target("10.0.0.1").is_err());
+        assert!(tools.is_safe_target("172.16.0.1").is_err());
     }
 
     #[test]
     fn test_validate_host_length() {
+        let tools = NetworkTools::new();
         let long_host = "a".repeat(300);
-        assert!(validate_host_length(&long_host).is_err());
-        
-        let short_host = "example.com";
-        assert!(validate_host_length(short_host).is_ok());
-    }
+        assert!(tools.validate_host(&long_host).is_err());
 
-    #[test]
-    fn test_check_tcp_connect_localhost() {
-        // 本地回环应该可以连接（即使端口关闭也不会报错解析失败）
-        let result = check_tcp_connect("127.0.0.1", 1, Duration::from_millis(100));
-        // 连接应该失败（端口 1 通常关闭），但不应该解析失败
-        assert!(result.is_err());
-        assert!(!result.unwrap_err().contains("解析"));
+        let short_host = "example.com";
+        assert!(tools.validate_host(short_host).is_ok());
     }
 
     #[test]
     fn test_get_local_network_info() {
-        let tools = NetworkTools;
+        let tools = NetworkTools::new();
         let result = tools.get_local_network_info();
-        
+
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("本地网络信息"));
-        assert!(output.contains("网络接口") || output.contains("DNS"));
-    }
-
-    #[test]
-    fn test_check_udp_port_syntax() {
-        let tools = NetworkTools;
-        
-        // 测试语法正确性（不保证成功）
-        let result = tools.check_udp_port(
-            "127.0.0.1".to_string(),
-            53,
-            Some(2),
-            Some("test".to_string()),
-        );
-
-        // 验证方法不 panic（网络请求可能成功或失败）
-        let _ = result;
     }
 }

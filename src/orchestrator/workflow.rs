@@ -1412,7 +1412,7 @@ mod tests {
     #[test]
     fn test_workflow_engine() {
         let workflow = templates::create_code_review_workflow();
-        let mut engine = WorkflowEngine::new(workflow);
+        let engine = WorkflowEngine::new(workflow);
 
         let result = engine.with_verbose(true).execute();
 

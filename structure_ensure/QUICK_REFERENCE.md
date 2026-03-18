@@ -2,7 +2,7 @@
 
 > **最新版本**: AI 原生工具选择器深化落实版 + 完整工具矩阵
 > **最后更新**: 2026-03-18
-> **测试状态**: 236/236 通过 ✅
+> **测试状态**: 411/411 通过 ✅
 
 ## 🚀 常用命令
 
@@ -455,21 +455,21 @@ integration/      1.2%  (  325 行)
 ## 🧪 测试状态
 
 ```
-running 236 tests
+running 411 tests
 test autonomy::...              ✅
 test context::...               ✅
 test tool_matrix::...           ✅
-test tool_matrix::tool_selector::...    ✅ (新增 5 个测试)
-test tool_matrix::ai_classifier::...    ✅ (新增 1 个测试)
-test tool_matrix::dependency_analyzer::... ✅ (新增 2 个测试)
-test tool_matrix::dispatcher::...       ✅ (新增 3 个测试)
+test tool_matrix::tool_selector::...    ✅ (5 个测试)
+test tool_matrix::ai_classifier::...    ✅ (1 个测试)
+test tool_matrix::dependency_analyzer::... ✅ (2 个测试)
+test tool_matrix::dispatcher::...       ✅ (3 个测试)
 test dialogue::...              ✅
 test observability::...         ✅
 test prompt_...                 ✅
 test integration::...           ✅
 test workflow_loader::...       ✅
 
-test result: ok. 236 passed; 0 failed
+test result: ok. 411 passed; 0 failed
 ```
 
 ---
@@ -508,5 +508,5 @@ test result: ok. 236 passed; 0 failed
 ---
 
 **最后更新**: 2026-03-18
-**测试**: 236/236 ✅
+**测试**: 411/411 ✅
 **构建**: Release ✅

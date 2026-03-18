@@ -1,0 +1,656 @@
+{
+  "metadata": {
+    "title": "Tokitai 工具集成问题与解决方案",
+    "version": "1.0",
+    "created_at": "2026-03-18",
+    "author": "P11 AI Assistant",
+    "analysis_scope": [
+      "src/tools/ 目录下所有工具模块",
+      "main.rs 工具注册逻辑",
+      "tokitai #[tool] 宏集成情况"
+    ],
+    "project_positioning": {
+      "name": "Tokitai - AI 原生工具选择器 + 双轨服务架构",
+      "core_features": [
+        "CLI AI 助手模式：用户交互式对话",
+        "项目自更新模式：AI 自主进化循环",
+        "63+ 工具函数，11 个工具箱",
+        "AI 原生工具选择器（ToolIndex + LightweightToolSelector）",
+        "纯文件上下文存储（三层架构 + ICHC 哈希链）",
+        "服务化架构（服务元数据 + 生命周期管理）"
+      ],
+      "target_scale": "10,000+ 工具",
+      "design_philosophy": [
+        "tokitai #[tool] 宏自动生成元数据 - 零手动定义",
+        "ToolProvider trait 统一工具发现 - 编译时注册",
+        "轻量化纯文件架构 - 零数据库依赖"
+      ]
+    }
+  },
+
+  "executive_summary": {
+    "total_tool_modules_analyzed": 7,
+    "tools_with_tool_macro": 26,
+    "tools_missing_from_registry": 6,
+    "critical_issues": 2,
+    "major_issues": 3,
+    "minor_issues": 4,
+    "overall_assessment": "项目整体 tokitai 集成良好，但存在部分工具未注册到工具矩阵的问题，导致 AI 无法发现和调用这些工具"
+  },
+
+  "tool_modules_analysis": {
+    "io_module": {
+      "path": "src/tools/io/",
+      "status": "✅ 已集成",
+      "tool_providers": [
+        {
+          "name": "FileOperations",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "file_ops",
+          "tool_count": 15
+        },
+        {
+          "name": "FileSearchTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "file_ops",
+          "tool_count": 4
+        },
+        {
+          "name": "PdfTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "file_ops",
+          "tool_count": 2
+        },
+        {
+          "name": "ProjectTemplates",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "data",
+          "tool_count": 3
+        },
+        {
+          "name": "FileCache",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 3,
+          "issue": "⚠️ 未在 main.rs 中注册"
+        }
+      ]
+    },
+
+    "network_module": {
+      "path": "src/tools/network/",
+      "status": "⚠️ 部分集成",
+      "tool_providers": [
+        {
+          "name": "HttpClientTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "web",
+          "tool_count": 8
+        },
+        {
+          "name": "SearchTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "web",
+          "tool_count": 6
+        },
+        {
+          "name": "DownloadTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "web",
+          "tool_count": 3
+        },
+        {
+          "name": "NetworkTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "web",
+          "tool_count": 4
+        },
+        {
+          "name": "WikipediaTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "web",
+          "tool_count": 2
+        },
+        {
+          "name": "RequestMonitor",
+          "tool_macro": false,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 0,
+          "issue": "❌ 未使用#[tool] 宏，仅为辅助监控类"
+        }
+      ]
+    },
+
+    "system_module": {
+      "path": "src/tools/system/",
+      "status": "⚠️ 部分集成",
+      "tool_providers": [
+        {
+          "name": "SystemCommands",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "system",
+          "tool_count": 5
+        },
+        {
+          "name": "ProcessManager",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "system",
+          "tool_count": 4
+        },
+        {
+          "name": "CodeAnalyzer",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "code",
+          "tool_count": 4
+        },
+        {
+          "name": "SystemMonitor",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 6,
+          "issue": "❌ 未在 main.rs 中注册 - 重要遗漏"
+        }
+      ],
+      "integrated_modules": [
+        {
+          "name": "DialogueTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "system",
+          "tool_count": 10,
+          "source": "src/dialogue/"
+        },
+        {
+          "name": "ObservabilityTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "system",
+          "tool_count": 6,
+          "source": "src/observability/"
+        },
+        {
+          "name": "PromptTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "system",
+          "tool_count": 6,
+          "source": "src/prompt_engineering/"
+        }
+      ]
+    },
+
+    "data_module": {
+      "path": "src/tools/data/",
+      "status": "❌ 严重遗漏",
+      "tool_providers": [
+        {
+          "name": "JsonFormatTools",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "data",
+          "tool_count": 3,
+          "note": "在 main.rs 中以 JsonTools 别名注册"
+        },
+        {
+          "name": "JsonQueryTools",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 2,
+          "issue": "❌ 未在 main.rs 中注册 - 重要遗漏"
+        },
+        {
+          "name": "JsonMergeTools",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 2,
+          "issue": "❌ 未在 main.rs 中注册 - 重要遗漏"
+        },
+        {
+          "name": "DataConversionTools",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 2,
+          "issue": "❌ 未在 main.rs 中注册 - 重要遗漏"
+        }
+      ],
+      "service_wrapper": {
+        "name": "DataService",
+        "status": "✅ 已实现",
+        "issue": "ServiceLifecycle 已实现但未被使用",
+        "recommendation": "考虑在 IntegratedModules 中集成 DataService"
+      }
+    },
+
+    "vcs_module": {
+      "path": "src/tools/vcs/",
+      "status": "✅ 已集成",
+      "tool_providers": [
+        {
+          "name": "GitOperations",
+          "tool_macro": true,
+          "registered_in_main": true,
+          "toolbox": "git",
+          "tool_count": 4
+        }
+      ]
+    },
+
+    "tensor_module": {
+      "path": "src/tools/tensor/",
+      "status": "⚠️ 可选功能",
+      "tool_providers": [
+        {
+          "name": "TensorTools",
+          "tool_macro": true,
+          "registered_in_main": false,
+          "toolbox": null,
+          "tool_count": 15,
+          "issue": "⚠️ 仅在 --features tensor 时编译，默认未启用",
+          "note": "这是设计决策，tensor 功能依赖 candle-core 等重型依赖"
+        }
+      ],
+      "feature_flag": {
+        "required": true,
+        "command": "cargo run --features tensor",
+        "dependencies": [
+          "candle-core",
+          "candle-nn",
+          "safetensors",
+          "half",
+          "ndarray"
+        ]
+      }
+    },
+
+    "integration_modules": {
+      "path": "src/integration/",
+      "status": "✅ 已集成",
+      "description": "统一管理 dialogue/observability/prompt_engineering 生命周期",
+      "tool_providers": [
+        {
+          "name": "IntegratedModules",
+          "tool_macro": false,
+          "registered_in_main": true,
+          "note": "作为模块管理器，本身不是 ToolProvider"
+        }
+      ]
+    }
+  },
+
+  "critical_issues": [
+    {
+      "id": "CRIT-001",
+      "severity": "严重",
+      "title": "Data 模块 3 个工具类未注册到工具矩阵",
+      "affected_tools": [
+        "JsonQueryTools (query_json, extract_keys)",
+        "JsonMergeTools (merge_json, merge_json_with_defaults)",
+        "DataConversionTools (json_to_csv, batch_json_to_csv)"
+      ],
+      "impact": "AI 无法发现和调用这 6 个数据工具，功能浪费",
+      "root_cause": "main.rs 中只注册了 JsonFormatTools（以 JsonTools 别名），遗漏了其他 3 个工具类",
+      "location": "src/main.rs:238",
+      "evidence": {
+        "import_exists": true,
+        "import_line": "use tools::data::{JsonQueryTools, JsonMergeTools, DataConversionTools};",
+        "registration_missing": true,
+        "only_registered": "JsonTools (JsonFormatTools 的别名)"
+      },
+      "solution": {
+        "action": "在 main.rs 中添加 3 个工具类的注册",
+        "code_change": {
+          "location": "src/main.rs:238 之后",
+          "add_lines": [
+            "let _ = tool_registry.register_from_provider_sync::<JsonQueryTools>(Some(\"data\"), ToolSource::Builtin);",
+            "let _ = tool_registry.register_from_provider_sync::<JsonMergeTools>(Some(\"data\"), ToolSource::Builtin);",
+            "let _ = tool_registry.register_from_provider_sync::<DataConversionTools>(Some(\"data\"), ToolSource::Builtin);"
+          ]
+        },
+        "effort": "5 分钟",
+        "risk": "无风险 - 仅添加注册调用"
+      }
+    },
+    {
+      "id": "CRIT-002",
+      "severity": "严重",
+      "title": "SystemMonitor 未注册到工具矩阵",
+      "affected_tools": [
+        "SystemMonitor (get_system_resources, get_system_info, get_cpu_info, get_memory_info, get_disk_info, get_uptime)"
+      ],
+      "impact": "AI 无法获取系统资源使用情况，缺少重要的系统监控能力",
+      "root_cause": "main.rs 中只注册了 SystemCommands/ProcessManager/CodeAnalyzer，遗漏了 SystemMonitor",
+      "location": "src/main.rs:232-234",
+      "evidence": {
+        "tool_macro_exists": true,
+        "tool_count": 6,
+        "registration_missing": true
+      },
+      "solution": {
+        "action": "在 main.rs 中添加 SystemMonitor 的注册",
+        "code_change": {
+          "location": "src/main.rs:234 之后",
+          "add_lines": [
+            "let _ = tool_registry.register_from_provider_sync::<SystemMonitor>(Some(\"system\"), ToolSource::Builtin);"
+          ]
+        },
+        "effort": "2 分钟",
+        "risk": "无风险 - 仅添加注册调用"
+      }
+    }
+  ],
+
+  "major_issues": [
+    {
+      "id": "MAJ-001",
+      "severity": "重要",
+      "title": "FileCache 未注册到工具矩阵",
+      "affected_tools": [
+        "FileCache (get, set, delete, clear)"
+      ],
+      "impact": "AI 无法使用文件缓存功能",
+      "root_cause": "FileCache 设计为辅助工具类，未作为独立 ToolProvider 注册",
+      "location": "src/tools/io/file_cache.rs",
+      "recommendation": {
+        "action": "评估 FileCache 是否需要作为独立工具暴露给 AI",
+        "options": [
+          {
+            "option": "A - 保持现状",
+            "rationale": "FileCache 作为内部缓存机制，不需要 AI 直接调用"
+          },
+          {
+            "option": "B - 注册为工具",
+            "rationale": "如果 AI 需要管理缓存，则注册到 file_ops 工具箱"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MAJ-002",
+      "severity": "重要",
+      "title": "RequestMonitor 未使用#[tool] 宏",
+      "affected_tools": [],
+      "impact": "RequestMonitor 仅为辅助监控类，无法被 AI 调用",
+      "root_cause": "RequestMonitor 设计为 HttpClientTools 的内部组件，不是独立 ToolProvider",
+      "location": "src/tools/network/request_monitor.rs",
+      "recommendation": {
+        "action": "保持现状 - 这是合理的设计决策",
+        "rationale": "RequestMonitor 用于监控 HTTP 请求统计，不应直接暴露给 AI"
+      }
+    },
+    {
+      "id": "MAJ-003",
+      "severity": "重要",
+      "title": "DataService 服务生命周期未被使用",
+      "affected_tools": ["所有 data 模块工具"],
+      "impact": "DataService 实现了 ServiceLifecycle 但未被集成到服务管理体系",
+      "root_cause": "DataService 作为服务包装器，未在 IntegratedModules 中注册",
+      "location": "src/tools/data/mod.rs",
+      "recommendation": {
+        "action": "考虑将 DataService 集成到 IntegratedModules",
+        "benefit": "统一管理 data 工具的生命周期和监控指标",
+        "effort": "2-3 小时"
+      }
+    }
+  ],
+
+  "minor_issues": [
+    {
+      "id": "MIN-001",
+      "severity": "轻微",
+      "title": "TensorTools 默认未启用",
+      "affected_tools": ["所有 tensor 工具 (15 个)"],
+      "impact": "默认构建不包含 tensor 功能",
+      "root_cause": "tensor 模块依赖重型依赖（candle-core 等），使用 feature flag 控制",
+      "location": "Cargo.toml, src/tools/tensor/",
+      "recommendation": {
+        "action": "保持现状 - 这是合理的设计决策",
+        "rationale": "tensor 功能是可选的，避免不必要的依赖"
+      },
+      "documentation_needed": "在 README.md 中说明如何启用 tensor 功能"
+    },
+    {
+      "id": "MIN-002",
+      "severity": "轻微",
+      "title": "工具注册代码分散在 main.rs 多处",
+      "affected_tools": ["所有工具"],
+      "impact": "代码维护性差，容易遗漏",
+      "root_cause": "工具注册逻辑分散在 CLI 模式和自主模式的初始化代码中",
+      "location": "src/main.rs:231-245, 408-422",
+      "recommendation": {
+        "action": "提取工具注册逻辑到独立函数",
+        "code_change": {
+          "create_file": "src/tool_matrix/registry_helper.rs",
+          "function": "pub fn register_all_builtin_tools(registry: &mut ToolRegistry)"
+        },
+        "effort": "1-2 小时",
+        "benefit": "减少代码重复，降低遗漏风险"
+      }
+    },
+    {
+      "id": "MIN-003",
+      "severity": "轻微",
+      "title": "缺少工具注册完整性检查",
+      "affected_tools": ["所有工具"],
+      "impact": "无法自动发现未注册的工具类",
+      "root_cause": "缺少编译时或运行时检查机制",
+      "recommendation": {
+        "action": "添加工具注册完整性测试",
+        "code_change": {
+          "create_test": "src/tool_matrix/tests/integration_test.rs",
+          "test_name": "test_all_tool_providers_registered"
+        },
+        "effort": "2-3 小时",
+        "benefit": "自动发现未注册的工具类"
+      }
+    },
+    {
+      "id": "MIN-004",
+      "severity": "轻微",
+      "title": "工具箱分类不够直观",
+      "affected_tools": ["所有工具"],
+      "impact": "用户可能不理解工具箱分类逻辑",
+      "current_toolboxes": ["file_ops", "system", "code", "web", "git", "data"],
+      "recommendation": {
+        "action": "在 README.md 中添加工具箱分类说明",
+        "effort": "30 分钟"
+      }
+    }
+  ],
+
+  "implementation_plan": {
+    "phase_1_critical_fixes": {
+      "name": "P0 - 关键修复（立即执行）",
+      "duration": "10 分钟",
+      "tasks": [
+        {
+          "id": "CRIT-001",
+          "action": "在 main.rs 中注册 JsonQueryTools/JsonMergeTools/DataConversionTools",
+          "location": "src/main.rs:238 之后",
+          "priority": "P0"
+        },
+        {
+          "id": "CRIT-002",
+          "action": "在 main.rs 中注册 SystemMonitor",
+          "location": "src/main.rs:234 之后",
+          "priority": "P0"
+        }
+      ],
+      "verification": [
+        "运行 cargo build 确保编译通过",
+        "运行 cargo test 确保测试通过",
+        "启动程序验证工具列表包含新增工具"
+      ]
+    },
+    "phase_2_code_quality": {
+      "name": "P2 - 代码质量改进（本周内）",
+      "duration": "3-5 小时",
+      "tasks": [
+        {
+          "id": "MIN-002",
+          "action": "提取工具注册逻辑到独立函数",
+          "priority": "P2"
+        },
+        {
+          "id": "MIN-003",
+          "action": "添加工具注册完整性测试",
+          "priority": "P2"
+        }
+      ]
+    },
+    "phase_3_documentation": {
+      "name": "P3 - 文档完善（下周内）",
+      "duration": "1-2 小时",
+      "tasks": [
+        {
+          "id": "MIN-001",
+          "action": "在 README.md 中说明 tensor 功能启用方法",
+          "priority": "P3"
+        },
+        {
+          "id": "MIN-004",
+          "action": "在 README.md 中添加工具箱分类说明",
+          "priority": "P3"
+        }
+      ]
+    }
+  },
+
+  "tool_inventory": {
+    "summary": {
+      "total_toolboxes": 6,
+      "total_tool_providers": 20,
+      "total_tools_with_macro": 63,
+      "tools_registered": 57,
+      "tools_missing_registration": 6,
+      "registration_rate": "90.5%"
+    },
+    "by_toolbox": {
+      "file_ops": {
+        "providers": ["FileOperations", "FileSearchTools", "PdfTools", "ProjectTemplates"],
+        "tool_count": 24,
+        "status": "✅ 完整"
+      },
+      "system": {
+        "providers": ["SystemCommands", "ProcessManager", "DialogueTools", "ObservabilityTools", "PromptTools"],
+        "tool_count": 31,
+        "status": "⚠️ 缺少 SystemMonitor"
+      },
+      "code": {
+        "providers": ["CodeAnalyzer"],
+        "tool_count": 4,
+        "status": "✅ 完整"
+      },
+      "web": {
+        "providers": ["HttpClientTools", "SearchTools", "DownloadTools", "NetworkTools", "WikipediaTools"],
+        "tool_count": 23,
+        "status": "✅ 完整"
+      },
+      "git": {
+        "providers": ["GitOperations"],
+        "tool_count": 4,
+        "status": "✅ 完整"
+      },
+      "data": {
+        "providers": ["JsonFormatTools"],
+        "tool_count": 3,
+        "status": "❌ 缺少 JsonQueryTools/JsonMergeTools/DataConversionTools"
+      }
+    }
+  },
+
+  "tokitai_integration_best_practices": {
+    "current_strengths": [
+      {
+        "practice": "使用#[tool] 宏自动提取元数据",
+        "status": "✅ 已落实",
+        "example": "所有工具类都使用#[tool] 宏"
+      },
+      {
+        "practice": "ToolProvider trait 统一工具发现",
+        "status": "✅ 已落实",
+        "example": "register_from_provider_sync::<T>() 统一注册"
+      },
+      {
+        "practice": "工具箱分类管理",
+        "status": "✅ 已落实",
+        "example": "6 个工具箱覆盖所有工具"
+      },
+      {
+        "practice": "AI 原生工具选择器",
+        "status": "✅ 已落实",
+        "example": "LightweightToolSelector + AIToolboxClassifier"
+      }
+    ],
+    "improvement_opportunities": [
+      {
+        "opportunity": "从 tool.tags 自动构建分类规则",
+        "reference": "ARCHITECTURE_IMPROVEMENT_PLAN.json (IMP-001)",
+        "benefit": "消除手动 toolbox_rules.json 配置"
+      },
+      {
+        "opportunity": "使用 tokitai-macros 生成工具代码",
+        "reference": "ARCHITECTURE_IMPROVEMENT_PLAN.json (IMP-002)",
+        "benefit": "减少工具生成时间至 10 秒"
+      },
+      {
+        "opportunity": "运行时工具注册",
+        "reference": "ARCHITECTURE_IMPROVEMENT_PLAN.json (IMP-004)",
+        "benefit": "零重新编译注册新工具"
+      }
+    ]
+  },
+
+  "related_documents": {
+    "architecture_plan": "docs/ARCHITECTURE_IMPROVEMENT_PLAN.json",
+    "pending_improvements": "docs/PENDING_IMPROVEMENTS.json",
+    "implementation_status": "docs/IMPLEMENTATION_STATUS_REPORT.md",
+    "structure_docs": "structure_ensure/"
+  },
+
+  "appendix": {
+    "all_tool_providers_list": [
+      {"name": "FileOperations", "module": "io", "tools": 15, "registered": true},
+      {"name": "FileSearchTools", "module": "io", "tools": 4, "registered": true},
+      {"name": "PdfTools", "module": "io", "tools": 2, "registered": true},
+      {"name": "ProjectTemplates", "module": "io", "tools": 3, "registered": true},
+      {"name": "FileCache", "module": "io", "tools": 3, "registered": false, "note": "辅助工具"},
+      {"name": "HttpClientTools", "module": "network", "tools": 8, "registered": true},
+      {"name": "SearchTools", "module": "network", "tools": 6, "registered": true},
+      {"name": "DownloadTools", "module": "network", "tools": 3, "registered": true},
+      {"name": "NetworkTools", "module": "network", "tools": 4, "registered": true},
+      {"name": "WikipediaTools", "module": "network", "tools": 2, "registered": true},
+      {"name": "RequestMonitor", "module": "network", "tools": 0, "registered": false, "note": "辅助监控"},
+      {"name": "SystemCommands", "module": "system", "tools": 5, "registered": true},
+      {"name": "ProcessManager", "module": "system", "tools": 4, "registered": true},
+      {"name": "CodeAnalyzer", "module": "system", "tools": 4, "registered": true},
+      {"name": "SystemMonitor", "module": "system", "tools": 6, "registered": false, "note": "需要注册"},
+      {"name": "DialogueTools", "module": "dialogue", "tools": 10, "registered": true},
+      {"name": "ObservabilityTools", "module": "observability", "tools": 6, "registered": true},
+      {"name": "PromptTools", "module": "prompt_engineering", "tools": 6, "registered": true},
+      {"name": "JsonFormatTools", "module": "data", "tools": 3, "registered": true},
+      {"name": "JsonQueryTools", "module": "data", "tools": 2, "registered": false, "note": "需要注册"},
+      {"name": "JsonMergeTools", "module": "data", "tools": 2, "registered": false, "note": "需要注册"},
+      {"name": "DataConversionTools", "module": "data", "tools": 2, "registered": false, "note": "需要注册"},
+      {"name": "GitOperations", "module": "vcs", "tools": 4, "registered": true},
+      {"name": "TensorTools", "module": "tensor", "tools": 15, "registered": false, "note": "可选功能"}
+    ]
+  }
+}

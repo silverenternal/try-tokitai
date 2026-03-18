@@ -332,7 +332,6 @@ pub fn get_system_prompt_for_role(role: &str, variables: &Value) -> Result<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prompt_engineering::template::{Example, Variable};
     use serde_json::json;
     use tempfile::TempDir;
 

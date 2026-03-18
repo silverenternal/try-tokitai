@@ -5,7 +5,7 @@
 > 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互** 和 **自主进化** 双模式，配备 63+ 工具和 AI 原生工具选择系统。
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Tests](https://img.shields.io/badge/tests-236%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-411%20passed-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
 
 ---
@@ -237,16 +237,16 @@ $ cargo run --release -- --autonomous
 ## 📊 项目规模
 
 ```
-tools/           25.9%  (7,114 行)
-context/         17.4%  (4,794 行)
-tool_matrix/     15.3%  (4,200 行)  ← AI 工具选择器 + 完整工具矩阵
-orchestrator/    12.8%  (3,528 行)
-autonomy/         9.8%  (2,684 行)
-main_core         6.9%  (1,884 行)
-其他             11.9%  (3,296 行)
+tools/           31.7%  (16,802 行)
+context/         14.0%  (7,398 行)
+autonomy/        13.4%  (7,072 行)
+orchestrator/     7.0%  (3,691 行)
+tool_matrix/      6.4%  (3,362 行)  ← AI 工具选择器 + 完整工具矩阵
+main_core         5.8%  (3,079 行)
+其他             21.7%  (11,560 行)
 ────────────────────────────────────
-总计                   ~27,500 行 Rust
-                       99 个源文件
+总计                   ~52,964 行 Rust
+                       131 个源文件
 ```
 
 ---
@@ -272,7 +272,7 @@ try-tokitai/
 │   └── code_review.toml
 │
 ├── src/                    # 源代码
-│   ├── main.rs             # 程序入口 (1,884 行)
+│   ├── main.rs             # 程序入口 (1,895 行)
 │   ├── config.rs           # 配置管理
 │   ├── sandbox.rs          # 沙箱系统
 │   │
@@ -379,7 +379,7 @@ running 236 tests
 ✅ integration::...
 ✅ orchestrator::workflow_loader::...
 
-test result: ok. 236 passed; 0 failed
+test result: ok. 411 passed; 0 failed
 ```
 
 ---
@@ -423,6 +423,6 @@ MIT OR Apache-2.0
 
 ---
 
-**最后更新**: 2026-03-18  
-**测试状态**: 236/236 ✅  
+**最后更新**: 2026-03-18
+**测试状态**: 411/411 ✅
 **构建状态**: Release ✅

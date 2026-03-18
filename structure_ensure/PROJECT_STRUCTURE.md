@@ -10,12 +10,12 @@
 
 | 指标 | 数值 |
 |------|------|
-| **代码行数** | ~27,500 行 Rust |
-| **源代码文件** | 99 个 |
+| **代码行数** | ~52,964 行 Rust |
+| **源代码文件** | 131 个 |
 | **核心模块** | 10 个 |
 | **工具箱** | 11 个 |
 | **工具函数** | 63+ 个 |
-| **测试状态** | 236/236 通过 ✅ |
+| **测试状态** | 411/411 通过 ✅ |
 
 ---
 
@@ -170,54 +170,67 @@ try-tokitai/
 │   ├── path_resolver.rs         # 路径解析器
 │   ├── sandbox.rs               # 沙箱系统
 │   │
-│   ├── tools/                   # 工具集合 (7,114 行)
+│   ├── tools/                   # 工具集合 (16,802 行)
 │   │   ├── io/                  # 文件 IO 工具
 │   │   ├── network/             # 网络工具（服务化）
 │   │   ├── system/              # 系统工具
 │   │   ├── data/                # 数据处理工具
-│   │   └── vcs/                 # 版本控制工具
+│   │   ├── vcs/                 # 版本控制工具
+│   │   └── tensor/              # 张量计算工具（可选）
 │   │
-│   ├── context/                 # 上下文存储 (4,794 行)
-│   ├── autonomy/                # 自主进化模块 (2,684 行)
-│   ├── orchestrator/            # 编排调度 (3,528 行)
+│   ├── context/                 # 上下文存储 (7,398 行)
+│   ├── autonomy/                # 自主进化模块 (7,072 行)
+│   ├── orchestrator/            # 编排调度 (4,419 行)
 │   │   ├── mod.rs               # 模块导出
 │   │   ├── orchestrator.rs      # 编排器核心
 │   │   ├── role_switcher.rs     # 角色切换
 │   │   ├── workflow.rs          # 声明式工作流定义和执行引擎
-│   │   └── workflow_loader.rs   # TOML 工作流加载器（新增）
+│   │   └── workflow_loader.rs   # TOML 工作流加载器
 │   │
-│   ├── tool_matrix/             # 工具矩阵/服务注册表 (3,362 行)
+│   ├── tool_matrix/             # 工具矩阵/服务注册表 (8,271 行)
 │   │   ├── mod.rs               # 模块导出
 │   │   ├── matrix.rs            # 服务化元数据/生命周期/指标收集
 │   │   ├── registry.rs          # 工具注册表（AI 分类/依赖分析/运行时学习）
 │   │   ├── selector.rs          # 工具选择器
 │   │   ├── skills_manager.rs    # 技能管理
-│   │   ├── tool_selector.rs     # 轻量级工具选择器（AI 原生，新增）
-│   │   ├── ai_classifier.rs     # AI 工具箱分类器（新增）
-│   │   ├── dependency_analyzer.rs # AI 依赖关系分析器（新增）
-│   │   ├── dispatcher.rs        # 工具调用分发器（新增）
-│   │   └── metadata_enhancer.rs # tokitai 元数据增强器（新增）
+│   │   ├── tool_selector.rs     # 轻量级工具选择器（AI 原生）
+│   │   ├── ai_classifier.rs     # AI 工具箱分类器
+│   │   ├── dependency_analyzer.rs # AI 依赖关系分析器
+│   │   ├── dispatcher.rs        # 工具调用分发器
+│   │   ├── metadata_enhancer.rs # tokitai 元数据增强器
+│   │   ├── rule_classifier.rs   # 规则分类器（分层缓存 L3）
+│   │   ├── query_enhancer.rs    # 查询增强器（同义词/意图识别）
+│   │   ├── tool_generator.rs    # 工具生成器（模板系统）
+│   │   ├── trie_index.rs        # Trie 树索引和 BK-Tree 拼写纠正
+│   │   └── dynamic_registry.rs  # 动态工具注册表（热加载）
 │   │
-│   ├── integration/             # 集成模块管理器
+│   ├── integration/             # 集成模块管理器 (331 行)
 │   │   ├── mod.rs               # 模块导出
 │   │   └── modules_manager.rs   # 统一生命周期管理
 │   │
-│   ├── prompt_engineering/      # 提示词工程 (已集成)
+│   ├── provider_config/         # AI 提供商配置
+│   │   ├── mod.rs
+│   │   └── provider_queue.rs    # 提供商队列管理
+│   │
+│   ├── prompt_engineering/      # 提示词工程 (677 行)
 │   │   ├── mod.rs
 │   │   ├── manager.rs           # 模板管理器
 │   │   ├── renderer.rs          # 渲染引擎
 │   │   ├── template.rs          # 模板结构
 │   │   └── prompt_tools.rs      # tokitai ToolProvider
 │   │
-│   ├── dialogue/                # 对话状态机 (已集成)
+│   ├── dialogue/                # 对话状态机 (751 行，已集成)
 │   │   ├── mod.rs
 │   │   ├── state_machine.rs     # 状态机核心
 │   │   └── dialogue_tools.rs    # tokitai ToolProvider
 │   │
-│   └── observability/           # 可观测性 (已集成)
+│   └── observability/           # 可观测性 (901 行，已集成)
 │       ├── mod.rs
 │       ├── tracing.rs           # 全链路追踪
-│       └── observability_tools.rs # tokitai ToolProvider
+│       ├── observability_tools.rs # tokitai ToolProvider
+│       ├── metrics_dashboard.rs  # 指标仪表板
+│       ├── replay.rs             # 追踪回放
+│       └── tool_timeline.rs      # 工具时间线
 │
 ├── examples/                     # 示例代码
 ├── benches/                      # 性能基准测试
@@ -802,30 +815,32 @@ context/
 ### 按代码行数
 
 ```
-tools/           ████████████████████████████  25.9%  (7,114 行)
-context/         ████████████                 17.4%  (4,794 行)
-orchestrator/    ████████                     12.8%  (3,528 行)
-tool_matrix/     ███████                      15.3%  (4,200 行)  ← +838 行 (新增模块)
-autonomy/        ██████                        9.8%  (2,684 行)
-main_core        ███████                       6.9%  (1,884 行)
-observability/   █                             1.7%  (  456 行)
-dialogue/        █                             1.6%  (  443 行)
-prompt_eng/      █                             1.4%  (  395 行)
-integration/     █                             1.2%  (  325 行)
-其他             ██████                        6.0%  (1,676 行)
+tools/           ██████████████████████████████████  31.7%  (16,802 行)
+context/         ██████████████                      14.0%  (7,398 行)
+autonomy/        █████████████                       13.4%  (7,072 行)
+orchestrator/    ████████                             7.0%  (4,419 行)
+tool_matrix/     ████████                             6.4%  (3,362 行)  ← AI 工具选择器 + 完整工具矩阵
+main_core        ██████                               5.8%  (3,079 行)
+observability/   █                                    1.7%  (  901 行)
+dialogue/        █                                    1.4%  (  751 行)
+prompt_eng/      █                                    1.3%  (  677 行)
+integration/     █                                    0.6%  (  331 行)
+其他             ████████████████████                16.7%  (8,832 行)
+─────────────────────────────────────────────────────────────────────
+总计                    100.0%  (52,964 行)
 ```
 
 ### 按文件数量
 
 ```
-tools/:          24 个文件
-context/:        11 个文件
-autonomy/:        9 个文件
-orchestrator/:    6 个文件 (含 workflow_loader)
-tool_matrix/:    15 个文件 (新增 rule_classifier/query_enhancer/tool_generator/trie_index/dynamic_registry)
+tools/:          58 个文件
+context/:        13 个文件
+autonomy/:       15 个文件
+orchestrator/:    7 个文件 (含 workflow_loader)
+tool_matrix/:    15 个文件 (含 rule_classifier/query_enhancer/tool_generator/trie_index/dynamic_registry)
 prompt_engineering/: 5 个文件
 dialogue/:        3 个文件
-observability/:   3 个文件
+observability/:   6 个文件
 integration/:     2 个文件
 ```
 

@@ -26,8 +26,10 @@ use crossterm::{
 use tool_matrix::matrix::ServiceLifecycle;
 use tracing_subscriber::EnvFilter;
 
-use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, WebSearchTools, HttpClientTools, JsonTools, FileSearchTools, ProcessTools, NetworkTools, WikipediaTools, ProjectTemplates, PdfTools};
-use tools::network::download_enhanced::DownloadToolsEnhanced;
+use tools::{CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools, SearchTools, HttpClientTools, JsonFormatTools, FileSearchTools, ProcessTools, NetworkTools, WikipediaTools, ProjectTemplates, PdfTools};
+use tools::data::{JsonQueryTools, JsonMergeTools, DataConversionTools};
+use tools::data::JsonFormatTools as JsonTools;  // 向后兼容别名
+use tools::system::system_monitor::SystemMonitor;
 use autonomy::{AgentCoordinator, GitWorkflow, GitWorkflowTools};
 use orchestrator::Orchestrator;
 use tool_matrix::registry::{ToolRegistry, ToolSource};
@@ -119,7 +121,7 @@ pub struct AiAssistant {
     file_ops: FileOperations,
     system_tools: SystemTools,
     code_tools: CodeTools,
-    web_search: WebSearchTools,
+    web_search: SearchTools,
     download_tools: DownloadTools,
     git_ops: GitOperations,
     http_client: HttpClientTools,
@@ -130,7 +132,6 @@ pub struct AiAssistant {
     wikipedia_tools: WikipediaTools,
     project_templates: ProjectTemplates,
     pdf_tools: PdfTools,
-    download_tools_enhanced: DownloadToolsEnhanced,
 
     // =========================================================================
     // 工具矩阵（用于工具管理和动态选择）
@@ -231,7 +232,7 @@ impl AiAssistant {
         let _ = tool_registry.register_from_provider_sync::<FileOperations>(Some("file_ops"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<SystemTools>(Some("system"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<CodeTools>(Some("code"), ToolSource::Builtin);
-        let _ = tool_registry.register_from_provider_sync::<WebSearchTools>(Some("web"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<SearchTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<DownloadTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<GitOperations>(Some("git"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<HttpClientTools>(Some("web"), ToolSource::Builtin);
@@ -242,8 +243,15 @@ impl AiAssistant {
         let _ = tool_registry.register_from_provider_sync::<WikipediaTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<ProjectTemplates>(Some("data"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<PdfTools>(Some("file_ops"), ToolSource::Builtin);
-        let _ = tool_registry.register_from_provider_sync::<DownloadToolsEnhanced>(Some("web"), ToolSource::Builtin);
-        
+
+        // 注册数据模块工具到 data 工具箱
+        let _ = tool_registry.register_from_provider_sync::<JsonQueryTools>(Some("data"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<JsonMergeTools>(Some("data"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<DataConversionTools>(Some("data"), ToolSource::Builtin);
+
+        // 注册系统监控工具到 system 工具箱
+        let _ = tool_registry.register_from_provider_sync::<SystemMonitor>(Some("system"), ToolSource::Builtin);
+
         // 注册新工具到工具箱（从 IntegratedModules 获取）
         // IntegratedModules 会统一管理 dialogue、observability、prompt_engineering
 
@@ -306,21 +314,20 @@ impl AiAssistant {
             .expect("创建 HTTP 客户端失败");
 
         Self {
-            file_ops: FileOperations,
-            system_tools: SystemTools,
-            code_tools: CodeTools,
-            web_search: WebSearchTools::new(),
+            file_ops: FileOperations::default(),
+            system_tools: SystemTools::default(),
+            code_tools: CodeTools::default(),
+            web_search: SearchTools::new(),
             download_tools: DownloadTools::new(),
-            git_ops: GitOperations,
+            git_ops: GitOperations::default(),
             http_client: HttpClientTools::new(),
-            json_tools: JsonTools,
-            file_search: FileSearchTools,
-            process_tools: ProcessTools,
-            network_tools: NetworkTools,
+            json_tools: JsonFormatTools::default(),
+            file_search: FileSearchTools::default(),
+            process_tools: ProcessTools::default(),
+            network_tools: NetworkTools::default(),
             wikipedia_tools: WikipediaTools::new(),
-            project_templates: ProjectTemplates,
-            pdf_tools: PdfTools,
-            download_tools_enhanced: DownloadToolsEnhanced,
+            project_templates: ProjectTemplates::default(),
+            pdf_tools: PdfTools::default(),
             tool_registry,
             tool_selector,
             skills_manager,
@@ -410,7 +417,7 @@ impl AiAssistant {
         let _ = tool_registry.register_from_provider_sync::<FileOperations>(Some("file_ops"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<SystemTools>(Some("system"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<CodeTools>(Some("code"), ToolSource::Builtin);
-        let _ = tool_registry.register_from_provider_sync::<WebSearchTools>(Some("web"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<SearchTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<DownloadTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<GitOperations>(Some("git"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<HttpClientTools>(Some("web"), ToolSource::Builtin);
@@ -421,8 +428,15 @@ impl AiAssistant {
         let _ = tool_registry.register_from_provider_sync::<WikipediaTools>(Some("web"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<ProjectTemplates>(Some("data"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<PdfTools>(Some("file_ops"), ToolSource::Builtin);
-        let _ = tool_registry.register_from_provider_sync::<DownloadToolsEnhanced>(Some("web"), ToolSource::Builtin);
-        
+
+        // 注册数据模块工具到 data 工具箱
+        let _ = tool_registry.register_from_provider_sync::<JsonQueryTools>(Some("data"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<JsonMergeTools>(Some("data"), ToolSource::Builtin);
+        let _ = tool_registry.register_from_provider_sync::<DataConversionTools>(Some("data"), ToolSource::Builtin);
+
+        // 注册系统监控工具到 system 工具箱
+        let _ = tool_registry.register_from_provider_sync::<SystemMonitor>(Some("system"), ToolSource::Builtin);
+
         // 注册新工具到工具箱
         let _ = tool_registry.register_from_provider_sync::<DialogueTools>(Some("system"), ToolSource::Builtin);
         let _ = tool_registry.register_from_provider_sync::<ObservabilityTools>(Some("system"), ToolSource::Builtin);
@@ -499,21 +513,20 @@ impl AiAssistant {
             .expect("创建 HTTP 客户端失败");
 
         Ok(Self {
-            file_ops: FileOperations,
-            system_tools: SystemTools,
-            code_tools: CodeTools,
-            web_search: WebSearchTools::new(),
+            file_ops: FileOperations::default(),
+            system_tools: SystemTools::default(),
+            code_tools: CodeTools::default(),
+            web_search: SearchTools::new(),
             download_tools: DownloadTools::new(),
-            git_ops: GitOperations,
+            git_ops: GitOperations::default(),
             http_client: HttpClientTools::new(),
-            json_tools: JsonTools,
-            file_search: FileSearchTools,
-            process_tools: ProcessTools,
-            network_tools: NetworkTools,
+            json_tools: JsonFormatTools::default(),
+            file_search: FileSearchTools::default(),
+            process_tools: ProcessTools::default(),
+            network_tools: NetworkTools::default(),
             wikipedia_tools: WikipediaTools::new(),
-            project_templates: ProjectTemplates,
-            pdf_tools: PdfTools,
-            download_tools_enhanced: DownloadToolsEnhanced,
+            project_templates: ProjectTemplates::default(),
+            pdf_tools: PdfTools::default(),
             tool_registry,
             tool_selector,
             skills_manager,
@@ -622,7 +635,6 @@ impl AiAssistant {
         try_tool!(self.wikipedia_tools, "wikipedia_tools");
         try_tool!(self.project_templates, "project_templates");
         try_tool!(self.pdf_tools, "pdf_tools");
-        try_tool!(self.download_tools_enhanced, "download_tools_enhanced");
 
         warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
@@ -1550,6 +1562,37 @@ fn main() -> Result<()> {
 
     println!("🚀 AI Assistant 启动中...");
 
+    // 加载 .env 文件（如果存在）
+    if let Ok(env_content) = std::fs::read_to_string(".env") {
+        for line in env_content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                // 只加载 PROVIDER_ 或 AI_ 开头的配置
+                if key.starts_with("PROVIDER_") || key.starts_with("AI_") || key == "PROVIDERS" || key == "SEARXNG_URL" {
+                    std::env::set_var(key, value);
+                }
+            }
+        }
+    }
+
+    // 多供应商模式：自动初始化当前供应商（选择第一个）
+    if std::env::var("PROVIDERS").is_ok() && std::env::var("AI_API_URL").is_err() {
+        if let Ok(pm) = crate::provider_config::ProviderManager::from_env_file(None) {
+            let current = pm.current();
+            std::env::set_var("AI_API_URL", &current.api_url);
+            if let Some(key) = &current.api_key {
+                std::env::set_var("AI_API_KEY", key);
+            }
+            std::env::set_var("AI_MODEL", &current.model);
+            info!("🔌 使用供应商：{} ({})", current.name, current.api_url);
+        }
+    }
+
     // 加载配置
     let config = config::Config::load(None).unwrap_or_else(|e| {
         warn!("加载配置文件失败：{}，使用默认配置", e);
@@ -1804,12 +1847,12 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tools::{FileOperations, CodeTools, SystemTools, WebSearchTools, DownloadTools};
+    use tools::{FileOperations, CodeTools, SystemTools, SearchTools, DownloadTools};
     use tokitai::ToolProvider;
 
     #[test]
     fn test_file_operations_read_write() {
-        let file_ops = FileOperations;
+        let file_ops = FileOperations::default();
         let test_path = "/tmp/test_tokitai.txt";
         let test_content = "Hello, Tokitai!";
 
@@ -1819,7 +1862,7 @@ mod tests {
             "content": test_content
         }));
         assert!(write_result.is_ok());
-        
+
         // 测试读取
         let read_result = file_ops.call_tool("read_file", &json!({
             "path": test_path
@@ -1827,15 +1870,15 @@ mod tests {
         assert!(read_result.is_ok());
         // 注意：call_tool 返回的是 JSON 字符串，包含引号
         assert!(read_result.unwrap().to_string().contains(test_content));
-        
+
         // 清理
         let _ = std::fs::remove_file(test_path);
     }
 
     #[test]
     fn test_file_operations_list_dir() {
-        let file_ops = FileOperations;
-        
+        let file_ops = FileOperations::default();
+
         // 测试列出当前目录
         let result = file_ops.call_tool("list_dir", &json!({
             "path": "."
@@ -1845,8 +1888,8 @@ mod tests {
 
     #[test]
     fn test_code_tools_detect_language() {
-        let code_tools = CodeTools;
-        
+        let code_tools = CodeTools::default();
+
         // 测试检测 Rust 文件
         let result = code_tools.call_tool("detect_language", &json!({
             "path": "src/main.rs"
@@ -1858,8 +1901,8 @@ mod tests {
 
     #[test]
     fn test_system_tools_get_current_dir() {
-        let system_tools = SystemTools;
-        
+        let system_tools = SystemTools::default();
+
         let result = system_tools.call_tool("get_current_dir", &json!({}));
         assert!(result.is_ok());
     }
@@ -1870,7 +1913,7 @@ mod tests {
         assert!(!FileOperations::tool_definitions().is_empty());
         assert!(!CodeTools::tool_definitions().is_empty());
         assert!(!SystemTools::tool_definitions().is_empty());
-        assert!(!WebSearchTools::tool_definitions().is_empty());
+        assert!(!SearchTools::tool_definitions().is_empty());
         assert!(!DownloadTools::tool_definitions().is_empty());
 
         // 验证工具定义格式

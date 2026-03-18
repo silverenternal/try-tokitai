@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn test_short_term_layer() {
         let temp_dir = TempDir::new().unwrap();
-        let mut layer = ShortTermLayer::new(temp_dir.path(), 3).unwrap();
+        let layer = ShortTermLayer::new(temp_dir.path(), 3).unwrap();
 
         // 存储 5 个项目
         for i in 0..5 {

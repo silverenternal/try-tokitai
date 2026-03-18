@@ -7,8 +7,8 @@
   "last_updated": "2026-03-18",
 
   "quick_stats": {
-    "total_source_lines": 27500,
-    "total_source_files": 99,
+    "total_source_lines": 52964,
+    "total_source_files": 131,
     "core_modules": 10,
     "toolboxes": 11,
     "tool_functions": 63
@@ -41,7 +41,7 @@
   "src_modules": {
     "main": {
       "file": "main.rs",
-      "lines": 1884,
+      "lines": 1895,
       "description": "主程序入口，AiAssistant 结构体整合所有工具",
       "features": ["服务生命周期管理", "集成模块管理", "AI 工具选择器初始化", "双轨服务架构"]
     },
@@ -408,8 +408,8 @@
   },
 
   "test_status": {
-    "total_tests": 236,
-    "passed": 236,
+    "total_tests": 411,
+    "passed": 411,
     "failed": 0,
     "coverage_modules": [
       "autonomy",
