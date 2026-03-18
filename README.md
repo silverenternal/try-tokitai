@@ -168,7 +168,7 @@ cargo test autonomy
 
 ## 🛠️ 工具箱
 
-项目提供 **63+ 工具函数**，分为 **11 个工具箱**：
+项目提供 **63+ 工具函数**，分为 **12 个工具箱**：
 
 | 工具箱 | 工具数 | 功能 |
 |--------|--------|------|
@@ -178,7 +178,39 @@ cargo test autonomy
 | `code` | 4 | 代码分析、语言检测 |
 | `git` | 4 | Git 状态、日志、分支管理 |
 | `data` | 5 | JSON 格式化、查询、转换 |
+| `tensor` | 20+ | 张量计算、矩阵操作、激活函数、神经网络 |
 | `autonomy` | 2 | 自主进化（仅自主模式） |
+
+### 张量计算工具箱（tensor）
+
+**核心功能**:
+- **创建操作**: `zeros`, `ones`, `randn`, `from_data`, `arange`
+- **算术操作**: `add`, `sub`, `mul`, `div`, `mul_scalar`（支持广播）
+- **矩阵操作**: `matmul`, `transpose`, `reshape`
+- **归约操作**: `sum`, `mean`, `max`, `min`, `argmax`
+- **索引操作**: `slice`, `cat`, `stack`
+- **激活函数**: `relu`, `gelu`, `sigmoid`, `layer_norm`
+
+**使用示例**:
+```rust
+use crate::tools::tensor::TensorService;
+
+let service = TensorService::new();
+
+// 创建张量
+let a = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
+let b = service.from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2])?;
+
+// 矩阵乘法
+let result = service.matmul(&a, &b)?;
+// 输出：[19.0, 22.0, 43.0, 50.0]
+
+// 链式调用
+let zeros = service.zeros(&[2, 2])?;
+let result = service.add_scalar(&zeros, 1.0)?.mul_scalar(&2.0)?;
+```
+
+详细文档：[src/tools/tensor/README.md](src/tools/tensor/README.md)
 
 ### 新增工具（已集成到 system 工具箱）
 
