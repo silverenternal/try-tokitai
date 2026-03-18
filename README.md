@@ -1,12 +1,25 @@
 # try-tokitai
 
 > **AI 原生工具选择器 + 双轨服务架构**
-> 
+>
 > 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互** 和 **自主进化** 双模式，配备 63+ 工具和 AI 原生工具选择系统。
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Tests](https://img.shields.io/badge/tests-411%20passed-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
+
+---
+
+## 📊 项目概览
+
+| 指标 | 数值 |
+|------|------|
+| **代码行数** | ~52,964 行 Rust |
+| **源代码文件** | 131 个 |
+| **核心模块** | 10 个 |
+| **工具箱** | 11 个 |
+| **工具函数** | 63+ 个 |
+| **测试状态** | 411/411 通过 ✅ |
 
 ---
 
@@ -53,6 +66,8 @@
 - **AIToolboxClassifier**: AI 自主管理工具箱体系
 - **AIDependencyAnalyzer**: AI 自主维护工具依赖关系（静态分析 + 运行时学习）
 - **后台异步重建**: 不阻塞主线程，批量处理优化（100 工具 ~600ms）
+- **ToolDispatcher**: 统一工具调用分发器
+- **SelectorMetrics**: 完整监控指标（搜索次数/缓存命中率/平均延迟）
 
 ### 🛠️ 完整工具矩阵 (IMP-001~004)
 
@@ -80,10 +95,14 @@
 
 ### 🌐 服务化架构
 
-- **服务元数据**: 分类、QoS、依赖、版本、标签
-- **生命周期管理**: init/health/shutdown/stats
-- **健康检查**: Healthy/Degraded/Unhealthy
+- **服务元数据**: ServiceMetadata 包含分类、QoS、依赖、版本、标签
+- **服务生命周期**: ServiceLifecycle trait (init/health/shutdown/stats)
+- **服务健康状态**: Healthy/Degraded/Unhealthy
+- **服务统计**: ServiceStats 记录调用次数/成功率/延迟
+- **服务指标收集**: ServiceMetricsCollector 统一收集服务调用指标
+- **服务分类**: 10 种服务类型（Utility/File/Network/System/Data/Ai/Vcs/Dialogue/Observability/Prompt）
 - **声明式工作流**: TOML 定义，支持重试/超时/错误处理
+- **TOML 工作流加载器**: WorkflowLoader 从文件/目录加载工作流
 
 ### 🧩 集成模块
 
@@ -236,18 +255,20 @@ $ cargo run --release -- --autonomous
 
 ## 📊 项目规模
 
-```
-tools/           31.7%  (16,802 行)
-context/         14.0%  (7,398 行)
-autonomy/        13.4%  (7,072 行)
-orchestrator/     7.0%  (3,691 行)
-tool_matrix/      6.4%  (3,362 行)  ← AI 工具选择器 + 完整工具矩阵
-main_core         5.8%  (3,079 行)
-其他             21.7%  (11,560 行)
-────────────────────────────────────
-总计                   ~52,964 行 Rust
-                       131 个源文件
-```
+| 模块 | 行数 | 占比 | 说明 |
+|------|------|------|------|
+| `tools/` | 16,802 | 31.7% | 工具集合（文件/网络/系统/Git/数据） |
+| `context/` | 7,398 | 14.0% | 上下文存储（三层架构/哈希链/语义索引） |
+| `autonomy/` | 7,072 | 13.4% | 自主进化（多 Agent 协作/智能工具推荐） |
+| `orchestrator/` | 4,419 | 8.3% | 编排调度（工作流/角色切换/TOML 加载器） |
+| `tool_matrix/` | 8,271 | 15.6% | 工具矩阵（服务注册表/选择器/AI 分类器/AI 分析器/规则分类器/查询增强器/工具生成器/Trie 索引/动态注册表） |
+| `main_core` | 3,079 | 5.8% | 主程序入口和核心逻辑 |
+| `observability/` | 901 | 1.7% | 可观测性（已集成） |
+| `dialogue/` | 751 | 1.4% | 对话状态机（已集成） |
+| `prompt_engineering/` | 677 | 1.3% | 提示词工程（已集成） |
+| `integration/` | 331 | 0.6% | 集成模块管理器 |
+| 其他 | 3,263 | 6.2% | 配置/沙箱/解析器等 |
+| **总计** | **~52,964** | **100%** | **131 个源文件** |
 
 ---
 
@@ -255,52 +276,76 @@ main_core         5.8%  (3,079 行)
 
 ```
 try-tokitai/
-├── Cargo.toml              # 项目配置
-├── config.toml             # 应用配置
-├── .env.example            # 环境变量模板
-├── demo.sh                 # 一键启动脚本
+├── Cargo.toml                    # 项目配置和依赖
+├── config.toml                   # 应用配置
+├── .env.example                  # 环境变量模板
+├── README.md                     # 项目说明
+├── demo.sh                       # 一键演示脚本
 │
-├── docs/                   # 用户文档
-│   ├── QUICKSTART.md       # 快速启动
-│   ├── USER_GUIDE.md       # 用户指南
-│   ├── DEMO.md             # 演示指南
-│   ├── CHANGELOG.md        # 更新日志
-│   └── archive/            # 技术报告归档
+├── docs/                         # 用户文档
+│   ├── QUICKSTART.md            # 快速启动
+│   ├── USER_GUIDE.md            # 用户指南
+│   ├── DEMO.md                  # 演示指南
+│   ├── CHANGELOG.md             # 更新日志
+│   └── archive/                 # 技术报告归档
+│       ├── MODULE_INTEGRATION_REPORT.md   - 集成报告
+│       ├── MODULE_IMPROVEMENT_REPORT.md   - 改进报告
+│       ├── SERVICE_ARCHITECTURE_IMPLEMENTATION.md - 服务化架构
+│       ├── LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md - 工具选择器设计
+│       ├── LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md - 深化落实报告
+│       └── LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md - 总结
 │
-├── workflows/              # TOML 工作流定义
-│   ├── research_and_write.toml
-│   └── code_review.toml
+├── workflows/                    # TOML 工作流定义
+│   ├── research_and_write.toml  - 研究并撰写报告工作流
+│   └── code_review.toml         - 代码审查工作流
 │
-├── src/                    # 源代码
-│   ├── main.rs             # 程序入口 (1,895 行)
-│   ├── config.rs           # 配置管理
-│   ├── sandbox.rs          # 沙箱系统
+├── src/                          # 源代码
+│   ├── main.rs                  # 程序入口，AiAssistant 整合
+│   ├── config.rs                # 配置管理
+│   ├── sandbox.rs               # 沙箱系统
 │   │
-│   ├── tools/              # 工具集合 (7,114 行)
-│   │   ├── io/             # 文件 IO 工具
-│   │   ├── network/        # 网络工具
-│   │   ├── system/         # 系统工具
-│   │   ├── data/           # 数据处理
-│   │   └── vcs/            # 版本控制
+│   ├── tools/                   # 工具集合 (16,802 行)
+│   │   ├── io/                  # 文件 IO 工具
+│   │   ├── network/             # 网络工具（服务化）
+│   │   ├── system/              # 系统工具
+│   │   ├── data/                # 数据处理工具
+│   │   └── vcs/                 # 版本控制工具
 │   │
-│   ├── context/            # 上下文存储 (4,794 行)
-│   ├── autonomy/           # 自主进化 (2,684 行)
-│   ├── orchestrator/       # 编排调度 (3,528 行)
-│   ├── tool_matrix/        # 工具矩阵 (4,200 行)
-│   ├── integration/        # 集成模块 (325 行)
-│   ├── dialogue/           # 对话状态机 (443 行)
-│   ├── observability/      # 可观测性 (456 行)
-│   └── prompt_engineering/ # 提示词工程 (395 行)
+│   ├── context/                 # 上下文存储 (7,398 行)
+│   ├── autonomy/                # 自主进化模块 (7,072 行)
+│   ├── orchestrator/            # 编排调度 (4,419 行)
+│   │   ├── orchestrator.rs      # 编排器核心
+│   │   ├── role_switcher.rs     # 角色切换
+│   │   ├── workflow.rs          # 声明式工作流定义和执行引擎
+│   │   └── workflow_loader.rs   # TOML 工作流加载器
+│   │
+│   ├── tool_matrix/             # 工具矩阵/服务注册表 (8,271 行)
+│   │   ├── matrix.rs            # 服务化元数据/生命周期/指标收集
+│   │   ├── registry.rs          # 工具注册表（AI 分类/依赖分析/运行时学习）
+│   │   ├── tool_selector.rs     # 轻量级工具选择器（AI 原生）
+│   │   ├── ai_classifier.rs     # AI 工具箱分类器
+│   │   ├── dependency_analyzer.rs # AI 依赖关系分析器
+│   │   ├── dispatcher.rs        # 工具调用分发器
+│   │   ├── rule_classifier.rs   # 规则分类器（分层缓存 L3）
+│   │   ├── query_enhancer.rs    # 查询增强器（同义词/意图识别）
+│   │   ├── tool_generator.rs    # 工具生成器（模板系统）
+│   │   ├── trie_index.rs        # Trie 树索引和 BK-Tree 拼写纠正
+│   │   └── dynamic_registry.rs  # 动态工具注册表（热加载）
+│   │
+│   ├── integration/             # 集成模块管理器 (331 行)
+│   ├── dialogue/                # 对话状态机 (751 行，已集成)
+│   ├── observability/           # 可观测性 (901 行，已集成)
+│   └── prompt_engineering/      # 提示词工程 (677 行，已集成)
 │
-├── structure_ensure/       # 项目结构文档
-│   ├── README.md           # 结构文档索引
-│   ├── SERVICES.md         # 服务架构说明
-│   ├── QUICK_REFERENCE.md  # 快速参考卡片
-│   ├── PROJECT_STRUCTURE.md # 完整项目结构
-│   └── TOOL_SELECTOR_GUIDE.md # 工具选择器指南
+├── structure_ensure/            # 项目结构文档
+│   ├── README.md                # 结构文档索引
+│   ├── SERVICES.md              # 服务架构说明
+│   ├── QUICK_REFERENCE.md       # 快速参考卡片
+│   ├── PROJECT_STRUCTURE.md     # 完整项目结构
+│   └── TOOL_SELECTOR_GUIDE.md   # 工具选择器指南
 │
-└── .context/               # 运行时上下文存储
-└── .tokitai/               # 运行时数据
+├── .context/                    # 运行时上下文存储
+└── .tokitai/                    # 运行时数据
 ```
 
 ---
@@ -313,21 +358,28 @@ try-tokitai/
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | 快速启动指南 |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
 | [docs/DEMO.md](docs/DEMO.md) | 演示指南 |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 更新日志 |
 
 ### 架构文档
 | 文档 | 说明 |
 |------|------|
-| [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 🆕 服务双轨架构 |
+| [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 🆕 服务双轨架构说明 |
 | [structure_ensure/QUICK_REFERENCE.md](structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
 | [structure_ensure/PROJECT_STRUCTURE.md](structure_ensure/PROJECT_STRUCTURE.md) | 完整项目结构 |
 | [structure_ensure/TOOL_SELECTOR_GUIDE.md](structure_ensure/TOOL_SELECTOR_GUIDE.md) | 工具选择器指南 |
+| [structure_ensure/README.md](structure_ensure/README.md) | 结构文档索引 |
 
 ### 技术报告
 | 文档 | 说明 |
 |------|------|
 | [docs/ARCHITECTURE_IMPROVEMENT_PLAN.json](docs/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划 |
 | [docs/ARCHITECTURE_IMPROVEMENT_REPORT.md](docs/ARCHITECTURE_IMPROVEMENT_REPORT.md) | 架构改进报告 |
-| [docs/archive/](docs/archive/) | 技术报告归档 |
+| [docs/archive/MODULE_INTEGRATION_REPORT.md](docs/archive/MODULE_INTEGRATION_REPORT.md) | 模块集成报告 |
+| [docs/archive/MODULE_IMPROVEMENT_REPORT.md](docs/archive/MODULE_IMPROVEMENT_REPORT.md) | 模块改进报告 |
+| [docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md](docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md) | 服务化架构实施报告 |
+| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md) | 工具选择器设计 |
+| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md) | 深化落实报告 |
+| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md) | 总结报告 |
 
 ---
 
@@ -402,14 +454,16 @@ A: 自主模式在本地执行代码审查（fmt/clippy/test），失败时自�
 
 ## 📁 运行时文件夹
 
-以下文件夹在运行时自动创建，已添加到 `.gitignore`：
+以下文件夹在运行时自动创建，已添加到 `.gitignore`，不会被提交到版本控制：
 
-| 文件夹 | 用途 |
-|--------|------|
-| `sandbox/` | 沙箱测试目录 |
-| `downloads/` | 下载文件目录 |
-| `.context/` | 上下文存储数据 |
-| `.tokitai/` | 运行时数据（对话状态、追踪日志等） |
+| 文件夹 | 用途 | 说明 |
+|--------|------|------|
+| `sandbox/` | 沙箱测试目录 | 用于测试文件操作、项目模板等功能 |
+| `downloads/` | 下载文件目录 | 使用下载工具时，文件默认保存到此目录 |
+| `.context/` | 上下文存储 | 三层存储架构（瞬时/短期/长期）的持久化数据 |
+| `.tokitai/` | 运行时数据 | 对话状态、追踪日志、自主进化数据等 |
+
+> 💡 **提示**：这些文件夹会在首次运行程序时自动创建，无需手动创建。如需清理缓存，可直接删除这些文件夹。
 
 ---
 
