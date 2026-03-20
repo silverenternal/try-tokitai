@@ -1,0 +1,721 @@
+{
+  "title": "算法创新落地实施指南",
+  "version": "1.0",
+  "created_date": "2026-03-20",
+  "hardware_summary": {
+    "overall_assessment": "中等硬件需求，大部分可在消费级 GPU 上运行",
+    "minimum_requirements": {
+      "gpu": "NVIDIA RTX 3090/4090 (24GB 显存) 或同等",
+      "cpu": "16 核 + (AMD Ryzen 9 或 Intel i9)",
+      "ram": "64GB+",
+      "storage": "1TB NVMe SSD"
+    },
+    "recommended_requirements": {
+      "gpu": "2x NVIDIA A100 40GB 或 8x RTX 4090",
+      "cpu": "32 核 + (AMD Threadripper 或 Intel Xeon)",
+      "ram": "128GB+",
+      "storage": "2TB NVMe SSD + 4TB HDD"
+    },
+    "cloud_alternatives": {
+      "provider": "Lambda Labs / RunPod / Vast.ai",
+      "instance": "1x A100 40GB",
+      "cost_per_hour": "$1.5-2.5",
+      "estimated_total": "$300-800/项目"
+    }
+  },
+
+  "implementation_guides": [
+    {
+      "algorithm_id": "AI-001",
+      "name": "因果推断工具缺口归因",
+      "hardware_requirements": {
+        "gpu_needed": false,
+        "cpu_intensive": true,
+        "memory_intensive": false,
+        "minimum": {
+          "cpu_cores": 8,
+          "ram_gb": 16,
+          "gpu": "无需独立 GPU",
+          "storage_gb": 50
+        },
+        "recommended": {
+          "cpu_cores": 16,
+          "ram_gb": 32,
+          "gpu": "可选（用于可视化）",
+          "storage_gb": 100
+        },
+        "estimated_runtime": {
+          "causal_graph_learning": "2-4 小时 (1000 任务)",
+          "counterfactual_inference": "10-30 分钟/批次",
+          "total_experiment": "1-2 天"
+        }
+      },
+      "software_dependencies": {
+        "rust_crates": [
+          {"name": "ndarray", "version": "0.16", "purpose": "矩阵运算"},
+          {"name": "statrs", "version": "0.17", "purpose": "统计计算"},
+          {"name": "petgraph", "version": "0.6", "purpose": "图算法"}
+        ],
+        "python_packages": [
+          {"name": "causalinference", "purpose": "因果推断"},
+          {"name": "dowhy", "purpose": "微软因果推断库"},
+          {"name": "pgmpy", "purpose": "概率图模型"}
+        ],
+        "external_tools": [
+          {"name": "NOTEARS (Python)", "purpose": "因果图学习", "integration": "子进程调用"}
+        ]
+      },
+      "implementation_steps": [
+        {
+          "step": 1,
+          "name": "数据准备模块",
+          "duration_days": 3,
+          "tasks": [
+            "设计任务日志数据格式 (JSON Schema)",
+            "实现日志提取器 (从.tokitai/目录读取)",
+            "数据清洗和预处理",
+            "生成训练/测试集"
+          ],
+          "files_to_create": [
+            "src/autonomy/causal/data_loader.rs",
+            "src/autonomy/causal/preprocessing.rs"
+          ],
+          "code_complexity": "低",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 2,
+          "name": "因果图学习器",
+          "duration_days": 7,
+          "tasks": [
+            "实现 PC 算法 (Rust 原生)",
+            "集成 NOTEARS (Python 调用)",
+            "因果图可视化",
+            "单元测试和验证"
+          ],
+          "files_to_create": [
+            "src/autonomy/causal/graph_learner.rs",
+            "src/autonomy/causal/pc_algorithm.rs",
+            "python/causal/learners.py"
+          ],
+          "code_complexity": "中高",
+          "hardware_demand": "中 (CPU 密集)"
+        },
+        {
+          "step": 3,
+          "name": "结构因果模型",
+          "duration_days": 5,
+          "tasks": [
+            "定义 SCM 数据结构",
+            "实现结构方程",
+            "噪声项推断 (Abduction)",
+            "干预操作 (do-calculus)"
+          ],
+          "files_to_create": [
+            "src/autonomy/causal/scm.rs",
+            "src/autonomy/causal/intervention.rs"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 4,
+          "name": "反事实推理引擎",
+          "duration_days": 5,
+          "tasks": [
+            "实现反事实预测算法",
+            "因果效应计算 (ACE, ATE)",
+            "置信度估计",
+            "与现有 ToolGapDetector 集成"
+          ],
+          "files_to_create": [
+            "src/autonomy/causal/counterfactual.rs",
+            "src/autonomy/causal/gap_detector.rs"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "中"
+        },
+        {
+          "step": 5,
+          "name": "实验验证",
+          "duration_days": 5,
+          "tasks": [
+            "设计对比实验 (vs 相关性方法)",
+            "运行 30 天历史数据",
+            "生成统计报告和图表",
+            "撰写实验结果文档"
+          ],
+          "files_to_create": [
+            "experiments/causal_gap_detection/main.py",
+            "experiments/causal_gap_detection/analyze_results.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "中"
+        }
+      ],
+      "integration_points": {
+        "existing_modules": [
+          "src/autonomy/gap_detector.rs - 扩展为 CausalGapDetector",
+          "src/autonomy/self_improvement_loop.rs - 替换原有检测逻辑"
+        ],
+        "api_changes": [
+          "新增 detect_causal_gaps() 方法",
+          "新增 compute_causal_effect() 方法",
+          "向后兼容原有 detect_gaps() 接口"
+        ]
+      },
+      "testing_strategy": {
+        "unit_tests": "测试每个因果推断组件",
+        "integration_tests": "测试与自进化系统集成",
+        "validation_data": "合成数据 + 真实任务日志"
+      },
+      "total_effort": {
+        "person_days": 25,
+        "calendar_weeks": 5,
+        "hardware_cost_usd": 0,
+        "cloud_cost_usd": 0
+      }
+    },
+
+    {
+      "algorithm_id": "AI-002",
+      "name": "RL 工具进化策略",
+      "hardware_requirements": {
+        "gpu_needed": true,
+        "cpu_intensive": false,
+        "memory_intensive": true,
+        "minimum": {
+          "cpu_cores": 8,
+          "ram_gb": 32,
+          "gpu": "RTX 3090/4090 (24GB)",
+          "gpu_vram_gb": 24,
+          "storage_gb": 100
+        },
+        "recommended": {
+          "cpu_cores": 16,
+          "ram_gb": 64,
+          "gpu": "2x A100 40GB 或 8x RTX 4090",
+          "gpu_vram_gb": 80,
+          "storage_gb": 200
+        },
+        "estimated_runtime": {
+          "environment_simulation": "1000 步/秒 (CPU)",
+          "ppo_training": "6-12 小时 (1000 轮)",
+          "evaluation": "1-2 小时/轮",
+          "total_experiment": "2-3 天"
+        }
+      },
+      "software_dependencies": {
+        "rust_crates": [
+          {"name": "tch-rs", "version": "0.14", "purpose": "PyTorch Rust 绑定"},
+          {"name": "ndarray", "version": "0.16", "purpose": "矩阵运算"},
+          {"name": "rand", "version": "0.8", "purpose": "随机数生成"}
+        ],
+        "python_packages": [
+          {"name": "torch", "version": "2.0+", "purpose": "PyTorch"},
+          {"name": "stable-baselines3", "purpose": "RL 算法库"},
+          {"name": "gymnasium", "purpose": "环境接口"},
+          {"name": "ray[rllib]", "purpose": "分布式 RL (可选)"}
+        ],
+        "external_tools": [
+          {"name": "Weights & Biases", "purpose": "实验跟踪", "optional": true},
+          {"name": "TensorBoard", "purpose": "可视化", "optional": true}
+        ]
+      },
+      "implementation_steps": [
+        {
+          "step": 1,
+          "name": "TE-MDP 环境定义",
+          "duration_days": 5,
+          "tasks": [
+            "定义状态空间编码 (Transformer Encoder)",
+            "定义动作空间 (层次化)",
+            "实现奖励函数 (多目标)",
+            "实现环境模拟器 (从历史数据学习转移模型)"
+          ],
+          "files_to_create": [
+            "src/autonomy/rl/mdp.rs",
+            "src/autonomy/rl/state_encoder.rs",
+            "src/autonomy/rl/reward_function.rs",
+            "python/rl/env.py"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 2,
+          "name": "HPPO-TE 算法实现",
+          "duration_days": 10,
+          "tasks": [
+            "实现 Actor-Critic 网络 (PyTorch)",
+            "实现 PPO-Clip 损失函数",
+            "实现层次化解码器",
+            "实现 GAE 优势估计",
+            "训练循环和检查点"
+          ],
+          "files_to_create": [
+            "python/rl/hppo_te.py",
+            "python/rl/networks.py",
+            "python/rl/ppo_trainer.py"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "高 (GPU 训练)"
+        },
+        {
+          "step": 3,
+          "name": "Rust-Python 桥接",
+          "duration_days": 3,
+          "tasks": [
+            "实现 Python 子进程调用接口",
+            "定义进程间通信协议 (JSON/消息队列)",
+            "实现异步推理接口",
+            "错误处理和超时控制"
+          ],
+          "files_to_create": [
+            "src/autonomy/rl/python_bridge.rs",
+            "python/rl/server.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 4,
+          "name": "与自进化系统集成",
+          "duration_days": 3,
+          "tasks": [
+            "替换原有 ToolCreator 决策逻辑",
+            "实现 RL 策略在线推理",
+            "实现经验回放缓冲区",
+            "实现在线学习 (可选)"
+          ],
+          "files_to_create": [
+            "src/autonomy/rl/integration.rs",
+            "src/autonomy/self_improvement_loop.rs (修改)"
+          ],
+          "code_complexity": "中高",
+          "hardware_demand": "中"
+        },
+        {
+          "step": 5,
+          "name": "实验验证",
+          "duration_days": 7,
+          "tasks": [
+            "训练 RL 策略 (多随机种子)",
+            "对比实验 (vs baseline 策略)",
+            "消融实验 (移除各组件)",
+            "学习曲线和收敛性分析",
+            "生成论文图表"
+          ],
+          "files_to_create": [
+            "experiments/rl_evolution/train.py",
+            "experiments/rl_evolution/evaluate.py",
+            "experiments/rl_evolution/plot_results.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "高 (GPU 训练)"
+        }
+      ],
+      "integration_points": {
+        "existing_modules": [
+          "src/autonomy/tool_creator.rs - 使用 RL 策略替代 LLM 直接生成",
+          "src/autonomy/self_improvement_loop.rs - 集成 RL 决策"
+        ],
+        "api_changes": [
+          "新增 select_evolution_action() 方法",
+          "新增 train_policy() 方法 (后台运行)",
+          "新增 get_policy_stats() 方法"
+        ]
+      },
+      "training_configuration": {
+        "ppo_hyperparameters": {
+          "learning_rate": 0.0003,
+          "gamma": 0.99,
+          "gae_lambda": 0.95,
+          "clip_epsilon": 0.2,
+          "value_coef": 0.5,
+          "entropy_coef": 0.01,
+          "max_grad_norm": 0.5,
+          "batch_size": 256,
+          "epochs_per_update": 10
+        },
+        "network_architecture": {
+          "encoder_type": "Transformer",
+          "hidden_dim": 512,
+          "num_layers": 6,
+          "attention_heads": 8,
+          "dropout": 0.1
+        },
+        "training_schedule": {
+          "total_steps": 100000,
+          "eval_interval": 1000,
+          "checkpoint_interval": 5000,
+          "estimated_gpu_hours": 20
+        }
+      },
+      "testing_strategy": {
+        "unit_tests": "测试奖励函数、状态编码等组件",
+        "integration_tests": "测试 RL 策略与系统集成",
+        "validation": "在历史任务数据上评估策略性能"
+      },
+      "total_effort": {
+        "person_days": 28,
+        "calendar_weeks": 6,
+        "hardware_cost_usd": 0,
+        "cloud_cost_usd": 50
+      }
+    },
+
+    {
+      "algorithm_id": "AI-003",
+      "name": "多智能体博弈演化",
+      "hardware_requirements": {
+        "gpu_needed": true,
+        "cpu_intensive": true,
+        "memory_intensive": true,
+        "minimum": {
+          "cpu_cores": 16,
+          "ram_gb": 64,
+          "gpu": "RTX 3090/4090 (24GB)",
+          "gpu_vram_gb": 24,
+          "storage_gb": 100
+        },
+        "recommended": {
+          "cpu_cores": 32,
+          "ram_gb": 128,
+          "gpu": "2x A100 40GB",
+          "gpu_vram_gb": 80,
+          "storage_gb": 200
+        },
+        "estimated_runtime": {
+          "equilibrium_computation": "2-4 小时/轮",
+          "game_simulation": "1000 步/秒 (CPU)",
+          "total_experiment": "3-5 天"
+        }
+      },
+      "software_dependencies": {
+        "rust_crates": [
+          {"name": "ndarray", "version": "0.16", "purpose": "矩阵运算"},
+          {"name": "nalgebra", "version": "0.32", "purpose": "线性代数"},
+          {"name": "rayon", "version": "1.8", "purpose": "并行计算"}
+        ],
+        "python_packages": [
+          {"name": "nashpy", "purpose": "纳什均衡计算"},
+          {"name": " Axelrod", "purpose": "博弈论实验"},
+          {"name": "networkx", "purpose": "图算法"}
+        ]
+      },
+      "implementation_steps": [
+        {
+          "step": 1,
+          "name": "博弈建模",
+          "duration_days": 7,
+          "tasks": [
+            "定义智能体类型和效用函数",
+            "实现博弈规则引擎",
+            "实现状态转移函数",
+            "单元测试验证"
+          ],
+          "files_to_create": [
+            "src/autonomy/game/theory.rs",
+            "src/autonomy/game/agents.rs",
+            "src/autonomy/game/utilities.rs"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 2,
+          "name": "均衡求解器",
+          "duration_days": 10,
+          "tasks": [
+            "实现虚拟博弈 (Fictitious Play) 算法",
+            "实现最佳响应计算",
+            "实现收敛检测",
+            "并行化优化"
+          ],
+          "files_to_create": [
+            "src/autonomy/game/equilibrium.rs",
+            "src/autonomy/game/fictitious_play.rs",
+            "python/game/solvers.py"
+          ],
+          "code_complexity": "极高",
+          "hardware_demand": "高 (CPU 密集)"
+        },
+        {
+          "step": 3,
+          "name": "机制设计",
+          "duration_days": 5,
+          "tasks": [
+            "实现 VCG 支付计算",
+            "验证激励相容性",
+            "实现预算平衡调整",
+            "理论分析 (PoA 计算)"
+          ],
+          "files_to_create": [
+            "src/autonomy/game/mechanism.rs",
+            "src/autonomy/game/vcg.rs"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "中"
+        },
+        {
+          "step": 4,
+          "name": "实验验证",
+          "duration_days": 7,
+          "tasks": [
+            "均衡收敛实验",
+            "社会最优性分析",
+            "与单智能体对比",
+            "生成论文图表"
+          ],
+          "files_to_create": [
+            "experiments/game_theory/simulate.py",
+            "experiments/game_theory/analyze.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "高"
+        }
+      ],
+      "total_effort": {
+        "person_days": 29,
+        "calendar_weeks": 6,
+        "hardware_cost_usd": 0,
+        "cloud_cost_usd": 100
+      }
+    },
+
+    {
+      "algorithm_id": "AI-004",
+      "name": "元学习工具代码生成",
+      "hardware_requirements": {
+        "gpu_needed": true,
+        "cpu_intensive": false,
+        "memory_intensive": true,
+        "minimum": {
+          "cpu_cores": 8,
+          "ram_gb": 32,
+          "gpu": "RTX 3090/4090 (24GB)",
+          "gpu_vram_gb": 24,
+          "storage_gb": 50
+        },
+        "recommended": {
+          "cpu_cores": 16,
+          "ram_gb": 64,
+          "gpu": "A100 40GB",
+          "gpu_vram_gb": 40,
+          "storage_gb": 100
+        },
+        "estimated_runtime": {
+          "maml_training": "4-8 小时 (1000 任务)",
+          "code_generation": "5 秒/工具",
+          "total_experiment": "1-2 天"
+        }
+      },
+      "software_dependencies": {
+        "python_packages": [
+          {"name": "torch", "version": "2.0+", "purpose": "PyTorch"},
+          {"name": "transformers", "purpose": "HuggingFace"},
+          {"name": "peft", "purpose": "LoRA 微调"},
+          {"name": "accelerate", "purpose": "分布式训练"}
+        ],
+        "external_models": [
+          {"name": "StarCoder 15B", "purpose": "基础代码模型", "vram_gb": 30},
+          {"name": "CodeLlama 13B", "purpose": "替代方案", "vram_gb": 26}
+        ]
+      },
+      "implementation_steps": [
+        {
+          "step": 1,
+          "name": "数据准备",
+          "duration_days": 5,
+          "tasks": [
+            "收集现有工具代码 (63+ 工具)",
+            "构建工具代码数据集",
+            "划分任务分布 (按工具类型)",
+            "数据增强 (合成新工具)"
+          ],
+          "files_to_create": [
+            "python/meta_learning/dataset.py",
+            "data/tool_code_corpus/"
+          ],
+          "code_complexity": "低",
+          "hardware_demand": "低"
+        },
+        {
+          "step": 2,
+          "name": "MAML 训练",
+          "duration_days": 7,
+          "tasks": [
+            "实现 MAML 算法",
+            "实现 LoRA 适配器",
+            "训练元学习模型",
+            "验证集调优"
+          ],
+          "files_to_create": [
+            "python/meta_learning/maml.py",
+            "python/meta_learning/lora_adapter.py",
+            "python/meta_learning/train.py"
+          ],
+          "code_complexity": "高",
+          "hardware_demand": "高 (GPU 训练)"
+        },
+        {
+          "step": 3,
+          "name": "代码生成集成",
+          "duration_days": 3,
+          "tasks": [
+            "实现模式检索模块",
+            "实现 few-shot 提示构建",
+            "实现代码生成和验证",
+            "与 ToolCreator 集成"
+          ],
+          "files_to_create": [
+            "src/autonomy/meta_learning/generator.rs",
+            "python/meta_learning/server.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "中"
+        },
+        {
+          "step": 4,
+          "name": "实验验证",
+          "duration_days": 3,
+          "tasks": [
+            "编译通过率测试",
+            "功能正确率测试",
+            "与 baseline 对比",
+            "生成结果图表"
+          ],
+          "files_to_create": [
+            "experiments/meta_learning/evaluate.py"
+          ],
+          "code_complexity": "中",
+          "hardware_demand": "中"
+        }
+      ],
+      "total_effort": {
+        "person_days": 18,
+        "calendar_weeks": 3,
+        "hardware_cost_usd": 0,
+        "cloud_cost_usd": 30
+      }
+    }
+  ],
+
+  "cost_breakdown": {
+    "local_hardware": {
+      "scenario": "已有实验室工作站",
+      "gpu": "RTX 4090 24GB",
+      "cpu": "AMD Ryzen 9 7950X",
+      "ram": "64GB DDR5",
+      "total_cost_usd": 3500,
+      "note": "一次性投资，可支持所有算法"
+    },
+    "cloud_rental": {
+      "scenario": "使用云服务",
+      "provider": "Lambda Labs",
+      "instance": "1x A100 40GB",
+      "hourly_rate_usd": 2.0,
+      "estimated_hours": {
+        "causal_inference": 0,
+        "rl_training": 20,
+        "game_theory": 10,
+        "meta_learning": 15
+      },
+      "total_cost_usd": 90,
+      "note": "按需付费，适合短期实验"
+    },
+    "hybrid_approach": {
+      "scenario": "本地开发 + 云训练",
+      "description": "日常开发用本地机器，大规模训练用云",
+      "estimated_cost_usd": 50,
+      "note": "最经济的方案"
+    }
+  },
+
+  "risk_mitigation": [
+    {
+      "risk": "GPU 显存不足",
+      "probability": "中",
+      "solutions": [
+        "使用梯度累积减少显存占用",
+        "使用模型并行 (pipeline parallelism)",
+        "使用云服务按需扩展"
+      ]
+    },
+    {
+      "risk": "训练时间过长",
+      "probability": "高",
+      "solutions": [
+        "使用预训练模型减少训练时间",
+        "使用分布式训练加速",
+        "早停策略和超参数优化"
+      ]
+    },
+    {
+      "risk": "实验结果不稳定",
+      "probability": "中",
+      "solutions": [
+        "多随机种子取平均",
+        "增加实验重复次数",
+        "使用统计显著性检验"
+      ]
+    }
+  ],
+
+  "recommended_setup": {
+    "for_phd_student": {
+      "scenario": "博士个人使用",
+      "hardware": "本地 RTX 4090 工作站",
+      "cloud_backup": "Lambda Labs 按需使用",
+      "monthly_budget_usd": 50,
+      "priority_order": ["AI-001", "AI-004", "AI-002", "AI-003"]
+    },
+    "for_research_lab": {
+      "scenario": "实验室共享资源",
+      "hardware": "2x A100 服务器",
+      "cloud_backup": "无需",
+      "monthly_budget_usd": 0,
+      "priority_order": ["AI-001", "AI-002", "AI-003", "AI-004"]
+    },
+    "for_limited_budget": {
+      "scenario": "预算有限",
+      "hardware": "仅 CPU (无 GPU)",
+      "cloud_backup": "RunPod 按需训练",
+      "monthly_budget_usd": 30,
+      "priority_order": ["AI-001", "AI-002(简化版)", "AI-004(使用 API)", "AI-003"]
+    }
+  },
+
+  "timeline_with_hardware": {
+    "phase_1_causal": {
+      "weeks": "1-5",
+      "hardware": "本地 CPU 即可",
+      "cloud_needed": false,
+      "milestone": "因果推断缺口检测完成"
+    },
+    "phase_2_rl": {
+      "weeks": "6-11",
+      "hardware": "需要 GPU",
+      "cloud_needed": true,
+      "cloud_budget_usd": 50,
+      "milestone": "RL 进化策略完成"
+    },
+    "phase_3_meta": {
+      "weeks": "12-14",
+      "hardware": "需要 GPU",
+      "cloud_needed": true,
+      "cloud_budget_usd": 30,
+      "milestone": "元学习代码生成完成"
+    },
+    "phase_4_game": {
+      "weeks": "15-20",
+      "hardware": "CPU+GPU",
+      "cloud_needed": true,
+      "cloud_budget_usd": 100,
+      "milestone": "多智能体博弈完成"
+    },
+    "total_cloud_budget_usd": 180,
+    "total_calendar_weeks": 20
+  }
+}

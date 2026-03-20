@@ -9,7 +9,7 @@
 
 ## 📋 执行摘要
 
-本次落实基于 `docs/ARCHITECTURE_IMPROVEMENT_PLAN.json` 中的架构改进计划，成功实现了以下核心改进：
+本次落实基于 `docs/archive/ARCHITECTURE_IMPROVEMENT_PLAN.json` 中的架构改进计划，成功实现了以下核心改进：
 
 1. **IMP-001**: 分层缓存 AI 分类器 ✅
 2. **IMP-002**: 工具模板系统 ✅
@@ -314,7 +314,7 @@ let tools = registry.search_tools("read file").await;
 
 ## 📚 相关文档
 
-- [ARCHITECTURE_IMPROVEMENT_PLAN.json](./ARCHITECTURE_IMPROVEMENT_PLAN.json) - 原始改进计划
+- [archive/ARCHITECTURE_IMPROVEMENT_PLAN.json](./archive/ARCHITECTURE_IMPROVEMENT_PLAN.json) - 原始改进计划（已归档）
 - [structure_ensure/README.md](../structure_ensure/README.md) - 项目结构说明
 - [structure_ensure/TOOL_SELECTOR_GUIDE.md](../structure_ensure/TOOL_SELECTOR_GUIDE.md) - 工具选择器指南
 

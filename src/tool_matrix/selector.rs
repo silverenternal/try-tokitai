@@ -331,7 +331,7 @@ impl Default for FilterCriteria {
 mod tests {
     use super::*;
     use crate::tool_matrix::matrix::ToolBox;
-    use crate::ToolSource;
+    use crate::tool_matrix::registry::ToolSource;
 
     #[test]
     fn test_select_tools_by_query() {

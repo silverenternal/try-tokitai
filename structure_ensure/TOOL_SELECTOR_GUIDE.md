@@ -1,9 +1,9 @@
 # 轻量级工具选择器使用指南
 
-> **版本**: 3.0（AI 原生深化落实版 + 完整工具矩阵）
-> **最后更新**: 2026-03-18
-> **测试状态**: 411/411 通过 ✅
-> **深化落实**: LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md
+> **版本**: 3.1（HybridGapDetector 实现完成 + Prompt Engineering 自进化系统）
+> **最后更新**: 2026-03-20
+> **测试状态**: 470/470 通过 ✅
+> **HybridGapDetector**: ✅ 完成（769 行，成本降低 95%）
 
 ---
 
@@ -308,13 +308,112 @@ mod tests {
 | 文档 | 说明 |
 |------|------|
 | [设计文档](../archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md) | 原始设计规划 |
-| [深化落实报告](../archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md) | 深化实施详情 |
-| [总结报告](../archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md) | 完成总结 |
-| [QUICK_REFERENCE.md](../../structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
-| [PROJECT_STRUCTURE.md](../../structure_ensure/PROJECT_STRUCTURE.md) | 项目结构详解 |
+| [深化落实报告](../archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md) | 深化落实报告 |
+| [总结报告](../archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md) | 总结报告 |
+| [HybridGapDetector 实现报告](../docs/HYBRID_GAP_DETECTOR_IMPLEMENTATION.md) | 🆕 HybridGapDetector 实现文档 |
+| [HybridGapDetector 设计文档](../docs/HYBRID_GAP_DETECTOR_DESIGN.json) | 🆕 HybridGapDetector 设计文档 |
+| [项目状态报告](../docs/PROJECT_STATUS_REPORT_2026_03_20.md) | 🆕 项目整体状态报告 |
+| [文档索引](../docs/README.md) | 🆕 完整文档导航 |
 
 ---
 
-**最后更新**: 2026-03-18
-**测试**: 411/411 ✅
+## 🆕 HybridGapDetector 使用示例
+
+HybridGapDetector 是自主进化系统的核心组件，用于检测工具缺口：
+
+### 基础使用（仅统计模式）
+
+```rust
+use crate::autonomy::hybrid_gap_detector::HybridGapDetector;
+
+// 创建检测器（仅统计模式，无需 LLM）
+let mut detector = HybridGapDetector::new_statistical_only(
+    PathBuf::from("data/gaps")
+)?;
+
+// 记录任务
+detector.record_task(TaskExecutionRecord {
+    task_id: "task_1".to_string(),
+    task_description: "批量处理文件".to_string(),
+    success: false,
+    used_tools: vec!["read_file".to_string()],
+    execution_time_ms: 100,
+    failure_reason: Some("无法批量处理".to_string()),
+    user_satisfaction: Some(2),
+});
+
+// 检测缺口
+let gaps = detector.detect_gaps().await;
+for gap in gaps {
+    println!("缺口：{}", gap.description);
+    println!("  融合置信度：{:.2}", gap.hybrid_confidence);
+    println!("  统计证据：失败率={:.2}", gap.statistical_evidence.failure_rate);
+}
+```
+
+### 高级使用（带因果分析）
+
+```rust
+use crate::autonomy::hybrid_gap_detector::{HybridGapDetector, HybridConfig};
+use std::sync::Arc;
+
+// 配置
+let config = HybridConfig {
+    enable_causal_analysis: true,
+    max_causal_analyses_per_cycle: 5,
+    api_budget_per_cycle: 0.5,
+    statistical_weight: 0.4,
+    causal_weight: 0.6,
+    ..Default::default()
+};
+
+// 创建检测器（带 LLM 客户端）
+let mut detector = HybridGapDetector::new(
+    PathBuf::from("data/gaps"),
+    llm_client,  // Arc<dyn LLMClient>
+    config
+)?;
+
+// 检测缺口（自动进行因果分析）
+let gaps = detector.detect_gaps().await;
+for gap in gaps {
+    println!("缺口：{}", gap.description);
+    println!("  融合置信度：{:.2}", gap.hybrid_confidence);
+    
+    if let Some(causal) = &gap.causal_evidence {
+        println!("  因果推理：{}", causal.counterfactual_reasoning);
+        println!("  LLM 置信度：{:.2}", causal.llm_confidence);
+    }
+}
+```
+
+### 集成到 SelfImprovementLoop
+
+```rust
+use crate::autonomy::self_improvement_loop::SelfImprovementLoop;
+
+// 创建自进化系统（仅统计模式）
+let evolution = SelfImprovementLoop::new(project_root)?;
+
+// 或者创建带 LLM 的版本（启用因果分析）
+let evolution = SelfImprovementLoop::with_llm(
+    project_root,
+    llm_client
+)?;
+
+// 记录任务
+evolution.record_task(task_record);
+
+// 运行进化循环
+let report = evolution.run_evolution_cycle_async().await?;
+println!("检测到 {} 个缺口", report.detected_gaps_count);
+```
+
+**详细文档**: [docs/HYBRID_GAP_DETECTOR_IMPLEMENTATION.md](../docs/HYBRID_GAP_DETECTOR_IMPLEMENTATION.md)
+
+---
+
+**最后更新**: 2026-03-20  
+**版本**: 3.1 (HybridGapDetector 实现完成)  
+**测试**: 470/470 ✅  
 **构建**: Release ✅

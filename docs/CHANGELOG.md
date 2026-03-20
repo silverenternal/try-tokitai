@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### 📚 文档整理
+
+- 移动已完成的计划性文档到 `docs/archive/`
+  - `ARCHITECTURE_IMPROVEMENT_PLAN.json` - 架构改进计划（已归档）
+  - `IMPLEMENTATION_STATUS_REPORT.md` - 实施状态报告（已归档）
+- 更新所有文档中的归档链接
+- 更新 `structure_ensure/` 目录下的文档导航
+- 更新主 `README.md` 技术报告链接
+
+---
+
 ## [2.0.0] - 2026-03-18
 
 ### 🎉 AI 原生工具选择器 + 完整工具矩阵

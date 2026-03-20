@@ -1,0 +1,612 @@
+{
+  "document": {
+    "title": "混合工具缺口检测器设计方案",
+    "subtitle": "融合统计方法与 Prompt Engineering 的 HybridGapDetector",
+    "version": "1.0",
+    "created_date": "2026-03-20",
+    "status": "设计完成，待实现",
+    "author": "tokitai 团队",
+    "related_docs": [
+      "docs/paper_plan/README.md",
+      "docs/paper_plan/MECHANISMS.md",
+      "docs/paper_plan/PROMPT_ENGINEERING_APPROACH.json"
+    ]
+  },
+
+  "executive_summary": {
+    "problem": "现有两种缺口检测方案各有优劣：统计方法快速但只能发现相关性，Prompt Engineering 能推理因果但成本高",
+    "solution": "设计 HybridGapDetector，三级流水线融合两种方案",
+    "key_benefits": [
+      "性能：80% 简单缺口用统计方法快速检测",
+      "深度：20% 复杂缺口用因果推理深度分析",
+      "成本：相比纯 Prompt Engineering 方案节省 80% API 调用",
+      "可解释性：同时输出统计证据和因果证据"
+    ],
+    "estimated_implementation_time": "18 小时（2-3 天）",
+    "estimated_api_cost_reduction": "80%"
+  },
+
+  "background": {
+    "existing_approaches": {
+      "statistical_method": {
+        "file": "src/autonomy/gap_detector.rs",
+        "lines_of_code": 497,
+        "principle": "基于失败率、满意度等统计指标",
+        "strengths": [
+          "快速，无需 API 调用",
+          "结果稳定可复现",
+          "适合实时检测",
+          "已有完整实现和测试"
+        ],
+        "weaknesses": [
+          "只能发现相关性，无法推理因果",
+          "需要足够样本量（min_evidence_count >= 3）",
+          "无法理解任务语义",
+          "对新模式不敏感"
+        ],
+        "applicable_scenarios": [
+          "高频重复任务",
+          "已有大量历史数据",
+          "需要快速响应"
+        ]
+      },
+
+      "prompt_engineering_method": {
+        "file": "src/autonomy/prompt_gap_detector.rs",
+        "lines_of_code": 815,
+        "principle": "基于 LLM 因果推理（Chain-of-Thought + 反事实推理）",
+        "strengths": [
+          "能识别复杂因果链",
+          "输出可解释性强（含推理过程）",
+          "能发现隐性缺口",
+          "样本量要求低"
+        ],
+        "weaknesses": [
+          "需要 API 调用，有成本",
+          "LLM 输出可能不稳定",
+          "速度较慢（秒级）",
+          "依赖外部 LLM 服务"
+        ],
+        "applicable_scenarios": [
+          "新任务/复杂任务",
+          "样本量不足时",
+          "需要深度分析"
+        ]
+      }
+    },
+
+    "motivation": {
+      "core_insight": "两种方案不是替代关系，而是互补关系",
+      "design_philosophy": "用统计方法快速筛选候选，用因果推理深度分析高价值候选",
+      "expected_outcome": "1+1>2 的融合效果"
+    }
+  },
+
+  "system_design": {
+    "architecture": {
+      "name": "HybridGapDetector",
+      "description": "三级流水线融合架构",
+      "components": [
+        {
+          "stage": 1,
+          "name": "Statistical Filter（快速筛选）",
+          "input": "原始任务历史记录",
+          "process": [
+            "基于失败率、满意度等指标筛选候选任务",
+            "聚类失败模式，识别高频问题",
+            "输出候选缺口列表（带统计证据）"
+          ],
+          "output": "Vec<ToolGap>（候选缺口）",
+          "latency": "<100ms",
+          "api_calls": 0
+        },
+        {
+          "stage": 2,
+          "name": "Causal Analysis（深度分析）",
+          "input": "强候选缺口列表",
+          "process": [
+            "对候选缺口进行因果推理",
+            "反事实提问：'如果有这个工具，任务会成功吗？'",
+            "输出带因果证据的缺口报告"
+          ],
+          "output": "Vec<IdentifiedGap>（因果证据）",
+          "latency": "5-30 秒/缺口",
+          "api_calls": "1-2/缺口"
+        },
+        {
+          "stage": 3,
+          "name": "Merger & Prioritize（融合与优先级排序）",
+          "input": "统计证据 + 因果证据",
+          "process": [
+            "合并统计证据和因果证据",
+            "计算融合置信度",
+            "按综合优先级排序"
+          ],
+          "output": "Vec<HybridToolGap>（最终缺口列表）",
+          "latency": "<50ms",
+          "api_calls": 0
+        }
+      ],
+
+      "data_flow": "TaskHistory → Stage1 → Candidates → Stage2 → CausalEvidence → Stage3 → HybridGaps"
+    },
+
+    "core_data_structures": {
+      "HybridToolGap": {
+        "description": "融合后的工具缺口",
+        "fields": {
+          "id": {"type": "String", "description": "缺口唯一 ID"},
+          "gap_type": {"type": "GapType", "description": "缺口类型（MissingTool/InsufficientCapability 等）"},
+          "description": {"type": "String", "description": "缺口描述"},
+          "suggested_tool_name": {"type": "Option<String>", "description": "建议的工具名称"},
+          "priority": {"type": "u8", "description": "优先级 (1-10)"},
+          "statistical_evidence": {"type": "StatisticalEvidence", "description": "统计证据（老方案）"},
+          "causal_evidence": {"type": "Option<CausalEvidence>", "description": "因果证据（新方案，可能为空）"},
+          "hybrid_confidence": {"type": "f32", "description": "融合后的置信度 (0.0-1.0)"}
+        }
+      },
+
+      "StatisticalEvidence": {
+        "description": "统计证据",
+        "fields": {
+          "failure_rate": {"type": "f32", "description": "失败率 (0.0-1.0)"},
+          "affected_tasks_count": {"type": "u32", "description": "影响的任务数量"},
+          "avg_satisfaction": {"type": "f32", "description": "平均满意度 (1.0-5.0)"},
+          "pattern_frequency": {"type": "u32", "description": "失败模式出现频率"}
+        }
+      },
+
+      "CausalEvidence": {
+        "description": "因果证据",
+        "fields": {
+          "causal_factors": {"type": "Vec<CausalFactor>", "description": "因果因素列表"},
+          "counterfactual_reasoning": {"type": "String", "description": "反事实推理结果"},
+          "llm_confidence": {"type": "f32", "description": "LLM 置信度 (0.0-1.0)"}
+        }
+      },
+
+      "CausalFactor": {
+        "description": "因果因素（复用 prompt_gap_detector.rs 中的定义）",
+        "fields": {
+          "factor": {"type": "String", "description": "因素描述"},
+          "is_causal": {"type": "bool", "description": "是否为因果性（而非相关性）"},
+          "evidence": {"type": "String", "description": "证据描述"},
+          "confidence": {"type": "f32", "description": "置信度 (0.0-1.0)"},
+          "reasoning": {"type": "String", "description": "推理过程（Chain-of-Thought）"}
+        }
+      }
+    },
+
+    "configuration": {
+      "HybridConfig": {
+        "description": "融合检测器配置",
+        "fields": {
+          "statistical_threshold": {
+            "type": "f32",
+            "default": 0.5,
+            "description": "统计筛选的失败率阈值"
+          },
+          "min_occurrence_count": {
+            "type": "u32",
+            "default": 3,
+            "description": "触发因果分析的最小出现次数"
+          },
+          "enable_causal_analysis": {
+            "type": "bool",
+            "default": true,
+            "description": "是否启用因果分析"
+          },
+          "causal_min_priority": {
+            "type": "u8",
+            "default": 6,
+            "description": "触发因果分析的最小优先级"
+          },
+          "max_causal_analyses_per_cycle": {
+            "type": "u32",
+            "default": 5,
+            "description": "每周期最大因果分析数（控制成本）"
+          },
+          "statistical_weight": {
+            "type": "f32",
+            "default": 0.4,
+            "description": "统计证据在融合置信度中的权重"
+          },
+          "causal_weight": {
+            "type": "f32",
+            "default": 0.6,
+            "description": "因果证据在融合置信度中的权重"
+          },
+          "api_budget_per_cycle": {
+            "type": "f32",
+            "default": 0.5,
+            "description": "每周期 API 预算（美元）"
+          }
+        }
+      }
+    }
+  },
+
+  "implementation_details": {
+    "module_structure": {
+      "file_path": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_lines": 400,
+      "dependencies": [
+        "crate::autonomy::gap_detector::ToolGapDetector",
+        "crate::autonomy::prompt_gap_detector::PromptGapDetector",
+        "crate::autonomy::gap_detector::{ToolGap, GapType, GapEvidence}",
+        "crate::autonomy::prompt_gap_detector::{IdentifiedGap, CausalFactor}"
+      ]
+    },
+
+    "core_algorithm": {
+      "detect_gaps": {
+        "signature": "pub async fn detect_gaps(&mut self) -> Vec<HybridToolGap>",
+        "steps": [
+          {
+            "step": 1,
+            "name": "统计筛选",
+            "code_outline": "let candidate_gaps = self.statistical_detector.analyze_and_detect();",
+            "filter": "candidate_gaps.into_iter().filter(|gap| meets_thresholds(gap)).collect()"
+          },
+          {
+            "step": 2,
+            "name": "因果分析（仅对强候选）",
+            "code_outline": "for candidate in strong_candidates { let causal_tasks = prepare_tasks(&candidate); self.causal_detector.add_tasks(causal_tasks); let causal_result = self.causal_detector.detect_gaps().await; }",
+            "cost_control": "if analyses_count >= config.max_causal_analyses_per_cycle { break; }"
+          },
+          {
+            "step": 3,
+            "name": "证据融合",
+            "code_outline": "let hybrid_gap = merge_evidence(candidate, causal_result);",
+            "confidence_calculation": "hybrid_confidence = stat_conf * 0.4 + causal_conf * 0.6"
+          },
+          {
+            "step": 4,
+            "name": "优先级排序",
+            "code_outline": "hybrid_gaps.sort_by(|a, b| b.hybrid_confidence.partial_cmp(&a.hybrid_confidence));",
+            "output": "Vec<HybridToolGap>"
+          }
+        ]
+      },
+
+      "merge_evidence": {
+        "signature": "fn merge_evidence(&self, statistical_gap: &ToolGap, causal_result: Result<Vec<IdentifiedGap>>) -> HybridToolGap",
+        "logic": {
+          "if_causal_success": {
+            "condition": "causal_result.is_ok() && !causal_result.unwrap().is_empty()",
+            "action": "提取因果证据，计算融合置信度",
+            "confidence_formula": "stat_conf * 0.4 + causal_conf * 0.6"
+          },
+          "if_causal_failure": {
+            "condition": "causal_result.is_err() || causal_result.unwrap().is_empty()",
+            "action": "仅依赖统计证据",
+            "confidence_formula": "stat_conf * 0.7 + (affected_tasks / 50.0).min(0.3)"
+          }
+        }
+      },
+
+      "calculate_hybrid_confidence": {
+        "signature": "fn calculate_hybrid_confidence(&self, stat: &StatisticalEvidence, causal: &CausalEvidence) -> f32",
+        "statistical_component": {
+          "formula": "failure_rate * 0.3 + (affected_tasks / 50.0).min(0.3) + (1.0 - avg_satisfaction / 5.0) * 0.2",
+          "max_value": 0.8
+        },
+        "causal_component": {
+          "formula": "llm_confidence * 0.4 + (causal_factors_with_is_causal / total_factors) * 0.3",
+          "max_value": 0.7
+        },
+        "fusion": "stat_component * 0.4 + causal_component * 0.6"
+      }
+    },
+
+    "cost_control_mechanism": {
+      "description": "控制 API 调用成本的机制",
+      "strategies": [
+        {
+          "name": "优先级阈值过滤",
+          "description": "只对优先级 >= causal_min_priority 的候选进行因果分析",
+          "expected_savings": "过滤掉 50% 低优先级候选"
+        },
+        {
+          "name": "每周期数量限制",
+          "description": "每周期最多进行 max_causal_analyses_per_cycle 次因果分析",
+          "expected_savings": "硬性上限，防止超预算"
+        },
+        {
+          "name": "API 预算监控",
+          "description": "跟踪当前周期已用 API 预算，超出后停止",
+          "formula": "if used_budget >= api_budget_per_cycle { skip_causal_analysis() }"
+        },
+        {
+          "name": "结果缓存",
+          "description": "对相同候选缺口缓存因果分析结果，避免重复调用",
+          "cache_key": "hash(gap.description + gap.suggested_tool_name)",
+          "expected_savings": "重复场景下节省 30-50%"
+        }
+      ],
+
+      "cost_estimation": {
+        "pure_prompt_engineering": {
+          "tasks_per_day": 100,
+          "api_calls_per_detection": 1,
+          "cost_per_call": 0.015,
+          "daily_cost": "$1.50",
+          "monthly_cost": "$45.00"
+        },
+        "hybrid_approach": {
+          "tasks_per_day": 100,
+          "candidates_after_filtering": 20,
+          "causal_analyses_after_limits": 5,
+          "api_calls_per_analysis": 1,
+          "cost_per_call": 0.015,
+          "daily_cost": "$0.075",
+          "monthly_cost": "$2.25",
+          "savings": "95%"
+        }
+      }
+    }
+  },
+
+  "integration_plan": {
+    "modifying_self_improvement_loop": {
+      "file": "src/autonomy/self_improvement_loop.rs",
+      "changes": [
+        {
+          "location": "imports",
+          "action": "add",
+          "code": "use crate::autonomy::hybrid_gap_detector::HybridGapDetector;"
+        },
+        {
+          "location": "SelfImprovementLoop struct",
+          "action": "replace",
+          "old_field": "gap_detector: Arc<RwLock<ToolGapDetector>>",
+          "new_field": "gap_detector: Arc<RwLock<HybridGapDetector>>"
+        },
+        {
+          "location": "SelfImprovementLoop::new()",
+          "action": "modify",
+          "description": "初始化 HybridGapDetector 而非 ToolGapDetector"
+        },
+        {
+          "location": "run_evolution_cycle()",
+          "action": "modify",
+          "description": "调用 hybrid_detector.detect_gaps().await 而非旧方法"
+        }
+      ]
+    },
+
+    "mod.rs_updates": {
+      "file": "src/autonomy/mod.rs",
+      "changes": [
+        {
+          "action": "add",
+          "code": "pub mod hybrid_gap_detector;"
+        },
+        {
+          "action": "add",
+          "code": "pub use hybrid_gap_detector::{HybridGapDetector, HybridToolGap, HybridConfig};"
+        }
+      ]
+    },
+
+    "test_migration": {
+      "description": "迁移现有 ToolGapDetector 的测试到 HybridGapDetector",
+      "test_files": [
+        "src/autonomy/gap_detector.rs 中的现有测试"
+      ],
+      "new_tests": [
+        "test_hybrid_gap_detection()",
+        "test_evidence_fusion()",
+        "test_cost_control()",
+        "test_cache_mechanism()"
+      ]
+    }
+  },
+
+  "implementation_tasks": [
+    {
+      "id": 1,
+      "name": "定义融合数据结构",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 2,
+      "description": "定义 HybridToolGap, StatisticalEvidence, CausalEvidence 等结构",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "name": "实现 HybridGapDetector 框架",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 4,
+      "description": "实现 detect_gaps() 主流程，集成两个检测器",
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "name": "实现证据融合逻辑",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 4,
+      "description": "实现 merge_evidence(), calculate_hybrid_confidence()",
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "name": "实现成本控制机制",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 2,
+      "description": "实现 API 预算限制、缓存机制",
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "name": "更新 SelfImprovementLoop",
+      "file": "src/autonomy/self_improvement_loop.rs",
+      "estimated_hours": 2,
+      "description": "使用 HybridGapDetector 替换 ToolGapDetector",
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "name": "更新 mod.rs 导出",
+      "file": "src/autonomy/mod.rs",
+      "estimated_hours": 1,
+      "description": "添加新模块导出",
+      "status": "pending"
+    },
+    {
+      "id": 7,
+      "name": "编写单元测试",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 3,
+      "description": "编写测试验证融合逻辑",
+      "status": "pending"
+    },
+    {
+      "id": 8,
+      "name": "编写文档和示例",
+      "file": "src/autonomy/hybrid_gap_detector.rs",
+      "estimated_hours": 1,
+      "description": "添加文档注释和使用示例",
+      "status": "pending"
+    }
+  ],
+
+  "total_estimated_hours": 19,
+
+  "testing_plan": {
+    "unit_tests": [
+      {
+        "name": "test_statistical_filtering",
+        "description": "测试统计筛选逻辑",
+        "input": "模拟任务历史记录（含失败和成功任务）",
+        "expected_output": "正确识别候选缺口"
+      },
+      {
+        "name": "test_causal_analysis_trigger",
+        "description": "测试因果分析触发条件",
+        "input": "不同优先级的候选缺口",
+        "expected_output": "仅对高优先级候选进行因果分析"
+      },
+      {
+        "name": "test_evidence_fusion",
+        "description": "测试证据融合逻辑",
+        "input": "统计证据 + 因果证据",
+        "expected_output": "正确的融合置信度"
+      },
+      {
+        "name": "test_cost_control",
+        "description": "测试成本控制机制",
+        "input": "超过预算的任务队列",
+        "expected_output": "正确停止因果分析"
+      },
+      {
+        "name": "test_cache_mechanism",
+        "description": "测试缓存机制",
+        "input": "重复的候选缺口",
+        "expected_output": "使用缓存结果，减少 API 调用"
+      }
+    ],
+
+    "integration_tests": [
+      {
+        "name": "test_hybrid_integration",
+        "description": "测试 HybridGapDetector 与 SelfImprovementLoop 集成",
+        "setup": "创建临时目录，初始化完整系统",
+        "steps": [
+          "记录 10 个模拟任务",
+          "运行自进化循环",
+          "验证输出了 HybridToolGap"
+        ]
+      }
+    ]
+  },
+
+  "expected_outcomes": {
+    "performance_metrics": {
+      "detection_latency": {
+        "pure_statistical": "<100ms",
+        "pure_prompt_engineering": "5-30 秒",
+        "hybrid_approach": "1-5 秒（平均）"
+      },
+      "api_calls_per_cycle": {
+        "pure_prompt_engineering": "10-20 次",
+        "hybrid_approach": "2-5 次",
+        "reduction": "70-80%"
+      },
+      "detection_accuracy": {
+        "pure_statistical": "60-70%（只能发现相关性）",
+        "pure_prompt_engineering": "75-85%",
+        "hybrid_approach": "75-85%（与纯 PE 相当）"
+      }
+    },
+
+    "cost_analysis": {
+      "daily_api_cost": {
+        "pure_prompt_engineering": "$1.50",
+        "hybrid_approach": "$0.075",
+        "savings": "95%"
+      },
+      "monthly_api_cost": {
+        "pure_prompt_engineering": "$45.00",
+        "hybrid_approach": "$2.25",
+        "savings": "95%"
+      }
+    },
+
+    "paper_contribution": {
+      "methodology_innovation": "首个融合统计方法和 Prompt Engineering 的缺口检测框架",
+      "practical_value": "在保持性能的同时大幅降低成本，使实际应用可行",
+      "evaluable_hypothesis": "HybridGapDetector 在检测准确率上与纯 Prompt Engineering 相当，但成本降低 80%+"
+    }
+  },
+
+  "risks_and_mitigation": {
+    "risks": [
+      {
+        "risk": "融合逻辑复杂，难以调试",
+        "probability": "中",
+        "impact": "中",
+        "mitigation": "添加详细日志，分阶段测试"
+      },
+      {
+        "risk": "因果分析失败时回退逻辑不完善",
+        "probability": "低",
+        "impact": "中",
+        "mitigation": "实现健壮的错误处理，确保统计证据可作为备选"
+      },
+      {
+        "risk": "缓存机制导致过期结果",
+        "probability": "低",
+        "impact": "低",
+        "mitigation": "实现缓存过期策略（如 24 小时）"
+      }
+    ]
+  },
+
+  "timeline": {
+    "day_1": {
+      "tasks": [1, 2],
+      "deliverable": "核心数据结构和框架完成"
+    },
+    "day_2": {
+      "tasks": [3, 4],
+      "deliverable": "证据融合和成本控制完成"
+    },
+    "day_3": {
+      "tasks": [5, 6, 7, 8],
+      "deliverable": "集成、测试、文档完成"
+    },
+    "day_4": {
+      "tasks": ["bug fixes", "code review"],
+      "deliverable": "准备代码审查"
+    }
+  },
+
+  "success_criteria": [
+    "HybridGapDetector 编译通过，无警告",
+    "所有单元测试通过",
+    "集成测试通过",
+    "与 SelfImprovementLoop 集成成功",
+    "性能测试显示 API 调用减少 70%+",
+    "文档完整，包含使用示例"
+  ]
+}

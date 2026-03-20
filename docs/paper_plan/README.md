@@ -1,9 +1,42 @@
-# 论文规划文档
+# 论文规划文档索引
 
 > **项目**：Self-Evolving Tool Ecosystem for AI Agents  
 > **核心平台**：tokitai (Rust AI 工具调用框架)  
-> **最后更新**：2026-03-15  
-> **目标会议**：ACL / EMNLP / NeurIPS / ICLR
+> **最后更新**：2026-03-20  
+> **目标会议**：ACL / EMNLP / NeurIPS / ICLR / AAAI  
+> **实施方法**：Prompt Engineering（无需训练）
+
+---
+
+## 📚 文档导航
+
+| 文档 | 说明 | 适合读者 |
+|------|------|----------|
+| **[EXECUTIVE_SUMMARY.md](./EXECUTIVE_SUMMARY.md)** | 📋 一分钟速览 + 完整执行摘要 | 快速了解全貌 |
+| **[README.md](./README.md)** | 📖 完整论文规划（本文档） | 详细阅读 |
+| **[MECHANISMS.md](./MECHANISMS.md)** | ⚙️ 核心机制设计详解（Prompt Engineering 版本） | 实现参考 |
+| **[PROMPT_ENGINEERING_APPROACH.json](./PROMPT_ENGINEERING_APPROACH.json)** | 💡 Prompt Engineering 方案详解 | 技术细节 |
+| **[ALGORITHM_INNOVATION_PROPOSAL.json](./ALGORITHM_INNOVATION_PROPOSAL.json)** | 🎯 算法创新提案（含训练方案对比） | 方案对比 |
+| **[IMPLEMENTATION_GUIDE.json](./IMPLEMENTATION_GUIDE.json)** | 🛠️ 落地实施指南（硬件需求、成本分析） | 实施参考 |
+
+---
+
+## 🚀 快速开始
+
+### 5 分钟了解
+
+1. 阅读 [EXECUTIVE_SUMMARY.md](./EXECUTIVE_SUMMARY.md) - 了解核心概念和时间表
+2. 查看 [PROMPT_ENGINEERING_APPROACH.json](./PROMPT_ENGINEERING_APPROACH.json) - 理解为什么选择 Prompt Engineering
+
+### 30 分钟深入
+
+1. 阅读 [MECHANISMS.md](./MECHANISMS.md) - 了解 4 个核心机制的设计
+2. 浏览 [IMPLEMENTATION_GUIDE.json](./IMPLEMENTATION_GUIDE.json) - 查看硬件需求和成本
+
+### 完整规划
+
+1. 阅读本文档 [README.md](./README.md) - 完整论文规划
+2. 阅读 [ALGORITHM_INNOVATION_PROPOSAL.json](./ALGORITHM_INNOVATION_PROPOSAL.json) - 算法创新细节
 
 ---
 
@@ -18,14 +51,27 @@
 > - 自主优化工具库
 > - 系统反思和改进
 
-### 核心贡献
+### 核心贡献（更新：Prompt Engineering 方法）
 
-| 贡献 | 说明 | 状态 |
-|------|------|------|
-| **AI 主动发现工具缺口** | 从失败/低效任务中学习，AI 生成工具创造建议 | 设计完成 |
-| **AI 自主优化工具库** | AI 分析低使用率/高失败率工具，决定合并/废弃/改进 | 设计完成 |
-| **AI 系统反思机制** | AI 定期生成"体检报告"，发现系统性问题 | 设计完成 |
-| **完整自主改进循环** | 反思→发现缺口→优化→创造→再反思 | 设计完成 |
+| 贡献 | 说明 | 状态 | 实施方法 |
+|------|------|------|----------|
+| **AI 主动发现工具缺口** | 从失败/低效任务中学习，AI 生成工具创造建议 | 设计完成 | Prompt + CoT 推理 |
+| **AI 自主优化工具库** | AI 分析低使用率/高失败率工具，决定合并/废弃/改进 | 设计完成 | Prompt + Few-shot |
+| **AI 系统反思机制** | AI 定期生成"体检报告"，发现系统性问题 | 设计完成 | Prompt + 结构化输出 |
+| **完整自主改进循环** | 反思→发现缺口→优化→创造→再反思 | 设计完成 | 多轮 Prompt 迭代 |
+| **多智能体协商协议** | 多个 LLM 智能体通过对话达成进化共识 | 新增 | Role-Playing + Debate |
+
+### 核心洞察（2026-03-20 更新）
+
+```
+关键转变：从"训练专用模型"转向"Prompt Engineering 激发 LLM 已有能力"
+
+优势：
+- 无需 GPU 训练，成本降低 10-20 倍
+- 实施时间从 12 周缩短到 8 周
+- 可解释性强，易于调试
+- 性能足够好 (70-85% vs 训练方法 75-90%)
+```
 
 ### 次要贡献（工具矩阵架构）
 
@@ -42,8 +88,9 @@
 tokitai = 工具调用基础设施（工程贡献）
 工具矩阵架构 = 支持自进化的基础设施（次要贡献）
 自进化系统 = 研究贡献（AI 主观能动性机制）
+Prompt Engineering 框架 = 方法论创新（无需训练）
 
-论文贡献 = 自进化系统（70%） + 工具矩阵架构（20%） + tokitai 平台（10%）
+论文贡献 = 自进化系统（50%） + Prompt Engineering 框架（30%） + 工具矩阵架构（20%）
 ```
 
 ---
@@ -601,24 +648,23 @@ Appendix (可选)
 
 ---
 
-## 🗓️ 时间规划
+## 🗓️ 时间规划（更新：Prompt Engineering 方法）
 
-### 阶段 1：系统实现（8-10 周）
+### 阶段 1：Prompt Engineering 实现（8 周）
 
-| 周次 | 任务 | 产出 |
-|------|------|------|
-| 1-2 | ToolGapDetector 实现 | 可运行的缺口检测 |
-| 3-4 | ToolOptimizer 实现 | 可运行的工具优化 |
-| 5-6 | SystemReflector 实现 | 可运行的系统反思 |
-| 7-8 | ToolCreator 实现 | AI 创造工具并自动注册 |
-| 9-10 | SelfImprovementLoop 集成 | 完整自主改进循环 |
+| 周次 | 任务 | 产出 | 硬件需求 |
+|------|------|------|----------|
+| 1-2 | PromptGapDetector 实现 | 因果推理 Prompt 模板 + Few-shot 示例 | 无需 GPU |
+| 3-4 | PromptOptimizer 实现 | 工具优化 Prompt + 验证器 | 无需 GPU |
+| 5-6 | PromptCreator 实现 | 代码生成 Prompt + 自修正循环 | 无需 GPU |
+| 7-8 | MultiAgentNegotiator 实现 | 多智能体角色 Prompt + 协商协议 | 无需 GPU |
 
-### 阶段 2：实验运行（4-6 周）
+### 阶段 2：实验运行（4 周）
 
-| 周次 | 任务 | 产出 |
-|------|------|------|
-| 1-4 | 运行 30 天实验 | 实验数据 |
-| 5-6 | 数据分析 | 实验结果图表 |
+| 周次 | 任务 | 产出 | 成本 |
+|------|------|------|------|
+| 1-2 | 运行 30 天历史数据测试 | 实验数据 | $20 API |
+| 3-4 | 对比实验 + 消融实验 | 结果图表 | $30 API |
 
 ### 阶段 3：论文写作（4-6 周）
 
@@ -628,33 +674,30 @@ Appendix (可选)
 | 3-4 | 修改完善 | 第二稿、第三稿 |
 | 5-6 | 最终润色 | 投稿版本 |
 
-### 总时间：16-22 周（4-5 个月）
+### 总时间：16-18 周（4-4.5 个月）
+### 总成本：<$150 API 调用费（vs 训练方案 $500-2000）
 
 ---
 
-## 🎯 投稿目标
+## 🎯 投稿目标（更新）
 
 ### 主会（首选）
 
-| 会议 | 领域 | 截止日期 | 接受率 |
-|------|------|----------|--------|
-| **ACL 2026** | NLP/AI Agent | 2026.01 | ~20% |
-| **EMNLP 2026** | NLP/AI Agent | 2026.06 | ~20% |
-| **NAACL 2026** | NLP/AI Agent | 2025.12 | ~20% |
+| 会议 | 领域 | 截止日期 | 接受率 | 适合方向 |
+|------|------|----------|--------|----------|
+| **AAAI 2027** | 综合 AI | 2026.08.15 | ~25% | Prompt Engineering + AI Agents |
+| **ACL 2027** | NLP/AI Agent | 2027.01.15 | ~20% | Tool Learning + Prompt Design |
+| **EMNLP 2027** | NLP/AI Agent | 2027.06.15 | ~20% | AI Agents + Self-Evolution |
+| **NeurIPS 2027** | ML/AI | 2027.05.15 | ~26% | Autonomous Systems |
+| **ICLR 2027** | ML/AI | 2026.09.15 | ~25% | AI Agents + Learning Systems |
 
-### Workshop（备选）
+### 推荐投稿策略
 
-| Workshop | 关联会议 | 说明 |
-|----------|----------|------|
-| **LLM Agents Workshop** | NeurIPS/ICLR | AI Agent 专题 |
-| **AutoML Workshop** | NeurIPS/ICML | 自动化系统 |
-
-### 期刊（备选）
-
-| 期刊 | 说明 |
-|------|------|
-| **TACL** | ACL 期刊，接受率较高 |
-| **JAIR** | AI 研究期刊 |
+```
+第一轮（2026.08）：AAAI 2027 - Prompt Engineering 框架 + 自进化系统
+第二轮（2027.01）：ACL 2027 - 工具学习 + Prompt 设计模式（如 AAAAI 被拒）
+第三轮（2027.05）：NeurIPS 2027 - 多智能体协商扩展版
+```
 
 ---
 
@@ -679,27 +722,40 @@ Appendix (可选)
 
 ---
 
-## ✅ 待办事项
+## ✅ 待办事项（更新：Prompt Engineering 方法）
 
-### 系统实现
+### 系统实现（Prompt Engineering）
 
-- [ ] 实现 `ToolGapDetector`
-- [ ] 实现 `ToolOptimizer`
-- [ ] 实现 `SystemReflector`
-- [ ] 实现 `ToolCreator`（集成 tokitai）
-- [ ] 实现 `SelfImprovementLoop`
+- [ ] 实现 `PromptGapDetector` - 基于因果推理 Prompt
+- [ ] 实现 `PromptOptimizer` - 基于 Few-shot 学习
+- [ ] 实现 `PromptCreator` - 基于代码生成 Prompt + 自修正
+- [ ] 实现 `MultiAgentNegotiator` - 基于 Role-Playing
+- [ ] 实现 `SelfImprovementLoop` - 集成所有 Prompt 模块
 
 ### 实验准备
 
 - [ ] 设计基准测试任务集
 - [ ] 设置实验日志系统
 - [ ] 准备评估脚本
+- [ ] 预算：$150 API 调用费
 
 ### 论文写作
 
-- [ ] 完成初稿
+- [ ] 完成初稿（重点：Prompt Engineering 框架）
 - [ ] 准备实验图表
-- [ ] 准备补充材料
+- [ ] 准备补充材料（Prompt 模板全集）
+
+### 关键里程碑
+
+| 日期 | 里程碑 |
+|------|--------|
+| 2026-04-03 | PromptGapDetector 完成 |
+| 2026-04-17 | PromptOptimizer 完成 |
+| 2026-05-01 | PromptCreator 完成 |
+| 2026-05-15 | MultiAgentNegotiator 完成 |
+| 2026-06-15 | 实验完成 |
+| 2026-07-15 | 论文初稿完成 |
+| 2026-08-01 | 投稿 AAAI 2027 |
 
 ---
 

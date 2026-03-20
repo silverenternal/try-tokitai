@@ -1,0 +1,417 @@
+{
+  "title": "基于 Prompt Engineering 的轻量化实现方案",
+  "version": "1.0",
+  "created_date": "2026-03-20",
+  "core_insight": {
+    "original_approach": "训练/微调模型",
+    "problem": "需要 GPU、训练时间长、维护成本高",
+    "better_approach": "动态 Prompt Engineering + 结构化输出",
+    "advantage": "无需训练、即时可用、成本低、效果相当"
+  },
+
+  "why_prompt_engineering_works": {
+    "reason_1": {
+      "name": "现代 LLM 已具备推理能力",
+      "explanation": "Qwen3.5/4.0、GPT-4 等模型已经通过预训练学会了因果推理、规划、代码生成等能力",
+      "evidence": "无需微调即可通过 prompt 完成复杂任务"
+    },
+    "reason_2": {
+      "name": "我们的任务是'推理'而非'技能'",
+      "explanation": "工具缺口检测、进化策略选择是推理任务，不是需要肌肉记忆的技能",
+      "analogy": "就像下棋 - 不需要训练新模型，用 GPT-4 就能分析棋局"
+    },
+    "reason_3": {
+      "name": "结构化输出 + 约束解码",
+      "explanation": "通过 JSON Schema 约束输出格式，通过 few-shot 示例引导推理过程",
+      "technique": "Function Calling / Structured Output"
+    }
+  },
+
+  "revised_algorithms": [
+    {
+      "algorithm_id": "AI-001-Prompt",
+      "name": "基于 Prompt 的因果推断",
+      "original_approach": "学习因果图 + SCM 建模 + 反事实推理",
+      "prompt_approach": {
+        "core_idea": "用精心设计的 prompt 让 LLM 直接进行因果分析",
+        "techniques": [
+          "Chain-of-Thought (逐步推理)",
+          "Counterfactual Prompting (反事实提问)",
+          "Structured Output (JSON Schema 约束)"
+        ],
+        "implementation": {
+          "step_1": {
+            "name": "因果分析 Prompt 模板",
+            "file": "src/autonomy/causal/prompts.rs",
+            "template": "你是一个因果推断专家。请分析以下任务失败的根本原因...\n\n任务：{task_description}\n失败信息：{failure_message}\n使用的工具：{used_tools}\n\n请按以下步骤分析：\n1. 列出可能导致失败的所有因素\n2. 对每个因素，判断是相关性还是因果性\n3. 识别真正的工具缺口（如果有这个工具，任务会成功吗？）\n4. 输出 JSON 格式的因果分析报告"
+          },
+          "step_2": {
+            "name": "Few-Shot 示例",
+            "file": "src/autonomy/causal/few_shot_examples.rs",
+            "examples": [
+              {
+                "task": "批量下载图片并压缩",
+                "failure": "手动逐个下载，耗时过长",
+                "causal_analysis": "缺少批量下载工具 → 因果缺口",
+                "recommendation": "创建 batch_download 工具"
+              }
+            ]
+          },
+          "step_3": {
+            "name": "JSON Schema 约束输出",
+            "file": "src/autonomy/causal/schema.rs",
+            "schema": {
+              "type": "object",
+              "required": ["causal_factors", "identified_gaps", "confidence"],
+              "properties": {
+                "causal_factors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "factor": {"type": "string"},
+                      "is_causal": {"type": "boolean"},
+                      "evidence": {"type": "string"},
+                      "confidence": {"type": "number"}
+                    }
+                  }
+                },
+                "identified_gaps": {"type": "array"},
+                "confidence": {"type": "number"}
+              }
+            }
+          }
+        },
+        "code_implementation": {
+          "file": "src/autonomy/causal/prompt_detector.rs",
+          "complexity": "低",
+          "lines_of_code": "~200 行",
+          "dependencies": ["tokitai-core (已有)", "serde_json (已有)"],
+          "example_code": "pub async fn detect_causal_gaps(&self, failed_tasks: &[TaskRecord]) -> Result<Vec<CausalGap>> {\n    let prompt = build_causal_analysis_prompt(failed_tasks);\n    let response = self.llm_client.chat_with_schema(\n        &prompt,\n        &CAUSAL_ANALYSIS_SCHEMA\n    ).await?;\n    let analysis: CausalAnalysis = serde_json::from_str(&response)?;\n    Ok(analysis.identified_gaps)\n}"
+        }
+      },
+      "hardware_requirements": {
+        "gpu_needed": false,
+        "cpu_needed": false,
+        "only_need": "LLM API 调用",
+        "cost_per_analysis": "$0.01-0.05 (按 token 计费)",
+        "monthly_cost": "$10-30 (日常使用)"
+      },
+      "implementation_effort": {
+        "person_days": 5,
+        "calendar_days": 7,
+        "files_to_create": [
+          "src/autonomy/causal/prompt_detector.rs",
+          "src/autonomy/causal/prompts.rs",
+          "src/autonomy/causal/schema.rs"
+        ]
+      },
+      "expected_performance": {
+        "accuracy": "70-80% (与训练方法相当)",
+        "latency": "2-5 秒/分析",
+        "advantage": "无需训练，即时可用"
+      }
+    },
+
+    {
+      "algorithm_id": "AI-002-Prompt",
+      "name": "基于 Prompt 的进化策略",
+      "original_approach": "PPO 训练策略网络",
+      "prompt_approach": {
+        "core_idea": "用 LLM 作为策略函数 π(a|s) = LLM(state)",
+        "techniques": [
+          "Role-Playing (扮演进化策略师)",
+          "Decision Tree Prompting (决策树引导)",
+          "Multi-Turn Planning (多轮规划)"
+        ],
+        "implementation": {
+          "step_1": {
+            "name": "进化策略 Prompt",
+            "file": "src/autonomy/evolution/prompts.rs",
+            "template": "你是工具生态系统的进化策略师。当前状态：\n- 工具库规模：{tool_count}\n- 任务完成率：{success_rate}\n- 低使用率工具：{underused_tools}\n- 高频失败工具：{high_failure_tools}\n\n请决定下一步进化动作：\nA) 创建新工具 (如果有明显缺口)\nB) 合并冗余工具\nC) 废弃低质量工具\nD) 改进现有工具\n\n输出 JSON 格式：{{action_type, target_tools, rationale, expected_impact}}"
+          },
+          "step_2": {
+            "name": "决策历史引导",
+            "file": "src/autonomy/evolution/history_prompt.rs",
+            "technique": "将历史成功决策作为 few-shot 示例",
+            "example": "过去类似状态下，合并 file_read 和 file_write 为 file_ops 工具箱，任务完成率提升 15%"
+          },
+          "step_3": {
+            "name": "反思 - 验证循环",
+            "file": "src/autonomy/evolution/reflection.rs",
+            "process": [
+              "1. LLM 生成进化策略",
+              "2. 验证器检查合理性 (规则-based)",
+              "3. 如不合理，反馈给 LLM 重新生成",
+              "4. 最多迭代 3 次"
+            ]
+          }
+        },
+        "code_implementation": {
+          "file": "src/autonomy/evolution/prompt_strategist.rs",
+          "complexity": "中",
+          "lines_of_code": "~300 行",
+          "example_code": "pub async fn select_evolution_action(&self, state: &EvolutionState) -> Result<EvolutionAction> {\n    let prompt = build_strategy_prompt(state, self.history);\n    let mut action: Option<EvolutionAction> = None;\n    \n    for attempt in 0..3 {\n        let response = self.llm_client.chat_with_schema(&prompt, &ACTION_SCHEMA).await?;\n        let candidate: EvolutionAction = serde_json::from_str(&response)?;\n        \n        if self.validator.validate(&candidate, state) {\n            action = Some(candidate);\n            break;\n        }\n    }\n    \n    Ok(action.ok_or(\"Failed to generate valid action\")?)\n}"
+        }
+      },
+      "hardware_requirements": {
+        "gpu_needed": false,
+        "only_need": "LLM API 调用",
+        "cost_per_decision": "$0.02-0.08",
+        "monthly_cost": "$20-50"
+      },
+      "implementation_effort": {
+        "person_days": 7,
+        "calendar_days": 10
+      }
+    },
+
+    {
+      "algorithm_id": "AI-003-Prompt",
+      "name": "基于 Prompt 的多智能体协商",
+      "original_approach": "虚拟博弈求解纳什均衡",
+      "prompt_approach": {
+        "core_idea": "用多个 LLM 实例扮演不同智能体，通过对话协商",
+        "techniques": [
+          "Multi-Agent Role-Playing",
+          "Debate/Argumentation",
+          "Consensus Building"
+        ],
+        "implementation": {
+          "step_1": {
+            "name": "智能体角色定义",
+            "file": "src/autonomy/multi_agent/roles.rs",
+            "roles": [
+              {
+                "name": "Creator",
+                "prompt": "你是工具创建者，目标是发现新工具机会。你倾向于创建工具，但需要考虑工具库的整体健康度..."
+              },
+              {
+                "name": "Optimizer",
+                "prompt": "你是工具优化者，目标是改进现有工具。你认为应该优先改进而非新建..."
+              },
+              {
+                "name": "Eliminator",
+                "prompt": "你是工具淘汰者，目标是移除冗余工具。你倾向于精简工具库..."
+              },
+              {
+                "name": "Planner",
+                "prompt": "你是系统规划者，目标是整体工具库健康。你协调各方意见，做出最终决策..."
+              }
+            ]
+          },
+          "step_2": {
+            "name": "协商协议",
+            "file": "src/autonomy/multi_agent/protocol.rs",
+            "rounds": [
+              "Round 1: 各智能体独立分析状态，提出建议",
+              "Round 2: 智能体互相评论对方建议",
+              "Round 3: Planner 汇总意见，做出决策",
+              "Round 4: 各智能体投票确认"
+            ]
+          },
+          "step_3": {
+            "name": "共识形成",
+            "file": "src/autonomy/multi_agent/consensus.rs",
+            "mechanism": "加权投票 + 否决权 (Planner 有一票否决)"
+          }
+        },
+        "code_implementation": {
+          "file": "src/autonomy/multi_agent/negotiator.rs",
+          "complexity": "中高",
+          "lines_of_code": "~500 行",
+          "example_code": "pub async fn negotiate(&self, state: &EvolutionState) -> Result<EvolutionAction> {\n    // Round 1: 独立分析\n    let creator_proposal = self.creator.analyze(state).await?;\n    let optimizer_proposal = self.optimizer.analyze(state).await?;\n    let eliminator_proposal = self.eliminator.analyze(state).await?;\n    \n    // Round 2: 互相评论\n    let critiques = self.collect_critiques(&proposals).await?;\n    \n    // Round 3: Planner 决策\n    let decision = self.planner.decide(&proposals, &critiques).await?;\n    \n    // Round 4: 投票确认\n    let votes = self.collect_votes(&decision).await?;\n    \n    if votes.approval_rate > 0.6 {\n        Ok(decision)\n    } else {\n        Err(\"Consensus not reached\")\n    }\n}"
+        }
+      },
+      "hardware_requirements": {
+        "gpu_needed": false,
+        "only_need": "LLM API 调用 (4 个智能体 × 多轮对话)",
+        "cost_per_negotiation": "$0.10-0.30",
+        "monthly_cost": "$30-80"
+      },
+      "implementation_effort": {
+        "person_days": 10,
+        "calendar_days": 14
+      }
+    },
+
+    {
+      "algorithm_id": "AI-004-Prompt",
+      "name": "基于 Prompt 的代码生成",
+      "original_approach": "MAML 微调代码模型",
+      "prompt_approach": {
+        "core_idea": "用 few-shot prompt + 现有工具代码作为示例",
+        "techniques": [
+          "Few-Shot Learning",
+          "Retrieval-Augmented Generation (RAG)",
+          "Self-Correction"
+        ],
+        "implementation": {
+          "step_1": {
+            "name": "工具代码示例库",
+            "file": "src/autonomy/codegen/example_db.rs",
+            "content": "收集现有 63+ 工具的代码，按类型分类",
+            "retrieval": "根据新工具的功能描述，检索最相似的 3-5 个示例"
+          },
+          "step_2": {
+            "name": "代码生成 Prompt",
+            "file": "src/autonomy/codegen/prompts.rs",
+            "template": "你是 Rust 工具开发专家。请根据以下要求创建新工具：\n\n需求：{tool_description}\n输入 Schema: {input_schema}\n\n参考以下相似工具的实现：\n{retrieved_examples}\n\n请生成：\n1. 工具结构体定义\n2. Tool trait 实现\n3. 单元测试\n\n输出完整 Rust 代码（可直接编译）"
+          },
+          "step_3": {
+            "name": "自修正循环",
+            "file": "src/autonomy/codegen/self_correct.rs",
+            "process": [
+              "1. LLM 生成初始代码",
+              "2. 尝试编译 (cargo check)",
+              "3. 如有错误，将错误信息反馈给 LLM",
+              "4. LLM 修正代码",
+              "5. 重复直到编译通过或达到最大迭代次数"
+            ]
+          }
+        },
+        "code_implementation": {
+          "file": "src/autonomy/codegen/generator.rs",
+          "complexity": "中",
+          "lines_of_code": "~400 行",
+          "example_code": "pub async fn generate_tool(&self, spec: &ToolSpec) -> Result<GeneratedCode> {\n    let examples = self.example_db.retrieve_similar(spec, 3)?;\n    let prompt = build_codegen_prompt(spec, &examples);\n    \n    let mut code = self.llm_client.chat(&prompt).await?;\n    \n    for attempt in 0..5 {\n        match self.compile_check(&code).await {\n            Ok(()) => return Ok(GeneratedCode { code, compiled: true }),\n            Err(errors) => {\n                let fix_prompt = build_fix_prompt(&code, &errors);\n                code = self.llm_client.chat(&fix_prompt).await?;\n            }\n        }\n    }\n    \n    Err(\"Failed to generate compilable code\")\n}"
+        }
+      },
+      "hardware_requirements": {
+        "gpu_needed": false,
+        "only_need": "LLM API 调用",
+        "cost_per_tool": "$0.05-0.15",
+        "monthly_cost": "$10-30"
+      },
+      "implementation_effort": {
+        "person_days": 7,
+        "calendar_days": 10
+      }
+    }
+  ],
+
+  "comparison": {
+    "training_vs_prompt": [
+      {
+        "aspect": "硬件需求",
+        "training": "需要 GPU (RTX 3090/A100)",
+        "prompt": "无需 GPU，仅需 API 调用"
+      },
+      {
+        "aspect": "实施时间",
+        "training": "6-12 周 (含训练时间)",
+        "prompt": "2-4 周 (纯代码开发)"
+      },
+      {
+        "aspect": "成本",
+        "training": "$500-2000 (硬件/云)",
+        "prompt": "$50-150 (API 调用)"
+      },
+      {
+        "aspect": "维护",
+        "training": "需要重新训练适应新数据",
+        "prompt": "更新 prompt 即可"
+      },
+      {
+        "aspect": "性能",
+        "training": "可能略高 5-10%",
+        "prompt": "足够好 (70-85% 准确率)"
+      },
+      {
+        "aspect": "可解释性",
+        "training": "黑盒，难以调试",
+        "prompt": "prompt 透明，易于调试"
+      }
+    ]
+  },
+
+  "recommended_approach": {
+    "phase_1": {
+      "name": "Prompt-Based Causal Detection",
+      "duration": "2 周",
+      "files": 3,
+      "cost": "$10",
+      "expected_accuracy": "75%+"
+    },
+    "phase_2": {
+      "name": "Prompt-Based Evolution Strategy",
+      "duration": "2 周",
+      "files": 4,
+      "cost": "$30",
+      "expected_accuracy": "70%+"
+    },
+    "phase_3": {
+      "name": "Prompt-Based Code Generation",
+      "duration": "2 周",
+      "files": 4,
+      "cost": "$20",
+      "expected_accuracy": "60-70% (编译通过率)"
+    },
+    "phase_4": {
+      "name": "Multi-Agent Negotiation (可选)",
+      "duration": "2 周",
+      "files": 5,
+      "cost": "$50",
+      "expected_accuracy": "与单智能体相当，但多样性更高"
+    },
+    "total": {
+      "duration": "8 周",
+      "cost": "$110",
+      "hardware_needed": "无"
+    }
+  },
+
+  "paper_contribution_reframing": {
+    "original_framing": "我们训练了 X 模型来实现 Y",
+    "better_framing": "我们设计了创新的 Prompt Engineering 框架，使现有 LLM 能够执行复杂的工具进化推理，无需额外训练",
+    "theoretical_contributions": [
+      {
+        "name": "Prompt 设计模式",
+        "description": "系统化的因果推理/决策/代码生成 prompt 模板",
+        "novelty": "首次应用于工具进化场景"
+      },
+      {
+        "name": "多智能体协商协议",
+        "description": "LLM 智能体如何通过结构化对话达成共识",
+        "novelty": "新的多 LLM 协作范式"
+      },
+      {
+        "name": "自修正代码生成",
+        "description": "编译错误反馈循环提高代码质量",
+        "novelty": "结合编译器反馈的 prompt 迭代"
+      }
+    ],
+    "experimental_contributions": [
+      "对比实验：Prompt vs 训练方法 (预期性能接近)",
+      "消融实验：各 prompt 组件的贡献",
+      "案例分析：成功/失败的工具进化实例"
+    ]
+  },
+
+  "risks_and_mitigation": [
+    {
+      "risk": "LLM 输出不稳定",
+      "mitigation": "JSON Schema 约束 + 验证器 + 多轮迭代"
+    },
+    {
+      "risk": "API 成本高",
+      "mitigation": "缓存历史结果 + 批量处理 + 本地模型备选 (Ollama)"
+    },
+      "risk": "审稿人质疑'没有训练'",
+      "mitigation": "强调 prompt 设计的系统性和创新性，引用相关 Prompt Engineering 论文"
+    }
+  ],
+
+  "conclusion": {
+    "recommendation": "强烈建议采用 Prompt Engineering 方案",
+    "reasons": [
+      "无需硬件投资",
+      "实施速度快 3-5 倍",
+      "成本低 10-20 倍",
+      "性能足够好 (70-85% vs 75-90%)",
+      "易于调试和迭代",
+      "符合'轻量级'设计理念"
+    ],
+    "fallback": "如实验效果确实不佳，再考虑训练方案作为补充"
+  }
+}

@@ -1,0 +1,1006 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created_date": "2026-03-20",
+    "total_tasks": 110,
+    "description": "基准测试任务集，用于评估 Prompt Engineering 自进化系统"
+  },
+  "tasks": [
+    {
+      "id": "file_001",
+      "category": "file_ops",
+      "difficulty": "easy",
+      "description": "读取当前目录下的 README.md 文件内容",
+      "expected_tools": ["read_file"],
+      "expected_tool_calls": 1,
+      "success_criteria": "成功返回文件内容"
+    },
+    {
+      "id": "file_002",
+      "category": "file_ops",
+      "difficulty": "easy",
+      "description": "在 sandbox 目录下创建一个名为 test.txt 的文件，内容为'Hello World'",
+      "expected_tools": ["write_file"],
+      "expected_tool_calls": 1,
+      "success_criteria": "文件创建成功且内容正确"
+    },
+    {
+      "id": "file_003",
+      "category": "file_ops",
+      "difficulty": "easy",
+      "description": "列出当前目录下所有的.rs 文件",
+      "expected_tools": ["list_files"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有.rs 文件列表"
+    },
+    {
+      "id": "file_004",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "将 config.toml 文件复制为 config.toml.backup",
+      "expected_tools": ["copy_file"],
+      "expected_tool_calls": 1,
+      "success_criteria": "备份文件创建成功"
+    },
+    {
+      "id": "file_005",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "重命名文件 old_name.txt 为 new_name.txt",
+      "expected_tools": ["rename_file"],
+      "expected_tool_calls": 1,
+      "success_criteria": "文件重命名成功"
+    },
+    {
+      "id": "file_006",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "删除 sandbox 目录下的所有.tmp 文件",
+      "expected_tools": ["list_files", "delete_file"],
+      "expected_tool_calls": 2,
+      "success_criteria": "所有.tmp 文件被删除"
+    },
+    {
+      "id": "file_007",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "创建一个新目录 projects/test-project",
+      "expected_tools": ["create_directory"],
+      "expected_tool_calls": 1,
+      "success_criteria": "目录创建成功"
+    },
+    {
+      "id": "file_008",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "递归删除 empty-dir 目录及其所有内容",
+      "expected_tools": ["delete_directory"],
+      "expected_tool_calls": 1,
+      "success_criteria": "目录及其内容被删除"
+    },
+    {
+      "id": "file_009",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "获取文件 Cargo.toml 的详细信息（大小、修改时间等）",
+      "expected_tools": ["get_file_info"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回文件元数据"
+    },
+    {
+      "id": "file_010",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "搜索当前目录下所有包含'fn main()'的.rs 文件",
+      "expected_tools": ["search_in_files"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回包含目标内容的文件列表"
+    },
+    {
+      "id": "file_011",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "批量重命名：将 docs 目录下所有.md 文件改为.txt",
+      "expected_tools": ["list_files", "batch_rename"],
+      "expected_tool_calls": 2,
+      "success_criteria": "所有.md 文件成功重命名为.txt"
+    },
+    {
+      "id": "file_012",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "复制整个 src 目录到 backup/src",
+      "expected_tools": ["copy_directory"],
+      "expected_tool_calls": 1,
+      "success_criteria": "目录完整复制"
+    },
+    {
+      "id": "file_013",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "查找并删除项目中所有的.o 和.a 文件（编译产物）",
+      "expected_tools": ["find_files", "delete_file"],
+      "expected_tool_calls": 2,
+      "success_criteria": "所有编译产物被删除"
+    },
+    {
+      "id": "file_014",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "计算项目中所有.rs 文件的总行数",
+      "expected_tools": ["read_file", "count_lines"],
+      "expected_tool_calls": 3,
+      "success_criteria": "返回正确的总行数"
+    },
+    {
+      "id": "file_015",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "将 logs 目录下按日期排序，删除最早的 5 个日志文件",
+      "expected_tools": ["list_files", "get_file_info", "delete_file"],
+      "expected_tool_calls": 4,
+      "success_criteria": "最早的 5 个日志文件被删除"
+    },
+    {
+      "id": "file_016",
+      "category": "file_ops",
+      "difficulty": "easy",
+      "description": "读取并解析 config.toml 文件内容",
+      "expected_tools": ["read_file", "parse_toml"],
+      "expected_tool_calls": 2,
+      "success_criteria": "成功解析 TOML 内容"
+    },
+    {
+      "id": "file_017",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "在项目中搜索所有包含'todo'或'TODO'的文件",
+      "expected_tools": ["search_in_files"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回包含 todo 的文件列表"
+    },
+    {
+      "id": "file_018",
+      "category": "file_ops",
+      "difficulty": "medium",
+      "description": "创建项目的目录结构树（深度 3 层）",
+      "expected_tools": ["list_files", "format_tree"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回格式化的目录树"
+    },
+    {
+      "id": "file_019",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "批量修改文件权限：将所有脚本文件设为可执行",
+      "expected_tools": ["list_files", "set_permissions"],
+      "expected_tool_calls": 2,
+      "success_criteria": "所有脚本文件可执行"
+    },
+    {
+      "id": "file_020",
+      "category": "file_ops",
+      "difficulty": "hard",
+      "description": "合并多个日志文件为一个，按时间戳排序",
+      "expected_tools": ["read_file", "sort_lines", "write_file"],
+      "expected_tool_calls": 4,
+      "success_criteria": "合并后的文件按时间戳有序"
+    },
+
+    {
+      "id": "code_001",
+      "category": "code_analysis",
+      "difficulty": "easy",
+      "description": "检测 src/main.rs 文件的编程语言",
+      "expected_tools": ["detect_language"],
+      "expected_tool_calls": 1,
+      "success_criteria": "正确识别为 Rust"
+    },
+    {
+      "id": "code_002",
+      "category": "code_analysis",
+      "difficulty": "easy",
+      "description": "统计 src/main.rs 文件的代码行数（不包括空行和注释）",
+      "expected_tools": ["count_code_lines"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回有效的代码行数"
+    },
+    {
+      "id": "code_003",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "查找 src/目录下所有的函数定义",
+      "expected_tools": ["find_functions"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有函数定义列表"
+    },
+    {
+      "id": "code_004",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "查找 src/目录下所有的结构体定义",
+      "expected_tools": ["find_structs"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有结构体定义列表"
+    },
+    {
+      "id": "code_005",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "分析 src/main.rs 中的依赖导入（use 语句）",
+      "expected_tools": ["analyze_imports"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有导入的模块列表"
+    },
+    {
+      "id": "code_006",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "检查项目中是否有未使用的变量",
+      "expected_tools": ["check_unused"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回未使用变量列表"
+    },
+    {
+      "id": "code_007",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "生成项目的调用图（哪些函数调用哪些函数）",
+      "expected_tools": ["find_functions", "analyze_calls"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回函数调用关系图"
+    },
+    {
+      "id": "code_008",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "计算每个函数的圈复杂度（Cyclomatic Complexity）",
+      "expected_tools": ["calculate_complexity"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回每个函数的复杂度评分"
+    },
+    {
+      "id": "code_009",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "查找所有可能的空指针解引用（.unwrap() 调用）",
+      "expected_tools": ["search_in_files"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有.unwrap() 调用位置"
+    },
+    {
+      "id": "code_010",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "分析错误处理模式：统计 Result 和 Option 的使用情况",
+      "expected_tools": ["analyze_error_handling"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回错误处理统计"
+    },
+    {
+      "id": "code_011",
+      "category": "code_analysis",
+      "difficulty": "easy",
+      "description": "检查代码格式是否符合 rustfmt 规范",
+      "expected_tools": ["check_format"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回格式检查结果"
+    },
+    {
+      "id": "code_012",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "运行 clippy 检查代码质量问题",
+      "expected_tools": ["run_clippy"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 clippy 警告列表"
+    },
+    {
+      "id": "code_013",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "查找所有的 println! 宏调用（可能用于调试）",
+      "expected_tools": ["search_in_files"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有 println! 调用位置"
+    },
+    {
+      "id": "code_014",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "分析模块依赖关系：哪些模块依赖哪些模块",
+      "expected_tools": ["analyze_module_deps"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回模块依赖图"
+    },
+    {
+      "id": "code_015",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "识别代码中的代码重复（复制粘贴）",
+      "expected_tools": ["detect_duplication"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回重复代码片段列表"
+    },
+    {
+      "id": "code_016",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "统计每个模块的测试覆盖率",
+      "expected_tools": ["check_coverage"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回覆盖率统计"
+    },
+    {
+      "id": "code_017",
+      "category": "code_analysis",
+      "difficulty": "medium",
+      "description": "查找所有的 pub 公开 API（对外暴露的接口）",
+      "expected_tools": ["find_public_apis"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回所有公开 API 列表"
+    },
+    {
+      "id": "code_018",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "分析异步代码模式：识别 async/await 使用情况",
+      "expected_tools": ["analyze_async_usage"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回异步代码统计"
+    },
+    {
+      "id": "code_019",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "检查潜在的内存泄漏（循环引用、未释放资源）",
+      "expected_tools": ["check_memory_leaks"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回潜在泄漏点列表"
+    },
+    {
+      "id": "code_020",
+      "category": "code_analysis",
+      "difficulty": "hard",
+      "description": "生成 API 文档骨架（从代码注释提取）",
+      "expected_tools": ["extract_doc_comments", "generate_docs"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回文档骨架"
+    },
+
+    {
+      "id": "net_001",
+      "category": "network",
+      "difficulty": "easy",
+      "description": "检查网络连接是否正常（ping google.com）",
+      "expected_tools": ["check_network"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回网络状态"
+    },
+    {
+      "id": "net_002",
+      "category": "network",
+      "difficulty": "easy",
+      "description": "获取本机 IP 地址",
+      "expected_tools": ["get_local_ip"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回正确的 IP 地址"
+    },
+    {
+      "id": "net_003",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "发送 HTTP GET 请求到 https://api.github.com",
+      "expected_tools": ["http_get"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 HTTP 响应"
+    },
+    {
+      "id": "net_004",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "发送 HTTP POST 请求到测试 API",
+      "expected_tools": ["http_post"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 HTTP 响应"
+    },
+    {
+      "id": "net_005",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "检查指定端口是否开放（如 80、443）",
+      "expected_tools": ["check_port"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回端口状态"
+    },
+    {
+      "id": "net_006",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "获取网站的 SSL 证书信息",
+      "expected_tools": ["get_ssl_info"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回证书详情"
+    },
+    {
+      "id": "net_007",
+      "category": "network",
+      "difficulty": "hard",
+      "description": "下载文件并保存到本地（如图片、文档）",
+      "expected_tools": ["download_file"],
+      "expected_tool_calls": 1,
+      "success_criteria": "文件下载成功"
+    },
+    {
+      "id": "net_008",
+      "category": "network",
+      "difficulty": "hard",
+      "description": "批量下载多个文件（从 URL 列表）",
+      "expected_tools": ["batch_download"],
+      "expected_tool_calls": 1,
+      "success_criteria": "所有文件下载成功"
+    },
+    {
+      "id": "net_009",
+      "category": "network",
+      "difficulty": "hard",
+      "description": "测试网站响应时间（多次请求取平均）",
+      "expected_tools": ["http_get", "calculate_stats"],
+      "expected_tool_calls": 3,
+      "success_criteria": "返回平均响应时间"
+    },
+    {
+      "id": "net_010",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "查询 DNS 记录（A、CNAME、MX 等）",
+      "expected_tools": ["dns_lookup"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 DNS 记录"
+    },
+    {
+      "id": "net_011",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "执行 traceroute 追踪网络路径",
+      "expected_tools": ["traceroute"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回网络路径"
+    },
+    {
+      "id": "net_012",
+      "category": "network",
+      "difficulty": "hard",
+      "description": "检查网站是否可访问（从多个地点）",
+      "expected_tools": ["check_accessibility"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回可访问性报告"
+    },
+    {
+      "id": "net_013",
+      "category": "network",
+      "difficulty": "easy",
+      "description": "搜索 Wikipedia 关于'Rust 编程语言'的条目",
+      "expected_tools": ["wikipedia_search"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回搜索结果"
+    },
+    {
+      "id": "net_014",
+      "category": "network",
+      "difficulty": "medium",
+      "description": "获取 Wikipedia 条目的摘要",
+      "expected_tools": ["wikipedia_summary"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回条目摘要"
+    },
+    {
+      "id": "net_015",
+      "category": "network",
+      "difficulty": "hard",
+      "description": "监控网站可用性（定时检查，持续 5 分钟）",
+      "expected_tools": ["monitor_uptime"],
+      "expected_tool_calls": 6,
+      "success_criteria": "返回可用性报告"
+    },
+
+    {
+      "id": "git_001",
+      "category": "git_ops",
+      "difficulty": "easy",
+      "description": "检查当前 Git 仓库状态",
+      "expected_tools": ["git_status"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 Git 状态"
+    },
+    {
+      "id": "git_002",
+      "category": "git_ops",
+      "difficulty": "easy",
+      "description": "查看最近的 Git 提交日志（5 条）",
+      "expected_tools": ["git_log"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回提交历史"
+    },
+    {
+      "id": "git_003",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "创建新的 Git 分支 feature/new-feature",
+      "expected_tools": ["git_checkout"],
+      "expected_tool_calls": 1,
+      "success_criteria": "分支创建并切换成功"
+    },
+    {
+      "id": "git_004",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "合并分支 feature/new-feature 到当前分支",
+      "expected_tools": ["git_merge"],
+      "expected_tool_calls": 1,
+      "success_criteria": "合并成功"
+    },
+    {
+      "id": "git_005",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "暂存所有修改并提交，消息为'Update: 新功能'",
+      "expected_tools": ["git_add", "git_commit"],
+      "expected_tool_calls": 2,
+      "success_criteria": "提交成功"
+    },
+    {
+      "id": "git_006",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "查看两个提交之间的差异",
+      "expected_tools": ["git_diff"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回差异内容"
+    },
+    {
+      "id": "git_007",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "撤销最近一次提交（保留修改）",
+      "expected_tools": ["git_reset"],
+      "expected_tool_calls": 1,
+      "success_criteria": "提交撤销成功"
+    },
+    {
+      "id": "git_008",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "创建并应用 stashing",
+      "expected_tools": ["git_stash"],
+      "expected_tool_calls": 2,
+      "success_criteria": "stashing 操作成功"
+    },
+    {
+      "id": "git_009",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "查看某个文件的修改历史",
+      "expected_tools": ["git_log"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回文件历史"
+    },
+    {
+      "id": "git_010",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "解决简单的合并冲突",
+      "expected_tools": ["git_merge", "resolve_conflict"],
+      "expected_tool_calls": 2,
+      "success_criteria": "冲突解决成功"
+    },
+    {
+      "id": "git_011",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "添加远程仓库 origin",
+      "expected_tools": ["git_remote_add"],
+      "expected_tool_calls": 1,
+      "success_criteria": "远程仓库添加成功"
+    },
+    {
+      "id": "git_012",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "从远程仓库拉取最新代码",
+      "expected_tools": ["git_pull"],
+      "expected_tool_calls": 1,
+      "success_criteria": "拉取成功"
+    },
+    {
+      "id": "git_013",
+      "category": "git_ops",
+      "difficulty": "medium",
+      "description": "推送本地分支到远程仓库",
+      "expected_tools": ["git_push"],
+      "expected_tool_calls": 1,
+      "success_criteria": "推送成功"
+    },
+    {
+      "id": "git_014",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "变基当前分支到 main",
+      "expected_tools": ["git_rebase"],
+      "expected_tool_calls": 1,
+      "success_criteria": "变基成功"
+    },
+    {
+      "id": "git_015",
+      "category": "git_ops",
+      "difficulty": "hard",
+      "description": "创建 Git tag v1.0.0",
+      "expected_tools": ["git_tag"],
+      "expected_tool_calls": 1,
+      "success_criteria": "tag 创建成功"
+    },
+
+    {
+      "id": "data_001",
+      "category": "data_processing",
+      "difficulty": "easy",
+      "description": "解析 JSON 字符串为对象",
+      "expected_tools": ["parse_json"],
+      "expected_tool_calls": 1,
+      "success_criteria": "成功解析 JSON"
+    },
+    {
+      "id": "data_002",
+      "category": "data_processing",
+      "difficulty": "easy",
+      "description": "将对象格式化为 JSON 字符串",
+      "expected_tools": ["format_json"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回格式化的 JSON"
+    },
+    {
+      "id": "data_003",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "查询 JSON 中的数据（使用 JSONPath）",
+      "expected_tools": ["json_query"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回查询结果"
+    },
+    {
+      "id": "data_004",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "合并两个 JSON 对象",
+      "expected_tools": ["json_merge"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回合并后的 JSON"
+    },
+    {
+      "id": "data_005",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "将 CSV 转换为 JSON",
+      "expected_tools": ["csv_to_json"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回转换后的 JSON"
+    },
+    {
+      "id": "data_006",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "将 JSON 转换为 CSV",
+      "expected_tools": ["json_to_csv"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回转换后的 CSV"
+    },
+    {
+      "id": "data_007",
+      "category": "data_processing",
+      "difficulty": "hard",
+      "description": "过滤 JSON 数组（满足特定条件的元素）",
+      "expected_tools": ["json_filter"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回过滤后的数组"
+    },
+    {
+      "id": "data_008",
+      "category": "data_processing",
+      "difficulty": "hard",
+      "description": "对 JSON 数组排序（按指定字段）",
+      "expected_tools": ["json_sort"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回排序后的数组"
+    },
+    {
+      "id": "data_009",
+      "category": "data_processing",
+      "difficulty": "hard",
+      "description": "聚合 JSON 数据（分组统计）",
+      "expected_tools": ["json_aggregate"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回聚合结果"
+    },
+    {
+      "id": "data_010",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "验证 JSON 是否符合 Schema",
+      "expected_tools": ["json_validate"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回验证结果"
+    },
+    {
+      "id": "data_011",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "扁平化嵌套的 JSON 结构",
+      "expected_tools": ["json_flatten"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回扁平化的 JSON"
+    },
+    {
+      "id": "data_012",
+      "category": "data_processing",
+      "difficulty": "hard",
+      "description": "比较两个 JSON 文件的差异",
+      "expected_tools": ["json_diff"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回差异报告"
+    },
+    {
+      "id": "data_013",
+      "category": "data_processing",
+      "difficulty": "hard",
+      "description": "从多个 JSON 文件提取数据并合并",
+      "expected_tools": ["read_file", "parse_json", "json_merge"],
+      "expected_tool_calls": 4,
+      "success_criteria": "返回合并后的数据"
+    },
+    {
+      "id": "data_014",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "将 JSON 数据转换为 YAML 格式",
+      "expected_tools": ["json_to_yaml"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 YAML 格式"
+    },
+    {
+      "id": "data_015",
+      "category": "data_processing",
+      "difficulty": "medium",
+      "description": "将 YAML 转换为 JSON 格式",
+      "expected_tools": ["yaml_to_json"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 JSON 格式"
+    },
+
+    {
+      "id": "sys_001",
+      "category": "system_monitor",
+      "difficulty": "easy",
+      "description": "获取当前 CPU 使用率",
+      "expected_tools": ["get_cpu_usage"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回 CPU 使用率"
+    },
+    {
+      "id": "sys_002",
+      "category": "system_monitor",
+      "difficulty": "easy",
+      "description": "获取当前内存使用情况",
+      "expected_tools": ["get_memory_usage"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回内存使用详情"
+    },
+    {
+      "id": "sys_003",
+      "category": "system_monitor",
+      "difficulty": "easy",
+      "description": "获取磁盘使用情况",
+      "expected_tools": ["get_disk_usage"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回磁盘使用详情"
+    },
+    {
+      "id": "sys_004",
+      "category": "system_monitor",
+      "difficulty": "medium",
+      "description": "列出当前运行的进程",
+      "expected_tools": ["list_processes"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回进程列表"
+    },
+    {
+      "id": "sys_005",
+      "category": "system_monitor",
+      "difficulty": "medium",
+      "description": "获取指定进程的详细信息",
+      "expected_tools": ["get_process_info"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回进程详情"
+    },
+    {
+      "id": "sys_006",
+      "category": "system_monitor",
+      "difficulty": "medium",
+      "description": "监控系统资源 1 分钟（CPU、内存、磁盘）",
+      "expected_tools": ["monitor_resources"],
+      "expected_tool_calls": 3,
+      "success_criteria": "返回监控报告"
+    },
+    {
+      "id": "sys_007",
+      "category": "system_monitor",
+      "difficulty": "hard",
+      "description": "查找占用内存最多的前 5 个进程",
+      "expected_tools": ["list_processes", "sort_by_memory"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回 Top 5 进程列表"
+    },
+    {
+      "id": "sys_008",
+      "category": "system_monitor",
+      "difficulty": "hard",
+      "description": "生成系统健康报告",
+      "expected_tools": ["generate_health_report"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回健康报告"
+    },
+    {
+      "id": "sys_009",
+      "category": "system_monitor",
+      "difficulty": "medium",
+      "description": "检查系统上是否有可用的更新",
+      "expected_tools": ["check_updates"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回可用更新列表"
+    },
+    {
+      "id": "sys_010",
+      "category": "system_monitor",
+      "difficulty": "medium",
+      "description": "获取系统启动时间和运行时长",
+      "expected_tools": ["get_uptime"],
+      "expected_tool_calls": 1,
+      "success_criteria": "返回启动时间和时长"
+    },
+
+    {
+      "id": "comp_001",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "下载 GitHub 仓库的 release 资产并解压",
+      "expected_tools": ["download_file", "extract_archive"],
+      "expected_tool_calls": 2,
+      "success_criteria": "文件下载并解压成功"
+    },
+    {
+      "id": "comp_002",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "克隆 Git 仓库，安装依赖，运行测试",
+      "expected_tools": ["git_clone", "install_deps", "run_tests"],
+      "expected_tool_calls": 3,
+      "success_criteria": "测试全部通过"
+    },
+    {
+      "id": "comp_003",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "备份项目目录，压缩并上传到远程服务器",
+      "expected_tools": ["copy_directory", "compress", "upload_file"],
+      "expected_tool_calls": 3,
+      "success_criteria": "备份上传成功"
+    },
+    {
+      "id": "comp_004",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "分析项目代码，生成复杂度报告和优化建议",
+      "expected_tools": ["analyze_complexity", "generate_report"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回优化报告"
+    },
+    {
+      "id": "comp_005",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "监控日志文件，发现错误时发送通知",
+      "expected_tools": ["monitor_file", "send_notification"],
+      "expected_tool_calls": 2,
+      "success_criteria": "错误检测并通知"
+    },
+    {
+      "id": "comp_006",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "定期清理临时文件，释放磁盘空间",
+      "expected_tools": ["find_temp_files", "delete_files", "get_disk_usage"],
+      "expected_tool_calls": 3,
+      "success_criteria": "临时文件被清理"
+    },
+    {
+      "id": "comp_007",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "构建项目 Docker 镜像并推送到 Registry",
+      "expected_tools": ["docker_build", "docker_push"],
+      "expected_tool_calls": 2,
+      "success_criteria": "镜像推送成功"
+    },
+    {
+      "id": "comp_008",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "部署应用到远程服务器（SCP + SSH）",
+      "expected_tools": ["scp_file", "ssh_command"],
+      "expected_tool_calls": 3,
+      "success_criteria": "部署成功"
+    },
+    {
+      "id": "comp_009",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "收集系统指标，存储到数据库，生成可视化图表",
+      "expected_tools": ["collect_metrics", "save_to_db", "generate_chart"],
+      "expected_tool_calls": 3,
+      "success_criteria": "图表生成成功"
+    },
+    {
+      "id": "comp_010",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "执行 A/B 测试：比较两种配置的性能差异",
+      "expected_tools": ["run_benchmark", "compare_results"],
+      "expected_tool_calls": 3,
+      "success_criteria": "返回对比报告"
+    },
+    {
+      "id": "comp_011",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "自动化发布流程：更新版本号、构建、打 tag、推送",
+      "expected_tools": ["update_version", "build", "git_tag", "git_push"],
+      "expected_tool_calls": 4,
+      "success_criteria": "发布成功"
+    },
+    {
+      "id": "comp_012",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "代码审查：检查代码质量、安全问题、性能问题",
+      "expected_tools": ["run_clippy", "security_check", "performance_check"],
+      "expected_tool_calls": 3,
+      "success_criteria": "返回审查报告"
+    },
+    {
+      "id": "comp_013",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "数据迁移：从旧数据库导出数据，转换格式，导入新数据库",
+      "expected_tools": ["export_db", "transform_data", "import_db"],
+      "expected_tool_calls": 3,
+      "success_criteria": "迁移成功"
+    },
+    {
+      "id": "comp_014",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "性能分析：运行 profiler，分析瓶颈，生成优化建议",
+      "expected_tools": ["run_profiler", "analyze_bottlenecks"],
+      "expected_tool_calls": 2,
+      "success_criteria": "返回优化建议"
+    },
+    {
+      "id": "comp_015",
+      "category": "composite",
+      "difficulty": "hard",
+      "description": "灾难恢复：从备份恢复数据，验证完整性",
+      "expected_tools": ["restore_backup", "verify_integrity"],
+      "expected_tool_calls": 2,
+      "success_criteria": "恢复并验证成功"
+    }
+  ]
+}

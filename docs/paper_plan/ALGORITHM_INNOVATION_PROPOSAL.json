@@ -1,0 +1,663 @@
+{
+  "title": "算法创新方案：Prompt Engineering 自进化系统",
+  "version": "2.0 (Prompt Engineering)",
+  "created_date": "2026-03-20",
+  "updated_date": "2026-03-20",
+  "target_venues": [
+    {
+      "name": "AAAI 2027",
+      "deadline": "2026-08-15",
+      "acceptance_rate": 0.25,
+      "fit_score": 0.9,
+      "preferred_tracks": ["AI Systems", "Autonomous Agents"],
+      "priority": "首选"
+    },
+    {
+      "name": "ACL 2027",
+      "deadline": "2027-01-15",
+      "acceptance_rate": 0.20,
+      "fit_score": 0.85,
+      "preferred_tracks": ["AI Agents", "Tool Learning"],
+      "priority": "备选"
+    },
+    {
+      "name": "EMNLP 2027",
+      "deadline": "2027-06-15",
+      "acceptance_rate": 0.20,
+      "fit_score": 0.85,
+      "preferred_tracks": ["AI Agents", "Self-Evolution"],
+      "priority": "备选"
+    }
+  ],
+
+  "executive_summary": {
+    "core_contribution": "Prompt Engineering 自进化系统",
+    "key_insight": "现代 LLM（Qwen3.5/4.0、GPT-4）已具备推理能力，无需训练专用模型，精心设计的 Prompt 即可激发已有能力",
+    "advantages": [
+      "无需 GPU 训练，成本降低 10-20 倍（<$150 vs $500-2000）",
+      "实施时间从 12-20 周缩短到 8 周",
+      "可解释性强，易于调试",
+      "性能足够好（预期 70-85% vs 训练方法 75-90%）"
+    ],
+    "three_sub_contributions": [
+      {
+        "name": "因果推理 Prompt 设计模式",
+        "description": "Chain-of-Thought + 反事实提问 + JSON Schema 约束",
+        "innovation": "首次应用于工具进化场景"
+      },
+      {
+        "name": "多智能体协商协议",
+        "description": "4 个 LLM 智能体通过结构化对话达成共识",
+        "innovation": "新的多 LLM 协作范式"
+      },
+      {
+        "name": "自修正代码生成",
+        "description": "编译错误反馈循环 + 相似工具检索",
+        "innovation": "结合编译器反馈的 Prompt 迭代"
+      }
+    ],
+    "secondary_contribution": {
+      "name": "工具矩阵架构",
+      "description": "服务化元数据管理（QoS、依赖图、Skills 文件）",
+      "role": "使能基础设施"
+    }
+  },
+
+  "current_system_analysis": {
+    "strengths": [
+      {
+        "id": "S1",
+        "name": "完整的 Prompt Engineering 自进化系统",
+        "components": [
+          "PromptGapDetector（因果推理 Prompt）",
+          "PromptOptimizer（Few-Shot 学习）",
+          "MultiAgentNegotiator（4 角色协商）",
+          "PromptCreator（代码生成 + 自修正）"
+        ],
+        "status": "已完成",
+        "code_lines": 52964,
+        "test_coverage": "456/456 测试通过"
+      },
+      {
+        "id": "S2",
+        "name": "创新的工具矩阵架构",
+        "components": [
+          "服务化元数据（QoS、依赖、健康监控）",
+          "AI 可读 Skills 文件",
+          "依赖图自动推断（三源融合）"
+        ],
+        "status": "已完成"
+      },
+      {
+        "id": "S3",
+        "name": "双轨服务架构",
+        "description": "CLI AI 助手（面向用户） + 项目自更新服务（面向项目自身）",
+        "status": "已完成"
+      }
+    ],
+    "weaknesses": [
+      {
+        "id": "W1",
+        "name": "实验验证缺失",
+        "description": "缺少 30 天自主进化实验的真实数据",
+        "severity": "高",
+        "impact": "无法量化系统优势，论文缺乏说服力"
+      },
+      {
+        "id": "W2",
+        "name": "文档与代码不一致",
+        "description": "ALGORITHM_INNOVATION_PROPOSAL.json 描述的是训练方案，实际代码是 Prompt Engineering",
+        "severity": "中",
+        "impact": "审稿人会困惑于实际使用的方法"
+      },
+      {
+        "id": "W3",
+        "name": "代码复杂度高",
+        "description": "main.rs 1928 行，AiAssistant 结构体 30+ 字段",
+        "severity": "中",
+        "impact": "影响可复现性和论文代码分离"
+      }
+    ],
+    "opportunity": "通过 Prompt Engineering 方法，将工程系统提升为有理论贡献的研究成果，成本<$150，时间 8 周"
+  },
+
+  "algorithm_innovations": [
+    {
+      "id": "AI-PE-001",
+      "name": "因果推理 Prompt 设计模式",
+      "english_name": "Causal Reasoning Prompt Design Pattern",
+      "priority": "P0",
+      "difficulty": "中",
+      "estimated_weeks": 3,
+      "novelty_score": 0.8,
+      "theoretical_depth": 0.7,
+      "experimental_feasibility": 0.9,
+
+      "core_insight": {
+        "problem": "如何让 LLM 进行可靠的因果推理而非简单的相关性分析？",
+        "innovation": "Chain-of-Thought + 反事实提问 + JSON Schema 约束",
+        "key_question": "如果有了工具 T，任务会成功吗？（反事实推理）"
+      },
+
+      "prompt_design": {
+        "component_1": {
+          "name": "Chain-of-Thought 推理框架",
+          "description": "强制 LLM 按步骤推理，避免跳跃式结论",
+          "steps": [
+            "1. 列出所有可能的失败因素",
+            "2. 对每个因素进行因果判断（相关性 vs 因果性）",
+            "3. 识别真正的工具缺口",
+            "4. 输出 JSON 格式报告"
+          ]
+        },
+        "component_2": {
+          "name": "反事实提问",
+          "description": "通过反事实问题识别因果性",
+          "example_questions": [
+            "如果消除这个因素，任务会成功吗？",
+            "如果有这个工具，任务会成功吗？",
+            "有其他混淆变量吗？"
+          ]
+        },
+        "component_3": {
+          "name": "JSON Schema 约束",
+          "description": "确保输出格式稳定可靠，便于程序解析",
+          "schema_fields": [
+            "causal_factors: [{factor, is_causal, evidence, confidence, reasoning}]",
+            "identified_gaps: [{gap_type, description, suggested_name, priority}]",
+            "overall_confidence: float"
+          ]
+        },
+        "component_4": {
+          "name": "Few-Shot 示例库",
+          "description": "历史成功决策作为学习样本",
+          "example_count": "10-20 个高质量示例",
+          "selection_strategy": "按任务类型和缺口类型分类"
+        }
+      },
+
+      "implementation_status": {
+        "file": "src/autonomy/prompt_gap_detector.rs",
+        "lines_of_code": 815,
+        "status": "已完成",
+        "key_components": [
+          "CausalAnalysisRequest（因果分析请求）",
+          "CausalFactor（因果因素）",
+          "IdentifiedGap（识别的工具缺口）",
+          "PromptGapDetector（检测器主体）"
+        ],
+        "prompt_template": "CAUSAL_ANALYSIS_PROMPT（包含完整推理步骤）"
+      },
+
+      "theoretical_contributions": [
+        {
+          "contribution_id": "TC1.1",
+          "name": "因果推理 Prompt 设计模式",
+          "description": "提出 Chain-of-Thought + 反事实提问 + JSON Schema 约束的三元设计模式",
+          "generalizability": "可推广到其他需要因果推理的 LLM 应用场景"
+        },
+        {
+          "contribution_id": "TC1.2",
+          "name": "Few-Shot 示例选择策略",
+          "description": "按任务类型和缺口类型分类的示例选择方法",
+          "generalizability": "适用于其他 Few-Shot 学习场景"
+        }
+      ],
+
+      "experiments": {
+        "metrics": [
+          {
+            "name": "缺口检测准确率",
+            "definition": "正确识别的因果缺口数 / 总检测缺口数",
+            "baseline": "简单相关性方法 ~60%",
+            "target": "因果推理 Prompt ~80%"
+          },
+          {
+            "name": "假阳性率",
+            "definition": "错误识别的缺口数 / 总检测缺口数",
+            "baseline": "~40%",
+            "target": "<20%"
+          },
+          {
+            "name": "工具创建成功率",
+            "definition": "成功解决任务的新工具数 / 创建的新工具数",
+            "baseline": "~50%",
+            "target": ">70%"
+          }
+        ],
+        "ablation_studies": [
+          {
+            "name": "Ours-NoCoT",
+            "description": "移除 Chain-of-Thought 推理步骤"
+          },
+          {
+            "name": "Ours-NoCounterfactual",
+            "description": "移除反事实提问"
+          },
+          {
+            "name": "Ours-NoFewShot",
+            "description": "移除 Few-Shot 示例"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "AI-PE-002",
+      "name": "多智能体协商协议",
+      "english_name": "Multi-Agent Negotiation Protocol",
+      "priority": "P0",
+      "difficulty": "中高",
+      "estimated_weeks": 3,
+      "novelty_score": 0.85,
+      "theoretical_depth": 0.75,
+      "experimental_feasibility": 0.9,
+
+      "core_insight": {
+        "problem": "如何避免单 LLM 决策的偏见和不一致性？",
+        "innovation": "4 个 LLM 智能体扮演不同角色，通过结构化对话达成共识",
+        "key_question": "不同利益的智能体如何通过博弈达到工具库的全局最优？"
+      },
+
+      "agent_roles": {
+        "creator": {
+          "name": "Creator（工具创建者）",
+          "role": "发现新工具机会，扩展工具库能力",
+          "tendency": "倾向于创建新工具",
+          "considerations": ["工具库整体健康度", "避免冗余", "优先级排序"]
+        },
+        "optimizer": {
+          "name": "Optimizer（工具优化者）",
+          "role": "改进现有工具",
+          "tendency": "优先改进而非新建",
+          "considerations": ["工具使用率", "工具失败率", "用户满意度"]
+        },
+        "eliminator": {
+          "name": "Eliminator（工具淘汰者）",
+          "role": "移除冗余工具，保持工具库精简",
+          "tendency": "合并功能重叠的工具，废弃低使用率工具",
+          "considerations": ["简化接口", "减少维护成本"]
+        },
+        "planner": {
+          "name": "Planner（系统规划者）",
+          "role": "协调各方意见，做出最终决策",
+          "tendency": "平衡短期效果和长期影响",
+          "considerations": ["各智能体的论据质量", "系统资源限制", "整体健康度"]
+        }
+      },
+
+      "negotiation_protocol": {
+        "round_1": {
+          "name": "独立分析",
+          "description": "各智能体独立分析状态，提出建议",
+          "output": "每个智能体提交提案（proposal + rationale + priority）"
+        },
+        "round_2": {
+          "name": "互相评论",
+          "description": "智能体互相评论对方建议",
+          "output": "每个智能体可以评论其他智能体的提案（critique + agreement_score + suggestions）"
+        },
+        "round_3": {
+          "name": "Planner 决策",
+          "description": "Planner 汇总意见，做出最终决策",
+          "output": "最终决策（decision + rationale + vote_threshold）"
+        },
+        "round_4": {
+          "name": "投票确认",
+          "description": "各智能体投票确认决策",
+          "success_condition": "通过率 > 60%",
+          "failure_action": "未达成共识，重新协商"
+        }
+      },
+
+      "implementation_status": {
+        "file": "src/autonomy/multi_agent_negotiator.rs",
+        "lines_of_code": 675,
+        "status": "已完成",
+        "key_components": [
+          "AgentRole（智能体角色枚举）",
+          "AgentProposal（智能体提案）",
+          "AgentCritique（智能体评论）",
+          "EvolutionAction（进化行动类型）",
+          "MultiAgentNegotiator（协商器主体）"
+        ],
+        "agent_prompts": "AGENT_ROLES（包含 4 个角色的详细 Prompt）"
+      },
+
+      "theoretical_contributions": [
+        {
+          "contribution_id": "TC2.1",
+          "name": "多智能体协商协议",
+          "description": "提出 4 轮结构化对话达成共识的协商协议",
+          "generalizability": "可推广到其他多 LLM 协作场景"
+        },
+        {
+          "contribution_id": "TC2.2",
+          "name": "Role-Playing 设计方法",
+          "description": "基于利益相关者分析设计智能体角色",
+          "generalizability": "适用于其他需要多方决策的场景"
+        }
+      ],
+
+      "experiments": {
+        "metrics": [
+          {
+            "name": "决策一致性",
+            "definition": "投票通过率 > 60% 的决策比例",
+            "target": ">80%"
+          },
+          {
+            "name": "协商轮数",
+            "definition": "达成共识需要的平均轮数",
+            "target": "<2 轮"
+          },
+          {
+            "name": "决策质量",
+            "definition": "决策执行后的任务完成率提升",
+            "target": "+15-20%"
+          }
+        ],
+        "ablation_studies": [
+          {
+            "name": "Ours-Single",
+            "description": "单 LLM 决策（无多智能体协商）"
+          },
+          {
+            "name": "Ours-3Roles",
+            "description": "移除 Eliminator 角色（仅 3 个智能体）"
+          },
+          {
+            "name": "Ours-NoCritique",
+            "description": "移除互相评论环节"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "AI-PE-003",
+      "name": "自修正代码生成",
+      "english_name": "Self-Correcting Code Generation",
+      "priority": "P0",
+      "difficulty": "中",
+      "estimated_weeks": 2,
+      "novelty_score": 0.75,
+      "theoretical_depth": 0.65,
+      "experimental_feasibility": 0.95,
+
+      "core_insight": {
+        "problem": "如何提高 LLM 生成 Rust 代码的编译通过率？",
+        "innovation": "编译错误反馈循环 + 相似工具检索",
+        "key_question": "如何利用编译器反馈改进 LLM 生成的代码？"
+      },
+
+      "algorithm_design": {
+        "component_1": {
+          "name": "Few-Shot 代码生成 Prompt",
+          "description": "检索相似工具代码作为示例，提高生成质量",
+          "retrieval_method": "基于语义相似度的 k-NN 检索（k=3）",
+          "prompt_template": "CODEGEN_PROMPT（包含工具规格和参考示例）"
+        },
+        "component_2": {
+          "name": "编译验证循环",
+          "description": "使用 cargo check 验证生成代码",
+          "max_iterations": 5,
+          "success_condition": "编译通过"
+        },
+        "component_3": {
+          "name": "错误反馈 Prompt",
+          "description": "将编译错误反馈给 LLM，要求修正",
+          "prompt_template": "FIX_PROMPT（包含原始代码和编译错误）"
+        }
+      },
+
+      "implementation_status": {
+        "file": "src/autonomy/tool_creator.rs",
+        "status": "已完成",
+        "key_components": [
+          "ToolCreationRequest（工具创建请求）",
+          "GeneratedCode（生成的代码）",
+          "ToolCreator（创建器主体）",
+          "compile_check（编译验证方法）",
+          "fix_code（错误修正方法）"
+        ]
+      },
+
+      "theoretical_contributions": [
+        {
+          "contribution_id": "TC3.1",
+          "name": "自修正代码生成框架",
+          "description": "提出编译错误反馈循环的代码生成方法",
+          "generalizability": "可推广到其他有编译器的语言（Java、C++ 等）"
+        }
+      ],
+
+      "experiments": {
+        "metrics": [
+          {
+            "name": "代码编译通过率",
+            "definition": "编译通过的代码数 / 总生成代码数",
+            "baseline": "LLM 直接生成 ~40%",
+            "target": "自修正方法 >80%"
+          },
+          {
+            "name": "代码功能正确率",
+            "definition": "通过单元测试的比例",
+            "baseline": "~30%",
+            "target": ">70%"
+          },
+          {
+            "name": "平均修正次数",
+            "definition": "达到编译通过需要的平均修正次数",
+            "target": "1-2 次"
+          },
+          {
+            "name": "平均生成时间",
+            "definition": "从开始到编译通过的平均时间",
+            "target": "<30 秒/工具"
+          }
+        ],
+        "ablation_studies": [
+          {
+            "name": "Ours-NoFix",
+            "description": "移除自修正循环（仅一次生成）"
+          },
+          {
+            "name": "Ours-NoRetrieval",
+            "description": "移除相似工具检索（无 Few-Shot 示例）"
+          }
+        ]
+      }
+    }
+  ],
+
+  "secondary_contribution": {
+    "name": "工具矩阵架构",
+    "english_name": "Tool Matrix Architecture",
+    "description": "服务化元数据管理，使能自进化系统",
+    "four_innovations": [
+      {
+        "name": "服务化元数据（Service-Oriented Metadata）",
+        "description": "将微服务理念引入工具管理（QoS、依赖、限流、版本、健康监控）",
+        "innovation": "首次将微服务架构的服务化元数据引入 AI 工具管理系统"
+      },
+      {
+        "name": "Skills 文件（AI-Readable Tool Manuals）",
+        "description": "AI 可读的工具说明书（使用场景、最佳实践、示例代码）",
+        "innovation": "提出 Skills 文件概念，一种专为 AI Agent 设计的工具说明书格式"
+      },
+      {
+        "name": "工具箱即服务边界（ToolBox as Service Boundary）",
+        "description": "工具箱不是简单的分类容器，而是服务边界（共享状态、统一配置、跨工具优化）",
+        "innovation": "类似 DDD 的'限界上下文'概念"
+      },
+      {
+        "name": "依赖图自动推断（Automatic Dependency Inference）",
+        "description": "三源融合的依赖推断（显式依赖 + AI 推断 + 运行时学习）",
+        "innovation": "减少 80% 人工维护成本"
+      }
+    ],
+    "role_in_paper": "作为'使能基础设施'（enabling infrastructure），占论文 20% 篇幅"
+  },
+
+  "recommended_roadmap": {
+    "phase_0": {
+      "name": "澄清与聚焦",
+      "timeframe": "第 1 周",
+      "focus": "确定核心贡献为 Prompt Engineering 方案",
+      "milestones": [
+        {"week": 1, "deliverable": "更新 ALGORITHM_INNOVATION_PROPOSAL.json"}
+      ]
+    },
+    "phase_1": {
+      "name": "代码重构",
+      "timeframe": "第 2-3 周",
+      "focus": "拆分 AiAssistant，提取 autonomy 模块",
+      "milestones": [
+        {"week": 2, "deliverable": "AiAssistant 拆分为 CliAssistant 和 AutonomousAssistant"},
+        {"week": 3, "deliverable": "提取 autonomy 模块为独立 crate"}
+      ]
+    },
+    "phase_2": {
+      "name": "实验框架",
+      "timeframe": "第 4-5 周",
+      "focus": "设计基准测试任务集，实现实验日志系统",
+      "milestones": [
+        {"week": 4, "deliverable": "100+ 基准测试任务集"},
+        {"week": 5, "deliverable": "实验日志和评估脚本"}
+      ]
+    },
+    "phase_3": {
+      "name": "完整实验",
+      "timeframe": "第 6-9 周",
+      "focus": "运行 30 天自主进化实验，收集数据",
+      "milestones": [
+        {"week": 6, "deliverable": "7 天预实验完成"},
+        {"week": 9, "deliverable": "30 天完整实验完成"}
+      ]
+    },
+    "phase_4": {
+      "name": "数据分析与可视化",
+      "timeframe": "第 10-11 周",
+      "focus": "统计分析，生成图表",
+      "milestones": [
+        {"week": 10, "deliverable": "对比实验结果图表"},
+        {"week": 11, "deliverable": "消融实验结果图表"}
+      ]
+    },
+    "phase_5": {
+      "name": "论文写作",
+      "timeframe": "第 12-15 周",
+      "focus": "完成论文初稿",
+      "milestones": [
+        {"week": 12, "deliverable": "Method 和 Experiment 章节初稿"},
+        {"week": 14, "deliverable": "完整初稿"},
+        {"week": 15, "deliverable": "投稿版本"}
+      ]
+    },
+    "target_submission": "AAAI 2027 (2026-08-15)"
+  },
+
+  "resource_requirements": {
+    "compute": {
+      "description": "无需 GPU，仅需 API 调用",
+      "api_provider": "Ollama Cloud (qwen3.5:397b)",
+      "estimated_cost": "<$150 (30 天实验 + 论文写作)"
+    },
+    "data": {
+      "task_logs": "需要 30 天 + 的自进化系统运行日志",
+      "synthetic_data": "可生成合成任务用于控制实验"
+    },
+    "personnel": {
+      "primary_researcher": "1 人（本科/博士）",
+      "advisors": "1-2 人（导师 + 合作者）",
+      "estimated_effort": "4-5 个月全职研究"
+    }
+  },
+
+  "risk_analysis": [
+    {
+      "risk": "实验效果不达预期",
+      "probability": "中",
+      "impact": "高",
+      "mitigation": "设计多个 baseline，确保至少超过简单 baseline；准备消融实验证明各组件价值"
+    },
+    {
+      "risk": "LLM 输出不稳定",
+      "probability": "中",
+      "impact": "中",
+      "mitigation": "增加 Prompt 版本管理（A/B 测试不同模板）；增加 fallback 机制（LLM 失败时降级为规则系统）"
+    },
+    {
+      "risk": "时间不足",
+      "probability": "中",
+      "impact": "高",
+      "mitigation": "优先完成 P0 组件（因果推理 Prompt、多智能体协商、自修正代码生成）；P1/P2 作为未来工作"
+    }
+  ],
+
+  "success_criteria": {
+    "paper_acceptance": "至少 1 篇顶会论文接受（AAAI/ACL/EMNLP）",
+    "citation_target": "发表后 2 年内引用>100 次",
+    "open_source_impact": "GitHub stars>500，被其他项目采用",
+    "thesis_contribution": "成为本科/博士论文的核心章节"
+  },
+
+  "paper_outline": {
+    "title": "Self-Evolving Tool Ecosystem for AI Agents via Prompt Engineering",
+    "subtitle": "Enabling Proactive Tool Management without Model Training",
+    "sections": [
+      {
+        "section": "Abstract",
+        "word_count": "150-200",
+        "content": "问题、方法、结果摘要"
+      },
+      {
+        "section": "1. Introduction",
+        "word_count": "1000-1500",
+        "content": "AI Agent 的工具使用场景、现有系统局限、我们的贡献"
+      },
+      {
+        "section": "2. Related Work",
+        "word_count": "800-1000",
+        "content": "Tool Learning、AI Agent Systems、自进化系统"
+      },
+      {
+        "section": "3. Background: Tokitai Platform",
+        "word_count": "400-500",
+        "content": "tokitai 简介、ToolProvider 和 ToolRegistry"
+      },
+      {
+        "section": "4. Tool Matrix Architecture",
+        "word_count": "1200-1500",
+        "content": "服务化元数据、Skills 文件、工具箱即服务边界、依赖图推断"
+      },
+      {
+        "section": "5. Method: Prompt Engineering Framework",
+        "word_count": "2000-2500",
+        "content": "因果推理 Prompt、多智能体协商、自修正代码生成"
+      },
+      {
+        "section": "6. Implementation",
+        "word_count": "800-1000",
+        "content": "在 tokitai 上的实现细节、新工具自动注册"
+      },
+      {
+        "section": "7. Experiments",
+        "word_count": "2000-2500",
+        "content": "实验设置、对比实验、消融实验、案例分析"
+      },
+      {
+        "section": "8. Discussion",
+        "word_count": "400-600",
+        "content": "局限性、未来方向、伦理考量"
+      },
+      {
+        "section": "9. Conclusion",
+        "word_count": "200-300",
+        "content": "总结贡献、长期愿景"
+      }
+    ],
+    "total_word_count": "9000-11000"
+  }
+}

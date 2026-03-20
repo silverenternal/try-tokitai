@@ -808,7 +808,8 @@ arguments = { path = "config.toml" }
 | [USER_GUIDE.md](USER_GUIDE.md) | 完整用户指南 |
 | [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) | 技术说明文档 |
 | [CHANGELOG.md](CHANGELOG.md) | 更新日志 |
-| [ARCHITECTURE_IMPROVEMENT_PLAN.json](ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划 |
+| [archive/ARCHITECTURE_IMPROVEMENT_PLAN.json](archive/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划（已归档） |
+| [archive/IMPLEMENTATION_STATUS_REPORT.md](archive/IMPLEMENTATION_STATUS_REPORT.md) | 实施状态报告（已归档） |
 | [archive/](archive/) | 技术报告归档 |
 
 ---
