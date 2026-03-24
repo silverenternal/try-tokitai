@@ -8,6 +8,8 @@
 //! # 设计原则
 //! - 统一工具调度接口
 //! - 支持运行时动态注册工具
+
+#![allow(dead_code)]
 //! - 与 LightweightToolSelector 无缝配合
 
 use crate::tool_matrix::matrix::ToolDefinition;
@@ -80,7 +82,7 @@ impl ToolDispatcher {
 
         // 添加到选择器索引
         for tool in tools {
-            let _ = self.selector.add_tool_async(tool);
+            let _ = self.selector.add_tool_async(tool).await;
         }
 
         info!("注册 {} 个工具执行器", tool_names.len());

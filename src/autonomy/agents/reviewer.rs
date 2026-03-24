@@ -7,6 +7,8 @@
 //! - 可维护性（maintainability）：命名清晰、函数长度、注释质量
 //! - 设计（design）：模块化、单一职责、依赖方向
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};

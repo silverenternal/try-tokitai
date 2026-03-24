@@ -9,6 +9,8 @@
 //! - Registers tools to the tool matrix
 //! - Tracks tool lifecycle and usage
 
+#![allow(dead_code)]
+
 use crate::external_process::metadata::{ExternalToolMetadata, RiskLevel};
 use crate::external_process::wrapper::ExternalTool;
 use crate::external_process::process_wrapper::{ProcessWrapper, ProcessWrapperBuilder};
@@ -407,8 +409,8 @@ impl ExternalToolRegistry {
             if tool_registry.get_toolbox(&toolbox_id).is_none() {
                 let toolbox = ToolBox::new(
                     &toolbox_id,
-                    &toolbox_id.replace('_', " ").to_uppercase(),
-                    &format!("{} tools", toolbox_id),
+                    toolbox_id.replace('_', " ").to_uppercase(),
+                    format!("{} tools", toolbox_id),
                 );
                 tool_registry.create_toolbox(toolbox)?;
             }

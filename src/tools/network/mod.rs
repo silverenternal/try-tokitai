@@ -42,9 +42,11 @@ pub use error::NetworkResult;
 // ============================================================================
 
 /// 网络工具模块版本
+#[allow(dead_code)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 获取模块信息
+#[allow(dead_code)]
 pub fn get_module_info() -> &'static str {
     "网络工具模块 v0.2.0 - 重构版"
 }

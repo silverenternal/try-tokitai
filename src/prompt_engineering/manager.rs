@@ -2,6 +2,8 @@
 //!
 //! 实现模板加载、注册、渲染和缓存功能
 
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;

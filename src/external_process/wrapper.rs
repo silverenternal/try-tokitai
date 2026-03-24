@@ -8,6 +8,8 @@
 //! - Executed with standardized input/output
 //! - Validated before execution
 //!
+
+#![allow(dead_code)]
 //! ## Implementations
 //! - `ProcessWrapper`: Local executable/CLI tools
 //! - `HTTPWrapper`: Remote HTTP services/REST APIs

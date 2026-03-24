@@ -8,6 +8,8 @@
 //! - 支持 AI 动态创建新工具箱
 //! - 后台异步索引重建
 //! - 运行时日志学习依赖关系
+
+#![allow(dead_code)]
 //!
 //! ## 分层分类集成 (IMP-001)
 //! - L1: 精确匹配缓存 (~0.1ms)
@@ -700,11 +702,14 @@ impl ToolRegistry {
             }
 
             // 使用 analyzer 学习
-            let _ = analyzer.learn_from_runtime_logs(&sequences);
-
             let learned_count = sequences.len();
-            info!("从 {} 条运行时日志中学习依赖关系", learned_count);
             
+            {
+                let _ = analyzer.learn_from_runtime_logs(&sequences).await;
+            }
+
+            info!("从 {} 条运行时日志中学习依赖关系", learned_count);
+
             Ok(learned_count)
         } else {
             warn!("未启用 AI 依赖分析器，无法学习");

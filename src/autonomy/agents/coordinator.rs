@@ -6,6 +6,8 @@
 //! Coordinator 现在通过 ToolRegistry 创建 ExecutorAgent，
 //! 使得执行 Agent 可以通过工具矩阵动态调用工具。
 
+#![allow(dead_code)]
+
 use super::{PlannerAgent, ExecutorAgent, ReviewerAgent};
 use super::planner::RiskLevel;
 use crate::autonomy::iteration_tracker::{IterationTracker, IterationState};
@@ -15,6 +17,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use parking_lot::RwLock;
 use thiserror::Error;
+
+/// 协调器状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub enum CoordinatorState {
+    Idle,
+    Planning,
+    Executing,
+    Reviewing,
+    Completed,
+    Failed,
+}
 
 /// 协调器错误类型
 #[derive(Error, Debug)]
@@ -27,17 +41,6 @@ pub enum CoordinatorError {
     ReviewFailed(String),
     #[error("迭代追踪失败：{0}")]
     IterationFailed(String),
-}
-
-/// 协调器状态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CoordinatorState {
-    Idle,
-    Planning,
-    Executing,
-    Reviewing,
-    Completed,
-    Failed,
 }
 
 /// Agent 协调器

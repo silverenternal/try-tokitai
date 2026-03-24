@@ -9,16 +9,20 @@
 //! - `ToolExecutionResult`: Standardized execution result structure
 //! - `RiskLevel`: Security risk classification
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Risk level for external tool execution
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub enum RiskLevel {
     /// Low risk: Safe to execute without confirmation
     Low,
     /// Medium risk: Requires logging and monitoring
+    #[default]
     Medium,
     /// High risk: Requires user confirmation before execution
     High,
@@ -26,11 +30,6 @@ pub enum RiskLevel {
     Critical,
 }
 
-impl Default for RiskLevel {
-    fn default() -> Self {
-        RiskLevel::Medium
-    }
-}
 
 /// Configuration for process-based tools
 #[derive(Debug, Clone, Serialize, Deserialize)]

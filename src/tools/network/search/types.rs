@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 /// 通用搜索结果
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SearchResult {
     /// 结果标题
@@ -22,6 +23,7 @@ pub struct SearchResult {
     pub engine: String,
 }
 
+#[allow(dead_code)]
 impl SearchResult {
     pub fn new(title: String, url: String, snippet: String, engine: String) -> Self {
         Self {
@@ -64,6 +66,7 @@ impl SearchResponse {
         }
     }
 
+    #[allow(dead_code)]
     pub fn empty(query: String) -> Self {
         Self {
             query,
@@ -107,6 +110,7 @@ pub struct ImageSearchResult {
     pub engine: String,
 }
 
+#[allow(dead_code)]
 impl ImageSearchResult {
     pub fn new(
         title: String,
@@ -156,17 +160,21 @@ impl ImageSearchResponse {
 #[derive(Debug, Clone, Default)]
 pub struct SearchRequest {
     /// 搜索关键词
+    #[allow(dead_code)]
     pub query: String,
     /// 返回结果数量
+    #[allow(dead_code)]
     pub limit: usize,
     /// 搜索引擎（可选）
     pub engine: Option<String>,
     /// 时间范围（可选）
     pub time_range: Option<TimeRange>,
     /// 语言（可选）
+    #[allow(dead_code)]
     pub language: Option<String>,
 }
 
+#[allow(dead_code)]
 impl SearchRequest {
     pub fn new(query: String, limit: usize) -> Self {
         Self {
@@ -192,14 +200,21 @@ impl SearchRequest {
 pub enum TimeRange {
     #[default]
     Any,
+    #[allow(dead_code)]
     PastHour,
+    #[allow(dead_code)]
     PastDay,
+    #[allow(dead_code)]
     PastWeek,
+    #[allow(dead_code)]
     PastMonth,
+    #[allow(dead_code)]
     PastYear,
 }
 
+#[allow(dead_code)]
 impl TimeRange {
+    #[allow(clippy::trivially_copy_pass_by_ref, clippy::wrong_self_convention)]
     pub fn to_param(&self) -> &'static str {
         match self {
             TimeRange::Any => "",
@@ -219,12 +234,19 @@ impl TimeRange {
 /// 搜索引擎类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SearchEngineType {
+    #[allow(dead_code)]
     DuckDuckGo,
+    #[allow(dead_code)]
     Searxng,
+    #[allow(dead_code)]
     Wikipedia,
+    #[allow(dead_code)]
     WikipediaEn,
+    #[allow(dead_code)]
     Arxiv,
+    #[allow(dead_code)]
     Google,
+    #[allow(dead_code)]
     Bing,
 }
 
@@ -242,6 +264,7 @@ impl std::fmt::Display for SearchEngineType {
     }
 }
 
+#[allow(dead_code)]
 impl SearchEngineType {
     /// 获取引擎的默认 API URL
     pub fn default_url(&self) -> Option<&'static str> {
@@ -275,9 +298,11 @@ pub struct EngineHealth {
     /// 平均响应时间 (ms)
     pub avg_response_time_ms: f64,
     /// 最后检查时间
+    #[allow(dead_code)]
     pub last_check: std::time::Instant,
 }
 
+#[allow(dead_code)]
 impl EngineHealth {
     pub fn new(name: String) -> Self {
         Self {

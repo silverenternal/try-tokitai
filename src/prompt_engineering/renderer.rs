@@ -2,6 +2,8 @@
 //!
 //! 实现 Mustache 风格的变量替换和条件渲染
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -183,10 +185,10 @@ impl PromptRenderer {
         // 收集所有匹配，避免借用冲突
         let matches: Vec<_> = var_pattern
             .captures_iter(&result)
-            .filter_map(|caps| {
+            .map(|caps| {
                 let full_match = caps.get(0).unwrap().as_str().to_string();
                 let var_name = caps.get(1).unwrap().as_str().to_string();
-                Some((full_match, var_name))
+                (full_match, var_name)
             })
             .collect();
 

@@ -52,7 +52,7 @@ use crate::external_process::{
 use crate::autonomy::prompt_gap_detector::LLMClient;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -237,8 +237,11 @@ impl SelfImprovementLoop {
             return;
         }
 
-        let mut detector = self.gap_detector.write();
-        detector.record_task(record);
+        let detector = self.gap_detector.clone();
+        futures::executor::block_on(async {
+            let mut d = detector.write().await;
+            d.record_task(record);
+        });
     }
 
     /// 更新工具指标（用于优化分析）
@@ -247,8 +250,11 @@ impl SelfImprovementLoop {
             return;
         }
 
-        let mut optimizer = self.optimizer.write();
-        optimizer.update_metrics(metrics);
+        let optimizer = self.optimizer.clone();
+        futures::executor::block_on(async {
+            let mut o = optimizer.write().await;
+            o.update_metrics(metrics);
+        });
     }
 
     /// 运行进化循环（异步版本，支持因果分析）
@@ -265,27 +271,35 @@ impl SelfImprovementLoop {
 
         // 0. 重置周期统计（重要：清理 API 预算计数）
         {
-            let mut detector = self.gap_detector.write();
+            let mut detector = self.gap_detector.write().await;
             detector.reset_cycle_stats();
+            // 锁在此处释放
         }
 
         // 1. 检测工具缺口（使用混合检测器）
-        let gaps = {
-            let mut detector = self.gap_detector.write();
-            detector.detect_gaps().await
+        let gaps: Vec<HybridToolGap> = {
+            let mut detector = self.gap_detector.write().await;
+            let gaps = detector.detect_gaps().await;
+            // 锁在此处释放
+            gaps
         };
 
         // 2. 分析工具优化建议
         let suggestions = {
-            let mut optimizer = self.optimizer.write();
+            let mut optimizer = self.optimizer.write().await;
             optimizer.analyze_and_optimize();
-            optimizer.get_suggestions().to_vec()
+            let suggestions = optimizer.get_suggestions().to_vec();
+            // 锁在此处释放
+            suggestions
         };
 
         // 3. 生成系统健康报告
         let health_score = {
-            let mut reflector = self.reflector.write();
-            match reflector.generate_health_report() {
+            let report_result = {
+                let mut reflector = self.reflector.write().await;
+                reflector.generate_health_report()
+            };
+            match report_result {
                 Ok(report) => report.system_health.overall_health,
                 Err(e) => {
                     tracing::warn!("System reflection failed: {}", e);
@@ -387,20 +401,18 @@ impl SelfImprovementLoop {
         futures::executor::block_on(self.run_evolution_cycle_async())
     }
 
-    /// 从缺口创建工具
+    /// 从缺口创建工具（同步版本，使用 block_on）
     fn create_tool_from_gap(&self, gap: &ToolGap) -> Result<String> {
-        let creator = self.creator.read();
-        
-        // 生成工具名称
+        let creator = self.creator.clone();
         let tool_name = if let Some(ref suggested) = gap.suggested_tool_name {
             suggested.clone()
         } else {
             format!("auto_{}", gap.id.replace("gap_", ""))
         };
-        
+
         // 生成参数定义（从缺口描述中提取）
         let parameters = self.extract_parameters_from_gap(gap);
-        
+
         let request = ToolCreationRequest {
             tool_name: tool_name.clone(),
             description: gap.description.clone(),
@@ -411,9 +423,11 @@ impl SelfImprovementLoop {
             creation_reason: gap.description.clone(),
             priority: gap.priority,
         };
-        
-        let result = creator.create_tool(request)?;
-        
+
+        futures::executor::block_on(async {
+            let c = creator.read().await;
+            c.create_tool(request)
+        })?;
         Ok(tool_name)
     }
 
@@ -470,11 +484,9 @@ impl SelfImprovementLoop {
         Ok(())
     }
 
-    /// 从混合缺口创建工具
+    /// 从混合缺口创建工具（同步版本，使用 block_on）
     fn create_tool_from_hybrid_gap(&self, gap: &HybridToolGap) -> Result<String> {
-        let creator = self.creator.read();
-
-        // 生成工具名称
+        let creator = self.creator.clone();
         let tool_name = if let Some(ref suggested) = gap.suggested_tool_name {
             suggested.clone()
         } else {
@@ -495,8 +507,10 @@ impl SelfImprovementLoop {
             priority: gap.priority,
         };
 
-        let result = creator.create_tool(request)?;
-
+        futures::executor::block_on(async {
+            let c = creator.read().await;
+            c.create_tool(request)
+        })?;
         Ok(tool_name)
     }
 
@@ -569,19 +583,15 @@ impl SelfImprovementLoop {
         // 决策树
         if requires_high_perf && is_complex {
             ToolCreationStrategy::RustTool
-        } else if has_matching_cli {
-            ToolCreationStrategy::ExternalTool
-        } else if is_rapid_proto {
-            ToolCreationStrategy::ExternalTool
-        } else if has_strong_causal_evidence && !is_complex {
-            // 强因果证据但任务不复杂，优先封装外部工具快速验证
+        } else if has_matching_cli || is_rapid_proto || (has_strong_causal_evidence && !is_complex) {
+            // 有匹配 CLI、快速原型需求、或强因果证据但任务不复杂，优先封装外部工具
             ToolCreationStrategy::ExternalTool
         } else {
             ToolCreationStrategy::RustTool
         }
     }
 
-    /// 为混合缺口封装外部工具
+    /// 为混合缺口封装外部工具（同步版本，使用 block_on）
     fn wrap_external_tool_for_hybrid_gap(&self, gap: &HybridToolGap) -> Result<String> {
         let desc_lower = gap.description.to_lowercase();
 
@@ -601,8 +611,11 @@ impl SelfImprovementLoop {
                     let metadata = self.create_cli_tool_metadata(cli, domain, gap)?;
 
                     // 注册到外部工具注册表
-                    let registry = self.external_tool_registry.read();
-                    registry.register_from_metadata(metadata.clone())?;
+                    let registry = self.external_tool_registry.clone();
+                    futures::executor::block_on(async {
+                        let r = registry.read().await;
+                        r.register_from_metadata(metadata.clone())
+                    })?;
 
                     tracing::info!("Created external tool wrapper for CLI: {}", cli);
                     return Ok(metadata.name);
@@ -665,15 +678,20 @@ impl SelfImprovementLoop {
             self.project_root.join("tools"),
         ];
 
-        let mut discovery = self.external_tool_discovery.write();
-
         for dir in &script_dirs {
             if dir.exists() {
-                match discovery.scan_scripts(dir).await {
+                let tools = {
+                    let mut discovery = self.external_tool_discovery.write().await;
+                    let tools = discovery.scan_scripts(dir).await;
+                    // 锁在此处释放
+                    tools
+                };
+
+                match tools {
                     Ok(tools) => {
                         for tool in tools {
                             let name = tool.name.clone();
-                            let registry = self.external_tool_registry.read();
+                            let registry = self.external_tool_registry.read().await;
                             if let Err(e) = registry.register_from_metadata(tool) {
                                 tracing::warn!("Failed to register script {}: {}", name, e);
                             } else {
@@ -758,7 +776,7 @@ impl ToolMetricsBuilder {
     }
 
     pub fn satisfaction(mut self, score: f32) -> Self {
-        self.avg_satisfaction = score.min(5.0).max(1.0);
+        self.avg_satisfaction = score.clamp(1.0, 5.0);
         self
     }
 
@@ -827,9 +845,7 @@ impl SelfImprovementLoop {
         // Decision tree
         if requires_high_perf && is_complex {
             ToolCreationStrategy::RustTool
-        } else if has_matching_cli {
-            ToolCreationStrategy::ExternalTool
-        } else if is_rapid_proto {
+        } else if has_matching_cli || is_rapid_proto {
             ToolCreationStrategy::ExternalTool
         } else {
             ToolCreationStrategy::RustTool
@@ -908,11 +924,117 @@ mod tests {
             .tag("io")
             .depends_on("read_file")
             .build();
-        
+
         assert_eq!(metrics.tool_name, "test_tool");
         assert_eq!(metrics.total_calls, 100);
         assert_eq!(metrics.success_count, 95);
         assert_eq!(metrics.tags.len(), 2);
         assert_eq!(metrics.dependencies.len(), 1);
+    }
+
+    /// 端到端测试：模拟完整的自进化闭环
+    /// 1. 记录多个失败任务
+    /// 2. 运行进化循环检测缺口
+    /// 3. 验证缺口被正确识别
+    #[test]
+    fn test_end_to_end_evolution_cycle() {
+        let temp_dir = TempDir::new().unwrap();
+        
+        // 创建配置（启用自动创建工具）
+        let mut config = EvolutionConfig::default();
+        config.auto_create_tools = false; // 测试中不实际创建工具
+        config.tool_creation_priority_threshold = 5;
+        
+        let evolution = SelfImprovementLoop::with_config(temp_dir.path(), config).unwrap();
+        
+        // 1. 记录多个失败任务（模拟需要批量文件处理工具的场景）
+        for i in 0..10 {
+            let record = TaskExecutionRecord {
+                task_id: format!("task_{}", i),
+                task_description: "Batch process multiple files".to_string(),
+                success: false,
+                used_tools: vec!["read_file".to_string(), "write_file".to_string()],
+                execution_time_ms: 500 + i * 100,
+                failure_reason: Some("No efficient way to process multiple files at once".to_string()),
+                user_satisfaction: Some(2),
+            };
+            evolution.record_task(record);
+        }
+        
+        // 记录一些成功任务作为对比
+        for i in 0..5 {
+            let record = TaskExecutionRecord {
+                task_id: format!("success_task_{}", i),
+                task_description: "Single file operation".to_string(),
+                success: true,
+                used_tools: vec!["read_file".to_string()],
+                execution_time_ms: 100,
+                failure_reason: None,
+                user_satisfaction: Some(5),
+            };
+            evolution.record_task(record);
+        }
+        
+        // 2. 运行进化循环
+        let report = evolution.run_evolution_cycle().unwrap();
+        
+        // 3. 验证结果
+        assert!(report.detected_gaps_count > 0, "应该检测到至少一个工具缺口");
+        assert_eq!(report.status, CycleStatus::Success);
+        
+        println!("=== 自进化闭环端到端测试 ===");
+        println!("检测到的缺口数量：{}", report.detected_gaps_count);
+        println!("优化建议数量：{}", report.optimization_suggestions_count);
+        println!("系统健康评分：{:.2}", report.system_health_score);
+        println!("循环耗时：{}ms", report.cycle_duration_ms);
+        
+        // 验证缺口检测器中有数据
+        let detector = evolution.get_gap_detector();
+        let gaps = futures::executor::block_on(async {
+            let mut d = detector.write().await;
+            d.detect_gaps().await
+        });
+        assert!(!gaps.is_empty(), "缺口检测器应该包含检测到的缺口");
+    }
+
+    /// 测试：验证混合检测器的统计证据提取
+    #[test]
+    fn test_hybrid_gap_detection_from_failures() {
+        let temp_dir = TempDir::new().unwrap();
+        let evolution = SelfImprovementLoop::new(temp_dir.path()).unwrap();
+        
+        // 记录具有相同失败原因的任务
+        let failure_reason = "Missing batch processing capability";
+        for i in 0..5 {
+            let record = TaskExecutionRecord {
+                task_id: format!("batch_task_{}", i),
+                task_description: "Process multiple files in batch".to_string(),
+                success: false,
+                used_tools: vec!["file_ops".to_string()],
+                execution_time_ms: 1000,
+                failure_reason: Some(failure_reason.to_string()),
+                user_satisfaction: Some(2),
+            };
+            evolution.record_task(record);
+        }
+        
+        // 运行检测
+        let gaps = {
+            let detector = evolution.gap_detector.clone();
+            futures::executor::block_on(async {
+                let mut d = detector.write().await;
+                d.detect_gaps().await
+            })
+        };
+        
+        // 验证检测到了缺口
+        assert!(!gaps.is_empty(), "应该检测到工具缺口");
+        
+        // 验证统计证据
+        for gap in &gaps {
+            assert!(gap.statistical_evidence.failure_rate > 0.0);
+            assert!(gap.statistical_evidence.affected_tasks_count > 0);
+            assert!(gap.hybrid_confidence >= 0.0 && gap.hybrid_confidence <= 1.0);
+        }
     }
 }

@@ -1,6 +1,6 @@
-/// 路径验证宏和工具函数
-///
-/// 提供统一的路径验证逻辑，消除重复代码
+//! 路径验证宏和工具函数
+//!
+//! 提供统一的路径验证逻辑，消除重复代码
 
 use crate::tools::io::error::{IoToolError, IoResult};
 use crate::tools::io::security::SecurePathResolver;
@@ -51,6 +51,7 @@ pub fn ensure_file_exists(path: &Path) -> IoResult<()> {
 }
 
 /// 检查目录是否存在
+#[allow(dead_code)]
 pub fn ensure_dir_exists(path: &Path) -> IoResult<()> {
     if !path.exists() {
         return Err(IoToolError::DirNotFound {
@@ -112,6 +113,7 @@ pub fn ensure_parent_dir_exists(path: &Path) -> IoResult<()> {
 }
 
 /// 检查路径是否不存在（用于创建新文件/目录）
+#[allow(dead_code)]
 pub fn ensure_path_not_exists(path: &Path) -> IoResult<()> {
     if path.exists() {
         return Err(IoToolError::AlreadyExists {

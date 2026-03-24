@@ -9,6 +9,8 @@
 //! This module provides the `ExternalToolDiscovery` struct that scans
 //! for external tools and generates tool metadata using AI assistance.
 
+#![allow(dead_code)]
+
 use crate::external_process::metadata::{
     ExternalToolMetadata,
     ExternalToolType,

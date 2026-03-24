@@ -43,6 +43,7 @@ impl Default for OrchestratorConfig {
 }
 
 /// 编排器状态
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorState {
     /// 当前角色
@@ -397,13 +398,13 @@ impl Orchestrator {
                         .unwrap_or_default();
 
                     if diff.trim().is_empty() {
-                        return (true, "干净".to_string());
+                        (true, "干净".to_string())
                     } else {
                         let lines = diff.lines().count();
-                        return (true, format!("有 {} 个未提交变更", lines));
+                        (true, format!("有 {} 个未提交变更", lines))
                     }
                 } else {
-                    return (false, "不在 Git 仓库中".to_string());
+                    (false, "不在 Git 仓库中".to_string())
                 }
             }
             Err(_) => (false, "Git 状态检查失败".to_string()),
@@ -757,11 +758,13 @@ impl Orchestrator {
     }
 
     /// 获取当前角色
+    #[allow(dead_code)]
     pub fn current_role(&self) -> &AgentRole {
         self.role_switcher.current_role()
     }
 
     /// 获取编排器状态
+    #[allow(dead_code)]
     pub fn get_state(&self) -> OrchestratorState {
         OrchestratorState {
             current_role: self.role_switcher.current_role().as_str().to_string(),
@@ -773,16 +776,19 @@ impl Orchestrator {
     }
 
     /// 获取上下文消息（用于发送给 AI）
+    #[allow(dead_code)]
     pub fn get_context_messages(&self) -> &VecDeque<ContextMessage> {
         self.context_optimizer.get_messages()
     }
 
     /// 清空上下文
+    #[allow(dead_code)]
     pub fn clear_context(&mut self) {
         self.context_optimizer.clear();
     }
 
     /// 设置详细模式
+    #[allow(dead_code)]
     pub fn set_verbose(&mut self, verbose: bool) {
         self.config.verbose = verbose;
     }
@@ -798,6 +804,7 @@ impl Default for Orchestrator {
 #[derive(Debug, Clone)]
 pub struct ProcessedInput {
     /// 原始输入
+    #[allow(dead_code)]
     pub original_input: String,
     /// 当前角色
     pub current_role: AgentRole,
@@ -806,6 +813,7 @@ pub struct ProcessedInput {
     /// 检测到的命令
     pub command: Option<OrchestratorCommand>,
     /// 上下文 token 数
+    #[allow(dead_code)]
     pub context_tokens: usize,
 }
 
@@ -937,6 +945,9 @@ impl CommandResult {
                 output
             }
             CommandResult::WorkflowList(info) => {
+                if info.workflows.is_empty() {
+                    return "📋 没有可用工作流".to_string();
+                }
                 let mut output = String::from("📋 可用工作流:\n");
                 for (id, name) in &info.workflows {
                     output.push_str(&format!("  - {}: {}\n", id, name));
@@ -946,18 +957,18 @@ impl CommandResult {
             CommandResult::Help(info) => {
                 let mut output = String::from("📖 可用命令:\n");
                 for (cmd, desc) in &info.commands {
-                    output.push_str(&format!("  {:<20} {}\n", cmd, desc));
+                    output.push_str(&format!("  {:<25} {}\n", cmd, desc));
                 }
                 output
             }
             CommandResult::ProviderInfo(info) => {
                 let ProviderInfo { current_name, current_url, current_model, all_providers } = info;
-                
+
                 if all_providers.len() > 1 {
                     // 多供应商模式 - 简洁显示
                     let mut output = format!("✅ 已切换到：{}\n", current_name);
                     output.push_str(&format!("   模型：{}\n", current_model));
-                    
+
                     output.push_str("\n📋 可用供应商:\n");
                     for (i, name) in all_providers.iter().enumerate() {
                         let marker = if name == current_name { "👉" } else { "  " };

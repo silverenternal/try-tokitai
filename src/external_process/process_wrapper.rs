@@ -8,6 +8,8 @@
 //!
 //! ## Features
 //! - Argument template substitution
+
+#![allow(dead_code)]
 //! - Working directory support
 //! - Environment variable injection
 //! - Timeout handling

@@ -74,22 +74,17 @@ impl Default for SearchConfig {
 /// 下载配置
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct DownloadConfig {
     /// 默认下载目录
     pub default_dir: Option<String>,
 }
 
-impl Default for DownloadConfig {
-    fn default() -> Self {
-        Self {
-            default_dir: None,
-        }
-    }
-}
 
 /// 用户工具配置（工作目录、下载目录等）
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct UserToolsConfig {
     /// 默认工作目录（文件操作、项目模板等）
     pub workspace_dir: Option<String>,
@@ -97,14 +92,6 @@ pub struct UserToolsConfig {
     pub download_dir: Option<String>,
 }
 
-impl Default for UserToolsConfig {
-    fn default() -> Self {
-        Self {
-            workspace_dir: None,
-            download_dir: None,
-        }
-    }
-}
 
 /// 上下文存储配置
 #[derive(Debug, Deserialize, Clone)]
@@ -193,6 +180,7 @@ pub struct Config {
 
 impl Config {
     /// 从配置文件加载
+    #[allow(dead_code)]
     pub fn load(path: Option<PathBuf>) -> Result<Self> {
         let config_path = path.unwrap_or_else(|| PathBuf::from("config.toml"));
 
@@ -213,6 +201,7 @@ impl Config {
 
     /// 获取默认工作目录
     /// 优先级：配置 > 当前目录
+    #[allow(dead_code)]
     pub fn get_workspace_dir(&self) -> PathBuf {
         self.user_tools.workspace_dir
             .as_ref()
@@ -222,6 +211,7 @@ impl Config {
 
     /// 获取默认下载目录
     /// 优先级：配置 > 系统下载目录 > ./downloads
+    #[allow(dead_code)]
     pub fn get_download_dir(&self) -> PathBuf {
         // 1. 使用配置的下载目录
         if let Some(dir) = self.user_tools.download_dir.as_ref() {

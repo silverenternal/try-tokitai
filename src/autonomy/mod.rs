@@ -69,6 +69,9 @@ pub mod prompt_gap_detector;
 pub mod prompt_optimizer;
 pub mod multi_agent_negotiator;
 
+// Prompt 模板热加载
+pub mod prompt_template_loader;
+
 // 混合检测器（融合统计与 Prompt Engineering）
 pub mod hybrid_gap_detector;
 
@@ -76,10 +79,18 @@ pub use git_workflow::GitWorkflow;
 pub use git_workflow_tools::GitWorkflowTools;
 pub use agents::AgentCoordinator;
 
-// 导出 Prompt Engineering 组件
+// 导出 Prompt Engineering 组件（供外部使用）
+#[allow(unused_imports)]
 pub use prompt_gap_detector::{PromptGapDetector, CausalAnalysisRequest, IdentifiedGap};
+#[allow(unused_imports)]
 pub use prompt_optimizer::{PromptOptimizer, OptimizationSuggestion, ToolMetrics as OptimizerToolMetrics};
+#[allow(unused_imports)]
 pub use multi_agent_negotiator::{MultiAgentNegotiator, EvolutionState, EvolutionAction, NegotiationDecision};
 
-// 导出混合检测器组件
+// 导出混合检测器组件（供外部使用）
+#[allow(unused_imports)]
 pub use hybrid_gap_detector::{HybridGapDetector, HybridToolGap, HybridConfig, StatisticalEvidence, CausalEvidence};
+
+// 导出 Prompt 模板加载器
+#[allow(unused_imports)]
+pub use prompt_template_loader::PromptTemplateLoader;

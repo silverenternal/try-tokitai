@@ -123,10 +123,21 @@ impl Validator for ItemCountValidator {
 }
 
 /// 组合验证器 - 按顺序执行多个验证器
+#[allow(dead_code)]
 pub struct CompositeValidator<'a> {
     validators: Vec<Box<dyn Validator + 'a>>,
 }
 
+#[allow(dead_code)]
+impl<'a> std::fmt::Debug for CompositeValidator<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompositeValidator")
+            .field("validators_count", &self.validators.len())
+            .finish()
+    }
+}
+
+#[allow(dead_code)]
 impl<'a> CompositeValidator<'a> {
     pub fn new() -> Self {
         Self {
@@ -153,6 +164,7 @@ impl<'a> Default for CompositeValidator<'a> {
 }
 
 /// 验证器辅助函数
+#[allow(dead_code)]
 pub fn validate_json(
     json_string: &str,
     config: &DataToolConfig,

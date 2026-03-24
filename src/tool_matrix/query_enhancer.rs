@@ -8,6 +8,8 @@
 //!
 //! ## 设计原则
 //! - 轻量化：不引入重型 NLP 库
+
+#![allow(dead_code)]
 //! - 可配置：通过 JSON 文件加载配置
 //! - 高性能：查询扩展在毫秒级完成
 
@@ -112,13 +114,13 @@ impl QueryEnhancer {
             for synonym in synonyms {
                 self.synonym_map
                     .entry(synonym.to_lowercase())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(main_term.clone());
             }
             // 主词本身也映射到自己
             self.synonym_map
                 .entry(main_term.to_lowercase())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(main_term.clone());
         }
 
@@ -172,12 +174,12 @@ impl QueryEnhancer {
             for synonym in synonyms {
                 enhancer.synonym_map
                     .entry(synonym.to_lowercase())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(main_term.clone());
             }
             enhancer.synonym_map
                 .entry(main_term.to_lowercase())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(main_term.clone());
         }
         
@@ -315,14 +317,14 @@ impl QueryEnhancer {
     /// 分词（支持中文和英文）
     fn tokenize_query(&self, query: &str) -> Vec<String> {
         // 首先尝试使用 jieba 分词（如果有中文）
-        if query.chars().any(|c| c.is_ascii() == false) {
+        if !query.is_ascii() {
             // 使用 jieba 分词
             use jieba_rs::Jieba;
             use std::sync::OnceLock;
-            
+
             static JIEBA: OnceLock<Jieba> = OnceLock::new();
             let jieba = JIEBA.get_or_init(Jieba::new);
-            
+
             return jieba.tokenize(query, jieba_rs::TokenizeMode::Search, false)
                 .iter()
                 .map(|t| t.word.to_string())

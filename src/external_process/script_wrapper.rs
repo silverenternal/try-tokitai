@@ -8,6 +8,8 @@
 //!
 //! ## Features
 //! - Multiple interpreter support (bash, python3, node, etc.)
+
+#![allow(dead_code)]
 //! - Auto-detect interpreter from file extension
 //! - Working directory support
 //! - Environment variable injection
@@ -126,7 +128,6 @@ impl ScriptWrapper {
             "pm" => "perl",
             "php" => "php",
             "r" => "Rscript",
-            "R" => "Rscript",
             "jl" => "julia",
             "lua" => "lua",
             "ps1" => "powershell",
@@ -522,11 +523,10 @@ pub mod script_scanner {
             // Use WalkDir for recursive scanning
             for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file() {
-                    if ScriptWrapper::detect_interpreter(path).is_some() {
+                if path.is_file()
+                    && ScriptWrapper::detect_interpreter(path).is_some() {
                         scripts.push(path.to_path_buf());
                     }
-                }
             }
         } else {
             // Non-recursive: only read directory

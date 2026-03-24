@@ -6,6 +6,7 @@
 pub const MAX_OUTPUT_SIZE: usize = 100 * 1024;
 
 /// 进程文件输出最大大小（50KB）
+#[allow(dead_code)]
 pub const MAX_PROCESS_FILES_OUTPUT_SIZE: usize = 50 * 1024;
 
 /// 最大命令长度
@@ -15,15 +16,19 @@ pub const MAX_COMMAND_LENGTH: usize = 4096;
 pub const MAX_PATTERN_LENGTH: usize = 256;
 
 /// 进程列表默认限制
+#[allow(dead_code)]
 pub const DEFAULT_PROCESS_LIMIT: usize = 20;
 
 /// 进程列表最大限制
+#[allow(dead_code)]
 pub const MAX_PROCESS_LIMIT: usize = 100;
 
 /// 进程文件默认限制
+#[allow(dead_code)]
 pub const DEFAULT_PROCESS_FILES_LIMIT: usize = 50;
 
 /// 进程文件最大限制
+#[allow(dead_code)]
 pub const MAX_PROCESS_FILES_LIMIT: usize = 200;
 
 /// 可用命令默认限制
@@ -99,6 +104,7 @@ pub const WHITELISTED_COMMANDS: &[&str] = &[
 ];
 
 /// 危险的 shell 元字符
+#[allow(dead_code)]
 pub const DANGEROUS_SHELL_CHARS: &[char] = &[
     ';',  // 命令分隔符
     '|',  // 管道
@@ -128,18 +134,21 @@ pub struct ToolMetadata {
     pub version: &'static str,
 }
 
+#[allow(dead_code)]
 pub const PROCESS_MANAGER_METADATA: ToolMetadata = ToolMetadata {
     name: "process_manager",
     description: "进程管理工具 - 查询、监控和管理系统进程",
     version: "1.0.0",
 };
 
+#[allow(dead_code)]
 pub const SYSTEM_MONITOR_METADATA: ToolMetadata = ToolMetadata {
     name: "system_monitor",
     description: "系统监控工具 - 获取 CPU、内存、磁盘等系统资源信息",
     version: "1.0.0",
 };
 
+#[allow(dead_code)]
 pub const SYSTEM_COMMANDS_METADATA: ToolMetadata = ToolMetadata {
     name: "system_commands",
     description: "系统命令执行工具 - 安全执行 shell 命令（白名单机制）",

@@ -2,6 +2,8 @@
 //!
 //! 实现循环队列结构用于供应商切换
 
+#![allow(dead_code)]
+
 use super::ProviderConfig;
 use std::collections::VecDeque;
 

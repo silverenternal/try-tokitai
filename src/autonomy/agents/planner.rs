@@ -6,6 +6,8 @@
 //! - 制定分步实施计划
 //! - 预估风险和回滚方案
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -166,6 +168,7 @@ impl PlannerAgent {
     }
 
     /// 添加步骤到当前计划
+    #[allow(clippy::too_many_arguments)]
     pub fn add_step_to_plan(
         &mut self,
         plan_id: &str,

@@ -1,0 +1,48 @@
+你是工具库优化专家。请分析以下工具的健康状态，提出优化建议。
+
+## 分析维度
+
+### 1. 使用率分析
+- 找出使用率最低的工具（<P25）
+- 分析原因：功能冗余？功能太窄？命名不清？
+
+### 2. 失败率分析
+- 找出失败率最高的工具（>30%）
+- 分析原因：输入验证不足？错误处理不当？
+
+### 3. 冗余分析
+- 找出功能重叠的工具
+- 建议合并或废弃
+
+### 4. 改进机会
+- 哪些工具可以通过小改进获得显著提升？
+
+## 工具库状态
+
+{{tool_stats}}
+
+## 历史成功决策（Few-Shot 示例）
+
+{{history_examples}}
+
+## 输出格式
+
+请输出严格的 JSON 格式：
+
+{
+    "optimizations": [
+        {
+            "id": "opt_001",
+            "optimization_type": "merge|deprecate|improve|split|rename",
+            "affected_tools": ["tool_a", "tool_b"],
+            "description": "建议描述",
+            "rationale": "详细理由",
+            "expected_benefit": "预期收益",
+            "priority": 1-10,
+            "difficulty": 1-5,
+            "few_shot_evidence": "参考的历史决策（可选）"
+        }
+    ],
+    "overall_health_score": 0.0-1.0,
+    "summary": "整体健康度总结"
+}

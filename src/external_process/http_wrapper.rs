@@ -8,6 +8,8 @@
 //!
 //! ## Features
 //! - HTTP method support (GET, POST, PUT, DELETE, PATCH, etc.)
+
+#![allow(dead_code)]
 //! - Path template substitution
 //! - Header injection
 //! - Multiple authentication methods (Bearer, API Key, Basic, OAuth 2.0)
@@ -300,7 +302,7 @@ impl HTTPWrapper {
                         chars.next(); // consume second {
                         let mut var = String::new();
                         while let Some(&c) = chars.peek() {
-                            if c == '}' && chars.clone().skip(1).next() == Some('}') {
+                            if c == '}' && chars.clone().nth(1) == Some('}') {
                                 chars.next(); // consume first }
                                 chars.next(); // consume second }
                                 break;
@@ -412,7 +414,7 @@ impl ExternalTool for HTTPWrapper {
                 let output = serde_json::from_str::<Value>(&body)
                     .unwrap_or_else(|_| Value::String(body.clone()));
 
-                let success = status >= 200 && status < 300;
+                let success = (200..300).contains(&status);
                 
                 if success {
                     Ok(ToolExecutionResult::success(output, elapsed))
@@ -779,7 +781,7 @@ pub mod openapi_parser {
     ) -> Value {
         if let Some(ref_str) = schema.get("$ref").and_then(|v| v.as_str()) {
             // Extract schema name from reference
-            let schema_name = ref_str.split('/').last().unwrap_or("");
+            let schema_name = ref_str.split('/').next_back().unwrap_or("");
             
             if let Some(schemas_map) = schemas {
                 if let Some(resolved) = schemas_map.get(schema_name) {

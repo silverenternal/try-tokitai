@@ -23,6 +23,7 @@ pub enum SearchError {
     #[error("搜索超时：{0}")]
     Timeout(#[from] std::io::Error),
 
+    #[allow(dead_code)]
     #[error("URL 验证失败：{0}")]
     UrlValidation(String),
 
@@ -31,21 +32,26 @@ pub enum SearchError {
         engine: String,
     },
 
+    #[allow(dead_code)]
     #[error("解析搜索结果失败：{0}")]
     ParseFailed(String),
 
+    #[allow(dead_code)]
     #[error("缓存错误：{0}")]
     CacheError(String),
 
     #[error("查询无效：{0}")]
     InvalidQuery(String),
 
+    #[allow(dead_code)]
     #[error("速率限制：{0}")]
     RateLimited(String),
 
+    #[allow(dead_code)]
     #[error("认证失败：{0}")]
     AuthenticationFailed(String),
 
+    #[allow(dead_code)]
     #[error("引擎初始化失败：{0}")]
     EngineInitFailed(String),
 }
@@ -91,4 +97,5 @@ impl From<SearchError> for NetworkError {
 }
 
 /// 搜索模块结果类型
+#[allow(dead_code)]
 pub type SearchResult<T> = Result<T, SearchError>;

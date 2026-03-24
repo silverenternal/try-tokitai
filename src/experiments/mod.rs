@@ -1,11 +1,20 @@
-//! 实验框架模块
+//! 实验数据收集模块
 //!
-//! 提供基准测试、日志记录和结果分析功能
+//! 用于收集和记录 HybridGapDetector 和 Prompt Engineering 自进化系统的性能指标和实验数据
+//!
+//! ## 使用示例
+//! ```rust,ignore
+//! use crate::experiments::{ExperimentLogger, TaskExecutionLog};
+//!
+//! let logger = ExperimentLogger::new(
+//!     &std::path::PathBuf::from("experiments/logs/ours-full"),
+//!     "Ours-Full",
+//!     "exp_001"
+//! ).unwrap();
+//! ```
 
+pub mod collector;
 pub mod logger;
-pub mod benchmark;
-pub mod analysis;
 
-pub use logger::{ExperimentLogger, TaskExecutionLog, EvolutionCycleLog, ExperimentReport};
-pub use benchmark::BenchmarkRunner;
-pub use analysis::ResultAnalyzer;
+#[allow(unused_imports)]
+pub use logger::{ExperimentLogger, TaskExecutionLog, SelfEvolutionLog, ExperimentSummary};

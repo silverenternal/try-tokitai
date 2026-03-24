@@ -251,6 +251,7 @@ pub type DataToolResult<T> = Result<T, DataToolError>;
 
 /// 错误辅助信息（用于 tracing 和日志）
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct ErrorContext {
     pub operation: Option<String>,
     pub path: Option<String>,
@@ -259,6 +260,7 @@ pub struct ErrorContext {
     pub details: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ErrorContext {
     pub fn new() -> Self {
         Self::default()

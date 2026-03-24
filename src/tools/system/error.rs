@@ -13,6 +13,7 @@ pub enum ProcessError {
     #[error("无权限访问进程 {0}: {1}")]
     PermissionDenied(u32, String),
 
+    #[allow(dead_code)]
     #[error("无效的 PID: {0}")]
     InvalidPid(String),
 
@@ -22,9 +23,11 @@ pub enum ProcessError {
     #[error("解析进程信息失败：{0}")]
     ParseFailed(String),
 
+    #[allow(dead_code)]
     #[error("不支持的操作系统：{0}")]
     UnsupportedOS(String),
 
+    #[allow(dead_code)]
     #[error("输出过大被截断：{0}")]
     OutputTruncated(String),
 
@@ -50,9 +53,11 @@ pub enum CommandError {
     #[error("需要确认才能执行危险操作")]
     ConfirmationRequired,
 
+    #[allow(dead_code)]
     #[error("输出过大被截断：{0}")]
     OutputTruncated(String),
 
+    #[allow(dead_code)]
     #[error("命令解析失败：{0}")]
     ParseFailed(String),
 }
@@ -66,9 +71,11 @@ pub enum CodeAnalysisError {
     #[error("文件不存在：{0}")]
     FileNotFound(String),
 
+    #[allow(dead_code)]
     #[error("解析失败：{0}")]
     ParseFailed(String),
 
+    #[allow(dead_code)]
     #[error("不支持的文件类型：{0}")]
     UnsupportedFileType(String),
 }
@@ -89,9 +96,11 @@ pub enum SystemInfoError {
     #[error("获取系统信息失败：{0}")]
     InfoFetchFailed(String),
 
+    #[allow(dead_code)]
     #[error("解析系统信息失败：{0}")]
     ParseFailed(String),
 
+    #[allow(dead_code)]
     #[error("不支持的操作系统：{0}")]
     UnsupportedOS(String),
 }
@@ -114,10 +123,12 @@ impl ToErrorString for std::string::FromUtf8Error {
 }
 
 /// 工具错误结果类型别名
+#[allow(dead_code)]
 pub type ToolResult<T> = Result<T, ToolError>;
 
 /// 通用工具错误枚举
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ToolError {
     #[error("进程错误：{0}")]
     Process(#[from] ProcessError),
@@ -140,6 +151,7 @@ pub enum ToolError {
 
 impl ToolError {
     /// 转换为 JSON 格式
+    #[allow(dead_code)]
     pub fn to_json(&self) -> String {
         serde_json::json!({
             "error": true,
@@ -156,11 +168,13 @@ impl ToolError {
     }
 
     /// 创建验证错误
+    #[allow(dead_code)]
     pub fn validation(msg: impl Into<String>) -> Self {
         ToolError::ValidationError(msg.into())
     }
 
     /// 创建工具调用失败错误
+    #[allow(dead_code)]
     pub fn tool_call(msg: impl Into<String>) -> Self {
         ToolError::ToolCallFailed(msg.into())
     }

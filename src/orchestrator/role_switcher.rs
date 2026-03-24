@@ -2,6 +2,8 @@
 //!
 //! 实现基于任务类型的自动角色切换
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

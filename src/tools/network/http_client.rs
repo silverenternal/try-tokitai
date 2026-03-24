@@ -92,6 +92,7 @@ impl HttpClientTools {
     }
 
     /// 创建带自定义监控器的实例
+    #[allow(dead_code)]
     pub fn with_monitor(config: HttpClientConfig, monitor: Arc<RequestMonitor>) -> Self {
         let client = Self::build_client(&config);
 
@@ -161,7 +162,7 @@ impl HttpClientTools {
                     url: url.to_string(),
                     method: method.to_string(),
                     status: 200,
-                    duration_ms: duration.as_millis() as u128,
+                    duration_ms: duration.as_millis(),
                     bytes: *bytes,
                     timestamp: chrono::Utc::now(),
                 });
@@ -171,7 +172,7 @@ impl HttpClientTools {
                     url: url.to_string(),
                     method: method.to_string(),
                     status: 500,
-                    duration_ms: duration.as_millis() as u128,
+                    duration_ms: duration.as_millis(),
                     bytes: 0,
                     timestamp: chrono::Utc::now(),
                 });
@@ -579,6 +580,7 @@ impl HttpClientTools {
 // 单独的 impl 块用于需要 &mut self 的方法
 impl HttpClientTools {
     /// 更新 SSRF 配置（热更新）
+    #[allow(dead_code)]
     pub fn update_ssrf_config(&mut self, config: RuntimeSsrfConfig) {
         self.config.ssrf_config = config;
         // 重建客户端以应用新配置

@@ -31,6 +31,7 @@ pub struct ProcessInfo {
     args: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl ProcessInfo {
     pub fn new(
         pid: u32,
@@ -65,18 +66,31 @@ impl ProcessInfo {
     }
 
     // 访问器方法
+    #[allow(dead_code)]
     pub fn pid(&self) -> u32 { self.pid }
+    #[allow(dead_code)]
     pub fn ppid(&self) -> u32 { self.ppid }
+    #[allow(dead_code)]
     pub fn user(&self) -> &str { &self.user }
+    #[allow(dead_code)]
     pub fn cpu_percent(&self) -> f32 { self.cpu_percent }
+    #[allow(dead_code)]
     pub fn mem_percent(&self) -> f32 { self.mem_percent }
+    #[allow(dead_code)]
     pub fn vsz(&self) -> u64 { self.vsz }
+    #[allow(dead_code)]
     pub fn rss(&self) -> u64 { self.rss }
+    #[allow(dead_code)]
     pub fn tty(&self) -> &str { &self.tty }
+    #[allow(dead_code)]
     pub fn stat(&self) -> &str { &self.stat }
+    #[allow(dead_code)]
     pub fn start(&self) -> &str { &self.start }
+    #[allow(dead_code)]
     pub fn time(&self) -> &str { &self.time }
+    #[allow(dead_code)]
     pub fn comm(&self) -> &str { &self.comm }
+    #[allow(dead_code)]
     pub fn args(&self) -> &str { &self.args }
 
     /// 转换为 JSON 友好的结构
@@ -225,9 +239,11 @@ pub trait ProcessBackend: Send + Sync {
     fn get_system_resources(&self) -> Result<SystemResourceInfo, SystemInfoError>;
 
     /// 检查进程是否存在（用于快速验证）
+    #[allow(dead_code)]
     fn process_exists(&self, pid: u32) -> bool;
 
     /// 检查进程所有权（用于权限验证）
+    #[allow(dead_code)]
     fn check_process_ownership(&self, pid: u32) -> Result<(), ProcessError>;
 
     /// 运行 ps 命令的辅助方法（内部使用）
@@ -247,6 +263,7 @@ pub trait ProcessBackend: Send + Sync {
 }
 
 /// Linux 平台后端实现
+#[allow(dead_code)]
 pub struct LinuxBackend;
 
 impl ProcessBackend for LinuxBackend {

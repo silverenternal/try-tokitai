@@ -2,6 +2,8 @@
 //!
 //! 对齐项目中的 SelectorMetrics 模式，提供完整的监控链路
 
+#![allow(dead_code)]
+
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use parking_lot::RwLock;

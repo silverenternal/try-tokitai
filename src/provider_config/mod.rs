@@ -2,6 +2,8 @@
 //!
 //! 支持多供应商配置和循环切换
 
+#![allow(dead_code)]
+
 mod provider_queue;
 
 #[allow(unused_imports)]

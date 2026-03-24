@@ -2,6 +2,8 @@
 //!
 //! 将 observability 模块封装为 tokitai ToolProvider
 
+#![allow(dead_code)]
+
 use tokitai::tool;
 use tokitai::Value;
 use super::tracing::{TracingRecorder, TraceSpan, SpanStatus};
@@ -173,7 +175,7 @@ impl ObservabilityTools {
             std::collections::HashMap::new();
         for span in &all_spans {
             trace_groups.entry(span.trace_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(span);
         }
         let unique_traces = trace_groups.len();

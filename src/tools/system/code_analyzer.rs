@@ -482,23 +482,21 @@ fn try_match_function(line: &str, lang: &Language) -> Option<FunctionInfo> {
                 return Some(FunctionInfo { name });
             }
             // 匹配 const/let foo = () =>
-            if trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("var ") {
-                if trimmed.contains("=>") {
+            if (trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("var "))
+                && trimmed.contains("=>") {
                     let name = extract_function_name(trimmed, &["const ", "let ", "var "])?;
                     let name = name.split('=').next()?.trim().to_string();
                     return Some(FunctionInfo { name });
                 }
-            }
         }
         Language::Java => {
             // Java 没有明显的关键字，需要更复杂的匹配
-            if trimmed.contains("(") && trimmed.contains(")") && trimmed.contains("{") {
-                if trimmed.starts_with("public ") || trimmed.starts_with("private ") ||
-                   trimmed.starts_with("protected ") || trimmed.starts_with("static ") {
+            if trimmed.contains("(") && trimmed.contains(")") && trimmed.contains("{")
+                && (trimmed.starts_with("public ") || trimmed.starts_with("private ") ||
+                   trimmed.starts_with("protected ") || trimmed.starts_with("static ")) {
                     let name = extract_java_method_name(trimmed)?;
                     return Some(FunctionInfo { name });
                 }
-            }
         }
         _ => {}
     }

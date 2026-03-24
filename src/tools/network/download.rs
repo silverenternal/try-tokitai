@@ -25,10 +25,13 @@ pub struct DownloadConfig {
     /// 连接超时（秒）
     pub connect_timeout_secs: u64,
     /// 分块大小（字节）
+    #[allow(dead_code)]
     pub chunk_size: usize,
     /// 最大重试次数
+    #[allow(dead_code)]
     pub max_retries: u32,
     /// 是否支持断点续传
+    #[allow(dead_code)]
     pub resume_enabled: bool,
     /// 最大文件大小（字节）
     pub max_file_size: usize,
@@ -245,6 +248,7 @@ impl Downloader {
         OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .read(true)
             .open(path)
             .map_err(|e| {
@@ -563,14 +567,13 @@ impl DownloadTools {
         ssrf_protection::validate_url(&url)?;
 
         let speed_limit_bytes = speed_limit
-            .map(|limit| {
+            .and_then(|limit| {
                 if limit == 0 {
                     None
                 } else {
                     Some(limit as u64 * 1024)
                 }
-            })
-            .flatten();
+            });
 
         let config = DownloaderConfig {
             resume_enabled: resume.unwrap_or(true),

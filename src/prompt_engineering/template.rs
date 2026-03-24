@@ -2,6 +2,8 @@
 //!
 //! 定义 PromptTemplate 及其相关结构，支持变量替换和条件渲染
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

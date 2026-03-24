@@ -143,16 +143,16 @@ mod tests {
     #[test]
     fn test_resolve_nonexistent_path() {
         let input = "读取 @/nonexistent/file.txt";
-        let (processed, contents) = resolve_paths(&input).unwrap();
-        
+        let (processed, contents) = resolve_paths(input).unwrap();
+
         assert!(processed.contains("文件读取失败"));
         assert!(contents.is_empty());
     }
-    
+
     #[test]
     fn test_no_path_reference() {
         let input = "你好，世界";
-        let (processed, contents) = resolve_paths(&input).unwrap();
+        let (processed, contents) = resolve_paths(input).unwrap();
         
         assert_eq!(processed, input);
         assert!(contents.is_empty());

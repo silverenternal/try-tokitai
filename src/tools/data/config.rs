@@ -36,16 +36,19 @@ impl Default for DataToolConfig {
 
 impl DataToolConfig {
     /// 创建配置构建器
+    #[allow(dead_code)]
     pub fn builder() -> DataToolConfigBuilder {
         DataToolConfigBuilder::new()
     }
 
     /// 创建默认配置
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 创建精简配置（适用于资源受限场景）
+    #[allow(dead_code)]
     pub fn minimal() -> Self {
         Self {
             max_length: 1024 * 1024, // 1MB
@@ -58,6 +61,7 @@ impl DataToolConfig {
     }
 
     /// 创建宽松配置（适用于批处理场景）
+    #[allow(dead_code)]
     pub fn permissive() -> Self {
         Self {
             max_length: 100 * 1024 * 1024, // 100MB
@@ -72,10 +76,12 @@ impl DataToolConfig {
 
 /// 配置构建器
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct DataToolConfigBuilder {
     config: DataToolConfig,
 }
 
+#[allow(dead_code)]
 impl DataToolConfigBuilder {
     pub fn new() -> Self {
         Self {

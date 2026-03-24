@@ -26,6 +26,7 @@ impl PdfTools {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_resolver(resolver: SecurePathResolver) -> Self {
         Self { resolver }
     }

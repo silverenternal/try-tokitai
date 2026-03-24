@@ -34,7 +34,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use parking_lot::RwLock;
 use tracing::{info, warn};
@@ -46,7 +46,6 @@ use crate::tool_matrix::registry::ToolSource;
 use crate::integration::{IntegratedModules, IntegratedModulesConfig};
 use crate::tools::{FileOperations, SystemTools, CodeTools, SearchTools, DownloadTools, GitOperations, JsonFormatTools};
 use crate::tools::HttpClientTools;
-use tokitai::ToolProvider;
 
 /// 自主助手 - 项目自更新服务
 pub struct AutonomousAssistant {
@@ -55,14 +54,18 @@ pub struct AutonomousAssistant {
     /// 工具管理器
     tool_manager: ToolManager,
     /// 集成模块
+    #[allow(dead_code)]
     integrated_modules: IntegratedModules,
     /// 项目根目录
+    #[allow(dead_code)]
     project_root: PathBuf,
     /// 自主进化目录
     autonomy_dir: PathBuf,
     /// Agent 协调器（多 Agent 协作系统）
+    #[allow(dead_code)]
     coordinator: AgentCoordinator,
     /// Git 工作流
+    #[allow(dead_code)]
     git_workflow: GitWorkflow,
     /// 工具实例（用于 call_tool 调用）
     file_ops: FileOperations,
@@ -159,7 +162,7 @@ impl AutonomousAssistant {
             code_tools: CodeTools::default(),
             web_search: SearchTools::new(),
             download_tools: DownloadTools::new(),
-            git_ops: GitOperations::default(),
+            git_ops: GitOperations,
             http_client: HttpClientTools::new(),
             json_tools: JsonFormatTools::default(),
         })

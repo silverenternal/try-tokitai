@@ -2,7 +2,6 @@
 //!
 //! 提供 CLI 助手和自主助手共享的配置和工具管理器
 
-use anyhow::Result;
 use reqwest::blocking::Client;
 use std::sync::Arc;
 use serde_json::Value;
@@ -16,13 +15,14 @@ use crate::tool_matrix::tool_selector::LightweightToolSelector;
 // ============================================================================
 
 /// 助手配置
-/// 
+///
 /// 包含 CLI 助手和自主助手共享的基础配置
 #[derive(Clone)]
 pub struct AssistantConfig {
     /// AI API 端点 URL
     pub api_url: String,
     /// AI API 密钥（可选）
+    #[allow(dead_code)]
     pub api_key: Option<String>,
     /// 使用的模型名称
     pub model: String,
@@ -60,14 +60,16 @@ impl AssistantConfig {
 // ============================================================================
 
 /// 工具管理器
-/// 
+///
 /// 统一管理工具注册表、选择器和分发器
 pub struct ToolManager {
     /// 工具注册表
     pub tool_registry: ToolRegistry,
     /// 轻量级工具选择器（AI 原生）
+    #[allow(dead_code)]
     pub lightweight_selector: Arc<LightweightToolSelector>,
     /// 工具调用分发器
+    #[allow(dead_code)]
     pub tool_dispatcher: Arc<ToolDispatcher>,
 }
 

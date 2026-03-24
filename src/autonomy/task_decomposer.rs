@@ -8,6 +8,8 @@
 //! - 纯文件存储，无需数据库
 //! - 支持拓扑排序确定执行顺序
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;

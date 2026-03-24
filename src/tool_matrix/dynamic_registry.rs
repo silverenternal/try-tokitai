@@ -8,6 +8,8 @@
 //! - 版本管理：元数据记录版本，支持回滚
 //! - 安全验证：沙箱验证，仅允许加载 AI 生成的已签名工具
 //!
+
+#![allow(dead_code)]
 //! ## 目录结构
 //! ```text
 //! .tokitai/tools/           # 动态工具元数据存储目录
@@ -240,7 +242,7 @@ impl DynamicToolRegistry {
 
         // 注册到基础注册表（直接注册，不指定工具箱）
         // 使用同步版本注册到 "utility" 工具箱，如果不存在则创建
-        if !self.base_registry.get_toolbox("utility").is_some() {
+        if self.base_registry.get_toolbox("utility").is_none() {
             let utility_box = crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
             self.create_toolbox(utility_box)?;
         }

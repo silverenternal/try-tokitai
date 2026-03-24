@@ -49,11 +49,13 @@ impl Default for ProcessManager {
 
 impl ProcessManager {
     /// 创建新的进程管理器（使用默认后端）
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 创建带有自定义后端的进程管理器（用于测试）
+    #[allow(dead_code)]
     pub fn with_backend(backend: Box<dyn ProcessBackend>) -> Self {
         Self {
             backend: Arc::new(backend),

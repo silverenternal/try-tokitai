@@ -276,7 +276,7 @@ impl ReplayPlayer {
 
     /// 设置播放速度
     pub fn set_speed(&mut self, speed: f32) {
-        self.playback_speed = speed.max(0.25).min(4.0);
+        self.playback_speed = speed.clamp(0.25, 4.0);
     }
 }
 

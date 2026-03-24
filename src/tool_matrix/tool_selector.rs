@@ -8,6 +8,8 @@
 //! - AI 自主依赖关系分析
 //!
 //! # 设计原则
+
+#![allow(dead_code)]
 //! - AI 自主管理工具箱（非预先设计）
 //! - 后台异步索引重建（不阻塞主线程）
 //! - AI 自主维护依赖关系（非手动声明）
@@ -15,6 +17,7 @@
 
 use crate::tool_matrix::matrix::{ToolDefinition, ServiceCategory};
 use crate::tool_matrix::ai_classifier::LLMClient as AILLMClient;
+use crate::tool_matrix::trie_index::TrieIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -25,10 +28,10 @@ use tokio::sync::RwLock;
 use tracing::{info, debug, warn};
 
 // ============================================================================
-// 工具索引（倒排索引）
+// 工具索引（倒排索引 + Trie 树优化）
 // ============================================================================
 
-/// 工具索引（倒排索引）
+/// 工具索引（倒排索引 + Trie 树优化）
 #[derive(Debug, Clone)]
 pub struct ToolIndex {
     /// 工具名称 -> 工具定义
@@ -39,6 +42,8 @@ pub struct ToolIndex {
     toolbox_index: HashMap<String, HashSet<String>>,
     /// 分类 -> 工具名称集合
     category_index: HashMap<ServiceCategory, HashSet<String>>,
+    /// Trie 树索引（用于前缀搜索优化）
+    trie_index: TrieIndex,
 }
 
 impl ToolIndex {
@@ -49,6 +54,7 @@ impl ToolIndex {
             keyword_index: HashMap::new(),
             toolbox_index: HashMap::new(),
             category_index: HashMap::new(),
+            trie_index: TrieIndex::new(),
         }
     }
 
@@ -61,15 +67,18 @@ impl ToolIndex {
         for keyword in keywords {
             self.keyword_index
                 .entry(keyword)
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(tool_name.clone());
         }
 
         // 添加到分类索引
         self.category_index
             .entry(tool.metadata.category.clone())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(tool_name.clone());
+
+        // 添加到 Trie 索引（用于前缀搜索）
+        self.trie_index.add_tool(&tool_name, self.tools.len() as u64);
 
         // 存储工具定义
         self.tools.insert(tool_name.clone(), tool);
@@ -79,17 +88,36 @@ impl ToolIndex {
     pub fn add_tool_to_toolbox(&mut self, tool_name: &str, toolbox_id: &str) {
         self.toolbox_index
             .entry(toolbox_id.to_string())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(tool_name.to_string());
     }
 
-    /// 搜索工具
+    /// 搜索工具（使用 Trie 树优化）
     pub fn search(&self, query: &str, max_results: usize) -> Vec<ToolDefinition> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
         let mut seen = HashSet::new();
 
-        // 1. 关键词匹配
+        // 1. Trie 树前缀搜索（最快，O(m) 复杂度）
+        let trie_results = self.trie_index.search_prefix(&query_lower);
+        for tool_name in trie_results {
+            if seen.insert(tool_name.clone()) {
+                if let Some(tool) = self.tools.get(&tool_name) {
+                    results.push(tool.clone());
+                    if results.len() >= max_results {
+                        return results;
+                    }
+                }
+            }
+        }
+
+        // 2. 关键词匹配（倒排索引）- 优化：只遍历部分关键词
+        // 如果查询较短，直接使用前缀匹配的结果
+        if query_lower.len() <= 3 && !results.is_empty() {
+            return results;
+        }
+
+        // 否则，只检查包含查询的关键词
         for keyword in self.keyword_index.keys() {
             if keyword.contains(&query_lower) || query_lower.contains(keyword) {
                 if let Some(tool_names) = self.keyword_index.get(keyword) {
@@ -107,16 +135,22 @@ impl ToolIndex {
             }
         }
 
-        // 2. 名称/描述匹配
-        for (name, tool) in &self.tools {
-            if seen.insert(name.clone()) {
-                if tool.name.to_lowercase().contains(&query_lower)
-                    || tool.description.to_lowercase().contains(&query_lower)
-                {
-                    results.push(tool.clone());
-                    if results.len() >= max_results {
-                        return results;
+        // 3. 名称/描述匹配（兜底）- 优化：限制遍历数量
+        if results.len() < max_results {
+            let remaining = max_results - results.len();
+            for (name, tool) in &self.tools {
+                if seen.insert(name.clone())
+                    && (tool.name.to_lowercase().contains(&query_lower)
+                        || tool.description.to_lowercase().contains(&query_lower))
+                    {
+                        results.push(tool.clone());
+                        if results.len() >= max_results {
+                            return results;
+                        }
                     }
+                // 限制兜底搜索的工具数量
+                if seen.len() > 1000 && results.len() >= remaining {
+                    break;
                 }
             }
         }
@@ -582,8 +616,7 @@ impl LightweightToolSelector {
         // 提取 selected_tools
         let selected_tools = json_value
             .get("selected_tools")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.clone())
+            .and_then(|v| v.as_array()).cloned()
             .unwrap_or_default();
 
         // 构建结果

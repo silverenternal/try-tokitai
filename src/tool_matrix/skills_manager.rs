@@ -5,6 +5,8 @@
 //! - 生成 AI 可读的 Skills 提示词
 //! - 支持运行时更新 Skills 文件
 
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};

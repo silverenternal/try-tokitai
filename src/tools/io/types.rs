@@ -1,11 +1,12 @@
-/// 统一的工具参数结构体
-///
-/// 为 AI 提供结构化的参数类型，避免使用 `Option<bool>` 等不清晰的类型
-/// 同时提供更好的文档和默认值
+//! 统一的工具参数结构体
+//!
+//! 为 AI 提供结构化的参数类型，避免使用 `Option<bool>` 等不清晰的类型
+//! 同时提供更好的文档和默认值
 
 use serde::{Deserialize, Serialize};
 
 /// 大小写敏感选项
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaseSensitivity {
@@ -18,6 +19,7 @@ pub enum CaseSensitivity {
     Auto,
 }
 
+#[allow(dead_code)]
 impl CaseSensitivity {
     pub fn is_case_sensitive(self) -> bool {
         match self {
@@ -37,6 +39,7 @@ impl CaseSensitivity {
 }
 
 /// 文件编辑模式
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EditMode {
@@ -49,6 +52,7 @@ pub enum EditMode {
     Replace,
 }
 
+#[allow(dead_code)]
 impl EditMode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -69,6 +73,7 @@ impl EditMode {
 }
 
 /// 文件搜索参数
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GrepParams {
     /// 搜索模式（文本或正则表达式）
@@ -86,10 +91,12 @@ pub struct GrepParams {
     pub use_regex: bool,
 }
 
+#[allow(dead_code)]
 fn default_max_results() -> usize {
     100
 }
 
+#[allow(dead_code)]
 impl GrepParams {
     pub fn new(pattern: String, path: String) -> Self {
         Self {
@@ -118,6 +125,7 @@ impl GrepParams {
 }
 
 /// 文件查找参数
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FindFilesParams {
     /// 目录路径
@@ -136,10 +144,12 @@ pub struct FindFilesParams {
     pub max_depth: usize,
 }
 
+#[allow(dead_code)]
 fn default_max_depth() -> usize {
     50
 }
 
+#[allow(dead_code)]
 impl FindFilesParams {
     pub fn new(directory: String) -> Self {
         Self {
@@ -163,6 +173,7 @@ impl FindFilesParams {
 }
 
 /// 文件编辑参数
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditFileParams {
     /// 文件路径
@@ -176,6 +187,7 @@ pub struct EditFileParams {
     pub search: Option<String>,
 }
 
+#[allow(dead_code)]
 impl EditFileParams {
     pub fn append(path: String, content: String) -> Self {
         Self {
@@ -206,6 +218,7 @@ impl EditFileParams {
 }
 
 /// 项目创建参数
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateProjectParams {
     /// 项目名称
@@ -218,6 +231,7 @@ pub struct CreateProjectParams {
     pub structure: Option<String>,
 }
 
+#[allow(dead_code)]
 impl CreateProjectParams {
     pub fn new(name: String) -> Self {
         Self {
@@ -234,12 +248,14 @@ impl CreateProjectParams {
 }
 
 /// 缓存预热参数
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheWarmupParams {
     /// 要预热的文件路径列表
     pub paths: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl CacheWarmupParams {
     pub fn new(paths: Vec<String>) -> Self {
         Self { paths }

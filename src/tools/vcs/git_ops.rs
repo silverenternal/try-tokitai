@@ -8,6 +8,8 @@
 //! ## 工具分类
 //! - **状态查询**：`git_status`, `git_current_branch`, `git_branch`
 //! - **历史查询**：`git_log`, `git_current_commit`
+
+#![allow(dead_code)]
 //! - **差异查询**：`git_diff`, `git_diff_staged`
 //!
 //! ## 使用示例

@@ -27,6 +27,7 @@ impl FileSearchTools {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_resolver(resolver: SecurePathResolver) -> Self {
         Self { resolver }
     }
@@ -400,6 +401,7 @@ impl DirectoryWalker {
 impl Iterator for DirectoryWalker {
     type Item = DirEntry;
 
+    #[allow(clippy::never_loop)]
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(entry) = self.stack.pop() {
             let path = entry.path();

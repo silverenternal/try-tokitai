@@ -29,6 +29,7 @@ impl FileOperations {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_resolver(resolver: SecurePathResolver) -> Self {
         Self { resolver }
     }
@@ -336,9 +337,16 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
     let mut dp = vec![vec![0; n + 1]; m + 1];
 
-    for i in 0..=m { dp[i][0] = i; }
-    for j in 0..=n { dp[0][j] = j; }
+    // 初始化第一列
+    for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+        row[0] = i;
+    }
+    // 初始化第一行
+    for (j, cell) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *cell = j;
+    }
 
+    // 动态规划计算编辑距离
     for i in 1..=m {
         for j in 1..=n {
             let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };

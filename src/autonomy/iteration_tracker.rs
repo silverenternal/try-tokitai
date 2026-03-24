@@ -7,6 +7,8 @@
 //! - 纯文件存储，支持增量追加
 //! - TUI 实时显示状态和进度
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

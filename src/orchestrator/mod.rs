@@ -21,4 +21,8 @@ pub use orchestrator::Orchestrator;
 pub use role_switcher::{AgentRole, RoleSwitcher, RoleSwitchResult};
 pub use context_optimizer::{ContextMessage, ContextOptimizer, MessageType, OptimizerConfig};
 #[allow(unused_imports)]
-pub use workflow::{Workflow, WorkflowEngine, templates};
+pub use workflow::{
+    Workflow, WorkflowEngine, Stage, Step, StepStatus, StageStatus, WorkflowStatus,
+    DeclarativeWorkflow, DeclarativeWorkflowStep, RetryConfig,
+    ErrorHandler, ErrorStrategy, templates,
+};

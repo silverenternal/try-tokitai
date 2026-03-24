@@ -207,6 +207,7 @@ impl ContextOptimizer {
     }
 
     /// 添加系统消息
+    #[allow(dead_code)]
     pub fn add_system_message(&mut self, content: String) {
         if self.config.keep_system_messages {
             let mut msg = ContextMessage::new(MessageType::System, content);
@@ -216,6 +217,7 @@ impl ContextOptimizer {
     }
 
     /// 添加工具调用
+    #[allow(dead_code)]
     pub fn add_tool_call(&mut self, tool_name: String, args: String) {
         if self.config.keep_tool_history {
             let content = format!("调用工具：{}({})", tool_name, args);
@@ -224,6 +226,7 @@ impl ContextOptimizer {
     }
 
     /// 添加工具结果
+    #[allow(dead_code)]
     pub fn add_tool_result(&mut self, tool_name: String, result: String) {
         if self.config.keep_tool_history {
             let content = format!("工具 {} 返回：{}", tool_name, result);
@@ -473,6 +476,7 @@ impl ContextOptimizer {
     }
 
     /// 获取当前上下文消息
+    #[allow(dead_code)]
     pub fn get_messages(&self) -> &VecDeque<ContextMessage> {
         &self.messages
     }
@@ -499,6 +503,7 @@ impl ContextOptimizer {
     }
 
     /// 设置重要性标记
+    #[allow(dead_code)]
     pub fn set_importance(&mut self, index: usize, importance: u8) {
         if let Some(msg) = self.messages.get_mut(index) {
             msg.importance = importance.min(10);
@@ -506,6 +511,7 @@ impl ContextOptimizer {
     }
 
     /// 标记最后一条消息为高重要性
+    #[allow(dead_code)]
     pub fn mark_last_as_important(&mut self) {
         if let Some(msg) = self.messages.back_mut() {
             msg.importance = 9;

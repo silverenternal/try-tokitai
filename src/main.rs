@@ -18,8 +18,9 @@ mod external_process;
 mod assistant_common;
 mod cli_assistant;
 mod autonomous_assistant;
+mod experiments;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -68,7 +69,7 @@ fn main() -> Result<()> {
     let project_path = args.iter()
         .position(|arg| arg == "--project-path" || arg == "-p")
         .and_then(|pos| args.get(pos + 1))
-        .map(|s| PathBuf::from(s));
+        .map(PathBuf::from);
 
     // 初始化 tracing（输出到 stderr，避免干扰 stdout 的交互界面）
     tracing_subscriber::fmt()

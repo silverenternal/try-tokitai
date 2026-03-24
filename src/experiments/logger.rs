@@ -1,56 +1,33 @@
 //! 实验日志系统
 //!
-//! 用于记录自进化实验的执行日志和指标
+//! 用于记录 HybridGapDetector 和 Prompt Engineering 自进化系统的实验数据
 //!
-//! # 使用示例
-//!
-//! ```rust,ignore
-//! let logger = ExperimentLogger::new("experiments/logs/ours_full")?;
-//!
-//! // 记录任务执行
-//! logger.log_task_execution(TaskExecutionLog {
-//!     task_id: "task_001".to_string(),
-//!     success: true,
-//!     tool_calls: vec![...],
-//!     ..Default::default()
-//! })?;
-//!
-//! // 记录自进化周期
-//! logger.log_evolution_cycle(EvolutionCycleLog {
-//!     cycle_id: "cycle_001".to_string(),
-//!     gaps_detected: 5,
-//!     tools_created: 2,
-//!     ..Default::default()
-//! })?;
-//!
-//! // 生成报告
-//! let report = logger.generate_report()?;
-//! ```
+//! ## 日志类型
+//! - 任务执行日志：记录每个基准任务的执行情况
+//! - 自进化日志：记录每次自主进化迭代的详细信息
+//! - 指标日志：记录关键性能指标
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use anyhow::Result;
 
 /// 实验日志记录器
+#[allow(dead_code)]
 pub struct ExperimentLogger {
     /// 日志目录
     log_dir: PathBuf,
-    /// 任务执行日志文件
-    task_log_file: PathBuf,
-    /// 进化周期日志文件
-    evolution_log_file: PathBuf,
-    /// 指标日志文件
-    metrics_log_file: PathBuf,
-    /// 日志文件句柄
-    task_writer: Option<BufWriter<File>>,
-    evolution_writer: Option<BufWriter<File>>,
-    metrics_writer: Option<BufWriter<File>>,
+    /// 实验组名称（Control, Ours-Full, Ours-Single, Ours-NoCoT, Ours-NoFix）
+    experiment_group: String,
+    /// 当前实验 ID
+    experiment_id: String,
 }
 
 /// 任务执行日志
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskExecutionLog {
     /// 任务 ID
@@ -63,83 +40,81 @@ pub struct TaskExecutionLog {
     pub description: String,
     /// 时间戳
     pub timestamp: DateTime<Utc>,
-    /// 实验组名
+    /// 实验组
     pub group: String,
-    /// 执行详情
-    pub execution: ExecutionDetails,
-    /// 进化详情
-    #[serde(default)]
-    pub evolution: EvolutionDetails,
+    /// 执行结果
+    pub execution: ExecutionResult,
+    /// 进化信息
+    pub evolution: EvolutionInfo,
 }
 
-/// 执行详情
+/// 执行结果
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionDetails {
+pub struct ExecutionResult {
     /// 是否成功
     pub success: bool,
     /// 工具调用列表
-    pub tool_calls: Vec<ToolCallLog>,
+    pub tool_calls: Vec<ToolCallRecord>,
     /// 总工具调用次数
     pub total_tool_calls: u32,
-    /// 执行时间 (ms)
-    pub execution_time_ms: u64,
-    /// 用户满意度 (1-5)
-    pub user_satisfaction: Option<u8>,
-    /// 失败原因（如果失败）
-    pub failure_reason: Option<String>,
+    /// 执行时间（毫秒）
+    pub execution_time_ms: f64,
+    /// 用户满意度（1-5）
+    pub user_satisfaction: u8,
+    /// 错误信息（如果失败）
+    pub error_message: Option<String>,
 }
 
-/// 工具调用日志
+/// 工具调用记录
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallLog {
+pub struct ToolCallRecord {
     /// 工具名称
     pub tool: String,
-    /// 工具参数
-    pub args: serde_json::Value,
-    /// 执行结果
+    /// 参数
+    pub args: HashMap<String, serde_json::Value>,
+    /// 结果
     pub result: String,
-    /// 执行时间 (ms)
-    pub execution_time_ms: Option<u64>,
-    /// 错误信息（如果失败）
-    pub error: Option<String>,
 }
 
-/// 进化详情
+/// 进化信息
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EvolutionDetails {
+pub struct EvolutionInfo {
     /// 检测到的缺口数量
     pub gaps_detected: u32,
     /// 创建的工具数量
     pub tools_created: u32,
     /// 优化的工具数量
     pub tools_optimized: u32,
-    /// 废弃的工具数量
-    pub tools_deprecated: u32,
 }
 
-/// 自进化周期日志
+/// 自进化日志
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvolutionCycleLog {
+pub struct SelfEvolutionLog {
     /// 周期 ID
     pub cycle_id: String,
     /// 时间戳
     pub timestamp: DateTime<Utc>,
-    /// 实验组名
+    /// 实验组
     pub group: String,
-    /// 系统反思
-    pub reflection: SystemReflection,
+    /// 反思结果
+    pub reflection: ReflectionResult,
     /// 检测到的缺口
-    pub gaps_detected: Vec<GapLog>,
-    /// 采取的行动
-    pub actions_taken: Vec<ActionLog>,
+    pub gaps_detected: Vec<GapRecord>,
+    /// 执行的操作
+    pub actions_taken: Vec<EvolutionAction>,
     /// 指标
-    pub metrics: CycleMetrics,
+    pub metrics: EvolutionMetrics,
 }
 
-/// 系统反思
+/// 反思结果
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemReflection {
-    /// 覆盖率评分 (0.0-1.0)
+pub struct ReflectionResult {
+    /// 覆盖分数
     pub coverage_score: f32,
     /// 系统性问题
     pub systemic_issues: Vec<String>,
@@ -147,320 +122,242 @@ pub struct SystemReflection {
     pub strategic_recommendations: Vec<String>,
 }
 
-/// 缺口日志
+/// 缺口记录
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GapLog {
+pub struct GapRecord {
     /// 缺口类型
     pub gap_type: String,
     /// 缺口描述
     pub description: String,
-    /// 建议的工具名称
+    /// 建议工具名称
     pub suggested_name: Option<String>,
-    /// 优先级 (1-10)
+    /// 优先级（1-10）
     pub priority: u8,
 }
 
-/// 行动日志
+/// 进化操作
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionLog {
-    /// 行动类型
+pub struct EvolutionAction {
+    /// 操作类型
     pub action_type: String,
     /// 工具名称
-    pub tool_name: String,
-    /// 执行结果
+    pub tool_name: Option<String>,
+    /// 结果
     pub result: String,
     /// 编译尝试次数
     pub compilation_attempts: Option<u32>,
 }
 
-/// 周期指标
+/// 进化指标
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CycleMetrics {
+pub struct EvolutionMetrics {
     /// API 调用次数
     pub api_calls: u32,
-    /// API 成本 (美元)
+    /// API 成本（美元）
     pub api_cost_usd: f32,
-    /// 周期耗时 (ms)
-    pub cycle_duration_ms: u64,
+    /// 周期持续时间（毫秒）
+    pub cycle_duration_ms: f64,
 }
 
+#[allow(dead_code)]
 impl ExperimentLogger {
     /// 创建新的实验日志记录器
-    pub fn new(log_dir: &str) -> Result<Self> {
-        let log_dir = PathBuf::from(log_dir);
-        
-        // 创建日志目录
-        fs::create_dir_all(&log_dir)
-            .with_context(|| format!("Failed to create log directory: {:?}", log_dir))?;
-        
-        let task_log_file = log_dir.join("task_executions.jsonl");
-        let evolution_log_file = log_dir.join("evolution_cycles.jsonl");
-        let metrics_log_file = log_dir.join("metrics.jsonl");
-        
-        // 打开日志文件（追加模式）
-        let task_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&task_log_file)
-            .with_context(|| format!("Failed to open task log file: {:?}", task_log_file))?;
-        
-        let evolution_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&evolution_log_file)
-            .with_context(|| format!("Failed to open evolution log file: {:?}", evolution_log_file))?;
-        
-        let metrics_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&metrics_log_file)
-            .with_context(|| format!("Failed to open metrics log file: {:?}", metrics_log_file))?;
+    pub fn new(log_dir: &Path, experiment_group: &str, experiment_id: &str) -> Result<Self> {
+        fs::create_dir_all(log_dir)?;
         
         Ok(Self {
-            log_dir,
-            task_log_file,
-            evolution_log_file,
-            metrics_log_file,
-            task_writer: Some(BufWriter::new(task_file)),
-            evolution_writer: Some(BufWriter::new(evolution_file)),
-            metrics_writer: Some(BufWriter::new(metrics_file)),
+            log_dir: log_dir.to_path_buf(),
+            experiment_group: experiment_group.to_string(),
+            experiment_id: experiment_id.to_string(),
         })
     }
-    
-    /// 记录任务执行日志
-    pub fn log_task_execution(&self, log: TaskExecutionLog) -> Result<()> {
-        let writer = self.task_writer.as_ref().unwrap();
-        let mut writer = writer.try_clone().unwrap();
+
+    /// 记录任务执行
+    pub fn log_task_execution(&self, log: &TaskExecutionLog) -> Result<()> {
+        let file_path = self.log_dir.join(format!("task_{}.jsonl", self.experiment_id));
         
-        let json = serde_json::to_string(&log)
-            .with_context(|| "Failed to serialize task execution log")?;
+        let json = serde_json::to_string(log)?;
         
-        writeln!(writer, "{}", json)
-            .with_context(|| "Failed to write task execution log")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)?;
         
-        Ok(())
-    }
-    
-    /// 记录进化周期日志
-    pub fn log_evolution_cycle(&self, log: EvolutionCycleLog) -> Result<()> {
-        let writer = self.evolution_writer.as_ref().unwrap();
-        let mut writer = writer.try_clone().unwrap();
-        
-        let json = serde_json::to_string(&log)
-            .with_context(|| "Failed to serialize evolution cycle log")?;
-        
-        writeln!(writer, "{}", json)
-            .with_context(|| "Failed to write evolution cycle log")?;
+        writeln!(file, "{}", json)?;
         
         Ok(())
     }
-    
-    /// 记录指标日志
-    pub fn log_metrics(&self, metrics: serde_json::Value) -> Result<()> {
-        let writer = self.metrics_writer.as_ref().unwrap();
-        let mut writer = writer.try_clone().unwrap();
+
+    /// 记录自进化周期
+    pub fn log_evolution_cycle(&self, log: &SelfEvolutionLog) -> Result<()> {
+        let file_path = self.log_dir.join(format!("evolution_{}.jsonl", self.experiment_id));
         
-        let json = serde_json::to_string(&metrics)
-            .with_context(|| "Failed to serialize metrics log")?;
+        let json = serde_json::to_string(log)?;
         
-        writeln!(writer, "{}", json)
-            .with_context(|| "Failed to write metrics log")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)?;
         
-        Ok(())
-    }
-    
-    /// 刷新所有缓冲区
-    pub fn flush(&self) -> Result<()> {
-        if let Some(writer) = &self.task_writer {
-            writer.get_mut().flush()
-                .with_context(|| "Failed to flush task log")?;
-        }
-        
-        if let Some(writer) = &self.evolution_writer {
-            writer.get_mut().flush()
-                .with_context(|| "Failed to flush evolution log")?;
-        }
-        
-        if let Some(writer) = &self.metrics_writer {
-            writer.get_mut().flush()
-                .with_context(|| "Failed to flush metrics log")?;
-        }
+        writeln!(file, "{}", json)?;
         
         Ok(())
     }
-    
-    /// 读取任务执行日志
-    pub fn read_task_executions(&self) -> Result<Vec<TaskExecutionLog>> {
-        let file = File::open(&self.task_log_file)
-            .with_context(|| format!("Failed to open task log file: {:?}", self.task_log_file))?;
+
+    /// 导出实验结果为 JSON
+    pub fn export_summary(&self) -> Result<ExperimentSummary> {
+        let task_logs = self.load_task_logs()?;
+        let evolution_logs = self.load_evolution_logs()?;
         
-        let reader = std::io::BufReader::new(file);
-        let mut logs = Vec::new();
+        let mut summary = ExperimentSummary::default();
         
-        for line in std::io::BufRead::lines(reader) {
-            let line = line.with_context(|| "Failed to read line")?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            
-            let log: TaskExecutionLog = serde_json::from_str(&line)
-                .with_context(|| "Failed to parse task execution log")?;
-            logs.push(log);
-        }
-        
-        Ok(logs)
-    }
-    
-    /// 读取进化周期日志
-    pub fn read_evolution_cycles(&self) -> Result<Vec<EvolutionCycleLog>> {
-        let file = File::open(&self.evolution_log_file)
-            .with_context(|| format!("Failed to open evolution log file: {:?}", self.evolution_log_file))?;
-        
-        let reader = std::io::BufReader::new(file);
-        let mut logs = Vec::new();
-        
-        for line in std::io::BufRead::lines(reader) {
-            let line = line.with_context(|| "Failed to read line")?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            
-            let log: EvolutionCycleLog = serde_json::from_str(&line)
-                .with_context(|| "Failed to parse evolution cycle log")?;
-            logs.push(log);
-        }
-        
-        Ok(logs)
-    }
-    
-    /// 生成实验报告
-    pub fn generate_report(&self) -> Result<ExperimentReport> {
-        let task_executions = self.read_task_executions()?;
-        let evolution_cycles = self.read_evolution_cycles()?;
-        
-        // 计算统计信息
-        let total_tasks = task_executions.len();
-        let successful_tasks = task_executions.iter().filter(|t| t.execution.success).count();
-        let success_rate = if total_tasks > 0 {
-            successful_tasks as f32 / total_tasks as f32
+        // 计算任务相关指标
+        summary.total_tasks = task_logs.len();
+        summary.successful_tasks = task_logs.iter().filter(|t| t.execution.success).count();
+        summary.task_completion_rate = if summary.total_tasks > 0 {
+            summary.successful_tasks as f64 / summary.total_tasks as f64
         } else {
             0.0
         };
         
-        let avg_tool_calls = if total_tasks > 0 {
-            task_executions.iter().map(|t| t.execution.total_tool_calls as f32).sum::<f32>() / total_tasks as f32
+        // 计算平均工具调用次数
+        summary.avg_tool_calls = if !task_logs.is_empty() {
+            task_logs.iter().map(|t| t.execution.total_tool_calls as f64).sum::<f64>() 
+                / summary.total_tasks as f64
         } else {
             0.0
         };
         
-        let avg_satisfaction = task_executions.iter()
-            .filter_map(|t| t.execution.user_satisfaction)
-            .map(|s| s as f32)
-            .collect::<Vec<_>>();
-        
-        let avg_satisfaction = if avg_satisfaction.is_empty() {
-            0.0
+        // 计算平均满意度
+        summary.avg_satisfaction = if !task_logs.is_empty() {
+            task_logs.iter().map(|t| t.execution.user_satisfaction as f64).sum::<f64>() 
+                / summary.total_tasks as f64
         } else {
-            avg_satisfaction.iter().sum::<f32>() / avg_satisfaction.len() as f32
+            0.0
         };
         
-        let total_gaps_detected: u32 = evolution_cycles.iter().map(|c| c.gaps_detected.len() as u32).sum();
-        let total_tools_created: u32 = evolution_cycles.iter()
-            .flat_map(|c| c.actions_taken.iter().filter(|a| a.action_type == "create_tool"))
+        // 计算进化相关指标
+        summary.total_evolution_cycles = evolution_logs.len();
+        summary.total_gaps_detected = evolution_logs.iter().map(|e| e.gaps_detected.len() as u32).sum();
+        summary.total_tools_created = evolution_logs.iter()
+            .flat_map(|e| &e.actions_taken)
+            .filter(|a| a.action_type == "create_tool")
             .count() as u32;
         
-        let total_api_cost: f32 = evolution_cycles.iter().map(|c| c.metrics.api_cost_usd).sum();
+        summary.group = self.experiment_group.clone();
+        summary.experiment_id = self.experiment_id.clone();
         
-        Ok(ExperimentReport {
-            total_tasks,
-            successful_tasks,
-            success_rate,
-            avg_tool_calls,
-            avg_satisfaction,
-            total_gaps_detected,
-            total_tools_created,
-            total_api_cost,
-            total_cycles: evolution_cycles.len(),
-        })
+        Ok(summary)
+    }
+
+    fn load_task_logs(&self) -> Result<Vec<TaskExecutionLog>> {
+        let file_path = self.log_dir.join(format!("task_{}.jsonl", self.experiment_id));
+        
+        if !file_path.exists() {
+            return Ok(Vec::new());
+        }
+        
+        let content = fs::read_to_string(file_path)?;
+        let logs = content.lines()
+            .filter_map(|line| serde_json::from_str::<TaskExecutionLog>(line).ok())
+            .collect();
+        
+        Ok(logs)
+    }
+
+    fn load_evolution_logs(&self) -> Result<Vec<SelfEvolutionLog>> {
+        let file_path = self.log_dir.join(format!("evolution_{}.jsonl", self.experiment_id));
+        
+        if !file_path.exists() {
+            return Ok(Vec::new());
+        }
+        
+        let content = fs::read_to_string(file_path)?;
+        let logs = content.lines()
+            .filter_map(|line| serde_json::from_str::<SelfEvolutionLog>(line).ok())
+            .collect();
+        
+        Ok(logs)
     }
 }
 
-/// 实验报告
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExperimentReport {
+/// 实验摘要
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExperimentSummary {
+    /// 实验组
+    pub group: String,
+    /// 实验 ID
+    pub experiment_id: String,
     /// 总任务数
     pub total_tasks: usize,
     /// 成功任务数
     pub successful_tasks: usize,
-    /// 成功率
-    pub success_rate: f32,
+    /// 任务完成率
+    pub task_completion_rate: f64,
     /// 平均工具调用次数
-    pub avg_tool_calls: f32,
+    pub avg_tool_calls: f64,
     /// 平均满意度
-    pub avg_satisfaction: f32,
-    /// 总缺口检测数
+    pub avg_satisfaction: f64,
+    /// 总进化周期数
+    pub total_evolution_cycles: usize,
+    /// 总检测缺口数
     pub total_gaps_detected: u32,
-    /// 总工具创建数
+    /// 总创建工具数
     pub total_tools_created: u32,
-    /// 总 API 成本
-    pub total_api_cost: f32,
-    /// 总周期数
-    pub total_cycles: usize,
-}
-
-impl Drop for ExperimentLogger {
-    fn drop(&mut self) {
-        let _ = self.flush();
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    
+    use tempfile::TempDir;
+
     #[test]
-    fn test_create_logger() {
-        let dir = tempdir().unwrap();
-        let log_dir = dir.path().join("test_logs");
+    fn test_experiment_logger_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let logger = ExperimentLogger::new(temp_dir.path(), "Ours-Full", "test_001");
         
-        let logger = ExperimentLogger::new(log_dir.to_str().unwrap()).unwrap();
-        
-        assert!(logger.task_log_file.exists());
-        assert!(logger.evolution_log_file.exists());
-        assert!(logger.metrics_log_file.exists());
+        assert!(logger.is_ok());
     }
-    
+
     #[test]
     fn test_log_task_execution() {
-        let dir = tempdir().unwrap();
-        let log_dir = dir.path().join("test_logs");
-        
-        let logger = ExperimentLogger::new(log_dir.to_str().unwrap()).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let logger = ExperimentLogger::new(temp_dir.path(), "Ours-Full", "test_001").unwrap();
         
         let log = TaskExecutionLog {
-            task_id: "test_001".to_string(),
-            category: "test".to_string(),
+            task_id: "file_001".to_string(),
+            category: "file_ops".to_string(),
             difficulty: "easy".to_string(),
-            description: "Test task".to_string(),
+            description: "读取 README.md".to_string(),
             timestamp: Utc::now(),
             group: "Ours-Full".to_string(),
-            execution: ExecutionDetails {
+            execution: ExecutionResult {
                 success: true,
                 tool_calls: vec![],
                 total_tool_calls: 1,
-                execution_time_ms: 100,
-                user_satisfaction: Some(5),
-                failure_reason: None,
+                execution_time_ms: 150.0,
+                user_satisfaction: 5,
+                error_message: None,
             },
-            evolution: EvolutionDetails::default(),
+            evolution: EvolutionInfo::default(),
         };
         
-        logger.log_task_execution(log).unwrap();
-        logger.flush().unwrap();
+        let result = logger.log_task_execution(&log);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_export_summary() {
+        let temp_dir = TempDir::new().unwrap();
+        let logger = ExperimentLogger::new(temp_dir.path(), "Ours-Full", "test_001").unwrap();
         
-        let executions = logger.read_task_executions().unwrap();
-        assert_eq!(executions.len(), 1);
-        assert_eq!(executions[0].task_id, "test_001");
+        let summary = logger.export_summary().unwrap();
+        
+        assert_eq!(summary.group, "Ours-Full");
+        assert_eq!(summary.experiment_id, "test_001");
     }
 }

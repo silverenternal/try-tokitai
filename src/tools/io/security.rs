@@ -1,6 +1,6 @@
-/// 安全模块 - 提供沙箱目录和路径验证
-///
-/// 防止路径遍历攻击、符号链接攻击，确保 AI 只能访问授权目录
+//! 安全模块 - 提供沙箱目录和路径验证
+//!
+//! 防止路径遍历攻击、符号链接攻击，确保 AI 只能访问授权目录
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -112,6 +112,7 @@ impl SecurePathResolver {
     }
 
     /// 创建自定义配置的路径解析器
+    #[allow(dead_code)]
     pub fn with_config(config: SandboxConfig) -> Self {
         Self { config }
     }
@@ -298,6 +299,7 @@ impl SecurePathResolver {
     }
 
     /// 添加允许的根目录
+    #[allow(dead_code)]
     pub fn add_allowed_root(&mut self, path: PathBuf) {
         if !self.config.allowed_roots.contains(&path) {
             self.config.allowed_roots.push(path);
@@ -305,6 +307,7 @@ impl SecurePathResolver {
     }
 
     /// 移除允许的根目录
+    #[allow(dead_code)]
     pub fn remove_allowed_root(&mut self, path: &Path) {
         self.config.allowed_roots.retain(|p| p != path);
     }
@@ -351,6 +354,7 @@ pub fn get_global_resolver() -> &'static RwLock<SecurePathResolver> {
 
 /// 初始化全局路径解析器（带自定义配置）
 /// 只能在程序启动时调用一次，后续调用会返回 false
+#[allow(dead_code)]
 pub fn init_global_resolver(config: SandboxConfig) -> bool {
     GLOBAL_RESOLVER
         .set(RwLock::new(SecurePathResolver::with_config(config)))
@@ -358,16 +362,19 @@ pub fn init_global_resolver(config: SandboxConfig) -> bool {
 }
 
 /// 便捷函数：验证路径（使用全局解析器）
+#[allow(dead_code)]
 pub fn validate_path(path: &str) -> PathValidationResult {
     get_global_resolver().read().resolve(path)
 }
 
 /// 便捷函数：检查路径是否安全
+#[allow(dead_code)]
 pub fn is_path_safe(path: &str) -> bool {
     get_global_resolver().read().resolve(path).is_valid
 }
 
 /// 便捷函数：验证路径并返回结果或错误
+#[allow(dead_code)]
 pub fn validate_path_or_error(path: &str) -> IoResult<String> {
     get_global_resolver().read().resolve(path).into_result(path)
 }
@@ -507,7 +514,7 @@ mod tests {
 
         // 双斜杠应该被规范化
         let result = resolver.resolve(&format!("{}/./test", tmpdir.path().display()));
-        assert!(result.is_valid || !result.is_valid); // 只要不 panic 就行
+        assert!(result.is_valid, "路径解析应该成功"); // 只要不 panic 就行
     }
 
     #[test]

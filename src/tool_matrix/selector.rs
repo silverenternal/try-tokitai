@@ -2,6 +2,8 @@
 //!
 //! 根据查询语义、角色和上下文自动选择最相关的工具子集
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;

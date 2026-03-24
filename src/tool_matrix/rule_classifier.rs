@@ -8,6 +8,8 @@
 //! - L3: 规则分类器 (~5ms) ← 本模块
 //! - L4: LLM 分类 (~1.5s)
 //!
+
+#![allow(dead_code)]
 //! ## 规则分类器特点
 //! - 关键词匹配：支持中英文关键词
 //! - 正则模式匹配：支持复杂模式
@@ -235,7 +237,7 @@ impl RuleClassifier {
             for keyword in &rule.keywords {
                 self.keyword_index
                     .entry(keyword.to_lowercase())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(toolbox_id.clone());
             }
         }
@@ -348,14 +350,14 @@ impl RuleClassifier {
             // 添加到工具箱的关键词收集
             toolbox_keywords
                 .entry(toolbox_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .extend(keywords);
 
             // 添加工具箱的正则模式（工具名称）
             let pattern = format!("(?i){}", tool.name.replace('_', ".*"));
             toolbox_patterns
                 .entry(toolbox_id)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(pattern);
         }
 
@@ -477,9 +479,10 @@ impl SimHasher {
         
         // 分词并计算每个词的哈希
         let tokens = self.tokenize(text);
-        
+
         for token in tokens {
             let hash = self.fnv1a_hash(&token);
+            #[allow(clippy::needless_range_loop)]
             for i in 0..self.hash_bits {
                 if (hash >> i) & 1 == 1 {
                     v[i] += 1;
@@ -488,15 +491,16 @@ impl SimHasher {
                 }
             }
         }
-        
+
         // 根据权重生成最终哈希
         let mut simhash: u64 = 0;
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.hash_bits {
             if v[i] > 0 {
                 simhash |= 1 << i;
             }
         }
-        
+
         simhash
     }
     

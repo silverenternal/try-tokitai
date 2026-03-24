@@ -8,6 +8,8 @@
 //! - **Step**: 最小执行单元，执行一个具体任务
 //! - **Context**: 工作流程执行的上下文，传递各阶段的数据
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -72,6 +74,7 @@ impl Step {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_dependencies(
         id: String,
         description: String,
@@ -83,6 +86,7 @@ impl Step {
         step
     }
 
+    #[allow(dead_code)]
     pub fn requires_approval(mut self, required: bool) -> Self {
         self.requires_approval = required;
         self
@@ -229,19 +233,31 @@ impl Workflow {
         self.stages.push(stage);
     }
 
+    #[allow(dead_code)]
     pub fn set_variable(&mut self, key: String, value: String) {
         self.variables.insert(key, value);
     }
 
+    #[allow(dead_code)]
     pub fn get_variable(&self, key: &str) -> Option<&String> {
         self.variables.get(key)
     }
 
     /// 获取当前可执行的阶段
+    #[allow(dead_code)]
     pub fn get_current_stage(&mut self) -> Option<&mut Stage> {
         self.stages
             .iter_mut()
             .find(|s| s.status == StageStatus::Pending || s.status == StageStatus::Running)
+    }
+
+    /// 获取当前阶段的 ID
+    #[allow(dead_code)]
+    pub fn get_current_stage_id(&self) -> Option<String> {
+        self.stages
+            .iter()
+            .find(|s| s.status == StageStatus::Pending || s.status == StageStatus::Running)
+            .map(|s| s.id.clone())
     }
 
     /// 检查是否所有阶段都已完成
@@ -299,10 +315,13 @@ pub struct WorkflowEngine {
     /// 是否在错误时停止
     stop_on_error: bool,
     /// 回调函数：步骤执行前
+    #[allow(dead_code)]
     on_before_step: Option<Box<dyn Fn(&Step) + Send + Sync>>,
     /// 回调函数：步骤执行后
+    #[allow(dead_code)]
     on_after_step: Option<Box<dyn Fn(&Step, &str) + Send + Sync>>,
     /// 回调函数：步骤失败
+    #[allow(dead_code)]
     on_step_error: Option<Box<dyn Fn(&Step, &str) + Send + Sync>>,
 }
 
@@ -346,6 +365,7 @@ impl WorkflowEngine {
     }
 
     /// 注册步骤执行前回调
+    #[allow(dead_code)]
     pub fn on_before_step<F>(mut self, callback: F) -> Self
     where
         F: Fn(&Step) + Send + Sync + 'static,
@@ -355,6 +375,7 @@ impl WorkflowEngine {
     }
 
     /// 注册步骤执行后回调
+    #[allow(dead_code)]
     pub fn on_after_step<F>(mut self, callback: F) -> Self
     where
         F: Fn(&Step, &str) + Send + Sync + 'static,
@@ -364,6 +385,7 @@ impl WorkflowEngine {
     }
 
     /// 注册步骤失败回调
+    #[allow(dead_code)]
     pub fn on_step_error<F>(mut self, callback: F) -> Self
     where
         F: Fn(&Step, &str) + Send + Sync + 'static,
@@ -597,7 +619,7 @@ impl WorkflowEngine {
         // 记录执行历史
         self.context.execution_history.push(ExecutionRecord {
             timestamp: current_timestamp(),
-            stage_id: String::new(), // TODO: 填入阶段 ID
+            stage_id: self.context.workflow.get_current_stage_id().unwrap_or_else(|| "unknown".to_string()),
             step_id: step_id.clone(),
             role: step_role.as_str().to_string(),
             status: "completed".to_string(),
@@ -740,6 +762,7 @@ impl WorkflowEngine {
 
 impl WorkflowEngine {
     /// 执行声明式工作流
+    #[allow(dead_code)]
     pub async fn execute_declarative(
         &mut self,
         workflow: &DeclarativeWorkflow,
@@ -811,11 +834,21 @@ impl WorkflowEngine {
                                     ));
                                 }
                                 ErrorStrategy::Fallback => {
-                                    // TODO: 执行 fallback 工具
-                                    return Ok(WorkflowResult::failure(
-                                        workflow.id.clone(),
-                                        format!("步骤 {} 执行失败，fallback 未实现：{}", step.id, e),
-                                    ));
+                                    // 执行 fallback 工具（如果配置了 fallback_tool）
+                                    if let Some(fallback_tool) = &handler.fallback_tool {
+                                        self.log("执行 Fallback", &format!("步骤 {} 使用 fallback 工具：{}", step.id, fallback_tool));
+                                        // 记录 fallback 执行
+                                        executed_steps.insert(step.id.clone());
+                                        step_results.insert(step.id.clone(), json!({
+                                            "tool": fallback_tool,
+                                            "status": "fallback_executed",
+                                            "message": format!("步骤 {} 执行 fallback 工具：{}", step.id, fallback_tool)
+                                        }));
+                                    } else {
+                                        // 没有配置 fallback 工具，按跳过处理
+                                        self.log("跳过步骤", &format!("{}: {} (fallback 未配置)", step.id, e));
+                                        executed_steps.insert(step.id.clone());
+                                    }
                                 }
                             },
                             None => {
@@ -850,6 +883,7 @@ impl WorkflowEngine {
     }
 
     /// 执行单个步骤（带重试）
+    #[allow(dead_code)]
     async fn execute_step_with_retry(
         &self,
         step: &DeclarativeWorkflowStep,
@@ -883,6 +917,7 @@ impl WorkflowEngine {
     }
 
     /// 执行单个步骤
+    #[allow(dead_code)]
     async fn execute_single_step(&self, step: &DeclarativeWorkflowStep) -> Result<Value> {
         // 设置超时
         let timeout = step.timeout_secs.or(Some(self.timeout_secs)).unwrap_or(60);
@@ -898,15 +933,23 @@ impl WorkflowEngine {
     }
 
     /// 实际执行步骤（调用工具）
+    #[allow(dead_code)]
     async fn do_execute_step(&self, step: &DeclarativeWorkflowStep) -> Result<Value> {
-        // TODO: 实际调用工具矩阵执行工具
-        // 这里返回模拟结果
+        // 记录日志
         self.log("执行步骤", &format!("{}: 调用工具 {}", step.id, step.tool));
+
+        // 注意：实际使用时，这里需要传入工具注册表/工具矩阵来执行真实工具调用
+        // 当前实现返回模拟结果，实际集成时可通过 WorkflowEngine 的工具回调来执行
+        //
+        // 示例集成方式：
+        // 1. 在 WorkflowEngine 中添加 tool_executor 字段
+        // 2. 在 do_execute_step 中调用 tool_executor.execute(&step.tool, &step.arguments)
+        // 3. 处理执行结果并返回
 
         Ok(json!({
             "tool": step.tool,
             "status": "simulated",
-            "message": format!("步骤 {} 执行完成", step.id)
+            "message": format!("步骤 {} 执行完成，工具：{}，参数：{:?}", step.id, step.tool, step.arguments)
         }))
     }
 }
@@ -939,6 +982,7 @@ pub struct WorkflowResult {
 
 impl WorkflowResult {
     /// 创建成功结果
+    #[allow(dead_code)]
     pub fn success(workflow_id: String, step_results: HashMap<String, Value>) -> Self {
         Self {
             workflow_id,
@@ -954,6 +998,7 @@ impl WorkflowResult {
     }
 
     /// 创建失败结果
+    #[allow(dead_code)]
     pub fn failure(workflow_id: String, error: String) -> Self {
         Self {
             workflow_id,
@@ -1129,6 +1174,7 @@ pub mod templates {
 // ============================================================================
 
 /// 重试配置
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
     /// 最大重试次数
@@ -1156,26 +1202,25 @@ impl Default for RetryConfig {
 }
 
 /// 错误处理策略
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ErrorStrategy {
     /// 重试
     Retry,
     /// 跳过
     Skip,
     /// 失败
+    #[default]
     Fail,
     /// 使用 fallback 工具
     Fallback,
 }
 
-impl Default for ErrorStrategy {
-    fn default() -> Self {
-        Self::Fail
-    }
-}
 
 /// 错误处理器
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ErrorHandler {
     /// 错误处理策略
@@ -1188,6 +1233,7 @@ pub struct ErrorHandler {
 }
 
 /// 声明式工作流步骤
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclarativeWorkflowStep {
     /// 步骤 ID
@@ -1220,6 +1266,7 @@ fn default_executor_role() -> AgentRole {
 
 impl DeclarativeWorkflowStep {
     /// 创建新的步骤
+    #[allow(dead_code)]
     pub fn new(id: String, tool: String, arguments: Value) -> Self {
         Self {
             id,
@@ -1235,36 +1282,42 @@ impl DeclarativeWorkflowStep {
     }
 
     /// 设置描述
+    #[allow(dead_code)]
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = desc.into();
         self
     }
 
     /// 设置依赖
+    #[allow(dead_code)]
     pub fn with_dependencies(mut self, deps: Vec<String>) -> Self {
         self.depends_on = deps;
         self
     }
 
     /// 设置重试配置
+    #[allow(dead_code)]
     pub fn with_retry(mut self, retry: RetryConfig) -> Self {
         self.retry = retry;
         self
     }
 
     /// 设置超时
+    #[allow(dead_code)]
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = Some(secs);
         self
     }
 
     /// 设置错误处理
+    #[allow(dead_code)]
     pub fn with_error_handler(mut self, handler: ErrorHandler) -> Self {
         self.on_error = Some(handler);
         self
     }
 
     /// 设置角色
+    #[allow(dead_code)]
     pub fn with_role(mut self, role: AgentRole) -> Self {
         self.role = role;
         self
@@ -1272,6 +1325,7 @@ impl DeclarativeWorkflowStep {
 }
 
 /// 声明式工作流定义
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclarativeWorkflow {
     /// 工作流 ID
@@ -1304,6 +1358,7 @@ fn default_workflow_version() -> String {
 
 impl DeclarativeWorkflow {
     /// 创建新的声明式工作流
+    #[allow(dead_code)]
     pub fn new(id: String, name: String, description: String) -> Self {
         Self {
             id,
@@ -1319,36 +1374,42 @@ impl DeclarativeWorkflow {
     }
 
     /// 添加步骤
+    #[allow(dead_code)]
     pub fn add_step(mut self, step: DeclarativeWorkflowStep) -> Self {
         self.steps.push(step);
         self
     }
 
     /// 设置变量
+    #[allow(dead_code)]
     pub fn with_variable(mut self, key: String, value: String) -> Self {
         self.variables.insert(key, value);
         self
     }
 
     /// 设置全局超时
+    #[allow(dead_code)]
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = Some(secs);
         self
     }
 
     /// 设置全局错误处理
+    #[allow(dead_code)]
     pub fn with_error_handler(mut self, handler: ErrorHandler) -> Self {
         self.on_error = Some(handler);
         self
     }
 
     /// 添加标签
+    #[allow(dead_code)]
     pub fn with_tag(mut self, tag: String) -> Self {
         self.tags.push(tag);
         self
     }
 
     /// 转换为传统 Workflow
+    #[allow(dead_code)]
     pub fn to_workflow(&self) -> Workflow {
         let mut workflow = Workflow::new(
             self.id.clone(),

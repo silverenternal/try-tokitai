@@ -8,6 +8,8 @@
 //! - 状态转换时自动保存/恢复相关上下文
 //! - 支持用户中断和状态回滚
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

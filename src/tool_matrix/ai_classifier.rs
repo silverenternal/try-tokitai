@@ -9,6 +9,8 @@
 //! - 工具箱不是预先设计的，而是 AI 在创造工具过程中自然演化的
 //! - 减少人工干预，让 AI 自主管理工具索引、分类和依赖关系
 
+#![allow(dead_code)]
+
 use crate::tool_matrix::matrix::{ToolDefinition, ToolBox};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -172,7 +174,7 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
 
         // 解析 AI 响应
         let assignment: ToolboxAssignment = serde_json::from_str(&response)
-            .map_err(|e| format!("解析 AI 响应响应失败：{}", e))?;
+            .map_err(|e| format!("解析 AI 响应失败：{}", e))?;
 
         // 如果 AI 建议创建新工具箱，自动执行
         if matches!(assignment.action, ToolboxAction::CreateNew) {

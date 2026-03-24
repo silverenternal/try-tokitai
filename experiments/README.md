@@ -1,8 +1,16 @@
 # 实验框架
 
 > **目的**：验证 Prompt Engineering 自进化系统的有效性
-> 
+>
 > **实验设计**：30 天自主进化实验 + 对比实验 + 消融实验
+>
+> **最后更新**：2026-03-20
+>
+> **当前状态**：
+> - ✅ 基准测试任务定义完成（110 个任务）
+> - ✅ 实验日志系统实现完成
+> - ✅ 评估脚本准备完成
+> - ⏳ 等待运行实验收集数据
 
 ---
 
@@ -12,14 +20,14 @@
 experiments/
 ├── README.md                 # 本文档
 ├── tasks/                    # 基准测试任务集
-│   ├── benchmark_tasks.json  # 100+ 基准任务定义
-│   ├── file_ops.json         # 文件操作任务（20 个）
-│   ├── code_analysis.json    # 代码分析任务（20 个）
-│   ├── network.json          # 网络请求任务（15 个）
-│   ├── git_ops.json          # Git 操作任务（15 个）
-│   ├── data_processing.json  # 数据处理任务（15 个）
-│   ├── system_monitor.json   # 系统监控任务（10 个）
-│   └── composite.json        # 复合任务（15 个）
+│   ├── benchmark_tasks.json  # 110 个基准任务定义 ✅
+│   ├── file_ops.json         # 文件操作任务（20 个）✅
+│   ├── code_analysis.json    # 代码分析任务（20 个）✅
+│   ├── network.json          # 网络请求任务（15 个）✅
+│   ├── git_ops.json          # Git 操作任务（15 个）✅
+│   ├── data_processing.json  # 数据处理任务（15 个）✅
+│   ├── system_monitor.json   # 系统监控任务（10 个）✅
+│   └── composite.json        # 复合任务（15 个）✅
 ├── logs/                     # 实验日志
 │   ├── control/              # Control 组日志
 │   ├── ours_full/            # Ours-Full 组日志
@@ -53,17 +61,17 @@ experiments/
 ### 实验流程
 
 ```
-Week 1-2: 准备阶段
-  - 设计 100+ 基准测试任务
-  - 实现实验日志系统
-  - 准备评估脚本
+Week 1-2: 准备阶段 ✅
+  - ✅ 设计 110+ 基准测试任务
+  - ✅ 实现实验日志系统
+  - ✅ 准备评估脚本
 
-Week 3-6: 运行实验
+Week 3-6: 运行实验 ⏳
   - 每组运行 30 天自主进化实验
   - 每天记录关键指标
   - 收集定性案例
 
-Week 7-8: 数据分析
+Week 7-8: 数据分析 ⏳
   - 统计分析（t-test、ANOVA）
   - 生成可视化图表
   - 撰写实验报告

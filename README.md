@@ -3,6 +3,8 @@
 > **AI 原生工具选择器 + 双轨服务架构**
 >
 > 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互** 和 **自主进化** 双模式，配备 63+ 工具和 AI 原生工具选择系统。
+>
+> **项目名称说明**: 本项目 (`ai-assistant`) 是对 `tokitai` 库的深度实践和扩展实现，核心贡献（HybridGapDetector、Prompt Engineering 自进化系统）已回馈到 tokitai 生态。
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Tests](https://img.shields.io/badge/tests-470%20passed-brightgreen)]()
@@ -207,10 +209,13 @@ cargo test autonomy
 | `code` | 4 | 代码分析、语言检测 |
 | `git` | 4 | Git 状态、日志、分支管理 |
 | `data` | 5 | JSON 格式化、查询、转换 |
-| `tensor` | 20+ | 张量计算、矩阵操作、激活函数、神经网络 |
+| `tensor` | 20+ | 张量计算、矩阵操作、激活函数、神经网络 **（实验性）** |
 | `autonomy` | 2 | 自主进化（仅自主模式） |
 
-### 张量计算工具箱（tensor）
+### 张量计算工具箱（tensor）⚠️
+
+> **注意**: `tensor` 功能为**实验性特性**，需要启用 `--features tensor`。
+> 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 [candle](https://github.com/huggingface/candle)、[tch-rs](https://github.com/LaurentMazare/tch-rs)）。
 
 **核心功能**:
 - **创建操作**: `zeros`, `ones`, `randn`, `from_data`, `arange`
@@ -222,6 +227,7 @@ cargo test autonomy
 
 **使用示例**:
 ```rust
+// 需要启用 tensor feature: cargo build --features tensor
 use crate::tools::tensor::TensorService;
 
 let service = TensorService::new();

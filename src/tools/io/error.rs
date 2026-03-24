@@ -1,9 +1,9 @@
-/// 统一的 IO 工具错误处理模块
-///
-/// 使用 thiserror 定义结构化错误类型，支持：
-/// - 错误分类（路径验证、IO、解析等）
-/// - 错误上下文（路径、操作类型等）
-/// - AI 友好的错误消息和建议
+//! 统一的 IO 工具错误处理模块
+//!
+//! 使用 thiserror 定义结构化错误类型，支持：
+//! - 错误分类（路径验证、IO、解析等）
+//! - 错误上下文（路径、操作类型等）
+//! - AI 友好的错误消息和建议
 
 use thiserror::Error;
 use serde_json::{json, Value};
@@ -364,6 +364,7 @@ impl From<IoToolError> for Value {
 }
 
 /// 转换为 serde_json::Result 的扩展方法
+#[allow(dead_code)]
 pub trait ToIoResult<T> {
     fn to_io_result(self, operation: &str, path: Option<&str>) -> IoResult<T>;
 }

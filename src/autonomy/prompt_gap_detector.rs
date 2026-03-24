@@ -647,7 +647,7 @@ impl PromptGapDetector {
         let total = self.task_history.len() as u32;
         let failed = self.task_history.iter().filter(|t| !t.success).count() as u32;
         let low_sat = self.task_history.iter()
-            .filter(|t| t.user_satisfaction.map_or(false, |s| s <= 2))
+            .filter(|t| t.user_satisfaction.is_some_and(|s| s <= 2))
             .count() as u32;
         let inefficient = self.task_history.iter()
             .filter(|t| t.execution_time_ms > 5000)

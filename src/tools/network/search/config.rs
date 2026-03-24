@@ -21,6 +21,7 @@ pub struct SearchConfig {
     /// 连接超时（秒）
     pub connect_timeout_secs: u64,
     /// 最大重试次数
+    #[allow(dead_code)]
     pub max_retries: u32,
     /// 缓存容量（条目数）
     pub cache_capacity: u64,
@@ -37,6 +38,7 @@ pub struct SearchConfig {
     /// 是否启用缓存
     pub enable_cache: bool,
     /// 是否启用健康检查
+    #[allow(dead_code)]
     pub enable_health_check: bool,
 }
 
@@ -61,6 +63,7 @@ impl Default for SearchConfig {
     }
 }
 
+#[allow(dead_code)]
 impl SearchConfig {
     /// 从环境变量加载配置
     pub fn from_env() -> Self {
@@ -89,6 +92,7 @@ impl SearchConfig {
     }
 
     /// 验证配置
+    #[allow(dead_code)]
     pub fn validate(&self) -> NetworkResult<()> {
         if self.timeout_secs == 0 {
             return Err(SearchError::InvalidQuery("超时时间必须大于 0".to_string()).into());
@@ -115,6 +119,7 @@ pub trait SearchEngine: Send + Sync {
     fn name(&self) -> &str;
 
     /// 引擎类型
+    #[allow(dead_code)]
     fn engine_type(&self) -> SearchEngineType;
 
     /// 执行搜索
@@ -137,6 +142,7 @@ pub trait SearchEngine: Send + Sync {
 
 /// 搜索引擎管理器 - 智能路由和缓存
 pub struct SearchEngineManager {
+    #[allow(dead_code)]
     config: SearchConfig,
     engines: Vec<Arc<dyn SearchEngine>>,
     stats: parking_lot::RwLock<SearchStats>,
@@ -170,6 +176,7 @@ impl SearchEngineManager {
     }
 
     /// 获取所有可用的引擎
+    #[allow(dead_code)]
     pub fn get_available_engines(&self) -> Vec<&dyn SearchEngine> {
         self.engines
             .iter()
@@ -200,6 +207,7 @@ impl SearchEngineManager {
     }
 
     /// 记录搜索统计
+    #[allow(dead_code)]
     pub fn record_search(&self, success: bool, response_time_ms: f64, cache_hit: bool) {
         let mut stats = self.stats.write();
         stats.total_searches += 1;
@@ -226,6 +234,7 @@ impl SearchEngineManager {
     }
 
     /// 清空统计
+    #[allow(dead_code)]
     pub fn clear_stats(&self) {
         let mut stats = self.stats.write();
         *stats = SearchStats::default();
@@ -237,6 +246,7 @@ impl SearchEngineManager {
 // ============================================================================
 
 /// 缓存配置
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CacheConfig {
     /// 最大容量
@@ -257,6 +267,7 @@ impl Default for CacheConfig {
     }
 }
 
+#[allow(dead_code)]
 impl CacheConfig {
     pub fn new(max_capacity: u64, ttl_secs: u64) -> Self {
         Self {

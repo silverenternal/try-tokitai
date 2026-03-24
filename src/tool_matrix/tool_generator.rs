@@ -8,6 +8,8 @@
 //!
 //! ## IMP-002: tokitai-macros 集成
 //! - 使用 tokitai::tool 宏生成工具代码骨架
+
+#![allow(dead_code)]
 //! - 零手写样板代码
 //! - 生成时间从 ~2 分钟降至 ~10 秒
 //! - 正确率从 ~95% 提升至 ~99%
@@ -251,11 +253,11 @@ impl ToolGenerator {
         // 添加特定参数
         for (key, value) in &request.parameters {
             context.insert(key, value);
-            context.insert(&format!("{}_param", key), &"{}");
+            context.insert(format!("{}_param", key), &"{}");
         }
         
         // 添加工具体逻辑占位符
-        context.insert("tool_body", &self.generate_tool_body(&template, &request.parameters));
+        context.insert("tool_body", &self.generate_tool_body(template, &request.parameters));
         
         // 渲染代码模板
         let code = self.render_template(&template.code.template, &context)?;
@@ -324,7 +326,7 @@ impl ToolGenerator {
                 self.generate_data_ops_body(parameters)
             }
             _ => {
-                "// TODO: 实现工具逻辑\nunimplemented!()".to_string()
+                "// 默认实现：返回未实现提示\nunimplemented!(\"Tool category '{}' not implemented\", category)".to_string()
             }
         }
     }
@@ -332,34 +334,59 @@ impl ToolGenerator {
     /// 生成文件操作工具逻辑
     fn generate_file_ops_body(&self, parameters: &HashMap<String, String>) -> String {
         let operation = parameters.get("operation").map(|s| s.as_str()).unwrap_or("read");
-        
+
         match operation {
             "read" => {
                 r#"let content = fs::read_to_string(&path).await?;
-    let result = content;"#.to_string()
+    Ok(content)"#.to_string()
             }
             "write" => {
                 r#"fs::write(&path, &content).await?;
-    let result = ();"#.to_string()
+    Ok(format!("Successfully wrote to {}", path))"#.to_string()
             }
             "copy" => {
                 r#"fs::copy(&path, &dest_path).await?;
-    let result = ();"#.to_string()
+    Ok(format!("Copied {} to {}", path, dest_path))"#.to_string()
             }
             "delete" => {
                 r#"fs::remove_file(&path).await?;
-    let result = ();"#.to_string()
+    Ok(format!("Deleted {}", path))"#.to_string()
+            }
+            "list" => {
+                r#"let entries = fs::read_dir(&path).await?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        files.push(entry.file_name().to_string_lossy().to_string());
+    }
+    Ok(files.join("\n"))"#.to_string()
             }
             _ => {
-                "// TODO: 实现具体操作\nunimplemented!()".to_string()
+                format!("unimplemented!(\"Operation '{}' not supported for file_ops\", operation)", operation)
             }
         }
     }
 
     /// 生成网络操作工具逻辑
     fn generate_network_ops_body(&self, parameters: &HashMap<String, String>) -> String {
-        r#"let response = client.get(&url).send().await?;
-    let result = response.text().await?;"#.to_string()
+        let method = parameters.get("method").map(|s| s.as_str()).unwrap_or("get");
+        
+        match method {
+            "get" => {
+                r#"let response = client.get(&url).send().await?;
+    Ok(response.text().await?)"#.to_string()
+            }
+            "post" => {
+                r#"let response = client.post(&url)
+        .json(&body)
+        .send()
+        .await?;
+    Ok(response.text().await?)"#.to_string()
+            }
+            _ => {
+                format!("unimplemented!(\"HTTP method '{}' not supported\", method)", method)
+            }
+        }
     }
 
     /// 生成分析操作工具逻辑
@@ -499,7 +526,7 @@ impl ToolGenerator {
 
         // 生成结构体名称（驼峰式）
         let struct_name = struct_name
-            .unwrap_or(&tool_name.to_string())
+            .unwrap_or(tool_name)
             .to_string();
 
         // 生成函数签名
@@ -516,11 +543,12 @@ impl ToolGenerator {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // 生成 TODO 注释，提示用户实现
-        let todo_comment = format!(
-            "// TODO: 实现 {} 工具逻辑\n    // 参数：{}\n    todo!()",
+        // 生成实现提示
+        let impl_hint = format!(
+            "// 实现 {} 工具逻辑\n    // 参数：{}\n    // 提示：根据具体需求实现功能\n    unimplemented!(\"Implement {} tool logic\")",
             tool_name,
-            parameters.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+            parameters.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "),
+            tool_name
         );
 
         // 生成完整的工具代码
@@ -550,7 +578,7 @@ impl {struct_name} {{
     /// # Errors
     /// 如果操作失败，返回错误
     pub fn {tool_name}({fn_params}) -> Result<String, String> {{
-        {todo_comment}
+        {impl_hint}
     }}
 }}
 
@@ -771,7 +799,7 @@ notes = ""
         assert!(code.contains("pub fn write_file"));
         assert!(code.contains("&self, path: String"));
         assert!(code.contains("&self, content: String"));
-        assert!(code.contains("todo!()"));
+        assert!(code.contains("unimplemented!"));
         assert!(code.contains("mod tests"));
     }
 

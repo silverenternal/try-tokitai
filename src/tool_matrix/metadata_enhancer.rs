@@ -8,6 +8,8 @@
 //! # 使用示例
 //!
 //! ```rust,ignore
+
+#![allow(dead_code)]
 //! use crate::tool_matrix::metadata_enhancer::MetadataEnhancer;
 //! use crate::tools::FileOperations;
 //! use tokitai::ToolProvider;

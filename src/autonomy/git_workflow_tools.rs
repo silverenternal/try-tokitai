@@ -7,6 +7,8 @@
 //! - 保持与现有 GitWorkflow 的兼容性
 //! - 支持通过工具矩阵统一调度
 
+#![allow(dead_code)]
+
 use tokitai::tool;
 use super::git_workflow::GitWorkflow;
 use std::path::PathBuf;

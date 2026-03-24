@@ -215,8 +215,7 @@ impl ToolOptimizer {
             let necessity_score = self.calculate_necessity_score(metrics);
             
             let health_score = (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3)
-                .min(1.0)
-                .max(0.0);
+                .clamp(0.0, 1.0);
             
             let mut issues = Vec::new();
             
@@ -447,16 +446,16 @@ impl ToolOptimizer {
     fn levenshtein_distance(&self, s1: &[char], s2: &[char]) -> usize {
         let len1 = s1.len();
         let len2 = s2.len();
-        
+
         let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
-        
-        for i in 0..=len1 {
-            dp[i][0] = i;
+
+        for (i, row) in dp.iter_mut().enumerate().take(len1 + 1) {
+            row[0] = i;
         }
-        for j in 0..=len2 {
-            dp[0][j] = j;
+        for (j, val) in dp[0].iter_mut().enumerate().take(len2 + 1) {
+            *val = j;
         }
-        
+
         for i in 1..=len1 {
             for j in 1..=len2 {
                 let cost = if s1[i - 1] == s2[j - 1] { 0 } else { 1 };
@@ -465,7 +464,7 @@ impl ToolOptimizer {
                     .min(dp[i - 1][j - 1] + cost);
             }
         }
-        
+
         dp[len1][len2]
     }
 

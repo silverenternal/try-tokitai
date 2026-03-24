@@ -82,11 +82,10 @@ impl NetworkTools {
     /// 检查目标是否安全（使用统一的 SSRF 防护模块）
     fn is_safe_target(&self, host: &str) -> NetworkResult<()> {
         // 允许 localhost 用于本地测试
-        if self.config.allow_localhost_scan {
-            if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        if self.config.allow_localhost_scan
+            && (host == "localhost" || host == "127.0.0.1" || host == "::1") {
                 return Ok(());
             }
-        }
 
         // 尝试解析 IP 地址并使用统一的 SSRF 检查
         if let Ok(ip_addr) = host.parse::<std::net::IpAddr>() {

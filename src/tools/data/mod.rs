@@ -40,6 +40,7 @@ use crate::tool_matrix::matrix::{ServiceLifecycle, ServiceHealth, ServiceStats};
 
 /// 数据工具服务（统一入口）
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct DataService {
     pub config: DataToolConfig,
     pub metrics: MetricsCollector,
@@ -51,10 +52,12 @@ pub struct DataService {
 }
 
 impl DataService {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::with_config(DataToolConfig::default())
     }
 
+    #[allow(dead_code)]
     pub fn with_config(config: DataToolConfig) -> Self {
         let metrics = MetricsCollector::new();
         Self {
@@ -69,6 +72,7 @@ impl DataService {
     }
 
     /// 获取服务版本
+    #[allow(dead_code)]
     pub fn version() -> &'static str {
         "1.0.0"
     }
@@ -134,6 +138,7 @@ impl ServiceLifecycle for DataService {
 
 // 为了向后兼容，保留旧的工具类导出
 #[deprecated(since = "0.3.0", note = "请使用 DataService 或独立的工具类")]
+#[allow(dead_code)]
 pub type JsonTools = JsonFormatTools;
 
 #[cfg(test)]

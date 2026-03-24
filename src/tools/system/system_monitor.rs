@@ -42,11 +42,13 @@ impl Default for SystemMonitor {
 
 impl SystemMonitor {
     /// 创建新的系统监控器
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 创建带有自定义后端的监控器（用于测试）
+    #[allow(dead_code)]
     pub fn with_backend(backend: Box<dyn ProcessBackend>) -> Self {
         Self {
             backend: Arc::new(backend),
@@ -484,7 +486,7 @@ impl SystemMonitor {
             return Err("无效的命令名称".to_string());
         }
 
-        if command.contains(|c| c == '/' || c == '\\' || c == ' ' || c == ';' || c == '|') {
+        if command.contains(['/', '\\', ' ', ';', '|']) {
             return Err("命令名称包含非法字符".to_string());
         }
 
@@ -531,6 +533,7 @@ impl SystemMonitor {
 }
 
 /// 格式化运行时间为人类可读格式
+#[allow(dead_code)]
 fn format_duration(secs: u64) -> String {
     let days = secs / 86400;
     let hours = (secs % 86400) / 3600;

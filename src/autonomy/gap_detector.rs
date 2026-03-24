@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 /// 工具缺口类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GapType {
     /// 完全缺失的工具
     MissingTool,
@@ -263,7 +263,7 @@ impl ToolGapDetector {
     /// 从低满意度任务中检测缺口
     fn detect_from_low_satisfaction(&mut self) {
         let low_sat_tasks: Vec<_> = self.task_records.iter()
-            .filter(|r| r.user_satisfaction.map_or(false, |s| s as f32 <= self.config.low_satisfaction_threshold))
+            .filter(|r| r.user_satisfaction.is_some_and(|s| s as f32 <= self.config.low_satisfaction_threshold))
             .collect();
         
         if low_sat_tasks.is_empty() {

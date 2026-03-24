@@ -8,6 +8,8 @@
 //! ## 服务化架构
 //! - ToolDefinition 包含 ServiceMetadata 支持 QoS、依赖、分类
 //! - ServiceLifecycle trait 支持服务生命周期管理
+
+#![allow(dead_code)]
 //! - ServiceStats 提供运行时统计
 //! - ServiceMetricsCollector 统一指标收集
 

@@ -9,8 +9,11 @@
 //! - 依赖关系不是手动声明的，而是 AI 分析工具语义自动推断的
 //! - 结合静态分析（AI 语义理解）和动态学习（运行时日志）
 
-use crate::tool_matrix::matrix::ToolDefinition;
+#![allow(dead_code)]
+
+use crate::tool_matrix::matrix::{ServiceCategory, ToolDefinition};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -73,7 +76,7 @@ impl ToolDependencyGraph {
         // 添加到 from 的后置依赖
         self.dependents
             .entry(from.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(WeightedDependency {
                 tool_name: to.clone(),
                 confidence,
@@ -82,7 +85,7 @@ impl ToolDependencyGraph {
         // 添加到 to 的前置依赖
         self.prerequisites
             .entry(to)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(WeightedDependency {
                 tool_name: from,
                 confidence,
@@ -307,16 +310,42 @@ impl<T: LLMClient + ?Sized> AIDependencyAnalyzer<T> {
         )
     }
 
-    /// 提取输入类型（简化实现）
+    /// 提取输入类型（从 input_schema 解析）
     fn extract_input_types(tool: &ToolDefinition) -> String {
-        // TODO: 从 input_schema 解析实际类型
+        // 尝试从 JSON Schema 中解析属性类型
+        if let Ok(schema) = serde_json::from_str::<Value>(&tool.input_schema) {
+            if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+                let mut types = Vec::new();
+                for (name, prop) in properties {
+                    let prop_type = prop
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("any");
+                    types.push(format!("{}: {}", name, prop_type));
+                }
+                if !types.is_empty() {
+                    return format!("{{{}}}", types.join(", "));
+                }
+            }
+        }
+        // 回退到分类名称
         format!("{:?}", tool.metadata.category)
     }
 
-    /// 提取输出类型（简化实现）
+    /// 提取输出类型（基于工具分类推断）
     fn extract_output_type(tool: &ToolDefinition) -> String {
-        // TODO: 从 input_schema 推断输出类型
-        "String".to_string()
+        // 根据工具分类推断典型输出类型
+        match tool.metadata.category {
+            ServiceCategory::File => "FileContent | FilePath | List<FilePath>".to_string(),
+            ServiceCategory::Network => "HttpResponse | String | DownloadedFile".to_string(),
+            ServiceCategory::Data => "Json | Xml | Csv".to_string(),
+            ServiceCategory::Development => "CodeAnalysis | String".to_string(),
+            ServiceCategory::Vcs | ServiceCategory::VersionControl => "GitStatus | GitLog | String".to_string(),
+            ServiceCategory::System => "ProcessOutput | SystemInfo | String".to_string(),
+            ServiceCategory::Ai => "LLMResponse | Embedding | String".to_string(),
+            ServiceCategory::Dialogue => "DialogueState | String".to_string(),
+            ServiceCategory::Utility | ServiceCategory::Default => "String".to_string(),
+        }
     }
 
     /// 更新依赖图

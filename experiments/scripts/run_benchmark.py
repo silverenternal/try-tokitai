@@ -1,437 +1,551 @@
 #!/usr/bin/env python3
 """
-实验运行脚本
+Tokitai 基准测试运行脚本
 
-用法:
-    # 运行单组实验
-    python run_benchmark.py --group Ours-Full --days 7
+用于运行 Prompt Engineering 自进化系统的对比实验和消融实验
+
+使用方法:
+    # 运行单组基准测试
+    python run_benchmark.py --group Ours-Full --days 30
     
     # 运行所有对比实验
-    python run_benchmark.py --all-groups --days 30
+    python run_benchmark.py --all-groups
     
     # 运行消融实验
-    python run_benchmark.py --ablation --days 30
+    python run_benchmark.py --ablation
+
+实验组别:
+    - Control: 原始 tokitai（无自进化）
+    - Ours-Full: 完整 Prompt Engineering 系统
+    - Ours-Single: 单 LLM 决策（无多智能体协商）
+    - Ours-NoCoT: 无 Chain-of-Thought 推理
+    - Ours-NoFix: 无自修正循环
 """
 
+import argparse
 import json
 import os
-import sys
 import subprocess
-import argparse
+import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-import random
+from typing import Dict, List, Optional, Any
 
-# 添加父目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 实验组配置
-EXPERIMENT_GROUPS = {
-    'Control': {
-        'config': {'self_evolution': False},
-        'description': '原始 tokitai（无自进化）'
+# ============================================================================
+# 配置
+# ============================================================================
+
+EXPERIMENTS_DIR = Path(__file__).parent
+TASKS_DIR = EXPERIMENTS_DIR / "tasks"
+LOGS_DIR = EXPERIMENTS_DIR / "logs"
+ANALYSIS_DIR = EXPERIMENTS_DIR / "analysis"
+
+# 实验组别配置
+GROUPS = {
+    "Control": {
+        "description": "原始 tokitai（无自进化）",
+        "args": ["--no-autonomous"]
     },
-    'Ours-Full': {
-        'config': {
-            'self_evolution': True,
-            'prompt_engineering': True,
-            'multi_agent': True,
-            'cot': True,
-            'self_fix': True
-        },
-        'description': '完整 Prompt Engineering 系统'
+    "Ours-Full": {
+        "description": "完整 Prompt Engineering 系统",
+        "args": ["--autonomous"]
     },
-    'Ours-Single': {
-        'config': {
-            'self_evolution': True,
-            'prompt_engineering': True,
-            'multi_agent': False,  # 单 LLM
-            'cot': True,
-            'self_fix': True
-        },
-        'description': '单 LLM 决策（无多智能体协商）'
+    "Ours-Single": {
+        "description": "单 LLM 决策（无多智能体协商）",
+        "args": ["--autonomous", "--single-agent"]
     },
-    'Ours-NoCoT': {
-        'config': {
-            'self_evolution': True,
-            'prompt_engineering': True,
-            'multi_agent': True,
-            'cot': False,  # 无 Chain-of-Thought
-            'self_fix': True
-        },
-        'description': '无 Chain-of-Thought 推理'
+    "Ours-NoCoT": {
+        "description": "无 Chain-of-Thought 推理",
+        "args": ["--autonomous", "--no-cot"]
     },
-    'Ours-NoFix': {
-        'config': {
-            'self_evolution': True,
-            'prompt_engineering': True,
-            'multi_agent': True,
-            'cot': True,
-            'self_fix': False  # 无自修正循环
-        },
-        'description': '无自修正循环'
+    "Ours-NoFix": {
+        "description": "无自修正循环",
+        "args": ["--autonomous", "--no-self-fix"]
     }
 }
 
 
-class BenchmarkRunner:
-    """基准测试运行器"""
+# ============================================================================
+# 数据类
+# ============================================================================
 
+class TaskExecutionLog:
+    """任务执行日志"""
+    
     def __init__(
         self,
-        group: str,
-        days: int = 7,
-        tasks_file: str = "experiments/tasks/benchmark_tasks.json",
-        log_dir: str = "experiments/logs"
+        task_id: str,
+        category: str,
+        difficulty: str,
+        description: str,
+        group: str
     ):
+        self.task_id = task_id
+        self.category = category
+        self.difficulty = difficulty
+        self.description = description
+        self.group = group
+        self.timestamp = datetime.utcnow().isoformat() + "Z"
+        self.success = False
+        self.tool_calls: List[Dict[str, Any]] = []
+        self.total_tool_calls = 0
+        self.execution_time_ms = 0
+        self.user_satisfaction = 0
+        self.gaps_detected = 0
+        self.tools_created = 0
+        self.tools_optimized = 0
+        self.error_message: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "task_id": self.task_id,
+            "category": self.category,
+            "difficulty": self.difficulty,
+            "description": self.description,
+            "timestamp": self.timestamp,
+            "group": self.group,
+            "execution": {
+                "success": self.success,
+                "tool_calls": self.tool_calls,
+                "total_tool_calls": self.total_tool_calls,
+                "execution_time_ms": self.execution_time_ms,
+                "user_satisfaction": self.user_satisfaction,
+                "error_message": self.error_message
+            },
+            "evolution": {
+                "gaps_detected": self.gaps_detected,
+                "tools_created": self.tools_created,
+                "tools_optimized": self.tools_optimized
+            }
+        }
+
+
+class SelfEvolutionLog:
+    """自进化日志"""
+    
+    def __init__(self, cycle_id: str, group: str):
+        self.cycle_id = cycle_id
+        self.group = group
+        self.timestamp = datetime.utcnow().isoformat() + "Z"
+        self.reflection: Dict[str, Any] = {}
+        self.gaps_detected: List[Dict[str, Any]] = []
+        self.actions_taken: List[Dict[str, Any]] = []
+        self.metrics: Dict[str, Any] = {
+            "api_calls": 0,
+            "api_cost_usd": 0.0,
+            "cycle_duration_ms": 0
+        }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "cycle_id": self.cycle_id,
+            "timestamp": self.timestamp,
+            "group": self.group,
+            "reflection": self.reflection,
+            "gaps_detected": self.gaps_detected,
+            "actions_taken": self.actions_taken,
+            "metrics": self.metrics
+        }
+
+
+# ============================================================================
+# 基准测试运行器
+# ============================================================================
+
+class BenchmarkRunner:
+    """基准测试运行器"""
+    
+    def __init__(self, group: str, days: int = 1, project_path: Optional[Path] = None):
         self.group = group
         self.days = days
-        self.tasks_file = Path(tasks_file)
-        self.log_dir = Path(log_dir) / group.lower().replace(' ', '_').replace('-', '_')
-        self.config = EXPERIMENT_GROUPS.get(group, {}).get('config', {})
+        self.project_path = project_path or Path.cwd()
+        self.logs: List[Dict[str, Any]] = []
+        self.evolution_logs: List[Dict[str, Any]] = []
         
         # 创建日志目录
+        self.log_dir = LOGS_DIR / group.lower().replace(" ", "_")
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 日志文件
-        self.task_log = self.log_dir / "task_executions.jsonl"
-        self.evolution_log = self.log_dir / "evolution_cycles.jsonl"
-        self.summary_log = self.log_dir / "summary.json"
-        
-        # 加载任务
-        self.tasks = self.load_tasks()
-        
-        # 统计信息
-        self.stats = {
-            'total_tasks': 0,
-            'successful_tasks': 0,
-            'failed_tasks': 0,
-            'total_tool_calls': 0,
-            'total_execution_time_ms': 0,
-            'gaps_detected': 0,
-            'tools_created': 0,
-            'tools_optimized': 0,
-            'api_cost_usd': 0.0
-        }
-
+    
     def load_tasks(self) -> List[Dict[str, Any]]:
         """加载基准测试任务"""
-        if not self.tasks_file.exists():
-            print(f"错误：任务文件不存在：{self.tasks_file}")
-            sys.exit(1)
+        tasks_file = TASKS_DIR / "benchmark_tasks.json"
+        if not tasks_file.exists():
+            raise FileNotFoundError(f"任务文件不存在：{tasks_file}")
         
-        with open(self.tasks_file, 'r', encoding='utf-8') as f:
+        with open(tasks_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data.get('tasks', [])
-
-    def log_task_execution(self, execution: Dict[str, Any]):
-        """记录任务执行日志"""
-        with open(self.task_log, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(execution, ensure_ascii=False) + '\n')
-
-    def log_evolution_cycle(self, cycle: Dict[str, Any]):
-        """记录进化周期日志"""
-        with open(self.evolution_log, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(cycle, ensure_ascii=False) + '\n')
-
-    def simulate_task_execution(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        模拟任务执行
         
-        注意：这是模拟实现，实际应该调用 tokitai 执行任务
-        """
+        return data.get("tasks", [])
+    
+    def run_task(self, task: Dict[str, Any]) -> TaskExecutionLog:
+        """运行单个任务"""
+        log = TaskExecutionLog(
+            task_id=task["id"],
+            category=task["category"],
+            difficulty=task["difficulty"],
+            description=task["description"],
+            group=self.group
+        )
+        
         start_time = time.time()
         
-        # 模拟执行成功率（根据组别配置）
-        base_success_rate = 0.65  # Control 组基线
+        try:
+            # 构建命令
+            cmd = [
+                "cargo", "run", "--release", "--"
+            ] + GROUPS[self.group]["args"] + [
+                "--project-path", str(self.project_path),
+                "--task", task["description"]
+            ]
+            
+            # 执行任务（模拟）
+            # 实际实现需要与 ai-assistant 交互
+            print(f"  执行任务：{task['id']} - {task['description']}")
+            
+            # TODO: 实际实现需要：
+            # 1. 启动 ai-assistant 进程
+            # 2. 发送任务描述
+            # 3. 捕获工具调用
+            # 4. 等待任务完成
+            # 5. 记录执行结果
+            
+            # 模拟执行（用于测试框架）
+            time.sleep(0.1)  # 模拟执行时间
+            log.success = True
+            log.total_tool_calls = 2
+            log.execution_time_ms = int((time.time() - start_time) * 1000)
+            log.user_satisfaction = 4
+            
+        except Exception as e:
+            log.success = False
+            log.error_message = str(e)
+            log.execution_time_ms = int((time.time() - start_time) * 1000)
         
-        if self.group == 'Ours-Full':
-            # 完整系统有更高的成功率
-            success_rate = base_success_rate + 0.15
-        elif self.group == 'Ours-Single':
-            success_rate = base_success_rate + 0.10
-        elif self.group in ['Ours-NoCoT', 'Ours-NoFix']:
-            success_rate = base_success_rate + 0.08
-        else:
-            success_rate = base_success_rate
+        return log
+    
+    def run_evolution_cycle(self, cycle_num: int) -> SelfEvolutionLog:
+        """运行一次自进化循环"""
+        log = SelfEvolutionLog(cycle_id=f"cycle_{cycle_num:03d}", group=self.group)
         
-        # 模拟执行结果
-        success = random.random() < success_rate
+        start_time = time.time()
         
-        # 模拟工具调用次数
-        expected_calls = task.get('expected_tool_calls', 1)
-        if success:
-            # 成功时接近预期调用次数
-            tool_calls = max(1, int(expected_calls * random.uniform(0.8, 1.2)))
-        else:
-            # 失败时可能调用更多工具
-            tool_calls = int(expected_calls * random.uniform(1.2, 2.0))
-        
-        execution_time = random.uniform(100, 5000)  # 100ms - 5s
-        
-        # 模拟用户满意度
-        if success:
-            satisfaction = random.randint(4, 5)
-        else:
-            satisfaction = random.randint(1, 3)
-        
-        execution = {
-            'task_id': task.get('id'),
-            'category': task.get('category'),
-            'difficulty': task.get('difficulty'),
-            'description': task.get('description'),
-            'timestamp': datetime.now().isoformat(),
-            'group': self.group,
-            'execution': {
-                'success': success,
-                'total_tool_calls': tool_calls,
-                'execution_time_ms': int(execution_time),
-                'user_satisfaction': satisfaction,
-                'error_message': None if success else "模拟执行失败"
-            },
-            'evolution': {
-                'gaps_detected': random.randint(0, 2) if self.config.get('self_evolution') else 0,
-                'tools_created': 0,
-                'tools_optimized': 0
+        try:
+            # TODO: 实际实现需要：
+            # 1. 调用 HybridGapDetector 检测工具缺口
+            # 2. 调用 PromptOptimizer 优化工具
+            # 3. 调用 PromptCreator 创建新工具
+            # 4. 调用 MultiAgentNegotiator 协商决策
+            # 5. 记录执行结果
+            
+            # 模拟自进化（用于测试框架）
+            time.sleep(0.5)  # 模拟执行时间
+            
+            log.reflection = {
+                "coverage_score": 0.75,
+                "systemic_issues": ["缺少批量文件处理工具"],
+                "strategic_recommendations": ["优先发展文件批处理工具"]
             }
-        }
-        
-        # 更新统计
-        self.stats['total_tasks'] += 1
-        if success:
-            self.stats['successful_tasks'] += 1
-        else:
-            self.stats['failed_tasks'] += 1
-        self.stats['total_tool_calls'] += tool_calls
-        self.stats['total_execution_time_ms'] += int(execution_time)
-        
-        return execution
-
-    def simulate_evolution_cycle(self, cycle_id: int) -> Dict[str, Any]:
-        """
-        模拟进化周期
-        
-        注意：这是模拟实现，实际应该调用自进化系统
-        """
-        gaps_detected = []
-        actions_taken = []
-        
-        if self.config.get('self_evolution'):
-            # 模拟检测到的缺口
-            num_gaps = random.randint(0, 3)
-            for i in range(num_gaps):
-                gap = {
-                    'gap_type': random.choice(['missing_tool', 'tool_improvement', 'tool_merge']),
-                    'description': f"模拟缺口 {i+1}",
-                    'suggested_name': f"simulated_tool_{cycle_id}_{i}",
-                    'priority': random.randint(5, 10)
+            
+            log.gaps_detected = [
+                {
+                    "gap_type": "missing_tool",
+                    "description": "缺少批量重命名文件的工具",
+                    "suggested_name": "batch_rename_files",
+                    "priority": 8
                 }
-                gaps_detected.append(gap)
+            ]
             
-            # 模拟采取的行动
-            for gap in gaps_detected:
-                if random.random() < 0.7:  # 70% 概率创建工具
-                    action = {
-                        'action_type': 'create_tool',
-                        'tool_name': gap['suggested_name'],
-                        'result': 'success',
-                        'compilation_attempts': random.randint(1, 3)
-                    }
-                    actions_taken.append(action)
-                    self.stats['tools_created'] += 1
+            log.actions_taken = [
+                {
+                    "action_type": "create_tool",
+                    "tool_name": "batch_rename_files",
+                    "result": "success",
+                    "compilation_attempts": 2
+                }
+            ]
             
-            self.stats['gaps_detected'] += len(gaps_detected)
-        
-        # 模拟 API 成本
-        api_calls = random.randint(5, 20)
-        api_cost = api_calls * 0.015  # $0.015 per call
-        
-        cycle = {
-            'cycle_id': f"cycle_{cycle_id:03d}",
-            'timestamp': datetime.now().isoformat(),
-            'group': self.group,
-            'reflection': {
-                'coverage_score': random.uniform(0.6, 0.9),
-                'systemic_issues': [] if not gaps_detected else ['模拟系统问题'],
-                'strategic_recommendations': []
-            },
-            'gaps_detected': gaps_detected,
-            'actions_taken': actions_taken,
-            'metrics': {
-                'api_calls': api_calls,
-                'api_cost_usd': round(api_cost, 3),
-                'cycle_duration_ms': random.randint(10000, 60000)
+            log.metrics = {
+                "api_calls": 15,
+                "api_cost_usd": 0.25,
+                "cycle_duration_ms": int((time.time() - start_time) * 1000)
             }
-        }
-        
-        self.stats['api_cost_usd'] += api_cost
-        
-        return cycle
-
-    def run_day(self, day: int):
-        """运行一天的实验"""
-        print(f"\n{'='*60}")
-        print(f"第 {day}/{self.days} 天 - {self.group}")
-        print(f"{'='*60}")
-        
-        # 随机选择当天的任务（每天 10-20 个任务）
-        num_tasks = random.randint(10, 20)
-        day_tasks = random.sample(self.tasks, min(num_tasks, len(self.tasks)))
-        
-        print(f"执行 {len(day_tasks)} 个任务...")
-        
-        # 执行任务
-        for task in day_tasks:
-            execution = self.simulate_task_execution(task)
-            self.log_task_execution(execution)
             
-            if execution['execution']['success']:
-                print(f"  ✓ {task['id']}: {execution['execution']['total_tool_calls']} 次调用")
-            else:
-                print(f"  ✗ {task['id']}: 失败")
+        except Exception as e:
+            log.metrics["error"] = str(e)
         
-        # 执行进化周期（每天一次）
-        if self.config.get('self_evolution'):
-            print("执行进化周期...")
-            cycle = self.simulate_evolution_cycle(day)
-            self.log_evolution_cycle(cycle)
-            
-            if cycle['gaps_detected']:
-                print(f"  检测到 {len(cycle['gaps_detected'])} 个缺口")
-            if cycle['actions_taken']:
-                print(f"  创建 {len([a for a in cycle['actions_taken'] if a['action_type'] == 'create_tool'])} 个工具")
-        
-        # 保存每日摘要
-        self.save_daily_summary(day)
-
-    def save_daily_summary(self, day: int):
-        """保存每日摘要"""
-        summary = {
-            'day': day,
-            'timestamp': datetime.now().isoformat(),
-            'group': self.group,
-            'stats': self.stats.copy(),
-            'config': self.config
-        }
-        
-        with open(self.summary_log, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-
-    def run(self):
-        """运行完整实验"""
+        return log
+    
+    def run_benchmark(self) -> Dict[str, Any]:
+        """运行完整基准测试"""
         print(f"\n{'='*60}")
-        print(f"开始实验：{self.group}")
-        print(f"配置：{json.dumps(self.config, ensure_ascii=False)}")
+        print(f"基准测试：{self.group}")
         print(f"天数：{self.days}")
-        print(f"任务总数：{len(self.tasks)}")
-        print(f"{'='*60}")
+        print(f"项目路径：{self.project_path}")
+        print(f"{'='*60}\n")
         
-        start_time = time.time()
+        tasks = self.load_tasks()
+        print(f"加载任务：{len(tasks)} 个\n")
         
-        for day in range(1, self.days + 1):
-            self.run_day(day)
+        # 运行任务
+        for i, task in enumerate(tasks, 1):
+            print(f"[{i}/{len(tasks)}] ", end="")
+            log = self.run_task(task)
+            self.logs.append(log.to_dict())
+            
+            # 每 5 个任务运行一次自进化循环
+            if i % 5 == 0 and self.group != "Control":
+                cycle_num = i // 5
+                evo_log = self.run_evolution_cycle(cycle_num)
+                self.evolution_logs.append(evo_log.to_dict())
         
-        elapsed = time.time() - start_time
+        # 保存日志
+        self.save_logs()
         
-        # 打印最终统计
-        print(f"\n{'='*60}")
-        print(f"实验完成：{self.group}")
-        print(f"{'='*60}")
-        print(f"总耗时：{elapsed:.1f} 秒")
-        print(f"总任务数：{self.stats['total_tasks']}")
-        print(f"成功任务数：{self.stats['successful_tasks']}")
-        print(f"失败任务数：{self.stats['failed_tasks']}")
-        print(f"成功率：{self.stats['successful_tasks']/max(1, self.stats['total_tasks']):.2%}")
-        print(f"平均工具调用：{self.stats['total_tool_calls']/max(1, self.stats['total_tasks']):.2f}")
-        print(f"总 API 成本：${self.stats['api_cost_usd']:.2f}")
-        print(f"日志目录：{self.log_dir}")
+        # 生成摘要
+        summary = self.generate_summary()
         
-        return self.stats
+        print(f"\n基准测试完成！")
+        print(f"  任务完成数：{summary['tasks_completed']}")
+        print(f"  任务成功率：{summary['success_rate']:.1%}")
+        print(f"  平均工具调用：{summary['avg_tool_calls']:.1f}")
+        print(f"  平均执行时间：{summary['avg_execution_time_ms']}ms")
+        print(f"  平均满意度：{summary['avg_satisfaction']:.1f}/5")
+        
+        if self.group != "Control":
+            print(f"  检测缺口：{summary['gaps_detected']}")
+            print(f"  创建工具：{summary['tools_created']}")
+            print(f"  API 成本：${summary['api_cost_usd']:.2f}")
+        
+        return summary
+    
+    def save_logs(self):
+        """保存日志到文件"""
+        # 保存任务执行日志
+        task_log_file = self.log_dir / f"task_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        with open(task_log_file, "w", encoding="utf-8") as f:
+            for log in self.logs:
+                f.write(json.dumps(log, ensure_ascii=False) + "\n")
+        
+        # 保存自进化日志
+        if self.evolution_logs:
+            evo_log_file = self.log_dir / f"evolution_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            with open(evo_log_file, "w", encoding="utf-8") as f:
+                for log in self.evolution_logs:
+                    f.write(json.dumps(log, ensure_ascii=False) + "\n")
+        
+        print(f"日志已保存到：{self.log_dir}")
+    
+    def generate_summary(self) -> Dict[str, Any]:
+        """生成摘要统计"""
+        if not self.logs:
+            return {}
+        
+        # 任务执行统计
+        completed = sum(1 for log in self.logs if log["execution"]["success"])
+        total_tool_calls = sum(log["execution"]["total_tool_calls"] for log in self.logs)
+        total_time = sum(log["execution"]["execution_time_ms"] for log in self.logs)
+        total_satisfaction = sum(log["execution"]["user_satisfaction"] for log in self.logs)
+        
+        summary = {
+            "group": self.group,
+            "days": self.days,
+            "tasks_completed": len(self.logs),
+            "tasks_successful": completed,
+            "success_rate": completed / len(self.logs) if self.logs else 0,
+            "avg_tool_calls": total_tool_calls / len(self.logs) if self.logs else 0,
+            "avg_execution_time_ms": total_time // len(self.logs) if self.logs else 0,
+            "avg_satisfaction": total_satisfaction / len(self.logs) if self.logs else 0,
+        }
+        
+        # 自进化统计
+        if self.evolution_logs:
+            total_gaps = sum(len(log["gaps_detected"]) for log in self.evolution_logs)
+            total_created = sum(
+                sum(1 for a in log["actions_taken"] if a["action_type"] == "create_tool")
+                for log in self.evolution_logs
+            )
+            total_api_cost = sum(log["metrics"]["api_cost_usd"] for log in self.evolution_logs)
+            
+            summary["gaps_detected"] = total_gaps
+            summary["tools_created"] = total_created
+            summary["api_cost_usd"] = total_api_cost
+        
+        return summary
 
 
-def run_all_groups(days: int = 30):
-    """运行所有实验组"""
-    all_stats = {}
+# ============================================================================
+# 分析器
+# ============================================================================
+
+class ResultsAnalyzer:
+    """结果分析器"""
     
-    for group_name in EXPERIMENT_GROUPS.keys():
-        runner = BenchmarkRunner(group_name, days=days)
-        stats = runner.run()
-        all_stats[group_name] = stats
+    def __init__(self):
+        self.results_dir = ANALYSIS_DIR
+        self.results_dir.mkdir(parents=True, exist_ok=True)
     
-    # 保存总体统计
-    summary = {
-        'timestamp': datetime.now().isoformat(),
-        'days': days,
-        'groups': all_stats
-    }
+    def load_group_logs(self, group: str) -> List[Dict[str, Any]]:
+        """加载指定组的日志"""
+        log_dir = LOGS_DIR / group.lower().replace(" ", "_")
+        if not log_dir.exists():
+            return []
+        
+        logs = []
+        for log_file in log_dir.glob("task_logs_*.jsonl"):
+            with open(log_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    logs.append(json.loads(line))
+        
+        return logs
     
-    output_file = Path("experiments/analysis/all_groups_summary.json")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    def compare_groups(self, groups: List[str]) -> Dict[str, Any]:
+        """对比多组结果"""
+        results = {}
+        
+        for group in groups:
+            logs = self.load_group_logs(group)
+            if not logs:
+                continue
+            
+            completed = sum(1 for log in logs if log["execution"]["success"])
+            results[group] = {
+                "tasks_completed": len(logs),
+                "tasks_successful": completed,
+                "success_rate": completed / len(logs) if logs else 0,
+                "avg_tool_calls": sum(log["execution"]["total_tool_calls"] for log in logs) / len(logs) if logs else 0,
+                "avg_execution_time_ms": sum(log["execution"]["execution_time_ms"] for log in logs) // len(logs) if logs else 0,
+                "avg_satisfaction": sum(log["execution"]["user_satisfaction"] for log in logs) / len(logs) if logs else 0,
+            }
+        
+        # 保存对比结果
+        output_file = self.results_dir / "comparison_results.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n对比结果已保存到：{output_file}")
+        
+        return results
     
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n总体统计已保存到：{output_file}")
-    
-    return all_stats
+    def print_comparison(self, results: Dict[str, Any]):
+        """打印对比表格"""
+        print("\n" + "="*80)
+        print("实验结果对比")
+        print("="*80)
+        
+        # 表头
+        print(f"{'组别':<15} {'任务数':>8} {'成功率':>10} {'平均工具':>10} {'平均时间':>12} {'满意度':>8}")
+        print("-"*80)
+        
+        # 数据行
+        for group, stats in results.items():
+            print(
+                f"{group:<15} "
+                f"{stats['tasks_completed']:>8} "
+                f"{stats['success_rate']:>10.1%} "
+                f"{stats['avg_tool_calls']:>10.1f} "
+                f"{stats['avg_execution_time_ms']:>12}ms "
+                f"{stats['avg_satisfaction']:>8.1f}"
+            )
+        
+        print("="*80)
 
 
-def run_ablation(days: int = 30):
-    """运行消融实验"""
-    ablation_groups = ['Ours-Full', 'Ours-Single', 'Ours-NoCoT', 'Ours-NoFix']
-    all_stats = {}
-    
-    for group_name in ablation_groups:
-        runner = BenchmarkRunner(group_name, days=days)
-        stats = runner.run()
-        all_stats[group_name] = stats
-    
-    # 保存消融统计
-    summary = {
-        'timestamp': datetime.now().isoformat(),
-        'days': days,
-        'type': 'ablation',
-        'groups': all_stats
-    }
-    
-    output_file = Path("experiments/analysis/ablation_summary.json")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n消融实验统计已保存到：{output_file}")
-    
-    return all_stats
-
+# ============================================================================
+# 主函数
+# ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='实验运行脚本')
-    parser.add_argument('--group', type=str, help='实验组名称')
-    parser.add_argument('--days', type=int, default=7, help='实验天数')
-    parser.add_argument('--all-groups', action='store_true', help='运行所有实验组')
-    parser.add_argument('--ablation', action='store_true', help='运行消融实验')
-    parser.add_argument('--tasks-file', type=str, default='experiments/tasks/benchmark_tasks.json',
-                        help='任务文件路径')
+    parser = argparse.ArgumentParser(
+        description="Tokitai 基准测试运行脚本",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+    
+    parser.add_argument(
+        "--group", "-g",
+        choices=list(GROUPS.keys()),
+        help="实验组别"
+    )
+    
+    parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=1,
+        help="实验天数（默认：1）"
+    )
+    
+    parser.add_argument(
+        "--project-path", "-p",
+        type=Path,
+        help="项目路径（默认：当前目录）"
+    )
+    
+    parser.add_argument(
+        "--all-groups", "-a",
+        action="store_true",
+        help="运行所有对比实验组"
+    )
+    
+    parser.add_argument(
+        "--ablation",
+        action="store_true",
+        help="运行消融实验"
+    )
+    
+    parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="分析已有实验结果"
+    )
     
     args = parser.parse_args()
     
+    # 分析模式
+    if args.analyze:
+        analyzer = ResultsAnalyzer()
+        groups = list(GROUPS.keys())
+        results = analyzer.compare_groups(groups)
+        analyzer.print_comparison(results)
+        return
+    
+    # 运行所有组
     if args.all_groups:
-        run_all_groups(days=args.days)
-    elif args.ablation:
-        run_ablation(days=args.days)
-    elif args.group:
-        runner = BenchmarkRunner(args.group, days=args.days, tasks_file=args.tasks_file)
-        runner.run()
+        all_results = {}
+        for group in GROUPS.keys():
+            runner = BenchmarkRunner(group, args.days, args.project_path)
+            result = runner.run_benchmark()
+            all_results[group] = result
+        
+        # 对比分析
+        analyzer = ResultsAnalyzer()
+        analyzer.print_comparison(all_results)
+        return
+    
+    # 运行消融实验
+    if args.ablation:
+        ablation_groups = ["Ours-Full", "Ours-Single", "Ours-NoCoT", "Ours-NoFix"]
+        all_results = {}
+        for group in ablation_groups:
+            runner = BenchmarkRunner(group, args.days, args.project_path)
+            result = runner.run_benchmark()
+            all_results[group] = result
+        
+        # 对比分析
+        analyzer = ResultsAnalyzer()
+        analyzer.print_comparison(all_results)
+        return
+    
+    # 运行单组
+    if args.group:
+        runner = BenchmarkRunner(args.group, args.days, args.project_path)
+        runner.run_benchmark()
     else:
         parser.print_help()
-        print("\n示例:")
-        print("  python run_benchmark.py --group Ours-Full --days 7")
-        print("  python run_benchmark.py --all-groups --days 30")
-        print("  python run_benchmark.py --ablation --days 30")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -344,6 +344,82 @@ pub struct MetricsSummary {
     pub avg_user_satisfaction: f64,
 }
 
+/// 实时统计（简化版本，用于快速访问）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RealtimeStats {
+    /// 平均请求延迟（毫秒）
+    pub avg_request_latency: f64,
+    /// 最大请求延迟（毫秒）
+    pub max_request_latency: f64,
+    /// 最小请求延迟（毫秒）
+    pub min_request_latency: f64,
+    /// 平均工具调用延迟（毫秒）
+    pub avg_tool_call_latency: f64,
+    /// 平均迭代周期时间（秒）
+    pub avg_iteration_cycle_time: f64,
+    /// 每分钟请求数
+    pub requests_per_minute: f64,
+    /// 每次请求工具调用数
+    pub tools_per_request: f64,
+    /// 任务完成率
+    pub task_completion_rate: f64,
+    /// 平均用户满意度（1-5）
+    pub avg_satisfaction: f64,
+    /// 总请求数
+    pub total_requests: u64,
+    /// 总工具调用数
+    pub total_tool_calls: u64,
+    /// 运行时间（秒）
+    pub uptime_secs: u64,
+}
+
+impl RealtimeStats {
+    /// 渲染为 TUI 仪表盘字符串
+    pub fn render_dashboard(&self) -> String {
+        use std::fmt::Write;
+        
+        let mut output = String::new();
+        
+        writeln!(output, "╔══════════════════════════════════════════════════════════╗").unwrap();
+        writeln!(output, "║              性能指标仪表盘                              ║").unwrap();
+        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
+        
+        // 延迟指标
+        writeln!(output, "║ 【延迟指标】                                              ║").unwrap();
+        writeln!(output, "║   平均请求延迟：{:>8.2} ms                               ║", self.avg_request_latency).unwrap();
+        writeln!(output, "║   最大请求延迟：{:>8.2} ms                               ║", self.max_request_latency).unwrap();
+        writeln!(output, "║   最小请求延迟：{:>8.2} ms                               ║", self.min_request_latency).unwrap();
+        writeln!(output, "║   工具调用延迟：{:>8.2} ms                               ║", self.avg_tool_call_latency).unwrap();
+        
+        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
+        
+        // 吞吐量指标
+        writeln!(output, "║ 【吞吐量指标】                                            ║").unwrap();
+        writeln!(output, "║   请求/分钟：  {:>8.2}                                   ║", self.requests_per_minute).unwrap();
+        writeln!(output, "║   工具/请求：  {:>8.2}                                   ║", self.tools_per_request).unwrap();
+        writeln!(output, "║   迭代周期：   {:>8.2} s                                 ║", self.avg_iteration_cycle_time).unwrap();
+        
+        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
+        
+        // 质量指标
+        writeln!(output, "║ 【质量指标】                                              ║").unwrap();
+        writeln!(output, "║   任务完成率： {:>8.2} %                                 ║", self.task_completion_rate * 100.0).unwrap();
+        writeln!(output, "║   用户满意度： {:>8.2} / 5.0                             ║", self.avg_satisfaction).unwrap();
+        
+        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
+        
+        // 总计
+        writeln!(output, "║ 【总计】                                                  ║").unwrap();
+        writeln!(output, "║   总请求数：   {:>10}                                    ║", self.total_requests).unwrap();
+        writeln!(output, "║   总工具调用： {:>10}                                    ║", self.total_tool_calls).unwrap();
+        writeln!(output, "║   运行时间：   {:>10} s                                  ║", self.uptime_secs).unwrap();
+        
+        writeln!(output, "╚══════════════════════════════════════════════════════════╝").unwrap();
+        
+        output
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,13 +436,48 @@ mod tests {
     fn test_record_metrics() {
         let temp_dir = TempDir::new().unwrap();
         let mut dashboard = MetricsDashboard::new(temp_dir.path()).unwrap();
-        
+
         dashboard.record_latency(Some(100.0), Some(50.0), Some(10.0));
         dashboard.record_quality(Some(0.9), Some(0.8), Some(4.5));
-        
+
         let summary = dashboard.get_summary();
         assert_eq!(summary.avg_input_to_first_token_ms, 100.0);
         assert_eq!(summary.avg_tool_call_latency_ms, 50.0);
         assert_eq!(summary.avg_user_satisfaction, 4.5);
+    }
+
+    #[test]
+    fn test_realtime_stats_rendering() {
+        let stats = RealtimeStats {
+            avg_request_latency: 150.5,
+            max_request_latency: 300.0,
+            min_request_latency: 50.0,
+            avg_tool_call_latency: 25.0,
+            avg_iteration_cycle_time: 120.5,
+            requests_per_minute: 10.5,
+            tools_per_request: 5.2,
+            task_completion_rate: 0.85,
+            avg_satisfaction: 4.2,
+            total_requests: 100,
+            total_tool_calls: 520,
+            uptime_secs: 600,
+        };
+        
+        let dashboard = stats.render_dashboard();
+        
+        assert!(dashboard.contains("性能指标仪表盘"));
+        assert!(dashboard.contains("150.5"));
+        assert!(dashboard.contains("85.00")); // 85% 完成率
+        assert!(dashboard.contains("╔"));
+        assert!(dashboard.contains("╚"));
+    }
+
+    #[test]
+    fn test_realtime_stats_default() {
+        let stats = RealtimeStats::default();
+        
+        assert_eq!(stats.total_requests, 0);
+        assert_eq!(stats.uptime_secs, 0);
+        assert_eq!(stats.avg_satisfaction, 0.0);
     }
 }

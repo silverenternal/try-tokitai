@@ -120,6 +120,7 @@ pub struct UnifiedManagerConfig {
 
 /// 合并策略
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::enum_variant_names)]
 pub enum MergeStrategy {
     /// 时间戳优先（最新的优先）
     TimestampPriority,

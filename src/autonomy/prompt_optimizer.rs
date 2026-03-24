@@ -219,12 +219,15 @@ pub struct OptimizationValidator {
     rules: Vec<OptimizationRule>,
 }
 
+/// 验证函数类型别名
+pub type ValidatorFn = Box<dyn Fn(&OptimizationSuggestion, &HashMap<String, ToolMetrics>) -> bool + Send + Sync>;
+
 /// 优化规则
 pub struct OptimizationRule {
     /// 规则描述
     pub description: String,
     /// 验证函数
-    pub validator: Box<dyn Fn(&OptimizationSuggestion, &HashMap<String, ToolMetrics>) -> bool + Send + Sync>,
+    pub validator: ValidatorFn,
 }
 
 impl OptimizationValidator {
@@ -247,7 +250,7 @@ impl OptimizationValidator {
                     if suggestion.optimization_type == OptimizationType::Deprecate {
                         // 检查工具使用率是否确实很低
                         suggestion.affected_tools.iter().all(|tool| {
-                            metrics.get(tool).map_or(true, |m| m.total_calls < 10)
+                            metrics.get(tool).is_none_or(|m| m.total_calls < 10)
                         })
                     } else {
                         true
@@ -458,8 +461,7 @@ impl PromptOptimizer {
         let necessity_score = self.calculate_necessity_score(metrics);
 
         let health_score = (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3)
-            .min(1.0)
-            .max(0.0);
+            .clamp(0.0, 1.0);
 
         let mut issues = Vec::new();
 
@@ -591,7 +593,7 @@ mod tests {
     #[test]
     fn test_validator_rules() {
         let validator = OptimizationValidator::default_rules();
-        let mut metrics = HashMap::new();
+        let metrics = HashMap::new();
 
         // 测试合并建议
         let merge_suggestion = OptimizationSuggestion {

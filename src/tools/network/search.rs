@@ -29,11 +29,13 @@ pub use search_error::SearchError;
 // ============================================================================
 
 /// DuckDuckGo 引擎实现
+#[allow(dead_code)]
 pub struct DuckDuckGoEngine {
     client: reqwest::blocking::Client,
     health: parking_lot::RwLock<EngineHealth>,
 }
 
+#[allow(dead_code)]
 impl DuckDuckGoEngine {
     pub fn new(config: &SearchConfig) -> Self {
         let client = reqwest::blocking::Client::builder()
@@ -125,12 +127,14 @@ impl SearchEngine for DuckDuckGoEngine {
 // ============================================================================
 
 /// SearXNG 引擎实现
+#[allow(dead_code)]
 pub struct SearxngEngine {
     url: String,
     client: reqwest::blocking::Client,
     health: parking_lot::RwLock<EngineHealth>,
 }
 
+#[allow(dead_code)]
 impl SearxngEngine {
     pub fn new(url: &str, config: &SearchConfig) -> Self {
         let client = reqwest::blocking::Client::builder()
@@ -788,6 +792,7 @@ struct WikipediaSearchResult {
 // ============================================================================
 
 /// 解析 DuckDuckGo HTML 结果
+#[allow(dead_code)]
 fn parse_duckduckgo_results(html: &str, limit: usize) -> Option<Vec<SearchResult>> {
     let document = scraper::Html::parse_document(html);
     let result_selector = scraper::Selector::parse(".result").ok()?;

@@ -34,7 +34,6 @@ use crate::integration::IntegratedModulesConfig;
 use crate::path_resolver;
 use crate::tools::{FileOperations, SystemTools, CodeTools, SearchTools, DownloadTools, GitOperations, JsonFormatTools};
 use crate::tools::HttpClientTools;
-use tokitai::ToolProvider;
 
 /// CLI AI 助手 - 面向用户的交互式助手
 pub struct CliAssistant {
@@ -45,6 +44,7 @@ pub struct CliAssistant {
     /// 编排器（角色切换和上下文优化）
     orchestrator: Orchestrator,
     /// 集成模块（dialogue、observability、prompt_engineering）
+    #[allow(dead_code)]
     integrated_modules: IntegratedModules,
     /// 工具实例（用于 call_tool 调用）
     file_ops: FileOperations,
@@ -108,7 +108,7 @@ impl CliAssistant {
             code_tools: CodeTools::default(),
             web_search: SearchTools::new(),
             download_tools: DownloadTools::new(),
-            git_ops: GitOperations::default(),
+            git_ops: GitOperations,
             http_client: HttpClientTools::new(),
             json_tools: JsonFormatTools::default(),
         })
@@ -427,8 +427,6 @@ impl CliAssistant {
                     let elapsed = spin_start.elapsed();
                     if elapsed.as_millis() < 500 {
                         println!("✅ 完成 ({:.0}ms)", elapsed.as_millis() as f64);
-                    } else if elapsed.as_millis() < 2000 {
-                        println!("✅ 完成 ({:.1}s)", elapsed.as_secs_f64());
                     } else {
                         println!("✅ 完成 ({:.1}s)", elapsed.as_secs_f64());
                     }

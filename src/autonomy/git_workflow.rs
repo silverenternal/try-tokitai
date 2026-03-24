@@ -8,6 +8,8 @@
 //! 3. AI 生成提交消息
 //! 4. 预提交检查（可选）
 //! 5. git add + commit
+
+#![allow(dead_code)]
 //! 6. git push（可选）
 //! 7. 失败回滚机制
 

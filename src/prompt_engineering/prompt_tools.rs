@@ -2,6 +2,8 @@
 //!
 //! 将 prompt_engineering 模块封装为 tokitai ToolProvider
 
+#![allow(dead_code)]
+
 use tokitai::tool;
 use tokitai::Value;
 use super::manager::PromptTemplateManager;

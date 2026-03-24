@@ -8,6 +8,8 @@
 //! - Chain tools together (output of one becomes input of next)
 //! - Execute tools in parallel
 //! - Conditionally execute tools based on results
+
+#![allow(dead_code)]
 //! - Handle errors and retries
 //!
 //! ## Quick Start
@@ -157,8 +159,10 @@ pub struct Workflow {
 
 /// Error handling strategy
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum OnErrorStrategy {
     /// Stop workflow on first error
+    #[default]
     Stop,
     /// Continue with next step despite error
     Continue,
@@ -166,11 +170,6 @@ pub enum OnErrorStrategy {
     Retry { max_retries: u32 },
 }
 
-impl Default for OnErrorStrategy {
-    fn default() -> Self {
-        OnErrorStrategy::Stop
-    }
-}
 
 /// Workflow builder
 pub struct WorkflowBuilder {

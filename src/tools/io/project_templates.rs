@@ -24,6 +24,7 @@ impl ProjectTemplates {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_resolver(resolver: SecurePathResolver) -> Self {
         Self { resolver }
     }
@@ -89,7 +90,7 @@ mod tests {
     }
 }
 "#;
-        fs::write(src_dir.join("main.rs"), &main_rs)
+        fs::write(src_dir.join("main.rs"), main_rs)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(src_dir.to_string_lossy().to_string()),
@@ -114,7 +115,7 @@ mod tests {
 .DS_Store
 Thumbs.db
 "#;
-        fs::write(project_path.join(".gitignore"), &gitignore)
+        fs::write(project_path.join(".gitignore"), gitignore)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(project_path.to_string_lossy().to_string()),
@@ -210,7 +211,7 @@ def test_hello():
     """Test the hello function."""
     assert hello() == "Hello from myproject!"
 "#;
-        fs::write(tests_dir.join("test_main.py"), &test_py)
+        fs::write(tests_dir.join("test_main.py"), test_py)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(tests_dir.to_string_lossy().to_string()),
@@ -292,7 +293,7 @@ ENV/
 .DS_Store
 Thumbs.db
 "#;
-        fs::write(project_path.join(".gitignore"), &gitignore)
+        fs::write(project_path.join(".gitignore"), gitignore)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(project_path.to_string_lossy().to_string()),
@@ -378,7 +379,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(hello());
 }
 "#;
-        fs::write(src_dir.join("index.js"), &index_js)
+        fs::write(src_dir.join("index.js"), index_js)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(src_dir.to_string_lossy().to_string()),
@@ -395,7 +396,7 @@ test('hello function', () => {
     assert.strictEqual(hello(), 'Hello from Node.js!');
 });
 "#;
-        fs::write(test_dir.join("index.test.js"), &test_js)
+        fs::write(test_dir.join("index.test.js"), test_js)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(test_dir.to_string_lossy().to_string()),
@@ -462,7 +463,7 @@ Thumbs.db
 .env
 .env.local
 "#;
-        fs::write(project_path.join(".gitignore"), &gitignore)
+        fs::write(project_path.join(".gitignore"), gitignore)
             .map_err(|e| IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(project_path.to_string_lossy().to_string()),
@@ -614,17 +615,16 @@ mod tests {
     fn get_test_temp_dir(name: &str) -> PathBuf {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         // 使用时间戳和随机数确保唯一性
-        let unique_id = format!("{}_{}_{}", 
-            name, 
-            std::process::id(), 
+        let unique_id = format!("{}_{}_{}",
+            name,
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         );
-        let test_dir = current_dir.join("target").join("test_tmp").join(unique_id);
         // 不预先创建目录，让测试自己管理
-        test_dir
+        current_dir.join("target").join("test_tmp").join(unique_id)
     }
 
     #[test]

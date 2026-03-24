@@ -8,6 +8,8 @@
 //! - 支持按 trace_id 查询完整执行链
 //! - JSONL 文件存储，无需数据库
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};

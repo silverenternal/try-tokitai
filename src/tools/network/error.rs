@@ -163,6 +163,7 @@ pub enum HttpError {
 }
 
 impl HttpError {
+    #[allow(dead_code)]
     pub fn with_context<S: Into<String>>(self, context: S) -> Self {
         match self {
             HttpError::WithContext { .. } => self,
@@ -331,6 +332,7 @@ pub enum NetworkToolError {
 // ============================================================================
 
 /// 错误上下文信息
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct ErrorContext {
     pub url: Option<String>,
@@ -341,6 +343,7 @@ pub struct ErrorContext {
     pub details: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ErrorContext {
     pub fn new() -> Self {
         Self::default()

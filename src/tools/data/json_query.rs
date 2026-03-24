@@ -34,8 +34,8 @@ impl JsonQueryTools {
     fn parse_and_validate(&self, json_string: &str) -> Result<Value, Value> {
         JsonLengthValidator { json_string }.validate(&self.config)
             .map_err(|e| e.to_value())?;
-        Ok(serde_json::from_str(json_string)
-            .map_err(|e| DataToolError::json_parse(e.to_string()).to_value())?)
+        serde_json::from_str(json_string)
+            .map_err(|e| DataToolError::json_parse(e.to_string()).to_value())
     }
 
     fn validate_path(&self, path: &str) -> Result<(), Value> {

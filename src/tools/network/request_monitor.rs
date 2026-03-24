@@ -30,11 +30,14 @@ pub struct RequestStats {
 /// 请求日志记录
 #[derive(Clone, Debug)]
 pub struct RequestLog {
+    #[allow(dead_code)]
     pub url: String,
+    #[allow(dead_code)]
     pub method: String,
     pub status: u16,
     pub duration_ms: u128,
     pub bytes: u64,
+    #[allow(dead_code)]
     pub timestamp: DateTime<Utc>,
 }
 
@@ -125,7 +128,7 @@ impl RequestMonitor {
         let mut stats = self.stats.write();
         stats.total_requests += 1;
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             stats.successful_requests += 1;
         } else {
             stats.failed_requests += 1;
@@ -205,11 +208,13 @@ impl RequestMonitor {
     }
 
     /// 获取最近请求日志
+    #[allow(dead_code)]
     pub fn get_recent_logs(&self, limit: usize) -> Vec<RequestLog> {
         self.logs.read().iter().rev().take(limit).cloned().collect()
     }
 
     /// 获取失败率
+    #[allow(dead_code)]
     pub fn get_failure_rate(&self) -> f64 {
         let stats = self.stats.read();
         if stats.total_requests == 0 {
@@ -220,11 +225,13 @@ impl RequestMonitor {
     }
 
     /// 获取背压状态
+    #[allow(dead_code)]
     pub fn get_backpressure_status(&self) -> BackpressureStatus {
         *self.current_status.read()
     }
 
     /// 检查是否可以接受新请求
+    #[allow(dead_code)]
     pub fn can_accept_request(&self) -> bool {
         if !self.config.enabled {
             return true;
@@ -235,6 +242,7 @@ impl RequestMonitor {
     }
 
     /// 获取队列使用率
+    #[allow(dead_code)]
     pub fn get_queue_usage(&self) -> f32 {
         let logs = self.logs.read();
         logs.len() as f32 / self.config.max_queue_size as f32
@@ -254,6 +262,7 @@ impl RequestMonitor {
     }
 
     /// 清空日志
+    #[allow(dead_code)]
     pub fn clear_logs(&self) {
         self.logs.write().clear();
         self.latencies.write().clear();
@@ -261,6 +270,7 @@ impl RequestMonitor {
     }
 
     /// 获取延迟直方图
+    #[allow(dead_code)]
     pub fn get_latency_histogram(&self, buckets: usize) -> Vec<(f64, usize)> {
         let latencies = self.latencies.read();
         if latencies.is_empty() {

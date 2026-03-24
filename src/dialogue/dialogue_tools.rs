@@ -7,6 +7,8 @@
 //! - 遵循 tokitai 工具规范（返回 `Result<T, String>`）
 //! - 提供状态查询和转换工具
 
+#![allow(dead_code)]
+
 use tokitai::tool;
 use tokitai::Value;
 use super::state_machine::{DialogueStateMachine, DialogueState};

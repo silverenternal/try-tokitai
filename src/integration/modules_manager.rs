@@ -8,6 +8,8 @@
 //! - 生产级资源清理
 //! - 优雅的错误处理和降级
 
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use parking_lot::RwLock;
 use std::path::PathBuf;

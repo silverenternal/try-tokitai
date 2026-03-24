@@ -8,6 +8,8 @@
 //!
 //! // 从文件加载工作流
 //! let workflow = WorkflowLoader::load_from_file("workflows/code_review.toml")?;
+
+#![allow(dead_code)]
 //!
 //! // 从字符串加载工作流
 //! let toml_str = std::fs::read_to_string("workflows/code_review.toml")?;
@@ -186,7 +188,7 @@ impl WorkflowLoader {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map_or(false, |ext| ext == "toml") {
+            if path.extension().is_some_and(|ext| ext == "toml") {
                 match Self::load_from_file(&path) {
                     Ok(workflow) => workflows.push(workflow),
                     Err(e) => tracing::warn!("加载工作流 {:?} 失败：{}", path, e),
