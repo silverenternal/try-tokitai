@@ -1,0 +1,43 @@
+# Template 03: File Operations Tool Template
+# Template for tools that work with files
+
+[tool]
+name = "my_file_tool"
+version = "1.0.0"
+description = "A file operations tool template"
+author = "your_name"
+category = "filesystem"
+entry_point = "tools::file::execute"
+tags = ["file", "filesystem", "io", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "path"
+type = "string"
+required = true
+description = "File path to operate on"
+
+[[parameters]]
+name = "operation"
+type = "string"
+required = true
+description = "Operation to perform (read, write, append, delete)"
+
+[[parameters]]
+name = "content"
+type = "string"
+required = false
+description = "Content to write (for write/append operations)"
+
+[[parameters]]
+name = "encoding"
+type = "string"
+required = false
+default = "utf-8"
+description = "File encoding"
+
+[permissions]
+network_access = false
+file_read = true
+file_write = true
+execute_commands = false

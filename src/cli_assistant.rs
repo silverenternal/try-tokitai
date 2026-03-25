@@ -34,6 +34,9 @@ use crate::integration::IntegratedModulesConfig;
 use crate::path_resolver;
 use crate::tools::{FileOperations, SystemTools, CodeTools, SearchTools, DownloadTools, GitOperations, JsonFormatTools};
 use crate::tools::HttpClientTools;
+use crate::llm::{LLMManager, ProviderInitializer, ModelCommandHandler};
+use crate::config::Config;
+use std::sync::Arc;
 
 /// CLI AI 助手 - 面向用户的交互式助手
 pub struct CliAssistant {
@@ -55,6 +58,15 @@ pub struct CliAssistant {
     git_ops: GitOperations,
     http_client: HttpClientTools,
     json_tools: JsonFormatTools,
+    /// LLM 管理器（多提供商支持）
+    #[allow(dead_code)]
+    llm_manager: Arc<LLMManager>,
+    /// 模型命令处理器
+    #[allow(dead_code)]
+    model_handler: Option<ModelCommandHandler>,
+    /// 配置文件
+    #[allow(dead_code)]
+    config_file: Config,
 }
 
 impl CliAssistant {
@@ -63,6 +75,54 @@ impl CliAssistant {
     /// # 参数
     /// - `config`: 助手配置
     pub fn new(config: AssistantConfig) -> Result<Self> {
+        // 加载配置文件
+        let config_file = Config::load(None).unwrap_or_else(|e| {
+            warn!("加载配置文件失败：{}，使用默认配置", e);
+            Config::default()
+        });
+
+        // 初始化 LLM 管理器（多提供商支持）
+        let provider_initializer = ProviderInitializer::new(config_file.clone());
+        let llm_manager = match provider_initializer.initialize_llm_manager() {
+            Ok(manager) => {
+                let providers = manager.list_providers();
+                info!("✅ 初始化 LLM 管理器，加载 {} 个提供商", providers.len());
+                Arc::new(manager)
+            }
+            Err(e) => {
+                warn!("⚠️  初始化 LLM 管理器失败：{}，使用单提供商模式", e);
+                // 尝试从环境变量创建单提供商
+                let mut manager = LLMManager::new();
+                if let Ok(api_url) = std::env::var("AI_API_URL") {
+                    let api_key = std::env::var("AI_API_KEY").ok();
+                    let model = std::env::var("AI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
+                    
+                    let provider = Arc::new(crate::llm::providers::OpenAIProvider::with_base_url(
+                        api_key.unwrap_or_default(),
+                        api_url,
+                        Some(model),
+                    ));
+                    manager.register_provider(provider);
+                }
+                Arc::new(manager)
+            }
+        };
+
+        // 创建模型命令处理器
+        let model_handler = if llm_manager.list_providers().len() > 1 {
+            info!("✅ 启用多提供商模式，创建模型命令处理器");
+            match ModelCommandHandler::new(llm_manager.clone(), config_file.clone()).with_router() {
+                Ok(handler) => Some(handler),
+                Err(e) => {
+                    warn!("⚠️  创建模型命令处理器失败：{}", e);
+                    None
+                }
+            }
+        } else {
+            info!("ℹ️  单提供商模式，跳过模型命令处理器");
+            None
+        };
+
         // 创建工具注册表
         let tool_registry = crate::tool_matrix::registry::ToolRegistry::new();
 
@@ -111,6 +171,9 @@ impl CliAssistant {
             git_ops: GitOperations,
             http_client: HttpClientTools::new(),
             json_tools: JsonFormatTools::default(),
+            llm_manager,
+            model_handler,
+            config_file,
         })
     }
 
@@ -360,6 +423,18 @@ impl CliAssistant {
                     continue;
                 }
 
+                // 处理 /model 命令
+                if input.starts_with("/model") {
+                    let model_args = input.trim_start_matches("/model").trim();
+                    if let Some(ref handler) = self.model_handler {
+                        let result = handler.execute(model_args);
+                        println!("\n{}\n", result);
+                    } else {
+                        println!("\n⚠️  模型命令处理器未初始化（可能在单提供商模式）\n");
+                    }
+                    continue;
+                }
+
                 let processed = self.orchestrator.process_input(&input);
                 if let Some(cmd) = processed.command {
                     let result = self.orchestrator.execute_command(cmd);
@@ -388,6 +463,7 @@ impl CliAssistant {
                 println!("  /context      查看上下文状态");
                 println!("  /optimize     优化上下文");
                 println!("  /toolbox      查看工具箱状态");
+                println!("  /model        管理 AI 模型 (list/switch/benchmark/stats)");
                 println!();
                 println!("  使用技巧");
                 println!("  ──────────────────────────────────────");

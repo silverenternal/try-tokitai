@@ -1,0 +1,51 @@
+# Template 08: Search Tool Template
+# Template for search and indexing tools
+
+[tool]
+name = "my_search_tool"
+version = "1.0.0"
+description = "A search and indexing tool template"
+author = "your_name"
+category = "search"
+entry_point = "tools::search::execute"
+tags = ["search", "index", "find", "query", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "query"
+type = "string"
+required = true
+description = "Search query"
+
+[[parameters]]
+name = "scope"
+type = "string"
+required = false
+default = "."
+description = "Search scope (path or pattern)"
+
+[[parameters]]
+name = "limit"
+type = "integer"
+required = false
+default = 20
+description = "Maximum number of results"
+
+[[parameters]]
+name = "case_sensitive"
+type = "boolean"
+required = false
+default = false
+description = "Case-sensitive search"
+
+[[parameters]]
+name = "file_pattern"
+type = "string"
+required = false
+description = "File pattern to filter (e.g., *.rs)"
+
+[permissions]
+network_access = false
+file_read = true
+file_write = false
+execute_commands = false

@@ -57,6 +57,8 @@ pub mod query_enhancer;
 pub mod tool_generator;
 pub mod trie_index;
 pub mod dynamic_registry;
+pub mod tool_definition;
+pub mod ai_tool_generator;
 
 // 注意：以下导出保留，供未来功能扩展使用
 #[allow(unused_imports)]
@@ -148,5 +150,26 @@ pub use dynamic_registry::{
     DynamicToolMetadata,
     DynamicRegistryStats,
     DynamicToolBuilder,
+};
+
+// TOML 工具定义模块导出
+#[allow(unused_imports)]
+pub use tool_definition::{
+    TomlToolDefinition,
+    TomlToolLoader,
+    ToolMetadata,
+    ParameterSpec,
+    Permissions,
+    RateLimit,
+    ValidationRule,
+};
+
+// AI 工具生成器模块导出
+#[allow(unused_imports)]
+pub use ai_tool_generator::{
+    AIToolGenerator,
+    AIToolGenerationRequest,
+    AIToolGenerationResult,
+    ToolCategory,
 };
 

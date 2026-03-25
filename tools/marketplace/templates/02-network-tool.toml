@@ -1,0 +1,47 @@
+# Template 02: Network Tool Template
+# Template for tools that require network access
+
+[tool]
+name = "my_network_tool"
+version = "1.0.0"
+description = "A network-enabled tool template"
+author = "your_name"
+category = "network"
+entry_point = "tools::network::execute"
+tags = ["network", "http", "api", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "url"
+type = "string"
+required = true
+description = "Target URL for the request"
+
+[[parameters]]
+name = "method"
+type = "string"
+required = false
+default = "GET"
+description = "HTTP method (GET, POST, PUT, DELETE)"
+
+[[parameters]]
+name = "headers"
+type = "object"
+required = false
+description = "Custom HTTP headers"
+
+[[parameters]]
+name = "timeout_seconds"
+type = "integer"
+required = false
+default = 30
+description = "Request timeout in seconds"
+
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_commands = false
+
+[rate_limit]
+requests_per_minute = 60

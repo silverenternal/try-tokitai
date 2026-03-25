@@ -1,0 +1,81 @@
+# =============================================================================
+# AI 工具模板 (AI Tool Template)
+# =============================================================================
+# 用途：适用于调用 LLM、AI 模型、 embeddings 等 AI 相关工具
+# 类别：ai
+# =============================================================================
+
+[tool]
+name = "example_ai_tool"
+version = "1.0.0"
+description = "Example AI tool template"
+author = "your_name"
+category = "ai"
+tags = ["template", "ai", "llm", "embedding"]
+license = "MIT"
+
+# -----------------------------------------------------------------------------
+# 参数定义
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "prompt"
+type = "string"
+required = true
+description = "Input prompt for the AI model"
+example = "Explain quantum computing in simple terms"
+
+[[parameters]]
+name = "model"
+type = "string"
+required = false
+default = "gpt-4"
+description = "AI model to use"
+example = "gpt-4-turbo"
+
+[[parameters]]
+name = "max_tokens"
+type = "integer"
+required = false
+default = 1024
+description = "Maximum tokens in response"
+validation = { min = 1, max = 128000 }
+
+[[parameters]]
+name = "temperature"
+type = "number"
+required = false
+default = 0.7
+description = "Sampling temperature"
+validation = { min = 0.0, max = 2.0 }
+
+[[parameters]]
+name = "system_prompt"
+type = "string"
+required = false
+description = "System prompt to set behavior"
+
+[[parameters]]
+name = "stream"
+type = "boolean"
+required = false
+default = false
+description = "Enable streaming response"
+
+# -----------------------------------------------------------------------------
+# 权限配置
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_command = false
+env_access = true
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# 速率限制
+# -----------------------------------------------------------------------------
+[rate_limit]
+requests_per_minute = 30
+requests_per_second = 1
+requests_per_day = 1000

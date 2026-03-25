@@ -1,0 +1,52 @@
+# Template 09: Webhook Tool Template
+# Template for webhook and event-driven tools
+
+[tool]
+name = "my_webhook_tool"
+version = "1.0.0"
+description = "A webhook integration tool template"
+author = "your_name"
+category = "integration"
+entry_point = "tools::webhook::execute"
+tags = ["webhook", "event", "integration", "callback", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "webhook_url"
+type = "string"
+required = true
+description = "Webhook endpoint URL"
+
+[[parameters]]
+name = "event_type"
+type = "string"
+required = true
+description = "Type of event to send"
+
+[[parameters]]
+name = "payload"
+type = "object"
+required = true
+description = "Event payload data"
+
+[[parameters]]
+name = "secret"
+type = "string"
+required = false
+description = "Secret for HMAC signature"
+
+[[parameters]]
+name = "retry_count"
+type = "integer"
+required = false
+default = 3
+description = "Number of retry attempts"
+
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_commands = false
+
+[rate_limit]
+requests_per_minute = 120

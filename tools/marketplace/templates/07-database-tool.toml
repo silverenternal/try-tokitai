@@ -1,0 +1,53 @@
+# Template 07: Database Tool Template
+# Template for database operations
+
+[tool]
+name = "my_database_tool"
+version = "1.0.0"
+description = "A database operations tool template"
+author = "your_name"
+category = "database"
+entry_point = "tools::database::execute"
+tags = ["database", "sql", "query", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "connection_string"
+type = "string"
+required = true
+description = "Database connection string"
+
+[[parameters]]
+name = "query"
+type = "string"
+required = true
+description = "SQL query to execute"
+
+[[parameters]]
+name = "params"
+type = "array"
+required = false
+description = "Query parameters for prepared statements"
+
+[[parameters]]
+name = "db_type"
+type = "string"
+required = false
+default = "postgresql"
+description = "Database type (postgresql, mysql, sqlite)"
+
+[[parameters]]
+name = "return_format"
+type = "string"
+required = false
+default = "json"
+description = "Result format (json, csv, table)"
+
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_commands = false
+
+[rate_limit]
+requests_per_minute = 100

@@ -1,0 +1,70 @@
+# =============================================================================
+# 文件工具模板 (File Tool Template)
+# =============================================================================
+# 用途：适用于文件读写、目录操作、文件搜索等文件系统相关工具
+# 类别：file_ops
+# =============================================================================
+
+[tool]
+name = "example_file_tool"
+version = "1.0.0"
+description = "Example file tool template"
+author = "your_name"
+category = "file_ops"
+tags = ["template", "file", "filesystem"]
+license = "MIT"
+
+# -----------------------------------------------------------------------------
+# 参数定义
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "path"
+type = "string"
+required = true
+description = "File or directory path"
+example = "/path/to/file.txt"
+
+[[parameters]]
+name = "operation"
+type = "string"
+required = true
+description = "File operation to perform"
+validation = { enum_values = ["read", "write", "append", "delete", "copy", "move", "list"] }
+
+[[parameters]]
+name = "content"
+type = "string"
+required = false
+description = "Content to write (for write/append operations)"
+
+[[parameters]]
+name = "recursive"
+type = "boolean"
+required = false
+default = false
+description = "Apply operation recursively"
+
+[[parameters]]
+name = "pattern"
+type = "string"
+required = false
+description = "File pattern for glob matching"
+example = "*.rs"
+
+# -----------------------------------------------------------------------------
+# 权限配置
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = false
+file_read = true
+file_write = true
+execute_command = false
+env_access = false
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# 速率限制
+# -----------------------------------------------------------------------------
+[rate_limit]
+requests_per_minute = 100
+requests_per_second = 10

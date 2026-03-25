@@ -8,6 +8,30 @@ temperature = 0.7
 # 最大 token 数
 max_tokens = 4096
 
+# ============================================================================
+# 多模型提供商配置 (Multi-Provider Configuration)
+# ============================================================================
+# 支持以下提供商：openai, gemini, anthropic, zhipu, moonshot, ollama
+# 在 .env 文件中配置 PROVIDERS 和各提供商的 API 密钥
+
+[llm]
+# 默认提供商（可选，留空则使用第一个可用的提供商）
+# default_provider = "ollama"
+
+# 模型路由策略：cost_optimized, quality_optimized, latency_optimized, balanced
+# routing_strategy = "balanced"
+
+# 路由约束（可选）
+# max_latency_ms = 5000
+# max_cost_per_1k_tokens = 0.10
+# min_quality_score = 6.0
+
+# 任务类型模型覆盖（可选）
+# [llm.task_overrides]
+# code_generation = "openai/gpt-4o"
+# code_review = "anthropic/claude-3-5-sonnet-20241022"
+# documentation = "zhipu/glm-4"
+
 [search]
 # SearXNG 服务地址（推荐配置，提高搜索可靠性）
 # searxng_url = "https://searx.be"

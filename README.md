@@ -2,340 +2,127 @@
 
 > **AI 原生工具选择器 + 双轨服务架构**
 >
-> 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互** 和 **自主进化** 双模式，配备 63+ 工具和 AI 原生工具选择系统。
->
-> **项目名称说明**: 本项目 (`ai-assistant`) 是对 `tokitai` 库的深度实践和扩展实现，核心贡献（HybridGapDetector、Prompt Engineering 自进化系统）已回馈到 tokitai 生态。
+> 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互**、**TUI 图形界面**、**MCP 协议** 和 **自主进化** 四种模式。
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Tests](https://img.shields.io/badge/tests-470%20passed-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
+[![Rust](https://img.shields.io/badge/rust-1.75+-orange)]()
 
 ---
 
-## 📊 项目概览
+## 🎯 核心特性
 
-| 指标 | 数值 |
-|------|------|
-| **代码行数** | ~52,964 行 Rust |
-| **源代码文件** | 131 个 |
-| **核心模块** | 15 个 |
-| **工具箱** | 12 个 |
-| **工具函数** | 63+ 个 |
-| **测试状态** | 470/470 通过 ✅ |
-| **HybridGapDetector** | ✅ 已实现（769 行，成本降低 95%） |
-
----
-
-## 🎯 双轨服务架构
-
-本项目采用独特的**双轨服务架构**，两种模式共享底层能力但定位不同：
+### 双轨服务架构
 
 | 模式 | 启动命令 | 服务对象 | 典型场景 |
 |------|----------|----------|----------|
-| **📱 CLI AI 助手** | `cargo run --release` | 用户（开发者） | 查询、分析、临时任务 |
-| **🤖 项目自更新** | `cargo run --release -- --autonomous` | 项目自身 | 代码改进、技术债务清理 |
+| **📱 CLI AI 助手** | `cargo run --release` | 用户 | 查询、分析、临时任务 |
+| **🎨 TUI 图形界面** | `cargo run --release -- --tui` | 用户 | 可视化交互、工具浏览 |
+| **🔌 MCP Server** | `cargo run --release -- --mcp` | 外部 AI 客户端 | 工具暴露、协议兼容 |
+| **🤖 自主进化** | `cargo run --release -- --autonomous` | 项目自身 | 代码改进、技术债务清理 |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Tokitai 双轨服务                          │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐              ┌─────────────────────────┐   │
-│  │  CLI AI 助手     │              │  项目自更新服务          │   │
-│  │  (面向用户)     │              │  (面向项目自身)         │   │
-│  │                 │              │                         │   │
-│  │  • 交互式对话   │              │  • 自主进化循环         │   │
-│  │  • 用户驱动     │              │  • AI 驱动              │   │
-│  │  • 即时响应     │              │  • Planner-Executor-    │   │
-│  │  • 完成任务     │              │    Reviewer 迭代        │   │
-│  └─────────────────┘              └─────────────────────────┘   │
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │              共享底层能力                                     ││
-│  │  ToolMatrix │ Context Storage │ Orchestrator │ Autonomy    ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+### 六大 LLM 提供商支持
+
+支持 **OpenAI**、**Gemini**、**Anthropic**、**智谱 AI**、**月之暗面**、**Ollama** 六大提供商，使用 `/model` 命令动态切换：
+
+```bash
+/model list          # 列出所有可用模型
+/model switch openai # 切换到 OpenAI
+/model benchmark     # 运行基准测试
+/model stats         # 显示使用统计
 ```
 
-详细架构说明：[structure_ensure/SERVICES.md](structure_ensure/SERVICES.md)
+### 工具市场
 
----
+```bash
+tokitai publish <tool>   # 发布工具
+tokitai search <query>   # 搜索工具
+tokitai install <tool>   # 安装工具
+tokitai list             # 列出已安装工具
+```
 
-## ✨ 核心特性
+提供 **10 种工具模板**，覆盖基础操作、网络、文件、AI、代码分析、Git、数据库、搜索、Webhook、自动化等场景。
 
-### 🤖 AI 原生工具选择器
+### MCP 协议支持
 
-- **ToolIndex**: 倒排索引，支持关键词/分类/工具箱检索
-- **LightweightToolSelector**: 快速搜索 <10ms，AI 搜索 <2s，LRU 缓存命中后 ~3ms
-- **AIToolboxClassifier**: AI 自主管理工具箱体系
-- **AIDependencyAnalyzer**: AI 自主维护工具依赖关系（静态分析 + 运行时学习）
-- **后台异步重建**: 不阻塞主线程，批量处理优化（100 工具 ~600ms）
-- **ToolDispatcher**: 统一工具调用分发器
-- **SelectorMetrics**: 完整监控指标（搜索次数/缓存命中率/平均延迟）
-
-### 🛠️ 完整工具矩阵 (IMP-001~004)
-
-| 改进项目 | 功能 | 状态 |
-|---------|------|------|
-| **IMP-001** | 规则分类器（分层缓存 L1→L2→L3→L4） | ✅ |
-| **IMP-002** | 工具生成器（tokitai 宏生成） | ✅ |
-| **IMP-003** | Trie 索引 + BK-Tree 拼写纠正 | ✅ |
-| **IMP-004** | 动态注册表（热加载） | ✅ |
-
-### 📁 纯文件上下文存储
-
-- **无数据库依赖**：纯文件存储，轻量级
-- **三层存储架构**：瞬时层 → 短期层 → 长期层
-- **增量哈希链 (ICHC)**：不可篡改的链式哈希结构
-- **上下文蒸馏 (HCD)**：提取核心意图，过滤冗余
-- **语义索引 (LSFI)**：基于 SimHash 的语义搜索
-
-### 🔒 安全沙箱
-
-- 路径验证、命令黑名单
-- SSRF 防护、内网 IP 过滤
-- 符号链接循环检测
-- 递归深度限制、速率限制
-
-### 🌐 服务化架构
-
-- **服务元数据**: ServiceMetadata 包含分类、QoS、依赖、版本、标签
-- **服务生命周期**: ServiceLifecycle trait (init/health/shutdown/stats)
-- **服务健康状态**: Healthy/Degraded/Unhealthy
-- **服务统计**: ServiceStats 记录调用次数/成功率/延迟
-- **服务指标收集**: ServiceMetricsCollector 统一收集服务调用指标
-- **服务分类**: 10 种服务类型（Utility/File/Network/System/Data/Ai/Vcs/Dialogue/Observability/Prompt）
-- **声明式工作流**: TOML 定义，支持重试/超时/错误处理
-- **TOML 工作流加载器**: WorkflowLoader 从文件/目录加载工作流
-
-### 🧩 集成模块
-
-- **IntegratedModules**: 统一管理 dialogue/observability/prompt_engineering
-- **共享状态管理**: `Arc<RwLock>` 跨模块同步
-- **优雅降级**: 单模块失败不影响其他
-
-### 🎯 Prompt Engineering 自进化系统（论文核心贡献）
-
-本项目实现了基于 **Prompt Engineering** 的自进化系统，无需训练专用模型：
-
-| 组件 | 说明 | 核心技术 | 状态 |
-|------|------|----------|------|
-| **PromptGapDetector** | 因果推理缺口检测器 | Chain-of-Thought + 反事实提问 + JSON Schema | ✅ |
-| **PromptOptimizer** | 工具优化器 | Few-Shot 学习 + 使用模式分析 | ✅ |
-| **MultiAgentNegotiator** | 多智能体协商器 | 4 角色 Role-Playing + 投票共识 | ✅ |
-| **PromptCreator** | 工具创建器 | 代码生成 + 编译错误自修正循环 | ✅ |
-| **HybridGapDetector** ⭐ | 混合缺口检测器 | 统计筛选 + 因果分析 + 证据融合 | ✅ |
-
-**核心洞察**：现代 LLM（Qwen3.5/4.0、GPT-4）已具备推理能力，精心设计的 Prompt 即可激发已有能力，无需训练专用模型。
-
-**优势**：
-- 成本降低 10-20 倍（<$150 vs $500-2000）
-- 实施时间从 12-20 周缩短到 8 周
-- 可解释性强，易于调试
-
-**HybridGapDetector 性能**：
-- API 成本降低 95%（从$45/月降至$2.25/月）
-- 检测延迟从 5-30 秒降至 1-5 秒
-- 保持检测准确率 75-85%
-
-详细设计：[docs/paper_plan/MECHANISMS.md](docs/paper_plan/MECHANISMS.md)  
-实现报告：[docs/HYBRID_GAP_DETECTOR_IMPLEMENTATION.md](docs/HYBRID_GAP_DETECTOR_IMPLEMENTATION.md)  
-项目状态：[docs/PROJECT_STATUS_REPORT_2026_03_20.md](docs/PROJECT_STATUS_REPORT_2026_03_20.md)
+- **MCP Server 模式**：将所有 `#[tool]` 函数暴露为标准 MCP 工具
+- **MCP Client 模式**：发现并调用外部 MCP Server 的工具
 
 ---
 
 ## 🚀 快速开始
 
-### 1️⃣ 获取 API Key
-
-本项目使用 **Ollama Cloud** 作为默认 AI 服务：
-
-1. 访问 https://ollama.com
-2. 注册/登录账号
-3. 进入 Settings → API Keys
-4. 创建新 Key 并复制（格式：`ollama-xxxxxxxx...`）
-
-> 💡 Ollama Cloud 目前提供免费额度，足够个人开发和测试使用。
-
-### 2️⃣ 配置环境变量
+### 1. 配置 API Key
 
 ```bash
-# 方法一：临时设置
-export AI_API_KEY="ollama-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export AI_API_URL="https://ollama.com/v1/chat/completions"
-export AI_MODEL="qwen3.5:397b"
-
-# 方法二：永久设置（推荐）
+# 复制环境变量模板
 cp .env.example .env
+
 # 编辑 .env 文件，填入你的 API Key
+# 支持多提供商配置（详见 docs/QUICKSTART.md）
 ```
 
-### 3️⃣ 启动程序
+### 2. 启动程序
 
 ```bash
-# CLI AI 助手模式（默认）
+# CLI 模式（默认）
 cargo run --release
 
-# 项目自更新模式（自主进化）
-cargo run --release -- --autonomous
+# TUI 模式
+cargo run --release -- --tui
 
-# 指定项目路径
-cargo run --release -- -p ./sandbox/test-project
+# MCP Server 模式
+cargo run --release -- --mcp
+
+# 自主进化模式
+cargo run --release -- --autonomous
 ```
 
-### 4️⃣ 运行测试
+### 3. 运行测试
 
 ```bash
-# 所有测试
 cargo test
-
-# 特定模块测试
-cargo test tool_matrix
-cargo test tool_selector
-cargo test ai_classifier
-cargo test autonomy
-```
-
----
-
-## 🛠️ 工具箱
-
-项目提供 **63+ 工具函数**，分为 **12 个工具箱**：
-
-| 工具箱 | 工具数 | 功能 |
-|--------|--------|------|
-| `file_ops` | 15 | 文件读写、搜索、PDF 处理、项目模板 |
-| `web` | 20 | HTTP 请求、网页搜索、下载、网络诊断、Wikipedia |
-| `system` | 13 | 命令执行、进程管理、代码分析、对话状态、可观测性、提示词 |
-| `code` | 4 | 代码分析、语言检测 |
-| `git` | 4 | Git 状态、日志、分支管理 |
-| `data` | 5 | JSON 格式化、查询、转换 |
-| `tensor` | 20+ | 张量计算、矩阵操作、激活函数、神经网络 **（实验性）** |
-| `autonomy` | 2 | 自主进化（仅自主模式） |
-
-### 张量计算工具箱（tensor）⚠️
-
-> **注意**: `tensor` 功能为**实验性特性**，需要启用 `--features tensor`。
-> 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 [candle](https://github.com/huggingface/candle)、[tch-rs](https://github.com/LaurentMazare/tch-rs)）。
-
-**核心功能**:
-- **创建操作**: `zeros`, `ones`, `randn`, `from_data`, `arange`
-- **算术操作**: `add`, `sub`, `mul`, `div`, `mul_scalar`（支持广播）
-- **矩阵操作**: `matmul`, `transpose`, `reshape`
-- **归约操作**: `sum`, `mean`, `max`, `min`, `argmax`
-- **索引操作**: `slice`, `cat`, `stack`
-- **激活函数**: `relu`, `gelu`, `sigmoid`, `layer_norm`
-
-**使用示例**:
-```rust
-// 需要启用 tensor feature: cargo build --features tensor
-use crate::tools::tensor::TensorService;
-
-let service = TensorService::new();
-
-// 创建张量
-let a = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
-let b = service.from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2])?;
-
-// 矩阵乘法
-let result = service.matmul(&a, &b)?;
-// 输出：[19.0, 22.0, 43.0, 50.0]
-
-// 链式调用
-let zeros = service.zeros(&[2, 2])?;
-let result = service.add_scalar(&zeros, 1.0)?.mul_scalar(&2.0)?;
-```
-
-详细文档：[src/tools/tensor/README.md](src/tools/tensor/README.md)
-
-### 新增工具（已集成到 system 工具箱）
-
-#### 对话状态管理 (DialogueTools)
-- `get_state()`, `get_context()`, `get_history()`
-- `set_goal()`, `set_plan()`, `record_tool_execution()`
-- `transition()`, `reset()`, `get_stats()`, `sync_with_autonomy()`
-
-#### 可观测性 (ObservabilityTools)
-- `get_recent_traces()`, `get_stats()`, `query_trace()`
-- `query_errors()`, `export_traces()`, `cleanup_old_traces()`
-
-#### 提示词工程 (PromptTools)
-- `load_role_template()`, `render_template()`, `has_template()`
-- `list_available_templates()`, `get_render_stats()`, `warmup_cache()`
-
----
-
-## 💬 交互命令
-
-| 命令 | 说明 |
-|------|------|
-| `help` | 显示可用操作列表 |
-| `exit` / `quit` | 退出程序 |
-| `/role <name>` | 切换角色（planner/executor/reviewer/researcher） |
-| `/optimize` | 优化上下文 |
-| `/context` | 显示上下文状态 |
-| `/workflow list` | 列出可用工作流 |
-| `/workflow start` | 启动工作流 |
-| `/toolbox` | 显示工具箱状态 |
-| `@<路径>` | 快速引用文件（如 `@README.md`） |
-
----
-
-## 📋 演示示例
-
-### CLI 模式示例
-
-```
-👤 你：当前目录有哪些文件
-🤖 AI：当前目录包含以下文件...
-
-👤 你：读取 README.md 的内容
-🤖 AI：README.md 的内容如下...
-
-👤 你：@src/main.rs 的结构是什么
-🤖 AI：main.rs 的结构分析如下...
-
-👤 你：帮我创建一个新文件 test.txt，写入 Hello World
-🤖 AI：已创建文件 test.txt...
-```
-
-### 自主模式示例
-
-```
-$ cargo run --release -- --autonomous
-
-[Planner] 分析项目状态...
-[Planner] 发现改进点：修复 Clippy 警告
-[Planner] 制定改进计划...
-
-[Executor] 执行任务 1/5: 修复 src/main.rs 的警告
-[Executor] 执行任务 2/5: 添加缺失的单元测试
-...
-
-[Reviewer] 代码审查通过
-[Reviewer] 运行测试... 236/236 passed ✅
-[GitWorkflow] 自动提交：fix: resolve Clippy warnings
-
-[Planner] 开始下一轮迭代...
 ```
 
 ---
 
 ## 📊 项目规模
 
-| 模块 | 行数 | 占比 | 说明 |
-|------|------|------|------|
-| `tools/` | 16,802 | 31.7% | 工具集合（文件/网络/系统/Git/数据） |
-| `context/` | 7,398 | 14.0% | 上下文存储（三层架构/哈希链/语义索引） |
-| `autonomy/` | 7,072 | 13.4% | 自主进化（多 Agent 协作/智能工具推荐） |
-| `orchestrator/` | 4,419 | 8.3% | 编排调度（工作流/角色切换/TOML 加载器） |
-| `tool_matrix/` | 8,271 | 15.6% | 工具矩阵（服务注册表/选择器/AI 分类器/AI 分析器/规则分类器/查询增强器/工具生成器/Trie 索引/动态注册表） |
-| `main_core` | 3,079 | 5.8% | 主程序入口和核心逻辑 |
-| `observability/` | 901 | 1.7% | 可观测性（已集成） |
-| `dialogue/` | 751 | 1.4% | 对话状态机（已集成） |
-| `prompt_engineering/` | 677 | 1.3% | 提示词工程（已集成） |
-| `integration/` | 331 | 0.6% | 集成模块管理器 |
-| 其他 | 3,263 | 6.2% | 配置/沙箱/解析器等 |
-| **总计** | **~52,964** | **100%** | **131 个源文件** |
+| 指标 | 数值 |
+|------|------|
+| **代码行数** | ~53,000 行 Rust |
+| **核心模块** | 15 个 |
+| **工具箱** | 12 个 |
+| **工具函数** | 63+ 个 |
+| **LLM 提供商** | 6 个 |
+| **工具模板** | 10 个 |
+
+---
+
+## 📚 文档导航
+
+| 文档 | 说明 |
+|------|------|
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | **快速启动指南**（推荐先看） |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
+| [docs/PHASE_1_COMPLETION_REPORT.md](docs/PHASE_1_COMPLETION_REPORT.md) | Phase 1 完成报告 |
+| [docs/STRATEGIC_IMPLEMENTATION_PLAN.json](docs/STRATEGIC_IMPLEMENTATION_PLAN.json) | 战略实施计划 |
+| [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 双轨服务架构详解 |
+
+---
+
+## 🛠️ 工具箱
+
+| 工具箱 | 工具数 | 功能 |
+|--------|--------|------|
+| `file_ops` | 15 | 文件读写、搜索、PDF 处理 |
+| `web` | 20 | HTTP 请求、网页搜索、下载 |
+| `system` | 13 | 命令执行、进程管理、代码分析 |
+| `code` | 4 | 代码分析、语言检测 |
+| `git` | 4 | Git 状态、日志、分支管理 |
+| `data` | 5 | JSON 格式化、查询、转换 |
+| `tensor` | 20+ | 张量计算（实验性） |
+| `autonomy` | 2 | 自主进化（仅自主模式） |
 
 ---
 
@@ -343,111 +130,38 @@ $ cargo run --release -- --autonomous
 
 ```
 try-tokitai/
-├── Cargo.toml                    # 项目配置和依赖
-├── config.toml                   # 应用配置
-├── .env.example                  # 环境变量模板
-├── README.md                     # 项目说明
-├── demo.sh                       # 一键演示脚本
+├── src/
+│   ├── main.rs                  # 程序入口
+│   ├── lib.rs                   # 库入口
+│   ├── llm/                     # 多模型支持（6 提供商）
+│   ├── mcp/                     # MCP 协议（Server/Client）
+│   ├── tool_market/             # 工具市场
+│   ├── tui/                     # TUI 图形界面
+│   ├── tools/                   # 工具集合（63+ 工具）
+│   ├── tool_matrix/             # 工具矩阵/服务注册表
+│   ├── context/                 # 上下文存储（三层架构）
+│   ├── autonomy/                # 自主进化（多 Agent 协作）
+│   ├── orchestrator/            # 编排调度（工作流/角色切换）
+│   ├── dialogue/                # 对话状态机
+│   ├── observability/           # 可观测性
+│   └── prompt_engineering/      # 提示词工程
 │
-├── docs/                         # 用户文档
-│   ├── QUICKSTART.md            # 快速启动
-│   ├── USER_GUIDE.md            # 用户指南
-│   ├── DEMO.md                  # 演示指南
-│   ├── CHANGELOG.md             # 更新日志
-│   └── archive/                 # 技术报告归档
-│       ├── MODULE_INTEGRATION_REPORT.md   - 集成报告
-│       ├── MODULE_IMPROVEMENT_REPORT.md   - 改进报告
-│       ├── SERVICE_ARCHITECTURE_IMPLEMENTATION.md - 服务化架构
-│       ├── LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md - 工具选择器设计
-│       ├── LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md - 深化落实报告
-│       └── LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md - 总结
-│
-├── workflows/                    # TOML 工作流定义
-│   ├── research_and_write.toml  - 研究并撰写报告工作流
-│   └── code_review.toml         - 代码审查工作流
-│
-├── src/                          # 源代码
-│   ├── main.rs                  # 程序入口，AiAssistant 整合
-│   ├── config.rs                # 配置管理
-│   ├── sandbox.rs               # 沙箱系统
-│   │
-│   ├── tools/                   # 工具集合 (16,802 行)
-│   │   ├── io/                  # 文件 IO 工具
-│   │   ├── network/             # 网络工具（服务化）
-│   │   ├── system/              # 系统工具
-│   │   ├── data/                # 数据处理工具
-│   │   └── vcs/                 # 版本控制工具
-│   │
-│   ├── context/                 # 上下文存储 (7,398 行)
-│   ├── autonomy/                # 自主进化模块 (7,072 行)
-│   ├── orchestrator/            # 编排调度 (4,419 行)
-│   │   ├── orchestrator.rs      # 编排器核心
-│   │   ├── role_switcher.rs     # 角色切换
-│   │   ├── workflow.rs          # 声明式工作流定义和执行引擎
-│   │   └── workflow_loader.rs   # TOML 工作流加载器
-│   │
-│   ├── tool_matrix/             # 工具矩阵/服务注册表 (8,271 行)
-│   │   ├── matrix.rs            # 服务化元数据/生命周期/指标收集
-│   │   ├── registry.rs          # 工具注册表（AI 分类/依赖分析/运行时学习）
-│   │   ├── tool_selector.rs     # 轻量级工具选择器（AI 原生）
-│   │   ├── ai_classifier.rs     # AI 工具箱分类器
-│   │   ├── dependency_analyzer.rs # AI 依赖关系分析器
-│   │   ├── dispatcher.rs        # 工具调用分发器
-│   │   ├── rule_classifier.rs   # 规则分类器（分层缓存 L3）
-│   │   ├── query_enhancer.rs    # 查询增强器（同义词/意图识别）
-│   │   ├── tool_generator.rs    # 工具生成器（模板系统）
-│   │   ├── trie_index.rs        # Trie 树索引和 BK-Tree 拼写纠正
-│   │   └── dynamic_registry.rs  # 动态工具注册表（热加载）
-│   │
-│   ├── integration/             # 集成模块管理器 (331 行)
-│   ├── dialogue/                # 对话状态机 (751 行，已集成)
-│   ├── observability/           # 可观测性 (901 行，已集成)
-│   └── prompt_engineering/      # 提示词工程 (677 行，已集成)
-│
-├── structure_ensure/            # 项目结构文档
-│   ├── README.md                # 结构文档索引
-│   ├── SERVICES.md              # 服务架构说明
-│   ├── QUICK_REFERENCE.md       # 快速参考卡片
-│   ├── PROJECT_STRUCTURE.md     # 完整项目结构
-│   └── TOOL_SELECTOR_GUIDE.md   # 工具选择器指南
-│
-├── .context/                    # 运行时上下文存储
-└── .tokitai/                    # 运行时数据
+├── docs/                        # 用户文档
+├── tools/marketplace/templates/ # 10 种工具模板
+├── workflows/                   # TOML 工作流定义
+└── structure_ensure/            # 架构文档
 ```
 
 ---
 
-## 📚 文档导航
+## 📈 Phase 1 完成状态
 
-### 入门文档
-| 文档 | 说明 |
-|------|------|
-| [docs/QUICKSTART.md](docs/QUICKSTART.md) | 快速启动指南 |
-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
-| [docs/DEMO.md](docs/DEMO.md) | 演示指南 |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 更新日志 |
+✅ **MP-001**: 多模型支持（6 提供商 + 智能路由 + /model 命令）  
+✅ **TE-001**: 工具市场（publish/search/install/list + 10 模板）  
+✅ **DX-001**: TUI 界面（三面板布局 + 状态栏 + 快捷键）  
+✅ **MCP-001**: MCP 协议（Server + Client 模式）
 
-### 架构文档
-| 文档 | 说明 |
-|------|------|
-| [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 🆕 服务双轨架构说明 |
-| [structure_ensure/QUICK_REFERENCE.md](structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
-| [structure_ensure/PROJECT_STRUCTURE.md](structure_ensure/PROJECT_STRUCTURE.md) | 完整项目结构 |
-| [structure_ensure/TOOL_SELECTOR_GUIDE.md](structure_ensure/TOOL_SELECTOR_GUIDE.md) | 工具选择器指南 |
-| [structure_ensure/README.md](structure_ensure/README.md) | 结构文档索引 |
-
-### 技术报告
-| 文档 | 说明 |
-|------|------|
-| [docs/archive/ARCHITECTURE_IMPROVEMENT_PLAN.json](docs/archive/ARCHITECTURE_IMPROVEMENT_PLAN.json) | 架构改进计划（已归档） |
-| [docs/ARCHITECTURE_IMPROVEMENT_REPORT.md](docs/ARCHITECTURE_IMPROVEMENT_REPORT.md) | 架构改进报告 |
-| [docs/archive/IMPLEMENTATION_STATUS_REPORT.md](docs/archive/IMPLEMENTATION_STATUS_REPORT.md) | 实施状态报告（已归档） |
-| [docs/archive/MODULE_INTEGRATION_REPORT.md](docs/archive/MODULE_INTEGRATION_REPORT.md) | 模块集成报告 |
-| [docs/archive/MODULE_IMPROVEMENT_REPORT.md](docs/archive/MODULE_IMPROVEMENT_REPORT.md) | 模块改进报告 |
-| [docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md](docs/archive/SERVICE_ARCHITECTURE_IMPLEMENTATION.md) | 服务化架构实施报告 |
-| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DESIGN.md) | 工具选择器设计 |
-| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_DEEPENING.md) | 深化落实报告 |
-| [docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md](docs/archive/LIGHTWEIGHT_TOOL_SELECTION_FINAL_SUMMARY.md) | 总结报告 |
+**构建状态**: `cargo build --release` ✅ 通过
 
 ---
 
@@ -455,82 +169,12 @@ try-tokitai/
 
 | 类别 | 依赖 |
 |------|------|
-| **AI 框架** | tokitai 0.4.0, tokitai-core 0.4.0 |
-| **异步运行时** | tokio 1.x (full features) |
-| **HTTP 客户端** | reqwest 0.12, ureq 2.9 |
+| **AI 框架** | tokitai 0.4.0, tokitai-core 0.4.0, tokitai-mcp-server 0.4.0 |
+| **异步运行时** | tokio 1.x (full) |
+| **TUI** | ratatui 0.26, crossterm 0.27 |
+| **HTTP** | reqwest 0.12 |
 | **序列化** | serde 1.0, serde_json 1.0, toml 0.8 |
 | **错误处理** | anyhow 1.0, thiserror 2.0 |
-| **日志追踪** | tracing 0.1, tracing-subscriber 0.3 |
-| **并发** | parking_lot 0.12, threadpool 1.8 |
-| **缓存** | moka 0.12 |
-| **中文分词** | jieba-rs 0.7 |
-| **模板引擎** | tera 1.19 |
-| **索引优化** | fst 0.4, bk-tree 0.5 |
-| **PDF 处理** | lopdf 0.34 |
-
----
-
-## 📈 性能指标
-
-| 操作 | 延迟 | 说明 |
-|------|------|------|
-| 快速搜索 | ~8ms | 关键词匹配 |
-| 快速搜索 (缓存命中) | ~3ms | LRU 缓存 1000 条 |
-| AI 搜索 | ~1.5s | 含 LLM 调用 |
-| 后台重建 (100 工具) | ~600ms | 批量处理优化 |
-| 内存占用 (10,000 工具) | ~15MB | 含缓存 |
-
----
-
-## 🧪 测试状态
-
-```
-running 470 tests
-✅ autonomy::hybrid_gap_detector::... (3 个新测试)
-✅ autonomy::gap_detector::...
-✅ autonomy::prompt_gap_detector::...
-✅ autonomy::prompt_optimizer::...
-✅ autonomy::multi_agent_negotiator::...
-✅ autonomy::self_improvement_loop::...
-✅ context::...
-✅ tool_matrix::...
-✅ tools::...
-✅ orchestrator::...
-✅ integration::...
-
-test result: ok. 470 passed; 0 failed
-```
-
----
-
-## ❓ 常见问题
-
-### Q: 提示 "未设置 AI_API_KEY" 怎么办？
-A: 参考上方「获取 API Key」步骤，获取 Ollama API Key 并设置环境变量。
-
-### Q: 可以使用本地 Ollama 服务吗？
-A: 可以。设置 `AI_API_URL="http://localhost:11434/v1/chat/completions"`
-
-### Q: 模型响应很慢怎么办？
-A: 尝试切换到较小的模型：`export AI_MODEL="qwen2.5:7b"`
-
-### Q: 自主模式安全吗？
-A: 自主模式在本地执行代码审查（fmt/clippy/test），失败时自动回滚，可配置为仅提交不推送。
-
----
-
-## 📁 运行时文件夹
-
-以下文件夹在运行时自动创建，已添加到 `.gitignore`，不会被提交到版本控制：
-
-| 文件夹 | 用途 | 说明 |
-|--------|------|------|
-| `sandbox/` | 沙箱测试目录 | 用于测试文件操作、项目模板等功能 |
-| `downloads/` | 下载文件目录 | 使用下载工具时，文件默认保存到此目录 |
-| `.context/` | 上下文存储 | 三层存储架构（瞬时/短期/长期）的持久化数据 |
-| `.tokitai/` | 运行时数据 | 对话状态、追踪日志、自主进化数据等 |
-
-> 💡 **提示**：这些文件夹会在首次运行程序时自动创建，无需手动创建。如需清理缓存，可直接删除这些文件夹。
 
 ---
 
@@ -538,13 +182,7 @@ A: 自主模式在本地执行代码审查（fmt/clippy/test），失败时自�
 
 MIT OR Apache-2.0
 
-## 🙏 致谢
-
-- [tokitai](https://github.com/silverenternal/tokitai) - 优秀的 AI 工具集成框架
-
 ---
 
-**最后更新**: 2026-03-20
-**测试状态**: 470/470 ✅
-**构建状态**: Release ✅
-**HybridGapDetector**: ✅ 完成（769 行，成本降低 95%）
+**最后更新**: 2026-03-25  
+**版本**: 0.4.0

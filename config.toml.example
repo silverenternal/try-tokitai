@@ -7,6 +7,63 @@ model = "qwen3.5:397b"
 temperature = 0.7
 # 最大 token 数
 max_tokens = 4096
+# 默认提供商（可选，留空则使用第一个）
+# default_provider = "openai"
+
+# ============================================================================
+# 多提供商配置（可选）
+# ============================================================================
+# 配置多个 LLM 提供商，支持运行时动态切换
+# 使用 /model list 查看所有可用模型
+# 使用 /model switch <provider> 切换提供商
+
+[ai.providers.openai]
+api_url = "https://api.openai.com/v1/chat/completions"
+api_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 OPENAI_API_KEY
+model = "gpt-4o"
+cost_per_1k_tokens = 0.03
+quality_score = 9.0
+context_window = 128000
+
+[ai.providers.gemini]
+api_url = "https://generativelanguage.googleapis.com/v1beta/models"
+api_key = "xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 GEMINI_API_KEY
+model = "gemini-2.0-flash"
+cost_per_1k_tokens = 0.00075
+quality_score = 8.5
+context_window = 1048576
+
+[ai.providers.anthropic]
+api_url = "https://api.anthropic.com/v1/messages"
+api_key = "sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 ANTHROPIC_API_KEY
+model = "claude-3-5-sonnet-20241022"
+cost_per_1k_tokens = 0.03
+quality_score = 9.5
+context_window = 200000
+
+[ai.providers.zhipu]
+api_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+api_key = "xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 ZHIPU_API_KEY
+model = "glm-4"
+cost_per_1k_tokens = 0.005
+quality_score = 7.5
+context_window = 128000
+
+[ai.providers.moonshot]
+api_url = "https://api.moonshot.cn/v1/chat/completions"
+api_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 MOONSHOT_API_KEY
+model = "moonshot-v1-8k"
+cost_per_1k_tokens = 0.012
+quality_score = 7.0
+context_window = 8192
+
+[ai.providers.ollama]
+api_url = "http://localhost:11434/v1/chat/completions"
+api_key = ""  # Ollama 不需要 API Key
+model = "qwen3.5:397b"
+cost_per_1k_tokens = 0.0
+quality_score = 6.0
+context_window = 32768
 
 [tools]
 # 启用的工具集（留空表示全部启用）

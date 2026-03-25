@@ -1,0 +1,46 @@
+# Template 06: Git Operations Tool Template
+# Template for Git version control tools
+
+[tool]
+name = "my_git_tool"
+version = "1.0.0"
+description = "A Git operations tool template"
+author = "your_name"
+category = "version-control"
+entry_point = "tools::git::execute"
+tags = ["git", "vcs", "commit", "branch", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "command"
+type = "string"
+required = true
+description = "Git command to execute"
+
+[[parameters]]
+name = "args"
+type = "array"
+required = false
+description = "Command line arguments"
+
+[[parameters]]
+name = "working_dir"
+type = "string"
+required = false
+description = "Working directory (defaults to current)"
+
+[[parameters]]
+name = "dry_run"
+type = "boolean"
+required = false
+default = false
+description = "Preview without executing"
+
+[permissions]
+network_access = false
+file_read = true
+file_write = true
+execute_commands = true
+
+[rate_limit]
+requests_per_minute = 20

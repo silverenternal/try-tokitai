@@ -1,0 +1,52 @@
+# =============================================================================
+# 基础工具模板 (Basic Tool Template)
+# =============================================================================
+# 用途：适用于简单的本地操作工具（文件操作、字符串处理等）
+# 类别：utility / file_ops
+# =============================================================================
+
+[tool]
+name = "example_basic_tool"
+version = "1.0.0"
+description = "Example basic tool template"
+author = "your_name"
+category = "utility"
+tags = ["template", "basic", "example"]
+license = "MIT"
+# documentation_url = "https://..."
+# repository_url = "https://..."
+
+# -----------------------------------------------------------------------------
+# 参数定义
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "input"
+type = "string"
+required = true
+description = "Input parameter"
+example = "hello world"
+
+[[parameters]]
+name = "verbose"
+type = "boolean"
+required = false
+default = false
+description = "Enable verbose output"
+
+# -----------------------------------------------------------------------------
+# 权限配置
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = false
+file_read = false
+file_write = false
+execute_command = false
+env_access = false
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# 速率限制（可选）
+# -----------------------------------------------------------------------------
+# [rate_limit]
+# requests_per_minute = 100
+# requests_per_second = 10

@@ -1,0 +1,31 @@
+# Template 01: Basic Tool Template
+# A simple tool template for basic operations
+
+[tool]
+name = "my_basic_tool"
+version = "1.0.0"
+description = "A basic tool template for getting started"
+author = "your_name"
+category = "utility"
+entry_point = "tools::basic::execute"
+tags = ["basic", "template", "utility"]
+license = "MIT"
+
+[[parameters]]
+name = "input"
+type = "string"
+required = true
+description = "Input parameter for the tool"
+
+[[parameters]]
+name = "verbose"
+type = "boolean"
+required = false
+default = false
+description = "Enable verbose output"
+
+[permissions]
+network_access = false
+file_read = false
+file_write = false
+execute_commands = false

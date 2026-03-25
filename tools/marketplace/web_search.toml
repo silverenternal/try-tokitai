@@ -1,0 +1,82 @@
+# =============================================================================
+# Web Search Tool - Example Community Tool
+# =============================================================================
+# A simple web search tool definition using TOML
+# This is an example of how to define a community tool
+# =============================================================================
+
+[tool]
+name = "web_search"
+version = "1.0.0"
+description = "Execute web searches using popular search engines"
+author = "community"
+category = "network"
+tags = ["search", "web", "google", "bing"]
+license = "MIT"
+documentation_url = "https://github.com/try-tokitai/tools/docs/web_search.md"
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "query"
+type = "string"
+required = true
+description = "Search query string"
+example = "Rust programming language tutorial"
+validation = { min_length = 1, max_length = 1000 }
+
+[[parameters]]
+name = "engine"
+type = "string"
+required = false
+default = "google"
+description = "Search engine to use"
+validation = { enum_values = ["google", "bing", "duckduckgo"] }
+
+[[parameters]]
+name = "limit"
+type = "integer"
+required = false
+default = 10
+description = "Maximum number of results to return"
+validation = { min = 1, max = 100 }
+
+[[parameters]]
+name = "language"
+type = "string"
+required = false
+default = "en"
+description = "Language code for search results"
+example = "en"
+
+[[parameters]]
+name = "safe_search"
+type = "boolean"
+required = false
+default = true
+description = "Enable safe search filtering"
+
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_command = false
+env_access = false
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# Rate Limits
+# -----------------------------------------------------------------------------
+[rate_limit]
+requests_per_minute = 60
+requests_per_second = 5
+requests_per_day = 1000
+
+# -----------------------------------------------------------------------------
+# Dependencies (other tools this tool depends on)
+# -----------------------------------------------------------------------------
+# dependencies = ["http_client", "html_parser"]

@@ -1,0 +1,64 @@
+# =============================================================================
+# File Reader Tool - Example Community Tool
+# =============================================================================
+# Read content from files with encoding detection
+# =============================================================================
+
+[tool]
+name = "file_reader"
+version = "1.0.0"
+description = "Read file content with automatic encoding detection"
+author = "community"
+category = "file_ops"
+tags = ["file", "read", "encoding", "text"]
+license = "MIT"
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "path"
+type = "string"
+required = true
+description = "Path to the file to read"
+example = "/path/to/file.txt"
+
+[[parameters]]
+name = "encoding"
+type = "string"
+required = false
+default = "auto"
+description = "File encoding (auto, utf-8, gbk, etc.)"
+validation = { enum_values = ["auto", "utf-8", "gbk", "latin1", "ascii"] }
+
+[[parameters]]
+name = "max_size_kb"
+type = "integer"
+required = false
+default = 1024
+description = "Maximum file size to read (in KB)"
+validation = { min = 1, max = 10240 }
+
+[[parameters]]
+name = "line_range"
+type = "object"
+required = false
+description = "Read specific line range {start: number, end: number}"
+
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = false
+file_read = true
+file_write = false
+execute_command = false
+env_access = false
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# Rate Limits
+# -----------------------------------------------------------------------------
+[rate_limit]
+requests_per_minute = 100
+requests_per_second = 10

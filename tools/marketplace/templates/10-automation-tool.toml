@@ -1,0 +1,53 @@
+# Template 10: Automation Workflow Tool Template
+# Template for automation and workflow tools
+
+[tool]
+name = "my_automation_tool"
+version = "1.0.0"
+description = "An automation workflow tool template"
+author = "your_name"
+category = "automation"
+entry_point = "tools::automation::execute"
+tags = ["automation", "workflow", "pipeline", "orchestration", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "workflow_name"
+type = "string"
+required = true
+description = "Name of the workflow to execute"
+
+[[parameters]]
+name = "steps"
+type = "array"
+required = false
+description = "Workflow steps to execute"
+
+[[parameters]]
+name = "variables"
+type = "object"
+required = false
+description = "Workflow variables"
+
+[[parameters]]
+name = "parallel"
+type = "boolean"
+required = false
+default = false
+description = "Execute steps in parallel"
+
+[[parameters]]
+name = "on_error"
+type = "string"
+required = false
+default = "stop"
+description = "Error handling strategy (stop, continue, rollback)"
+
+[permissions]
+network_access = true
+file_read = true
+file_write = true
+execute_commands = true
+
+[rate_limit]
+requests_per_minute = 10

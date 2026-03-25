@@ -1,0 +1,54 @@
+# Template 04: AI-Powered Tool Template
+# Template for tools that use AI/LLM capabilities
+
+[tool]
+name = "my_ai_tool"
+version = "1.0.0"
+description = "An AI-powered tool template"
+author = "your_name"
+category = "ai"
+entry_point = "tools::ai::execute"
+tags = ["ai", "llm", "nlp", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "prompt"
+type = "string"
+required = true
+description = "Prompt to send to the AI model"
+
+[[parameters]]
+name = "model"
+type = "string"
+required = false
+default = "default"
+description = "AI model to use"
+
+[[parameters]]
+name = "temperature"
+type = "number"
+required = false
+default = 0.7
+description = "Temperature for response generation (0.0-2.0)"
+
+[[parameters]]
+name = "max_tokens"
+type = "integer"
+required = false
+default = 1024
+description = "Maximum tokens in response"
+
+[[parameters]]
+name = "system_prompt"
+type = "string"
+required = false
+description = "System prompt to set context"
+
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_commands = false
+
+[rate_limit]
+requests_per_minute = 30

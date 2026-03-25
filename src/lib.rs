@@ -30,6 +30,10 @@ mod assistant_common;
 mod cli_assistant;
 mod autonomous_assistant;
 mod experiments;
+pub mod llm;
+pub mod mcp;
+pub mod tool_market;
+pub mod tui;
 
 // 重新导出常用类型
 pub use autonomy::hybrid_gap_detector::{HybridGapDetector, HybridConfig, HybridToolGap};

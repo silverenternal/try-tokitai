@@ -1,0 +1,71 @@
+# =============================================================================
+# 网络工具模板 (Network Tool Template)
+# =============================================================================
+# 用途：适用于网络请求、API 调用、网页抓取等网络相关工具
+# 类别：network
+# =============================================================================
+
+[tool]
+name = "example_network_tool"
+version = "1.0.0"
+description = "Example network tool template"
+author = "your_name"
+category = "network"
+tags = ["template", "network", "http", "api"]
+license = "MIT"
+
+# -----------------------------------------------------------------------------
+# 参数定义
+# -----------------------------------------------------------------------------
+[[parameters]]
+name = "url"
+type = "string"
+required = true
+description = "Target URL"
+example = "https://api.example.com/data"
+
+[[parameters]]
+name = "method"
+type = "string"
+required = false
+default = "GET"
+description = "HTTP method"
+validation = { enum_values = ["GET", "POST", "PUT", "DELETE", "PATCH"] }
+
+[[parameters]]
+name = "headers"
+type = "object"
+required = false
+description = "HTTP headers"
+
+[[parameters]]
+name = "body"
+type = "object"
+required = false
+description = "Request body (for POST/PUT/PATCH)"
+
+[[parameters]]
+name = "timeout_secs"
+type = "integer"
+required = false
+default = 30
+description = "Request timeout in seconds"
+validation = { min = 1, max = 300 }
+
+# -----------------------------------------------------------------------------
+# 权限配置
+# -----------------------------------------------------------------------------
+[permissions]
+network_access = true
+file_read = false
+file_write = false
+execute_command = false
+env_access = true
+clipboard_access = false
+
+# -----------------------------------------------------------------------------
+# 速率限制
+# -----------------------------------------------------------------------------
+[rate_limit]
+requests_per_minute = 60
+requests_per_second = 5

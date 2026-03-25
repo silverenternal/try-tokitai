@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 /// AI 配置
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -12,6 +13,42 @@ pub struct AiConfig {
     pub temperature: f32,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
+    /// Multi-provider configuration (optional)
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
+    /// Default provider name
+    #[serde(default)]
+    pub default_provider: Option<String>,
+}
+
+/// Provider configuration
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct ProviderConfig {
+    /// API URL
+    pub api_url: String,
+    /// API Key
+    pub api_key: Option<String>,
+    /// Default model for this provider
+    #[serde(default)]
+    pub model: String,
+    /// Cost per 1K tokens (USD)
+    #[serde(default)]
+    pub cost_per_1k_tokens: f64,
+    /// Quality score (0-10)
+    #[serde(default = "default_quality")]
+    pub quality_score: f64,
+    /// Context window size
+    #[serde(default = "default_context_window")]
+    pub context_window: usize,
+}
+
+fn default_quality() -> f64 {
+    5.0
+}
+
+fn default_context_window() -> usize {
+    4096
 }
 
 fn default_model() -> String {
@@ -245,6 +282,8 @@ impl Config {
                 model,
                 temperature,
                 max_tokens,
+                providers: HashMap::new(),
+                default_provider: None,
             },
             tools: ToolsConfig::default(),
             search: SearchConfig::default(),

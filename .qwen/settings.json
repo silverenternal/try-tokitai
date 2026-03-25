@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(rm *)",
+      "WebFetch(github.com)",
+      "Bash(cargo build)",
+      "Bash(cargo check)",
+      "Bash(cargo test *)",
+      "Bash(cargo doc *)",
+      "Bash(cat *)",
+      "Bash(cargo build *)"
     ]
-  }
+  },
+  "$version": 3
 }

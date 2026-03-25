@@ -1,176 +1,219 @@
 # 🚀 快速启动指南
 
-> **最后更新**: 2026-03-18
-> **测试状态**: 236/236 通过 ✅
-> **构建状态**: Release ✅
+> **最后更新**: 2026-03-25  
+> **目标**: 5 分钟内启动并运行
 
-## 一键启动演示
+---
+
+## 第一步：获取 API Key
+
+本项目支持多个 LLM 提供商，选择一个即可开始：
+
+| 提供商 | 获取地址 | 免费额度 |
+|--------|---------|---------|
+| **Ollama** | https://ollama.com | ✅ 有 |
+| **OpenAI** | https://platform.openai.com | ❌ 无 |
+| **Anthropic** | https://console.anthropic.com | ❌ 无 |
+| **Google Gemini** | https://makersuite.google.com | ✅ 有 |
+| **智谱 AI** | https://open.bigmodel.cn | ✅ 有 |
+| **月之暗面** | https://platform.moonshot.cn | ✅ 有 |
+
+---
+
+## 第二步：配置环境变量
 
 ```bash
-./demo.sh
-```
-
-或者手动启动：
-
-```bash
-# 复制环境变量模板
+# 复制模板
 cp .env.example .env
 
-# 编辑 .env 文件，填入你的 API key
-# AI_API_KEY=your_api_key_here
+# 编辑 .env 文件
+# 方式一：单提供商配置（推荐新手）
+AI_API_KEY="your-api-key-here"
+AI_API_URL="https://api.provider.com/v1/chat/completions"
+AI_MODEL="model-name"
 
-# 加载环境变量并启动
-source .env
+# 方式二：多提供商配置（高级）
+# 详见下方「多模型支持」章节
+```
+
+### 快速配置示例
+
+**Ollama（推荐）**:
+```bash
+export AI_API_KEY="ollama-xxxxxxxxxxxxxxxx"
+export AI_API_URL="https://ollama.com/v1/chat/completions"
+export AI_MODEL="qwen3.5:397b"
+```
+
+**OpenAI**:
+```bash
+export AI_API_KEY="sk-xxxxxxxxxxxxxxxx"
+export AI_MODEL="gpt-4o"
+```
+
+**Anthropic**:
+```bash
+export AI_API_KEY="sk-ant-xxxxxxxxxxxxxxxx"
+export AI_MODEL="claude-3-5-sonnet-20241022"
+```
+
+---
+
+## 第三步：启动程序
+
+```bash
+# 编译并启动（首次需要编译，约 1-2 分钟）
 cargo run --release
 ```
 
----
-
-## 🎯 双轨服务模式
-
-本项目支持两种运行模式：
-
-| 模式 | 启动命令 | 说明 |
-|------|----------|------|
-| **CLI AI 助手** | `cargo run --release` | 交互式对话，响应用户查询 |
-| **项目自更新** | `cargo run --release -- --autonomous` | AI 自主进化，持续改进代码 |
-
-详细说明：[structure_ensure/SERVICES.md](../structure_ensure/SERVICES.md)
-
----
-
-## 💬 交互式命令
-
-启动后可以使用以下命令：
-
-| 命令 | 说明 |
-|------|------|
-| `help` | 显示可用操作列表 |
-| `exit` 或 `quit` | 退出程序 |
-| 任意自然语言 | 与 AI 对话 |
-
----
-
-## 📋 演示示例
-
-### 1. 查看帮助
+启动后看到以下提示表示成功：
 ```
-👤 你：help
+🚀 AI Assistant 启动中...
+👤 你：
 ```
 
-### 2. 查看目录
+---
+
+## 第四步：开始对话
+
+输入任意问题即可开始：
+
 ```
 👤 你：当前目录有哪些文件
-```
+🤖 AI：当前目录包含以下文件...
 
-### 3. 读取文件
-```
 👤 你：读取 README.md 的内容
-```
+🤖 AI：README.md 的内容如下...
 
-### 4. 执行命令
-```
-👤 你：运行 cargo --version
-```
-
-### 5. 分析代码
-```
-👤 你：分析 src/main.rs 的结构
-```
-
-### 6. 创建文件
-```
-👤 你：创建 test.txt，写入 Hello Tokitai
-```
-
-### 7. 多步骤任务
-```
-👤 你：帮我看看 Cargo.toml 的内容，然后统计一下有多少行
+👤 你：帮我创建一个新文件 test.txt，写入 Hello World
+🤖 AI：已创建文件 test.txt...
 ```
 
 ---
 
-## 🎯 演示要点
+## 其他启动模式
 
-1. **工具调用自动化** - AI 自主决定调用哪些工具
-2. **多轮对话记忆** - 上下文连续，可以追问
-3. **错误处理** - 工具执行失败时有友好提示
-4. **自然语言交互** - 不需要记命令，直接说需求
+### TUI 图形界面模式
 
----
-
-## ⚙️ 配置说明
-
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `AI_API_URL` | AI API 地址 | `https://ollama.com/v1/chat/completions` |
-| `AI_API_KEY` | API 密钥 | 无 |
-| `AI_MODEL` | 模型名称 | `qwen3.5:397b` |
-
-### 更换模型
-
-编辑 `.env` 文件：
 ```bash
-AI_MODEL=qwen3.5:397b  # 通义千问 3.5（推荐）
-# 或
-AI_MODEL=qwen3-coder:480b  # 代码专用
-# 或
-AI_MODEL=deepseek-v3.2  # DeepSeek
+cargo run --release -- --tui
+```
+
+**快捷键**:
+- `Ctrl+Q` - 退出
+- `Ctrl+L` - 清空对话
+- `j/k` - 上下选择
+- `Enter` - 发送消息
+
+### MCP Server 模式
+
+```bash
+cargo run --release -- --mcp
+```
+
+将所有工具暴露为 MCP 标准接口，供其他 AI 客户端调用。
+
+### 自主进化模式
+
+```bash
+cargo run --release -- --autonomous
+```
+
+AI 将自主分析项目、发现改进点、执行修复并提交。
+
+---
+
+## 多模型支持
+
+### 配置多提供商
+
+编辑 `config.toml`：
+
+```toml
+[ai.providers.openai]
+api_key = "sk-..."
+model = "gpt-4o"
+cost_per_1k_tokens = 0.03
+quality_score = 9.0
+
+[ai.providers.anthropic]
+api_key = "sk-ant-..."
+model = "claude-3-5-sonnet-20241022"
+cost_per_1k_tokens = 0.03
+quality_score = 9.5
+
+[ai.providers.ollama]
+api_url = "http://localhost:11434/v1/chat/completions"
+model = "qwen3.5:397b"
+cost_per_1k_tokens = 0.0
+quality_score = 6.0
+```
+
+### 切换模型
+
+在 CLI 中使用 `/model` 命令：
+
+```bash
+/model list          # 列出所有可用模型
+/model switch openai # 切换到 OpenAI
+/model benchmark     # 运行基准测试
+/model stats         # 显示使用统计
 ```
 
 ---
 
-## 🐛 故障排除
+## 工具市场命令
 
-### 问题：API 请求失败
-
-**原因**：API key 无效或网络问题
-
-**解决**：
 ```bash
-# 检查 API key 是否正确
-echo $AI_API_KEY
+# 查看帮助
+cargo run -- tokitai
 
-# 测试 API 连接
-curl -H "Authorization: Bearer $AI_API_KEY" $AI_API_URL
-```
+# 搜索工具
+cargo run -- tokitai search code-analysis
 
-### 问题：工具执行失败
+# 安装工具
+cargo run -- tokitai install smart-search
 
-**原因**：文件路径不存在或权限问题
-
-**解决**：检查路径是否正确，确保有读写权限
-
-### 问题：编译失败
-
-**解决**：
-```bash
-# 清理后重新编译
-cargo clean
-cargo build --release
-```
-
-### 问题：自主模式无法启动
-
-**解决**：
-```bash
-# 确保项目路径正确
-cargo run --release -- --autonomous --project-path /path/to/project
+# 列出已安装工具
+cargo run -- tokitai list
 ```
 
 ---
 
-## 📚 相关文档
+## 常见问题
 
-| 文档 | 说明 |
-|------|------|
-| [USER_GUIDE.md](USER_GUIDE.md) | 完整用户指南 |
-| [DEMO.md](DEMO.md) | 演示指南 |
-| [structure_ensure/SERVICES.md](../structure_ensure/SERVICES.md) | 服务双轨架构 |
-| [structure_ensure/QUICK_REFERENCE.md](../structure_ensure/QUICK_REFERENCE.md) | 快速参考卡片 |
+### Q: 编译失败怎么办？
+
+确保 Rust 版本 >= 1.75：
+```bash
+rustc --version
+rustup update
+```
+
+### Q: 响应很慢怎么办？
+
+1. 切换到更快的模型：`export AI_MODEL="qwen2.5:7b"`
+2. 使用本地 Ollama：`export AI_API_URL="http://localhost:11434/v1/chat/completions"`
+
+### Q: 如何退出程序？
+
+输入 `exit` 或 `quit`，或按 `Ctrl+C`
+
+### Q: 如何清空对话历史？
+
+输入 `/context clear` 或重启程序
 
 ---
 
-**最后更新**: 2026-03-18
+## 下一步
+
+- 📖 [完整用户指南](USER_GUIDE.md) - 深入了解所有功能
+- 🏗️ [服务架构说明](../structure_ensure/SERVICES.md) - 了解双轨架构
+- 🛠️ [工具模板](../tools/marketplace/templates/) - 创建自定义工具
+
+---
+
+**提示**: 运行时会自动创建以下文件夹（已在 `.gitignore` 中）：
+- `.context/` - 上下文存储
+- `.tokitai/` - 运行时数据
+- `sandbox/` - 沙箱测试目录

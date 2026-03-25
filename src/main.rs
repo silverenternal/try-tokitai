@@ -19,6 +19,10 @@ mod assistant_common;
 mod cli_assistant;
 mod autonomous_assistant;
 mod experiments;
+pub mod llm;
+pub mod mcp;
+pub mod tool_market;
+pub mod tui;
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -64,6 +68,13 @@ fn main() -> Result<()> {
     // 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
     let use_autonomous = args.iter().any(|arg| arg == "--autonomous" || arg == "-a");
+    let use_mcp = args.iter().any(|arg| arg == "--mcp" || arg == "-m");
+    let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
+    
+    // 检查工具市场命令
+    if args.len() >= 2 && args[1] == "tokitai" {
+        return handle_tool_market_command(&args[2..]);
+    }
 
     // 解析 --project-path 参数
     let project_path = args.iter()
@@ -142,6 +153,48 @@ fn main() -> Result<()> {
 
     // 创建助手配置
     let config = AssistantConfig::new(api_url, api_key, model);
+
+    // 如果指定了 --mcp，启动 MCP Server 模式
+    if use_mcp {
+        println!("🔌 启动 MCP Server 模式");
+        println!("═══════════════════════════");
+        println!("📡 传输模式：stdio");
+        println!();
+        println!("✨ MCP Server 将：");
+        println!("   • 暴露所有 #[tool] 函数");
+        println!("   • 通过 stdio 与 AI 客户端通信");
+        println!("   • 符合 Model Context Protocol 规范");
+        println!();
+        println!("⚠️  注意：按 Ctrl+C 停止");
+        println!("═══════════════════════════\n");
+
+        // 启动 MCP Server
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(mcp::start_mcp_mode())?;
+
+        return Ok(());
+    }
+
+    // 如果指定了 --tui，启动 TUI 模式
+    if use_tui {
+        println!("🎨 启动 TUI 模式");
+        println!("═══════════════════════════");
+        println!("📱 界面：ratatui 终端图形界面");
+        println!();
+        println!("✨ TUI 功能：");
+        println!("   • 三面板布局（工具/对话/上下文）");
+        println!("   • 实时状态显示");
+        println!("   • 快捷键系统");
+        println!();
+        println!("⚠️  注意：按 Ctrl+Q 退出");
+        println!("═══════════════════════════\n");
+
+        // 启动 TUI
+        tui::run_tui()?;
+
+        return Ok(());
+    }
 
     // 如果指定了 --autonomous，启动自主进化模式
     if use_autonomous {
@@ -290,4 +343,79 @@ mod tests {
             assert!(!def.input_schema.is_empty());
         }
     }
+}
+
+/// 处理工具市场命令
+fn handle_tool_market_command(args: &[String]) -> Result<()> {
+    use tool_market::ToolMarket;
+    
+    if args.is_empty() {
+        println!("🛠️  Tokitai 工具市场");
+        println!();
+        println!("用法：cargo run -- tokitai <command> [arguments]");
+        println!();
+        println!("命令:");
+        println!("  publish <tool-name>    发布工具到注册表");
+        println!("  search <query>         搜索社区工具");
+        println!("  install <tool-name>    安装工具");
+        println!("  list                   列出现有工具");
+        println!();
+        println!("示例:");
+        println!("  cargo run -- tokitai publish my-tool");
+        println!("  cargo run -- tokitai search code-analysis");
+        println!("  cargo run -- tokitai install smart-search");
+        return Ok(());
+    }
+    
+    let command = &args[0];
+    
+    // 创建工具市场实例
+    let market = ToolMarket::new(None)?;
+    
+    // 创建 tokio 运行时执行异步操作
+    let rt = tokio::runtime::Runtime::new()?;
+    
+    match command.as_str() {
+        "publish" => {
+            if args.len() < 2 {
+                eprintln!("❌ 错误：缺少工具名称");
+                eprintln!("用法：tokitai publish <tool-name>");
+                return Ok(());
+            }
+            rt.block_on(market.publish(&args[1]))?;
+        }
+        "search" => {
+            if args.len() < 2 {
+                eprintln!("❌ 错误：缺少搜索关键词");
+                eprintln!("用法：tokitai search <query>");
+                return Ok(());
+            }
+            rt.block_on(market.search(&args[1]))?;
+        }
+        "install" => {
+            if args.len() < 2 {
+                eprintln!("❌ 错误：缺少工具名称");
+                eprintln!("用法：tokitai install <tool-name>");
+                return Ok(());
+            }
+            rt.block_on(market.install(&args[1]))?;
+        }
+        "list" => {
+            let tools = market.list()?;
+            if tools.is_empty() {
+                println!("📭 未安装任何工具");
+            } else {
+                println!("📦 已安装的工具:");
+                for tool in tools {
+                    println!("   • {}", tool);
+                }
+            }
+        }
+        _ => {
+            eprintln!("❌ 未知命令：{}", command);
+            eprintln!("运行 'cargo run -- tokitai' 查看帮助");
+        }
+    }
+    
+    Ok(())
 }

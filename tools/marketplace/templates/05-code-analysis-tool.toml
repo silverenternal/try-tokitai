@@ -1,0 +1,50 @@
+# Template 05: Code Analysis Tool Template
+# Template for static code analysis tools
+
+[tool]
+name = "my_code_analyzer"
+version = "1.0.0"
+description = "A code analysis tool template"
+author = "your_name"
+category = "code"
+entry_point = "tools::analysis::execute"
+tags = ["code", "analysis", "lint", "quality", "template"]
+license = "MIT"
+
+[[parameters]]
+name = "path"
+type = "string"
+required = true
+description = "Path to code file or directory"
+
+[[parameters]]
+name = "language"
+type = "string"
+required = false
+description = "Programming language (auto-detect if not specified)"
+
+[[parameters]]
+name = "rules"
+type = "array"
+required = false
+description = "Specific rules to check"
+
+[[parameters]]
+name = "severity"
+type = "string"
+required = false
+default = "all"
+description = "Minimum severity level (info, warning, error)"
+
+[[parameters]]
+name = "format"
+type = "string"
+required = false
+default = "text"
+description = "Output format (text, json, sarif)"
+
+[permissions]
+network_access = false
+file_read = true
+file_write = false
+execute_commands = false

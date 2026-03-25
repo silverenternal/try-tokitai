@@ -16,6 +16,7 @@ pub mod workflow;
 pub mod workflow_loader;
 pub mod orchestrator;
 pub mod intervention_protocol;
+pub mod model_command;
 
 pub use orchestrator::Orchestrator;
 pub use role_switcher::{AgentRole, RoleSwitcher, RoleSwitchResult};
