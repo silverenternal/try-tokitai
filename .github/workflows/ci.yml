@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.75
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build and test
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-action@stable
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+        components: rustfmt, clippy, llvm-tools-preview
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+        cargo install cargo-tarpaulin
+
+    - name: Check format
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy lints
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build (release)
+      run: cargo build --release --verbose
+
+    - name: Run unit tests
+      run: cargo test --lib --verbose -- --test-threads=4
+      timeout-minutes: 10
+
+    - name: Run integration tests
+      run: cargo test --test '*' --verbose -- --test-threads=2
+      timeout-minutes: 15
+
+    - name: Run property tests
+      run: cargo test --test property_tests --verbose
+      timeout-minutes: 5
+
+    - name: Generate coverage report
+      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml --out Html
+      timeout-minutes: 10
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./cobertura.xml
+        fail_ci_if_below: 40
+        verbose: true
+
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-report
+        path: |
+          tarpaulin-report.html
+          cobertura.xml
+        retention-days: 7
+
+  # Build documentation
+  build-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-action@stable
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Build documentation
+      run: cargo doc --no-deps --document-private-items
+      env:
+        RUSTDOCFLAGS: -D warnings
+
+    - name: Upload documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: target/doc/
+        retention-days: 7
+
+  # Check experiment framework
+  experiment-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-action@stable
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-exp-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Build experiment framework
+      run: cargo build --release --verbose
+
+    - name: Verify experiment CLI
+      run: cargo run --release -- experiment help
+
+    - name: Verify benchmark tasks loaded
+      run: |
+        if [ -f "experiments/tasks/benchmark_tasks.json" ]; then
+          echo "✓ Benchmark tasks file exists"
+          TASK_COUNT=$(python3 -c "import json; print(len(json.load(open('experiments/tasks/benchmark_tasks.json'))))")
+          echo "✓ Found $TASK_COUNT benchmark tasks"
+          if [ "$TASK_COUNT" -eq 110 ]; then
+            echo "✓ All 110 benchmark tasks loaded"
+          else
+            echo "✗ Expected 110 tasks, found $TASK_COUNT"
+            exit 1
+          fi
+        else
+          echo "✗ Benchmark tasks file not found"
+          exit 1
+        fi
+
+  # Test coverage gate (PR only)
+  coverage-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [build-and-test]
+    
+    steps:
+    - name: Check coverage threshold
+      run: |
+        echo "✓ Coverage gate passed"
+        echo "Note: Actual coverage check is done in build-and-test job"

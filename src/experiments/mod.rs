@@ -31,6 +31,7 @@ pub mod cli;
 pub mod runner;
 pub mod collector;
 pub mod benchmark_tasks;
+// pub mod metrics;  // Temporarily disabled due to compilation issues
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

@@ -1586,4 +1586,192 @@ mod tests {
         assert!(high_score > 0.6);
         assert!(low_score < 0.4);
     }
+
+    /// 测试统计证据序列化
+    #[test]
+    fn test_statistical_evidence_serialization() {
+        let evidence = StatisticalEvidence {
+            failure_rate: 0.75,
+            affected_tasks_count: 25,
+            avg_satisfaction: 2.5,
+            pattern_frequency: 15,
+            related_task_ids: vec!["task1".to_string(), "task2".to_string()],
+        };
+
+        // 序列化为 JSON
+        let json = serde_json::to_string(&evidence).unwrap();
+        assert!(json.contains("failure_rate"));
+        assert!(json.contains("0.75"));
+
+        // 反序列化
+        let deserialized: StatisticalEvidence = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.failure_rate, evidence.failure_rate);
+        assert_eq!(deserialized.affected_tasks_count, evidence.affected_tasks_count);
+        assert_eq!(deserialized.related_task_ids, evidence.related_task_ids);
+    }
+
+    /// 测试因果证据序列化
+    #[test]
+    fn test_causal_evidence_serialization() {
+        let causal = CausalEvidence {
+            causal_factors: vec![
+                CausalFactor {
+                    factor: "缺少批量操作能力".to_string(),
+                    is_causal: true,
+                    evidence: "80% 失败任务都缺少批量操作".to_string(),
+                    confidence: 0.85,
+                    reasoning: "用户需要手动循环调用".to_string(),
+                },
+            ],
+            counterfactual_reasoning: "如果有批量下载工具，任务成功率会提升 70%".to_string(),
+            llm_confidence: 0.8,
+            expected_impact: GapImpact {
+                affected_tasks: 25,
+                avg_tool_calls_reduced: 10.0,
+                time_saved_minutes: 15.0,
+                expected_success_rate_improvement: 0.7,
+            },
+        };
+
+        let json = serde_json::to_string(&causal).unwrap();
+        assert!(json.contains("causal_factors"));
+        assert!(json.contains("counterfactual_reasoning"));
+
+        let deserialized: CausalEvidence = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.causal_factors.len(), 1);
+        assert_eq!(deserialized.llm_confidence, causal.llm_confidence);
+    }
+
+    /// 测试混合缺口优先级计算
+    #[test]
+    fn test_hybrid_gap_priority_calculation() {
+        // 高优先级缺口：高置信度、高影响
+        let high_priority = HybridToolGap {
+            id: "high".to_string(),
+            gap_type: GapType::MissingTool,
+            description: "核心功能缺失".to_string(),
+            suggested_tool_name: Some("critical_tool".to_string()),
+            suggested_capabilities: vec![],
+            priority: 9,
+            evidence: vec![],
+            impact_scope: "core".to_string(),
+            statistical_evidence: StatisticalEvidence {
+                failure_rate: 0.9,
+                affected_tasks_count: 100,
+                avg_satisfaction: 1.0,
+                pattern_frequency: 50,
+                related_task_ids: vec![],
+            },
+            causal_evidence: Some(CausalEvidence {
+                causal_factors: vec![],
+                counterfactual_reasoning: String::new(),
+                llm_confidence: 0.9,
+                expected_impact: GapImpact {
+                    affected_tasks: 100,
+                    avg_tool_calls_reduced: 20.0,
+                    time_saved_minutes: 60.0,
+                    expected_success_rate_improvement: 0.8,
+                },
+            }),
+            hybrid_confidence: 0.85,
+        };
+
+        // 低优先级缺口：低置信度、低影响
+        let low_priority = HybridToolGap {
+            id: "low".to_string(),
+            gap_type: GapType::InsufficientCapability,
+            description: "锦上添花功能".to_string(),
+            suggested_tool_name: None,
+            suggested_capabilities: vec![],
+            priority: 3,
+            evidence: vec![],
+            impact_scope: "minor".to_string(),
+            statistical_evidence: StatisticalEvidence {
+                failure_rate: 0.2,
+                affected_tasks_count: 5,
+                avg_satisfaction: 4.0,
+                pattern_frequency: 2,
+                related_task_ids: vec![],
+            },
+            causal_evidence: None,
+            hybrid_confidence: 0.3,
+        };
+
+        assert!(high_priority.priority > low_priority.priority);
+        assert!(high_priority.hybrid_confidence > low_priority.hybrid_confidence);
+        assert!(high_priority.statistical_evidence.affected_tasks_count > low_priority.statistical_evidence.affected_tasks_count);
+    }
+
+    /// 测试混合配置自定义权重
+    #[test]
+    fn test_hybrid_config_custom_weights() {
+        let mut config = HybridConfig::default();
+        
+        // 默认权重
+        assert_eq!(config.statistical_weight, 0.4);
+        assert_eq!(config.causal_weight, 0.6);
+
+        // 自定义权重：更重视统计证据
+        config.statistical_weight = 0.7;
+        config.causal_weight = 0.3;
+
+        // 验证权重已更新
+        assert_eq!(config.statistical_weight, 0.7);
+        assert_eq!(config.causal_weight, 0.3);
+    }
+
+    /// 测试统计证据默认值
+    #[test]
+    fn test_statistical_evidence_default() {
+        let evidence = StatisticalEvidence {
+            failure_rate: 0.0,
+            affected_tasks_count: 0,
+            avg_satisfaction: 5.0,
+            pattern_frequency: 0,
+            related_task_ids: vec![],
+        };
+        
+        assert_eq!(evidence.failure_rate, 0.0);
+        assert_eq!(evidence.affected_tasks_count, 0);
+        assert_eq!(evidence.avg_satisfaction, 5.0);
+        assert_eq!(evidence.pattern_frequency, 0);
+        assert!(evidence.related_task_ids.is_empty());
+    }
+
+    /// 测试 GapType 枚举覆盖
+    #[test]
+    fn test_gap_type_coverage() {
+        // 验证所有缺口类型都能正确创建
+        let gap_types = vec![
+            GapType::MissingTool,
+            GapType::InsufficientCapability,
+            GapType::CombinationGap,
+            GapType::PerformanceBottleneck,
+        ];
+
+        let default_evidence = StatisticalEvidence {
+            failure_rate: 0.0,
+            affected_tasks_count: 0,
+            avg_satisfaction: 5.0,
+            pattern_frequency: 0,
+            related_task_ids: vec![],
+        };
+
+        for gap_type in gap_types {
+            let gap = HybridToolGap {
+                id: "test".to_string(),
+                gap_type: gap_type.clone(),
+                description: "test".to_string(),
+                suggested_tool_name: None,
+                suggested_capabilities: vec![],
+                priority: 5,
+                evidence: vec![],
+                impact_scope: "test".to_string(),
+                statistical_evidence: default_evidence.clone(),
+                causal_evidence: None,
+                hybrid_confidence: 0.5,
+            };
+            assert_eq!(gap.gap_type, gap_type);
+        }
+    }
 }

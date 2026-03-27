@@ -40,6 +40,9 @@
 //! requests_per_minute = 60
 //! ```
 
+// 允许未使用的代码，这些是热加载功能的基础设施
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

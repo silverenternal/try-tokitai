@@ -17,7 +17,7 @@ mod path_resolver;
 mod sandbox;
 mod tools;
 pub mod context;
-mod autonomy;
+pub mod autonomy;
 mod observability;
 mod dialogue;
 mod prompt_engineering;
@@ -29,7 +29,7 @@ mod external_process;
 mod assistant_common;
 mod cli_assistant;
 mod autonomous_assistant;
-mod experiments;
+pub mod experiments;
 pub mod llm;
 pub mod mcp;
 pub mod tool_market;
@@ -58,3 +58,11 @@ pub use orchestrator::{
     DeclarativeWorkflow, DeclarativeWorkflowStep, RetryConfig,
     ErrorHandler, ErrorStrategy, AgentRole, Orchestrator,
 };
+
+// 重新导出 experiments 公共类型（用于测试和论文实验）
+pub use experiments::ExperimentGroup;
+pub use experiments::collector::DataCollector;
+
+// 测试工具模块（仅在测试时可用）
+#[cfg(test)]
+pub mod test_utils;

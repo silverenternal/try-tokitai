@@ -16,8 +16,6 @@ use crate::autonomy::{
     hybrid_gap_detector::{HybridToolGap},
 };
 
-use super::data_collector::{DetailedTaskLog, GapDetectionEvent};
-
 // ============================================================================
 // 核心指标定义（论文 Table 1）
 // ============================================================================

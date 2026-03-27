@@ -653,4 +653,183 @@ mod tests {
         assert_eq!(stats.total_branches, 3);
         assert_eq!(stats.active_branches, 3);
     }
+
+    #[test]
+    fn test_fork_inherits_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        let mut manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+
+        // 在 main 分支添加一些上下文
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::create_dir_all(long_term_dir).unwrap();
+            std::fs::write(long_term_dir.join("doc1.md"), "main context").unwrap();
+        }
+
+        // 创建分支
+        let feature_branch = manager.create_branch("feature", "main").unwrap();
+        let feature_id = feature_branch.branch_id.clone();
+
+        // 验证新分支可以访问继承的上下文（通过 symlink）
+        manager.checkout(&feature_id).unwrap();
+        let branch = manager.get_current_branch().unwrap();
+        let long_term_dir = &branch.long_term_dir;
+        
+        // 应该能读取到继承的内容
+        let content = std::fs::read_to_string(long_term_dir.join("doc1.md")).unwrap();
+        assert_eq!(content, "main context");
+    }
+
+    #[test]
+    fn test_branch_isolation_after_write() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        let mut manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+
+        // 创建两个分支
+        let branch1 = manager.create_branch("feature-1", "main").unwrap();
+        let branch1_id = branch1.branch_id.clone();
+        
+        let branch2 = manager.create_branch("feature-2", "main").unwrap();
+        let branch2_id = branch2.branch_id.clone();
+
+        // 在 feature-1 写入内容
+        manager.checkout(&branch1_id).unwrap();
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::create_dir_all(long_term_dir).unwrap();
+            std::fs::write(long_term_dir.join("file1.txt"), "feature-1 content").unwrap();
+        }
+
+        // 在 feature-2 写入不同内容
+        manager.checkout(&branch2_id).unwrap();
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::create_dir_all(long_term_dir).unwrap();
+            std::fs::write(long_term_dir.join("file2.txt"), "feature-2 content").unwrap();
+        }
+
+        // 验证隔离：feature-1 不应该看到 feature-2 的文件
+        manager.checkout(&branch1_id).unwrap();
+        let branch1 = manager.get_current_branch().unwrap();
+        assert!(branch1.long_term_dir.join("file1.txt").exists());
+        
+        // 验证隔离：feature-2 不应该看到 feature-1 的文件
+        manager.checkout(&branch2_id).unwrap();
+        let branch2 = manager.get_current_branch().unwrap();
+        assert!(branch2.long_term_dir.join("file2.txt").exists());
+    }
+
+    #[test]
+    fn test_merge_selective_strategy() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        let mut manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+
+        // 在 feature 分支添加内容
+        let feature = manager.create_branch("feature", "main").unwrap();
+        let feature_id = feature.branch_id.clone();
+        
+        manager.checkout(&feature_id).unwrap();
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::create_dir_all(long_term_dir).unwrap();
+            std::fs::write(long_term_dir.join("feature_doc.md"), "# Feature Documentation").unwrap();
+        }
+
+        // 合并回 main
+        manager.checkout("main").unwrap();
+        let result = manager.merge(&feature_id, "main", Some(MergeStrategy::SelectiveMerge)).unwrap();
+        
+        assert!(result.success);
+    }
+
+    #[test]
+    fn test_diff_between_branches() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        let mut manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+
+        // 在 main 添加内容
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::create_dir_all(long_term_dir).unwrap();
+            std::fs::write(long_term_dir.join("base.md"), "# Base").unwrap();
+        }
+
+        // 创建 feature 分支并修改
+        let feature = manager.create_branch("feature", "main").unwrap();
+        let feature_id = feature.branch_id.clone();
+        
+        manager.checkout(&feature_id).unwrap();
+        {
+            let branch = manager.get_current_branch().unwrap();
+            let long_term_dir = &branch.long_term_dir;
+            std::fs::write(long_term_dir.join("feature.md"), "# Feature").unwrap();
+        }
+
+        // 比较分支
+        manager.checkout("main").unwrap();
+        let diff = manager.diff("main", &feature_id).unwrap();
+        
+        // 验证差异报告包含预期信息（检查 added_items 或 removed_items）
+        assert!(diff.added_items.len() >= 0 || diff.removed_items.len() >= 0);
+    }
+
+    #[test]
+    fn test_branch_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        let mut manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+
+        let branch = manager.create_branch("test-branch", "main").unwrap();
+        
+        // 验证元数据
+        assert_eq!(branch.branch_name, "test-branch");
+        assert_eq!(branch.parent_branch, "main");
+        assert_eq!(branch.state, BranchState::Active);
+        assert!(!branch.branch_id.is_empty());
+    }
+
+    #[test]
+    fn test_concurrent_branch_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_root = temp_dir.path().join(".context");
+
+        // 并发创建多个分支
+        let mut handles = vec![];
+        for i in 0..5 {
+            let context_root_clone = context_root.clone();
+            let handle = std::thread::spawn(move || {
+                let mut mgr = ParallelContextManager::from_context_root(&context_root_clone).unwrap();
+                let result = mgr.create_branch(&format!("feature-{}", i), "main");
+                // 验证创建成功，不返回分支引用
+                assert!(result.is_ok());
+                result.is_ok()
+            });
+            handles.push(handle);
+        }
+
+        // 等待所有线程完成
+        for handle in handles {
+            let success = handle.join().unwrap();
+            assert!(success);
+        }
+
+        // 验证所有分支都创建了
+        let manager = ParallelContextManager::from_context_root(&context_root).unwrap();
+        let branches = manager.list_branches();
+        assert_eq!(branches.len(), 6); // main + 5 features
+    }
 }

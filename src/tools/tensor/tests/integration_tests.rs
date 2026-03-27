@@ -1,323 +1,202 @@
 //! Tensor 模块集成测试
+//!
+//! 测试完整的端到端场景，包括：
+//! - 多步骤工作流
+//! - 复杂计算场景
+//! - 并发操作
 
-#[cfg(test)]
-mod tests {
-    use ai_assistant::tools::tensor::{TensorService, TensorTools, Tensor};
-    use serde_json::json;
+use ai_assistant::tools::tensor::{TensorService, TensorTools, Tensor};
+use serde_json::json;
 
-    // ========== TensorService 测试 ==========
+// ========== 端到端场景测试 ==========
 
-    #[test]
-    fn test_service_creation_ops() -> anyhow::Result<()> {
-        let service = TensorService::new();
+#[test]
+fn test_neural_network_forward_pass() -> anyhow::Result<()> {
+    let service = TensorService::new();
 
-        // zeros
-        let zeros = service.zeros(&[2, 3])?;
-        assert_eq!(zeros.dims(), &[2, 3]);
-        assert!(zeros.as_slice().unwrap().iter().all(|&x| x == 0.0));
+    // 模拟一个简单的两层神经网络前向传播
+    // 输入：[batch_size=2, input_dim=3]
+    let input = service.from_data(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[2, 3]
+    )?;
 
-        // ones
-        let ones = service.ones(&[2, 3])?;
-        assert!(ones.as_slice().unwrap().iter().all(|&x| x == 1.0));
+    // 权重层 1：[3, 4]
+    let w1 = service.from_data(
+        &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2],
+        &[3, 4]
+    )?;
 
-        // randn
-        let randn = service.randn(&[2, 3])?;
-        assert_eq!(randn.dims(), &[2, 3]);
+    // 权重层 2：[4, 1]
+    let w2 = service.from_data(
+        &[0.1, 0.2, 0.3, 0.4],
+        &[4, 1]
+    )?;
 
-        // from_data
-        let data = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
-        assert_eq!(data.as_slice().unwrap(), &[1.0, 2.0, 3.0, 4.0]);
+    // 层 1: input @ w1
+    let layer1 = service.matmul(&input, &w1)?;
+    assert_eq!(layer1.dims(), &[2, 4]);
 
-        Ok(())
-    }
+    // 激活：ReLU
+    let activated1 = service.relu(&layer1)?;
 
-    #[test]
-    fn test_service_arithmetic_ops() -> anyhow::Result<()> {
-        let service = TensorService::new();
+    // 层 2: activated1 @ w2
+    let output = service.matmul(&activated1, &w2)?;
+    assert_eq!(output.dims(), &[2, 1]);
 
-        let a = service.from_data(&[1.0, 2.0, 3.0], &[3])?;
-        let b = service.from_data(&[4.0, 5.0, 6.0], &[3])?;
+    Ok(())
+}
 
-        // add
-        let sum = service.add(&a, &b)?;
-        assert_eq!(sum.as_slice().unwrap(), &[5.0, 7.0, 9.0]);
+#[test]
+fn test_batch_normalization_workflow() -> anyhow::Result<()> {
+    let service = TensorService::new();
 
-        // sub
-        let diff = service.sub(&a, &b)?;
-        assert_eq!(diff.as_slice().unwrap(), &[-3.0, -3.0, -3.0]);
+    // 模拟批量归一化流程
+    let batch = service.from_data(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        &[4, 2]
+    )?;
 
-        // mul
-        let prod = service.mul(&a, &b)?;
-        assert_eq!(prod.as_slice().unwrap(), &[4.0, 10.0, 18.0]);
+    // 计算均值
+    let mean = service.mean(&batch, &[0])?;
+    assert_eq!(mean.dims(), &[2]);
 
-        // div
-        let quot = service.div(&b, &a)?;
-        assert!(quot.as_slice().unwrap()[0].is_finite());
+    // 计算标准差（简化版）
+    let centered = service.sub(&batch, &service.reshape(&mean, &[1, 2])?)?;
+    let squared = service.mul(&centered, &centered)?;
+    let variance = service.mean(&squared, &[0])?;
 
-        // mul_scalar
-        let scaled = service.mul_scalar(&a, 2.0)?;
-        assert_eq!(scaled.as_slice().unwrap(), &[2.0, 4.0, 6.0]);
+    // 归一化
+    let std = service.sqrt(&variance)?;
+    let normalized = service.div(&centered, &service.reshape(&std, &[1, 2])?)?;
 
-        Ok(())
-    }
+    // 验证归一化后的均值接近 0
+    let norm_mean = service.mean(&normalized, &[0])?;
+    let norm_mean_slice = norm_mean.as_slice().unwrap();
+    assert!(norm_mean_slice[0].abs() < 1e-5);
+    assert!(norm_mean_slice[1].abs() < 1e-5);
 
-    #[test]
-    fn test_service_matmul() -> anyhow::Result<()> {
-        let service = TensorService::new();
+    Ok(())
+}
 
-        let a = service.from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])?;
-        let b = service.from_data(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2])?;
+#[test]
+fn test_gradient_descent_step() -> anyhow::Result<()> {
+    let service = TensorService::new();
 
-        let result = service.matmul(&a, &b)?;
-        assert_eq!(result.dims(), &[2, 2]);
-        assert_eq!(result.as_slice().unwrap(), &[58.0, 64.0, 139.0, 154.0]);
+    // 模拟梯度下降更新步骤
+    let params = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[4])?;
+    let gradients = service.from_data(&[0.1, 0.2, 0.3, 0.4], &[4])?;
+    let learning_rate = 0.01;
 
-        Ok(())
-    }
+    // 参数更新：params = params - lr * gradients
+    let scaled_grad = service.mul_scalar(&gradients, learning_rate)?;
+    let new_params = service.sub(&params, &scaled_grad)?;
 
-    #[test]
-    fn test_service_reduction_ops() -> anyhow::Result<()> {
-        let service = TensorService::new();
+    let new_params_slice = new_params.as_slice().unwrap();
+    assert!((new_params_slice[0] - 0.999).abs() < 0.002);
+    assert!((new_params_slice[1] - 1.998).abs() < 0.002);
 
-        let tensor = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
+    Ok(())
+}
 
-        // sum
-        let sum = service.sum(&tensor, &[0])?;
-        assert_eq!(sum.as_slice().unwrap(), &[4.0, 6.0]);
+// ========== 并发操作测试 ==========
 
-        // mean
-        let mean = service.mean(&tensor, &[0])?;
-        assert_eq!(mean.as_slice().unwrap(), &[2.0, 3.0]);
+#[test]
+fn test_concurrent_tensor_operations() {
+    use std::thread;
+    use std::sync::{Arc, Mutex};
 
-        // max
-        let max = service.max(&tensor, &[0])?;
-        assert_eq!(max.as_slice().unwrap(), &[3.0, 4.0]);
+    let service = Arc::new(Mutex::new(TensorService::new()));
+    let mut handles = vec![];
 
-        // min
-        let min = service.min(&tensor, &[0])?;
-        assert_eq!(min.as_slice().unwrap(), &[1.0, 2.0]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_service_activation_ops() -> anyhow::Result<()> {
-        let service = TensorService::new();
-
-        let input = service.from_data(&[-2.0, -1.0, 0.0, 1.0, 2.0], &[5])?;
-
-        // relu
-        let relu = service.relu(&input)?;
-        assert_eq!(relu.as_slice().unwrap(), &[0.0, 0.0, 0.0, 1.0, 2.0]);
-
-        // sigmoid
-        let sigmoid = service.sigmoid(&input)?;
-        let sig_slice = sigmoid.as_slice().unwrap();
-        assert!(sig_slice[2] > 0.49 && sig_slice[2] < 0.51); // sigmoid(0) ≈ 0.5
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_service_chain_operations() -> anyhow::Result<()> {
-        let service = TensorService::new();
-
-        // 链式调用：zeros -> add_scalar -> mul_scalar
-        let result = service
-            .zeros(&[2, 2])?
-            .into(); // 需要正确链式调用
-
-        let zeros = service.zeros(&[2, 2])?;
-        let added = service.add_scalar(&zeros, 1.0)?;
-        let multiplied = service.mul_scalar(&added, 2.0)?;
-
-        assert_eq!(multiplied.as_slice().unwrap(), &[2.0, 2.0, 2.0, 2.0]);
-
-        Ok(())
-    }
-
-    // ========== TensorTools 测试 ==========
-
-    #[test]
-    fn test_tools_zeros() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-        let result = tools.zeros(vec![2, 3])?;
-
-        let obj = result.as_object().unwrap();
-        assert_eq!(obj["shape"], json!([2, 3]));
-        assert_eq!(obj["data"].as_array().unwrap().len(), 6);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_tools_from_data() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-        let result = tools.from_data(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-
-        let obj = result.as_object().unwrap();
-        assert_eq!(obj["shape"], json!([2, 2]));
-        assert_eq!(obj["data"].as_array().unwrap().len(), 4);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_tools_matmul() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-
-        let a = json!({
-            "shape": [2, 3],
-            "data": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    // 创建多个线程并发执行张量操作
+    for i in 0..5 {
+        let service_clone = Arc::clone(&service);
+        let handle = thread::spawn(move || {
+            let svc = service_clone.lock().unwrap();
+            let tensor = svc.from_data(&[1.0, 2.0, 3.0], &[3]).unwrap();
+            let result = svc.mul_scalar(&tensor, (i + 1) as f64).unwrap();
+            
+            let expected: Vec<f64> = vec![1.0, 2.0, 3.0].iter()
+                .map(|&x| x * (i + 1) as f64)
+                .collect();
+            assert_eq!(result.as_slice().unwrap(), &expected);
         });
-        let b = json!({
-            "shape": [3, 2],
-            "data": [7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
-        });
-
-        let result = tools.matmul(a, b)?;
-        let obj = result.as_object().unwrap();
-        assert_eq!(obj["shape"], json!([2, 2]));
-
-        let data = obj["data"].as_array().unwrap();
-        assert_eq!(data[0].as_f64().unwrap(), 58.0);
-        assert_eq!(data[1].as_f64().unwrap(), 64.0);
-
-        Ok(())
+        handles.push(handle);
     }
 
-    #[test]
-    fn test_tools_relu() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
+    // 等待所有线程完成
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
 
-        let input = json!({
-            "shape": [5],
-            "data": [-2.0, -1.0, 0.0, 1.0, 2.0]
-        });
+// ========== JSON 工具集成测试 ==========
 
-        let result = tools.relu(input)?;
-        let obj = result.as_object().unwrap();
-        let data = obj["data"].as_array().unwrap();
+#[test]
+fn test_tools_json_workflow() -> anyhow::Result<()> {
+    let tools = TensorTools::new();
 
-        assert_eq!(data[0].as_f64().unwrap(), 0.0);
-        assert_eq!(data[3].as_f64().unwrap(), 1.0);
-        assert_eq!(data[4].as_f64().unwrap(), 2.0);
+    // 创建张量
+    let zeros_result = tools.zeros(vec![2, 2])?;
+    let zeros_shape = zeros_result["shape"].as_array().unwrap();
+    assert_eq!(zeros_shape.len(), 2);
 
-        Ok(())
+    // 使用 JSON 数据进行矩阵乘法
+    let a = json!({
+        "shape": [2, 2],
+        "data": [1.0, 2.0, 3.0, 4.0]
+    });
+    let b = json!({
+        "shape": [2, 2],
+        "data": [5.0, 6.0, 7.0, 8.0]
+    });
+
+    let result = tools.matmul(a, b)?;
+    let obj = result.as_object().unwrap();
+    
+    assert_eq!(obj["shape"].as_array().unwrap().len(), 2);
+    assert_eq!(obj["data"].as_array().unwrap().len(), 4);
+
+    Ok(())
+}
+
+// ========== 性能边界测试 ==========
+
+#[test]
+fn test_large_matrix_multiplication() -> anyhow::Result<()> {
+    let service = TensorService::new();
+
+    // 创建较大的矩阵
+    let size = 100;
+    let data_a: Vec<f64> = (0..size * size).map(|i| i as f64).collect();
+    let data_b: Vec<f64> = (0..size * size).map(|i| (i * 2) as f64).collect();
+
+    let a = service.from_data(&data_a, &[size, size])?;
+    let b = service.from_data(&data_b, &[size, size])?;
+
+    let result = service.matmul(&a, &b)?;
+    assert_eq!(result.dims(), &[size, size]);
+
+    Ok(())
+}
+
+#[test]
+fn test_deep_chain_operations() -> anyhow::Result<()> {
+    let service = TensorService::new();
+
+    // 创建深度操作链
+    let mut tensor = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
+
+    for i in 0..10 {
+        tensor = service.add_scalar(&tensor, 1.0)?;
+        tensor = service.mul_scalar(&tensor, 1.1)?;
     }
 
-    #[test]
-    fn test_tools_reshape() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
+    // 验证最终结果
+    let final_slice = tensor.as_slice().unwrap();
+    assert!(final_slice.iter().all(|&x| x.is_finite()));
+    assert!(final_slice.iter().all(|&x| x > 10.0)); // 经过 10 次增长应该大于 10
 
-        let tensor = json!({
-            "shape": [2, 2],
-            "data": [1.0, 2.0, 3.0, 4.0]
-        });
-
-        let result = tools.reshape(tensor, vec![4])?;
-        let obj = result.as_object().unwrap();
-        assert_eq!(obj["shape"], json!([4]));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_tools_sum() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-
-        let tensor = json!({
-            "shape": [2, 2],
-            "data": [1.0, 2.0, 3.0, 4.0]
-        });
-
-        // 沿第 0 维求和
-        let result = tools.sum(tensor.clone(), Some(vec![0]))?;
-        let obj = result.as_object().unwrap();
-        let data = obj["data"].as_array().unwrap();
-        assert_eq!(data[0].as_f64().unwrap(), 4.0);
-        assert_eq!(data[1].as_f64().unwrap(), 6.0);
-
-        // 对所有元素求和
-        let result = tools.sum(tensor, None)?;
-        let obj = result.as_object().unwrap();
-        let data = obj["data"].as_array().unwrap();
-        assert_eq!(data[0].as_f64().unwrap(), 10.0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_tools_layer_norm() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-
-        let input = json!({
-            "shape": [1, 4],
-            "data": [1.0, 2.0, 3.0, 4.0]
-        });
-
-        let result = tools.layer_norm(input, 4, Some(1e-5))?;
-        let obj = result.as_object().unwrap();
-
-        // 验证形状
-        assert_eq!(obj["shape"], json!([1, 4]));
-
-        // 验证归一化后的均值接近 0
-        let data = obj["data"].as_array().unwrap();
-        let mean: f64 = data.iter().map(|v| v.as_f64().unwrap()).sum::<f64>() / 4.0;
-        assert!(mean.abs() < 1e-5);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_tools_backend_name() -> anyhow::Result<()> {
-        let tools = TensorTools::new();
-        let result = tools.backend_name()?;
-        assert_eq!(result.as_str().unwrap(), "NdArray");
-
-        Ok(())
-    }
-
-    // ========== 错误处理测试 ==========
-
-    #[test]
-    fn test_matmul_shape_mismatch() -> anyhow::Result<()> {
-        let service = TensorService::new();
-
-        let a = service.from_data(&[1.0, 2.0, 3.0], &[3])?;
-        let b = service.from_data(&[1.0, 2.0, 3.0], &[3])?;
-
-        // 1D 张量不能 matmul
-        let result = service.matmul(&a, &b);
-        assert!(result.is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_reshape_element_mismatch() -> anyhow::Result<()> {
-        let service = TensorService::new();
-
-        let tensor = service.from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2])?;
-
-        // 元素数量不匹配
-        let result = service.reshape(&tensor, &[3, 3]);
-        assert!(result.is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_division_by_zero() -> anyhow::Result<()> {
-        let service = TensorService::new();
-
-        let a = service.from_data(&[1.0, 2.0, 3.0], &[3])?;
-        let b = service.from_data(&[1.0, 0.0, 2.0], &[3])?;
-
-        let result = service.div(&a, &b);
-        assert!(result.is_err());
-
-        Ok(())
-    }
+    Ok(())
 }

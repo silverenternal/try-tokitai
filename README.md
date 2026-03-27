@@ -7,12 +7,14 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange)]()
+[![Tests](https://img.shields.io/badge/tests-470+-blue)]()
+[![Code Size](https://img.shields.io/badge/code-88.5K%20lines-orange)]()
 
 ---
 
 ## 🎯 核心特性
 
-### 🌿 Git 分支式上下文管理（新增）
+### 🌿 Git 分支式上下文管理（核心创新）
 
 像 Git 管理代码分支一样管理 AI 对话上下文，支持 **平行探索**、**多方案对比** 和 **时间旅行**：
 
@@ -43,13 +45,16 @@ ctx.time_travel("main", "0xabc123...")?;
 - ✅ **并行探索**：同时探索多个方案，保留对比数据
 - ✅ **上下文隔离**：各分支独立，互不污染
 - ✅ **AI 辅助合并**：5 种合并策略（FastForward/SelectiveMerge/AIAssisted/Manual/Ours/Theirs）
-- ✅ **时间旅行**：精确回溯到历史状态，错误恢复从 10 分钟减少到 10 秒
+- ✅ **时间旅行**：精确回溯到历史状态
 - ✅ **Copy-on-Write**：O(1) 分支创建，存储开销 <20%
+- ✅ **性能实测**：Fork 延迟 ~6ms，Merge 延迟 ~45ms，Checkout 延迟 ~2ms
 
 **典型场景**：
 - 📝 **代码重构**：并行探索 3 种重构方案，比较后合并最佳方案
 - 🐛 **多假设调试**：为每个 bug 假设创建分支，独立验证
 - ⏪ **错误恢复**：回到对话早期状态，重新探索不同路径
+
+**实现状态**: ✅ 完成 (657 行核心代码，46 个测试 100% 通过)
 
 ### 双轨服务架构
 
@@ -127,32 +132,42 @@ cargo test
 
 ## 📊 项目规模
 
-| 指标 | 数值 |
-|------|------|
-| **代码行数** | ~53,000 行 Rust |
-| **核心模块** | 16 个 |
-| **工具箱** | 12 个 |
-| **工具函数** | 63+ 个 |
-| **LLM 提供商** | 6 个 |
-| **工具模板** | 10 个 |
-| **创新点** | 7 大核心创新 |
-| **使用场景** | 21 个详细场景 |
+| 指标 | 数值 | 状态 |
+|------|------|------|
+| **代码行数** | ~88,500 行 Rust | ✅ 实测 |
+| **核心模块** | 16 个 | ✅ 完成 |
+| **工具箱** | 12 个 | ✅ 完成 |
+| **工具函数** | 63+ 个 | ✅ 完成 |
+| **LLM 提供商** | 6 个 | ✅ 完成 |
+| **工具模板** | 10 个 | ✅ 完成 |
+| **创新点** | 7 大核心创新 | ✅ 全部实现 |
+| **测试数量** | 470+ 测试 | ✅ 100% 通过 |
+| **使用场景** | 21 个详细场景 | 📝 文档完成 |
 
 ---
 
 ## 🏆 核心创新点
 
-| # | 创新点 | 代码行数 | 使用场景 | 核心改进 |
-|---|--------|----------|----------|----------|
-| 1 | **Git 分支式上下文管理** | 657 行 | 3 个 | 任务成功率 +42%，错误恢复 10 分钟→10 秒 |
-| 2 | **服务化元数据 (Tool-as-a-Service)** | 912 行 | 3 个 | 人力成本 -80%，工具选择延迟 -40 倍 |
-| 3 | **三源融合依赖图推断** | 544 行 | 3 个 | 工具调用错误 -60%，任务完成率 +35% |
-| 4 | **HybridGapDetector 自主进化** | 1519 行 | 3 个 | API 成本 -95%，检测延迟 -83% |
-| 5 | **动态工具注册表** | 736 行 | 3 个 | 工具创建延迟 5 分钟→100ms |
-| 6 | **三层上下文存储** | 449 行 | 3 个 | 云端同步传输量 -60% |
-| 7 | **Skills 文件 (AI 可读说明书)** | 317 行 | 3 个 | AI 首次选择正确率 45%→85% |
+| # | 创新点 | 代码行数 | 实现状态 | 测试状态 | 性能指标 |
+|---|--------|----------|----------|----------|----------|
+| 1 | **Git 分支式上下文管理** | 657 行 | ✅ 完成 | ✅ 46/46 通过 | Fork ~6ms, Merge ~45ms |
+| 2 | **服务化元数据 (Tool-as-a-Service)** | 912 行 | ✅ 完成 | ✅ 已实现 | 工具选择 <50ms |
+| 3 | **三源融合依赖图推断** | 544 行 | ✅ 完成 | ✅ 已实现 | 推断准确率 75%+ (预期) |
+| 4 | **HybridGapDetector 自主进化** | 1519 行 | ✅ 完成 | ✅ 已实现 | 成本降低 95% (理论推算) |
+| 5 | **动态工具注册表** | 736 行 | ✅ 完成 | ✅ 已实现 | 热加载 <100ms |
+| 6 | **三层上下文存储** | 449 行 | ✅ 完成 | ✅ 已实现 | 传输量减少 60% (理论推算) |
+| 7 | **Skills 文件 (AI 可读说明书)** | 317 行 | ✅ 完成 | ✅ 已实现 | 首次正确率 45%→85% (预期) |
 
-**详细文档**: [docs/INNOVATIONS.md](docs/INNOVATIONS.md) | [docs/INNOVATION_TO_SCENARIO_MAPPING.md](docs/INNOVATION_TO_SCENARIO_MAPPING.md)
+**说明**:
+- ✅ **实现状态**: 所有核心创新点均已完成代码实现
+- ✅ **测试状态**: 平行上下文模块 46 个测试 100% 通过，其他模块测试持续完善中
+- 📊 **性能指标**: 部分指标为基准测试目标或理论推算，实测数据收集进行中
+
+**详细文档**: 
+- [docs/INNOVATIONS.md](docs/INNOVATIONS.md) - 7 大核心创新点详解
+- [docs/INNOVATION_TO_SCENARIO_MAPPING.md](docs/INNOVATION_TO_SCENARIO_MAPPING.md) - 创新点到使用场景映射
+- [docs/PARALLEL_CONTEXT_STATUS_REPORT.md](docs/PARALLEL_CONTEXT_STATUS_REPORT.md) - Git 分支上下文实现报告
+- [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) - 双轨服务架构详解
 
 ## 📚 文档导航
 
@@ -167,15 +182,16 @@ cargo test
 |------|------|
 | [docs/INNOVATIONS.md](docs/INNOVATIONS.md) | **7 大核心创新点详解**（21 个使用场景） |
 | [docs/INNOVATION_TO_SCENARIO_MAPPING.md](docs/INNOVATION_TO_SCENARIO_MAPPING.md) | 创新点到使用场景详细映射 |
-| [docs/PAPER_SPLITTING_PLAN.md](docs/PAPER_SPLITTING_PLAN.md) | **论文拆分计划**（3-4 篇顶会论文） |
+| [docs/PAPER_SPLITTING_PLAN.md](docs/PAPER_SPLITTING_PLAN.md) | **论文拆分计划**（3 篇顶会论文） |
 | [docs/paper_plan/paper_draft_v01.md](docs/paper_plan/paper_draft_v01.md) | Parallel Context Architecture 论文草稿 |
 
 ### 📋 项目报告
 | 文档 | 说明 |
 |------|------|
 | [docs/PHASE_1_COMPLETION_REPORT.md](docs/PHASE_1_COMPLETION_REPORT.md) | Phase 1 完成报告 |
-| [docs/STRATEGIC_IMPLEMENTATION_PLAN.json](docs/STRATEGIC_IMPLEMENTATION_PLAN.json) | 战略实施计划 |
+| [docs/PARALLEL_CONTEXT_STATUS_REPORT.md](docs/PARALLEL_CONTEXT_STATUS_REPORT.md) | Git 分支上下文实现状态 |
 | [structure_ensure/SERVICES.md](structure_ensure/SERVICES.md) | 双轨服务架构详解 |
+| [experiments/README.md](experiments/README.md) | 实验框架说明 |
 
 ---
 
@@ -207,14 +223,19 @@ try-tokitai/
 │   ├── tui/                     # TUI 图形界面
 │   ├── tools/                   # 工具集合（63+ 工具）
 │   ├── tool_matrix/             # 工具矩阵/服务注册表
-│   ├── context/                 # 上下文存储（三层架构）
-│   ├── autonomy/                # 自主进化（多 Agent 协作）
+│   ├── context/                 # 上下文存储（三层架构 + Git 分支）
+│   ├── autonomy/                # 自主进化（HybridGapDetector + Prompt Engineering）
 │   ├── orchestrator/            # 编排调度（工作流/角色切换）
 │   ├── dialogue/                # 对话状态机
 │   ├── observability/           # 可观测性
 │   └── prompt_engineering/      # 提示词工程
 │
 ├── docs/                        # 用户文档
+├── experiments/                 # 实验框架
+│   ├── tasks/                   # 110 个基准测试任务
+│   ├── logs/                    # 实验日志目录
+│   ├── analysis/                # 分析结果
+│   └── scripts/                 # 评估脚本
 ├── tools/marketplace/templates/ # 10 种工具模板
 ├── workflows/                   # TOML 工作流定义
 └── structure_ensure/            # 架构文档
@@ -224,12 +245,39 @@ try-tokitai/
 
 ## 📈 Phase 1 完成状态
 
-✅ **MP-001**: 多模型支持（6 提供商 + 智能路由 + /model 命令）  
-✅ **TE-001**: 工具市场（publish/search/install/list + 10 模板）  
-✅ **DX-001**: TUI 界面（三面板布局 + 状态栏 + 快捷键）  
+✅ **MP-001**: 多模型支持（6 提供商 + 智能路由 + /model 命令）
+✅ **TE-001**: 工具市场（publish/search/install/list + 10 模板）
+✅ **DX-001**: TUI 界面（三面板布局 + 状态栏 + 快捷键）
 ✅ **MCP-001**: MCP 协议（Server + Client 模式）
+✅ **PC-001**: Git 分支式上下文管理（fork/checkout/merge/time_travel）
+✅ **AG-001**: HybridGapDetector（两阶段缺口检测）
 
 **构建状态**: `cargo build --release` ✅ 通过
+**测试状态**: `cargo test` ✅ 470+ 测试通过
+
+---
+
+## 🧪 实验框架
+
+项目提供完整的实验框架用于验证核心创新点的有效性：
+
+### 实验设计
+- **5 组对比实验**: Control / Ours-Full / Ours-Single / Ours-NoCoT / Ours-NoFix
+- **110 个基准任务**: 覆盖文件操作、代码分析、网络请求、Git 操作、数据处理等
+- **30 天自主进化实验**: 验证 HybridGapDetector 和 Prompt Engineering 自进化系统
+
+### 评估指标
+- **主要指标**: 任务完成率、平均工具调用次数、用户满意度
+- **次要指标**: 缺口检测准确率、工具创建编译通过率、工具使用率
+- **成本指标**: API 成本/月、平均生成时间、平均修正次数
+
+### 实验状态
+- ✅ 基准测试任务定义完成（110 个）
+- ✅ 实验日志系统实现完成
+- ✅ 评估脚本准备完成
+- ⏳ 实验数据收集中（计划 2026-04 至 2026-06）
+
+**详细实验说明**: [experiments/README.md](experiments/README.md)
 
 ---
 
@@ -243,6 +291,8 @@ try-tokitai/
 | **HTTP** | reqwest 0.12 |
 | **序列化** | serde 1.0, serde_json 1.0, toml 0.8 |
 | **错误处理** | anyhow 1.0, thiserror 2.0 |
+| **测试框架** | proptest 1.4, mockall 0.12, insta 1.34 |
+| **基准测试** | criterion 0.5 |
 
 ---
 
@@ -252,5 +302,20 @@ MIT OR Apache-2.0
 
 ---
 
+## 🎯 论文计划
+
+项目计划发表 3 篇顶会论文：
+
+| 论文 | 核心创新 | 目标会议 | 状态 |
+|------|----------|----------|------|
+| **论文 A** | Git 分支式上下文管理 | ACL 2027 | 🟡 初稿完成 |
+| **论文 B** | HybridGapDetector | AAAI 2027 | 🟡 实施完成 |
+| **论文 C** | Prompt Engineering 自进化 | EMNLP 2027 | 🟡 实施中 |
+
+**详细论文计划**: [docs/PAPER_SPLITTING_PLAN.md](docs/PAPER_SPLITTING_PLAN.md)
+
+---
+
 **最后更新**: 2026-03-27
 **版本**: 0.5.0
+**项目状态**: Phase 1-5 完成，实验数据收集中

@@ -830,4 +830,152 @@ mod tests {
         assert_eq!(diff.added_items[0].id, "added.txt");
         assert_eq!(diff.removed_items[0].id, "removed.txt");
     }
+
+    #[test]
+    fn test_merge_result_serialization() {
+        let result = MergeResult::success(
+            "merge-001",
+            "feature-1",
+            "main",
+            MergeStrategy::SelectiveMerge,
+            5,
+        );
+
+        assert_eq!(result.merge_id, "merge-001");
+        assert_eq!(result.source_branch, "feature-1");
+        assert_eq!(result.target_branch, "main");
+        assert!(result.success);
+        assert_eq!(result.merged_count, 5);
+        assert_eq!(result.strategy, MergeStrategy::SelectiveMerge);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_merge_result_failure() {
+        let result = MergeResult::failure(
+            "merge-002",
+            "feature-2",
+            "main",
+            "Merge conflict unresolved",
+        );
+
+        assert_eq!(result.merge_id, "merge-002");
+        assert!(!result.success);
+        assert_eq!(result.merged_count, 0);
+        assert_eq!(result.error.unwrap(), "Merge conflict unresolved");
+    }
+
+    #[test]
+    fn test_branch_diff_creation() {
+        let diff = BranchDiff {
+            source_branch: "source".to_string(),
+            target_branch: "target".to_string(),
+            added_items: vec![],
+            removed_items: vec![],
+            modified_items: vec![],
+            conflicts: vec![],
+        };
+
+        assert_eq!(diff.source_branch, "source");
+        assert_eq!(diff.target_branch, "target");
+        assert!(diff.added_items.is_empty());
+        assert!(diff.conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_modified_item_creation() {
+        let modified = ModifiedItem {
+            id: "item-001".to_string(),
+            source_hash: "hash1".to_string(),
+            target_hash: "hash2".to_string(),
+            layer: "long-term".to_string(),
+        };
+
+        assert_eq!(modified.id, "item-001");
+        assert_ne!(modified.source_hash, modified.target_hash);
+    }
+
+    #[test]
+    fn test_merge_strategy_display() {
+        // 验证所有合并策略都能正确显示
+        let strategies = vec![
+            MergeStrategy::FastForward,
+            MergeStrategy::SelectiveMerge,
+            MergeStrategy::AIAssisted,
+            MergeStrategy::Manual,
+            MergeStrategy::Ours,
+            MergeStrategy::Theirs,
+        ];
+
+        for strategy in strategies {
+            // 确保策略可以转换为字符串（通过 Debug trait）
+            let debug_str = format!("{:?}", strategy);
+            assert!(!debug_str.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_hash_computation() {
+        let content = "test content for hashing";
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let hash = hasher.finalize();
+        let hash_hex = hex::encode(hash);
+
+        assert_eq!(hash_hex.len(), 64); // SHA256 produces 64 hex characters
+
+        // 验证相同内容产生相同哈希
+        let mut hasher2 = Sha256::new();
+        hasher2.update(content.as_bytes());
+        let hash2 = hasher2.finalize();
+        let hash_hex2 = hex::encode(hash2);
+
+        assert_eq!(hash_hex, hash_hex2);
+    }
+
+    #[test]
+    fn test_merge_log_structure() {
+        let merge_record = MergeRecord {
+            merge_id: "merge-003".to_string(),
+            source_branch: "feature".to_string(),
+            target_branch: "main".to_string(),
+            merge_time: Utc::now(),
+            merged_items: vec![],
+            conflicts: vec![],
+            resolution: ConflictResolution {
+                strategy: "auto".to_string(),
+                decision: crate::context::graph::MergeDecision::KeepSource,
+                ai_explanation: None,
+            },
+            success: true,
+        };
+
+        assert_eq!(merge_record.merge_id, "merge-003");
+        assert!(merge_record.success);
+        assert_eq!(merge_record.resolution.strategy, "auto");
+    }
+
+    #[test]
+    fn test_conflict_creation() {
+        let conflict = Conflict {
+            conflict_id: "conflict-001".to_string(),
+            item_id: "item-001".to_string(),
+            source_version: ConflictVersion {
+                hash: "hash1".to_string(),
+                content_path: PathBuf::from("/source/path"),
+                metadata: None,
+            },
+            target_version: ConflictVersion {
+                hash: "hash2".to_string(),
+                content_path: PathBuf::from("/target/path"),
+                metadata: None,
+            },
+            conflict_type: crate::context::graph::ConflictType::ContentConflict,
+            resolution: None,
+        };
+
+        assert_eq!(conflict.item_id, "item-001");
+        assert_eq!(conflict.conflict_type, crate::context::graph::ConflictType::ContentConflict);
+        assert_ne!(conflict.source_version.hash, conflict.target_version.hash);
+    }
 }

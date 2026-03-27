@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 
 /// AI 配置
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct AiConfig {
     #[serde(default = "default_model")]
@@ -21,6 +21,18 @@ pub struct AiConfig {
     pub default_provider: Option<String>,
 }
 
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            model: default_model(),
+            temperature: default_temperature(),
+            max_tokens: default_max_tokens(),
+            providers: HashMap::default(),
+            default_provider: None,
+        }
+    }
+}
+
 /// Provider configuration
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
@@ -30,7 +42,7 @@ pub struct ProviderConfig {
     /// API Key
     pub api_key: Option<String>,
     /// Default model for this provider
-    #[serde(default)]
+    #[serde(default = "default_model")]
     pub model: String,
     /// Cost per 1K tokens (USD)
     #[serde(default)]
@@ -291,5 +303,374 @@ impl Config {
             user_tools: UserToolsConfig::default(),
             context: ContextConfig::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ========== 默认值测试 ==========
+
+    #[test]
+    fn test_default_ai_config() {
+        let config = AiConfig::default();
+        assert_eq!(config.model, "qwen3.5:397b");
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.max_tokens, 4096);
+        assert!(config.providers.is_empty());
+        assert!(config.default_provider.is_none());
+    }
+
+    #[test]
+    fn test_default_context_config() {
+        let config = ContextConfig::default();
+        assert_eq!(config.max_short_term_rounds, 10);
+        assert!(config.enable_mmap);
+        assert!(config.enable_logging);
+        assert!(config.enable_knowledge_index);
+        assert!(config.auto_sync_categories);
+        assert!(config.auto_recommend_knowledge);
+        assert_eq!(config.recommend_threshold, 0.5);
+        assert_eq!(config.recommend_limit, 3);
+    }
+
+    #[test]
+    fn test_default_search_config() {
+        let config = SearchConfig::default();
+        assert!(config.searxng_url.is_none());
+        assert_eq!(config.engines.len(), 3);
+        assert!(config.engines.contains(&"google".to_string()));
+        assert_eq!(config.cache_capacity, 100);
+        assert_eq!(config.cache_ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert!(config.tools.enabled.is_empty());
+        assert_eq!(config.context.max_short_term_rounds, 10);
+    }
+
+    // ========== Provider 配置测试 ==========
+
+    #[test]
+    fn test_provider_config_default_values() {
+        let provider = ProviderConfig {
+            api_url: "https://api.example.com".to_string(),
+            api_key: Some("test-key".to_string()),
+            model: "test-model".to_string(),
+            cost_per_1k_tokens: 0.001,
+            quality_score: 8.5,
+            context_window: 8192,
+        };
+
+        assert_eq!(provider.api_url, "https://api.example.com");
+        assert_eq!(provider.quality_score, 8.5);
+        assert_eq!(provider.context_window, 8192);
+    }
+
+    #[test]
+    fn test_provider_config_deserialize() {
+        let toml_content = r#"
+            api_url = "https://api.openai.com"
+            api_key = "sk-test123"
+            model = "gpt-4"
+            cost_per_1k_tokens = 0.03
+            quality_score = 9.5
+            context_window = 128000
+        "#;
+
+        let provider: ProviderConfig = toml::from_str(toml_content).unwrap();
+        assert_eq!(provider.api_url, "https://api.openai.com");
+        assert_eq!(provider.api_key, Some("sk-test123".to_string()));
+        assert_eq!(provider.model, "gpt-4");
+        assert_eq!(provider.quality_score, 9.5);
+    }
+
+    // ========== TOML 解析测试 ==========
+
+    #[test]
+    fn test_config_from_toml_complete() {
+        let toml_content = r#"
+            [ai]
+            model = "gpt-4-turbo"
+            temperature = 0.5
+            max_tokens = 2048
+            default_provider = "openai"
+
+            [ai.providers.openai]
+            api_url = "https://api.openai.com"
+            api_key = "sk-test"
+            model = "gpt-4"
+            quality_score = 9.0
+
+            [context]
+            root_dir = "./.tokitai"
+            max_short_term_rounds = 5
+            enable_mmap = false
+            enable_logging = true
+            recommend_threshold = 0.7
+            recommend_limit = 5
+
+            [search]
+            searxng_url = "https://searx.example.org"
+            engines = ["duckduckgo", "bing"]
+            cache_capacity = 200
+
+            [user_tools]
+            workspace_dir = "/home/user/projects"
+            download_dir = "/home/user/downloads"
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+
+        // AI 配置
+        assert_eq!(config.ai.model, "gpt-4-turbo");
+        assert_eq!(config.ai.temperature, 0.5);
+        assert_eq!(config.ai.max_tokens, 2048);
+        assert_eq!(config.ai.default_provider, Some("openai".to_string()));
+        assert!(config.ai.providers.contains_key("openai"));
+
+        // 上下文配置
+        assert_eq!(config.context.root_dir, Some("./.tokitai".to_string()));
+        assert_eq!(config.context.max_short_term_rounds, 5);
+        assert!(!config.context.enable_mmap);
+        assert_eq!(config.context.recommend_threshold, 0.7);
+        assert_eq!(config.context.recommend_limit, 5);
+
+        // 搜索配置
+        assert_eq!(config.search.searxng_url, Some("https://searx.example.org".to_string()));
+        assert_eq!(config.search.engines, vec!["duckduckgo", "bing"]);
+        assert_eq!(config.search.cache_capacity, 200);
+
+        // 用户工具配置
+        assert_eq!(config.user_tools.workspace_dir, Some("/home/user/projects".to_string()));
+        assert_eq!(config.user_tools.download_dir, Some("/home/user/downloads".to_string()));
+    }
+
+    #[test]
+    fn test_config_from_toml_minimal() {
+        let toml_content = r#"# 最小配置"#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+
+        // 应该使用默认值
+        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert_eq!(config.ai.temperature, 0.7);
+        assert!(config.context.enable_mmap);
+        assert!(config.context.enable_logging);
+    }
+
+    // ========== 文件加载测试 ==========
+
+    #[test]
+    fn test_config_load_from_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let toml_content = r#"
+            [ai]
+            model = "test-model"
+            temperature = 0.3
+        "#;
+
+        fs::write(&config_path, toml_content).unwrap();
+
+        let config = Config::load(Some(config_path)).unwrap();
+        assert_eq!(config.ai.model, "test-model");
+        assert_eq!(config.ai.temperature, 0.3);
+    }
+
+    #[test]
+    fn test_config_load_nonexistent_file() {
+        let config = Config::load(Some(PathBuf::from("/nonexistent/config.toml"))).unwrap();
+        
+        // 应该返回默认配置
+        assert_eq!(config.ai.model, "qwen3.5:397b");
+    }
+
+    #[test]
+    fn test_config_load_invalid_toml() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("invalid.toml");
+
+        fs::write(&config_path, "invalid toml {{{{").unwrap();
+
+        let result = Config::load(Some(config_path));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("解析配置文件失败"));
+    }
+
+    // ========== 目录获取测试 ==========
+
+    #[test]
+    fn test_get_workspace_dir_from_config() {
+        let config = Config {
+            user_tools: UserToolsConfig {
+                workspace_dir: Some("/custom/workspace".to_string()),
+                download_dir: None,
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(config.get_workspace_dir(), PathBuf::from("/custom/workspace"));
+    }
+
+    #[test]
+    fn test_get_workspace_dir_fallback_to_current() {
+        let config = Config::default();
+        let workspace = config.get_workspace_dir();
+        
+        // 应该返回当前目录
+        assert!(workspace.is_absolute() || workspace == PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_get_download_dir_from_config() {
+        let config = Config {
+            user_tools: UserToolsConfig {
+                workspace_dir: None,
+                download_dir: Some("/custom/downloads".to_string()),
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(config.get_download_dir(), PathBuf::from("/custom/downloads"));
+    }
+
+    #[test]
+    fn test_get_download_dir_from_env() {
+        // 这个测试依赖于 dirs crate 的行为
+        let config = Config::default();
+        let download_dir = config.get_download_dir();
+        
+        // 应该是系统下载目录或 ./downloads
+        if let Some(system_download) = dirs::download_dir() {
+            assert_eq!(download_dir, system_download);
+        } else {
+            assert_eq!(download_dir, PathBuf::from("./downloads"));
+        }
+    }
+
+    // ========== 环境变量测试 ==========
+
+    #[test]
+    fn test_load_from_env_defaults() {
+        // 清除环境变量以确保测试可重复
+        std::env::remove_var("AI_MODEL");
+        std::env::remove_var("AI_TEMPERATURE");
+        std::env::remove_var("AI_MAX_TOKENS");
+
+        let config = Config::load_from_env();
+
+        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert_eq!(config.ai.temperature, 0.7);
+        assert_eq!(config.ai.max_tokens, 4096);
+    }
+
+    #[test]
+    fn test_load_from_env_custom_values() {
+        std::env::set_var("AI_MODEL", "custom-model");
+        std::env::set_var("AI_TEMPERATURE", "0.9");
+        std::env::set_var("AI_MAX_TOKENS", "8192");
+
+        let config = Config::load_from_env();
+
+        assert_eq!(config.ai.model, "custom-model");
+        assert_eq!(config.ai.temperature, 0.9);
+        assert_eq!(config.ai.max_tokens, 8192);
+
+        // 清理环境变量
+        std::env::remove_var("AI_MODEL");
+        std::env::remove_var("AI_TEMPERATURE");
+        std::env::remove_var("AI_MAX_TOKENS");
+    }
+
+    #[test]
+    fn test_load_from_env_invalid_values() {
+        std::env::set_var("AI_TEMPERATURE", "not-a-number");
+        std::env::set_var("AI_MAX_TOKENS", "invalid");
+
+        let config = Config::load_from_env();
+
+        // 应该回退到默认值
+        assert_eq!(config.ai.temperature, 0.7);
+        assert_eq!(config.ai.max_tokens, 4096);
+
+        std::env::remove_var("AI_TEMPERATURE");
+        std::env::remove_var("AI_MAX_TOKENS");
+    }
+
+    // ========== 边界条件测试 ==========
+
+    #[test]
+    fn test_config_extreme_values() {
+        let toml_content = r#"
+            [ai]
+            temperature = 0.0
+            max_tokens = 0
+
+            [context]
+            max_short_term_rounds = 0
+            recommend_threshold = 0.0
+            recommend_limit = 0
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.ai.temperature, 0.0);
+        assert_eq!(config.ai.max_tokens, 0);
+        assert_eq!(config.context.max_short_term_rounds, 0);
+        assert_eq!(config.context.recommend_threshold, 0.0);
+        assert_eq!(config.context.recommend_limit, 0);
+    }
+
+    #[test]
+    fn test_config_large_values() {
+        let toml_content = r#"
+            [ai]
+            max_tokens = 1000000
+
+            [context]
+            max_short_term_rounds = 10000
+            recommend_limit = 1000
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.ai.max_tokens, 1000000);
+        assert_eq!(config.context.max_short_term_rounds, 10000);
+        assert_eq!(config.context.recommend_limit, 1000);
+    }
+
+    // ========== Clone 测试 ==========
+
+    #[test]
+    fn test_config_clone() {
+        let config1 = Config {
+            ai: AiConfig {
+                model: "test".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let config2 = config1.clone();
+        assert_eq!(config1.ai.model, config2.ai.model);
+    }
+
+    // ========== Debug 输出测试 ==========
+
+    #[test]
+    fn test_config_debug() {
+        let config = Config::default();
+        let debug_str = format!("{:?}", config);
+        
+        assert!(debug_str.contains("Config"));
+        assert!(debug_str.contains("ai:"));
+        assert!(debug_str.contains("context:"));
     }
 }

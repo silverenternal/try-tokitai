@@ -135,7 +135,7 @@ mod tests {
         // 创建分支
         let branch = manager.create_branch("test-branch", "main").unwrap();
         let branch_id = branch.branch_id.clone();
-        drop(branch); // 释放借用
+        // branch 引用在作用域结束时自动释放
 
         // 列出分支
         let branches = manager.list_branches();
