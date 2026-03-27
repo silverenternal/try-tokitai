@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 /// 工具缺口类型
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GapType {
     /// 完全缺失的工具
     MissingTool,
@@ -419,6 +419,11 @@ impl ToolGapDetector {
     /// 获取工具统计
     pub fn get_tool_stats(&self) -> &HashMap<String, ToolUsageStats> {
         &self.tool_stats
+    }
+
+    /// 获取任务记录
+    pub fn get_task_records(&self) -> &[TaskExecutionRecord] {
+        &self.task_records
     }
 
     /// 保存检测数据

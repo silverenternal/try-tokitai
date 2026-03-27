@@ -762,13 +762,84 @@ impl HybridGapDetector {
     /// 获取检测器统计信息
     #[allow(dead_code)]
     pub fn get_stats(&self) -> HybridDetectorStats {
+        let total_tasks = self.statistical_detector.get_task_records().len() as u32;
         HybridDetectorStats {
-            total_tasks_recorded: 0, // 需要从 statistical_detector 获取
+            total_tasks_recorded: total_tasks,
             cache_size: self.cache.len() as u32,
             used_api_budget: self.used_api_budget,
             causal_analyses_count: self.causal_analyses_count,
         }
     }
+
+    /// Record task execution for experiments (simplified interface)
+    pub async fn record_task_execution(
+        &mut self,
+        task_id: &str,
+        success: bool,
+        tool_calls: u32,
+    ) {
+        use crate::autonomy::gap_detector::TaskExecutionRecord;
+        
+        let record = TaskExecutionRecord {
+            task_id: task_id.to_string(),
+            task_description: format!("Task {}", task_id),
+            success,
+            used_tools: vec![],
+            execution_time_ms: 0,
+            failure_reason: if !success { Some("Task failed".to_string()) } else { None },
+            user_satisfaction: if success { Some(4) } else { Some(2) },
+        };
+        
+        self.record_task(record);
+    }
+
+    /// Get current statistics for experiment tracking
+    pub fn get_current_stats(&self) -> ExperimentStats {
+        let total_tasks = self.statistical_detector.get_task_records().len() as u32;
+        let gaps_detected = self.statistical_detector.get_gaps().len() as u32;
+        let tools_created = 0; // Would need to track separately
+        let tools_optimized = 0; // Would need to track separately
+        
+        ExperimentStats {
+            gaps_detected,
+            tools_created,
+            tools_optimized,
+            total_tasks,
+        }
+    }
+
+    /// Get metrics for experiment cycle
+    pub fn get_metrics(&self) -> ExperimentMetrics {
+        ExperimentMetrics {
+            api_calls: self.causal_analyses_count,
+            api_cost_usd: self.used_api_budget,
+            cycle_duration_ms: 0, // Would need to track separately
+        }
+    }
+}
+
+/// Experiment statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentStats {
+    /// Number of gaps detected
+    pub gaps_detected: u32,
+    /// Number of tools created
+    pub tools_created: u32,
+    /// Number of tools optimized
+    pub tools_optimized: u32,
+    /// Total tasks recorded
+    pub total_tasks: u32,
+}
+
+/// Experiment metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentMetrics {
+    /// Number of API calls
+    pub api_calls: u32,
+    /// API cost in USD
+    pub api_cost_usd: f32,
+    /// Cycle duration in milliseconds
+    pub cycle_duration_ms: u64,
 }
 
 /// 检测器统计信息

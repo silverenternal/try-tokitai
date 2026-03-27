@@ -263,6 +263,20 @@ impl HashChainManager {
         Ok(chain.verify())
     }
 
+    /// 初始化哈希链到指定文件路径（用于新分支创建）
+    pub fn initialize_chain_to_path(&mut self, session_id: &str, chain_file_path: &Path) -> Result<String> {
+        let chain = self.get_or_create_chain(session_id)?;
+        let genesis_hash = chain.current_chain_hash.clone();
+        
+        // 保存到指定路径
+        let content = serde_json::to_string_pretty(chain)
+            .with_context(|| format!("Failed to serialize chain: {:?}", session_id))?;
+        std::fs::write(chain_file_path, content)
+            .with_context(|| format!("Failed to write chain file: {:?}", chain_file_path))?;
+        
+        Ok(genesis_hash)
+    }
+
     /// 创建快照
     pub fn create_snapshot(&mut self, session_id: &str) -> Result<HashChainSnapshot> {
         let chain = self.get_or_create_chain(session_id)?;

@@ -19,6 +19,7 @@ mod assistant_common;
 mod cli_assistant;
 mod autonomous_assistant;
 mod experiments;
+mod context_cli;
 pub mod llm;
 pub mod mcp;
 pub mod tool_market;
@@ -74,6 +75,18 @@ fn main() -> Result<()> {
     // 检查工具市场命令
     if args.len() >= 2 && args[1] == "tokitai" {
         return handle_tool_market_command(&args[2..]);
+    }
+
+    // 检查实验命令
+    if args.len() >= 2 && args[1] == "experiment" {
+        // 异步运行实验命令
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        return rt.block_on(crate::experiments::cli::run_experiment_command(&args[2..]));
+    }
+
+    // 检查平行上下文命令
+    if args.len() >= 2 && args[1] == "context" {
+        return crate::context_cli::handle_context_command(&args[2..]);
     }
 
     // 解析 --project-path 参数

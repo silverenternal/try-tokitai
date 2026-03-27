@@ -37,6 +37,31 @@ mod knowledge_watcher;
 mod path_resolver;
 mod window_manager;
 mod unified_manager;
+mod branch;
+mod graph;
+mod merge;
+mod parallel_manager;
+mod cow;
+mod cache;
+mod three_way_merge;
+mod bloom_conflict;
+mod optimized_merge;
+mod storage_optimization;
+mod parallel_merge;
+mod lru_cache;
+mod benchmarks;
+mod hirschberg_lcs;
+mod minhash_lsh;
+mod cuckoo_filter;
+mod dictionary_compression;
+mod arc_cache;
+
+// AI 集成模块（Phase 3）
+mod ai_resolver;
+mod purpose_inference;
+mod smart_merge;
+mod summarizer;
+mod ai_enhanced_manager;
 
 #[allow(unused_imports)]
 pub use file_service::{FileContextService, FileContextConfig, CloudContextItem, CloudPayload};
@@ -49,7 +74,7 @@ pub use logger::{ContextLogger, LogEntry, LogOperation};
 #[allow(unused_imports)]
 pub use hash_chain::{HashChain, HashChainManager, ChainNode, HashChainSnapshot, CloudChainPayload};
 #[allow(unused_imports)]
-pub use distiller::{ContextDistiller, DistillerConfig, DistilledSummary, ToolDependency, ToolStatus, DistillationCache, CacheStats};
+pub use distiller::{ContextDistiller, DistillerConfig, DistilledSummary, ToolDependency, ToolStatus, DistillationCache, CacheStats as DistillerCacheStats};
 #[allow(unused_imports)]
 pub use semantic_index::{SemanticIndex, SemanticIndexConfig, SemanticIndexManager, FingerprintIndexEntry as SearchIndexEntry, IndexStats, SearchResult};
 #[allow(unused_imports)]
@@ -65,8 +90,143 @@ pub use window_manager::{
 };
 #[allow(unused_imports)]
 pub use unified_manager::{
-    UnifiedContextManager, UnifiedManagerConfig, MergeStrategy,
+    UnifiedContextManager, UnifiedManagerConfig, MergeStrategy as UnifiedMergeStrategy,
     UnifiedContextItem, ContextLayerType, ContextSource, UnifiedStats,
+};
+
+// Parallel context management exports
+#[allow(unused_imports)]
+pub use branch::{
+    BranchMetadata, BranchState, ConflictType, ContextBranch, MergeDecision,
+    MergeStrategy,
+};
+#[allow(unused_imports)]
+pub use graph::{
+    BranchPoint, Conflict, ConflictResolution, ConflictVersion, ContextGraph,
+    ContextGraphManager, ContextGraphStats, MergeDecision as GraphMergeDecision,
+    MergeRecord, MergedItem,
+};
+#[allow(unused_imports)]
+pub use merge::{compute_diff, BranchDiff, ContextItem as MergeContextItem, Merger, MergeResult, ModifiedItem};
+#[allow(unused_imports)]
+pub use parallel_manager::{
+    ParallelContextManager, ParallelContextManagerConfig,
+};
+#[allow(unused_imports)]
+pub use cow::{
+    BranchCloner, CowConfig, CowManager, CowStats, ForkResult,
+};
+
+// AI 集成模块导出（Phase 3）
+#[allow(unused_imports)]
+pub use ai_resolver::{
+    AIConflictResolver, ConflictResolutionRequest, ConflictResolutionResponse,
+    ConflictAnalysisReport, ResolverStats,
+};
+#[allow(unused_imports)]
+pub use purpose_inference::{
+    AIPurposeInference, PurposeInferenceRequest, PurposeInferenceResult,
+    BranchType, InferenceStats,
+};
+#[allow(unused_imports)]
+pub use smart_merge::{
+    AISmartMergeRecommender, MergeRecommendationRequest, MergeRecommendation,
+    TimingRecommendation, RiskAssessment, ChecklistItem, ChecklistStatus,
+    QuickAssessment, RecommenderStats,
+};
+#[allow(unused_imports)]
+pub use summarizer::{
+    AIBranchSummarizer, SummaryGenerationRequest, SummaryGenerationResult,
+    TimelineEvent, StatusAssessment, MergeReadiness, QuickSummary, SummarizerStats,
+};
+#[allow(unused_imports)]
+pub use ai_enhanced_manager::{
+    AIEnhancedContextManager, AIStats,
+};
+
+// 缓存优化模块
+#[allow(unused_imports)]
+pub use cache::{
+    AncestorCache, AncestorCacheStats, BranchCache, CacheStats as CacheStatsV1,
+    CacheWarmup, CacheWarmupConfig, CachedBranch as CachedBranchV1,
+};
+
+// 三路合并优化模块
+#[allow(unused_imports)]
+pub use three_way_merge::{
+    FileMetadata, MergeOutcome, ThreeWayMerger, MergeComparison,
+};
+
+// Bloom Filter 冲突检测优化模块
+#[allow(unused_imports)]
+pub use bloom_conflict::{
+    BloomFilter, BloomConflictDetector, BloomStats, PerformanceComparison,
+};
+
+// 高级合并算法优化模块
+#[allow(unused_imports)]
+pub use optimized_merge::{
+    AdvancedMerger, ContentDeduplicator, DedupResult, DedupStats,
+    Diff3Hunk, Diff3Result, LcsAlignment, SemanticBlock,
+    SemanticMergeOutcome, SemanticMergeResult,
+};
+
+// 存储优化模块
+#[allow(unused_imports)]
+pub use storage_optimization::{
+    ChangeType, CompressionAlgorithm, CompressionConfig,
+    ContentAddressableEntry, ContentAddressableStorage,
+    GcResult, IncrementalSnapshot, SnapshotChange, SnapshotManager,
+    SnapshotMetadata, StorageStats,
+};
+
+// 并行合并优化模块
+#[allow(unused_imports)]
+pub use parallel_merge::{
+    ParallelMerger, ParallelMergeConfig, ParallelMergeResult, ParallelMergeStats,
+};
+
+// LRU-K 缓存优化模块
+#[allow(unused_imports)]
+pub use lru_cache::{
+    BranchLRUCache, BranchCacheConfig, CachedBranch, CacheStats,
+    ThreadSafeBranchCache,
+};
+
+// 性能基准测试模块
+#[allow(unused_imports)]
+pub use benchmarks::{
+    BenchmarkConfig, BenchmarkResult, BenchmarkSuite, run_benchmarks,
+};
+
+// Hirschberg LCS 优化模块
+#[allow(unused_imports)]
+pub use hirschberg_lcs::{HirschbergLCS, OptimizedLcsResult};
+
+// MinHash+LSH 语义索引优化模块
+#[allow(unused_imports)]
+pub use minhash_lsh::{
+    MinHashGenerator, MinHashSignature, LSHConfig, LSHIndex, LSHIndexStats,
+    MinHashLSHIndex, DocumentMetadata,
+};
+
+// Cuckoo Filter 冲突检测优化模块
+#[allow(unused_imports)]
+pub use cuckoo_filter::{
+    CuckooFilter, CuckooStats, CuckooConflictDetector,
+};
+
+// Zstd Dictionary 压缩优化模块
+#[allow(unused_imports)]
+pub use dictionary_compression::{
+    DictionaryCompressor, DictionaryCompressionConfig, DictionaryStats,
+    DictionaryMetadata, DictionaryContentAddressableStorage,
+};
+
+// ARC 自适应缓存替换算法
+#[allow(unused_imports)]
+pub use arc_cache::{
+    ArcCache, ArcCacheConfig, ArcCacheStats, ArcEntry, BranchArcCache,
 };
 
 /// 知识管理器 - 整合知识索引、监听和推荐功能

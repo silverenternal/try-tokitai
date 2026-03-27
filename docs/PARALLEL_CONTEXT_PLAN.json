@@ -1,0 +1,917 @@
+{
+  "proposal_title": "Parallel Context Architecture: Git-like Branching for AI Agent Memory",
+  "chinese_title": "平行上下文架构：AI Agent 记忆的 Git 式分支管理",
+  "version": "1.0",
+  "created_at": "2026-03-26",
+  "status": "proposal",
+  "target_paper": {
+    "conference": "ACL 2027 / EMNLP 2027",
+    "track": "Systems and Infrastructure for NLP",
+    "acceptance_rate_target": "25%"
+  },
+
+  "executive_summary": {
+    "core_insight": "现有 AI Agent 上下文管理是线性单线程的，无法支持多路径探索、假设推理和并行实验。我们提出平行上下文架构，首次将 Git 的分支/合并语义引入 AI Agent 记忆系统。",
+    "key_innovations": [
+      "上下文分支原语（fork/checkout/merge/abort）",
+      "分支间上下文隔离机制",
+      "选择性上下文合并算法",
+      "分支历史追溯与时间旅行"
+    ],
+    "expected_impact": "为 AI Agent 提供平行探索能力，支持多假设验证、并行实验和可回溯决策，使复杂任务成功率提升 40%+"
+  },
+
+  "research_motivation": {
+    "problem_statement": {
+      "current_limitation": "现有 AI Agent 上下文系统（包括本项目的三层存储架构）都是线性单线程设计",
+      "pain_points": [
+        "无法并行探索多个解决方案路径",
+        "无法进行假设推理（what-if analysis）",
+        "错误决策后无法优雅回溯",
+        "多轮对话中无法切换不同话题分支",
+        "复杂任务需要手动管理上下文状态"
+      ],
+      "real_world_scenarios": [
+        {
+          "scenario": "代码重构探索",
+          "description": "Agent 需要尝试 3 种不同的重构方案，比较效果后选择最佳方案",
+          "current_workflow": "串行执行 3 次，每次手动清理上下文，丢失对比信息",
+          "desired_workflow": "创建 3 个分支并行探索，最后合并最佳方案"
+        },
+        {
+          "scenario": "多假设验证",
+          "description": "调试程序时，Agent 提出 3 个可能的 bug 原因，需要分别验证",
+          "current_workflow": "线性验证，每次验证后上下文污染",
+          "desired_workflow": "每个假设一个分支，独立验证，汇总结论"
+        },
+        {
+          "scenario": "创意写作",
+          "description": "帮助用户写小说，需要探索不同剧情走向",
+          "current_workflow": "用户手动复制粘贴不同版本",
+          "desired_workflow": "自动分支管理不同剧情线，支持合并创意"
+        }
+      ]
+    },
+
+    "related_work": {
+      "academic_research": [
+        {
+          "paper": "Fork, Explore, Commit: OS Primitives for Agentic Exploration (arXiv:2602.08199)",
+          "contribution": "提出 OS 级别的分支上下文原语，使用 FUSE 文件系统实现",
+          "limitation": "聚焦操作系统原语，非 LLM 上下文管理"
+        },
+        {
+          "paper": "Conversation Tree Architecture (arXiv:2603.21278)",
+          "contribution": "树状对话管理，节点间上下文流动机制",
+          "limitation": "侧重对话 UX，非 Agent 记忆系统"
+        },
+        {
+          "paper": "LLMs Can't Play Hangman (arXiv:2601.06973)",
+          "contribution": "证明 forked dialogue branches 中需要私有工作记忆",
+          "limitation": "理论分析为主，无完整实现"
+        }
+      ],
+      "industry_systems": [
+        {
+          "system": "Delta (GitHub: danielcorin/delta)",
+          "feature": "LLM 对话分支，Obsidian Canvas 导出",
+          "limitation": "用户手动分支，非 Agent 自主管理"
+        },
+        {
+          "system": "LangGraph Time Travel",
+          "feature": "检查点回溯，状态恢复",
+          "limitation": "只支持线性回溯，不支持分支"
+        },
+        {
+          "system": "Frond (GitHub: malbiruk/frond)",
+          "feature": "TUI LLM 客户端，分支和完整上下文控制",
+          "limitation": "Rust 实现但功能简单"
+        }
+      ],
+      "gap_analysis": "现有工作要么聚焦 OS 原语，要么侧重 UX 交互，缺少专为 AI Agent 设计的完整平行上下文管理系统"
+    }
+  },
+
+  "core_design": {
+    "architecture_overview": {
+      "design_philosophy": "在现有三层存储架构基础上，引入图结构分支能力，保持纯文件存储优势",
+      "key_abstractions": [
+        "ContextBranch: 分支上下文，包含完整的三层存储",
+        "ContextGraph: 上下文图，管理分支关系和历史",
+        "BranchPoint: 分支点，记录 fork 操作的源和目标",
+        "MergeResult: 合并结果，记录合并决策和冲突解决"
+      ],
+      "directory_structure": {
+        ".context/": "根目录",
+        ".context/graph.json": "上下文图元数据",
+        ".context/branches/": "分支存储目录",
+        ".context/branches/main/": "主分支（现有结构保持不变）",
+        ".context/branches/feature-x/": "特性分支",
+        ".context/branches/branch_xxx/": "动态分支",
+        ".context/branches/branch_xxx/transient/": "分支瞬时层",
+        ".context/branches/branch_xxx/short-term/": "分支短期层",
+        ".context/branches/branch_xxx/long-term/": "分支长期层",
+        ".context/branches/branch_xxx/hash_chain.json": "分支哈希链",
+        ".context/merge_logs/": "合并日志",
+        ".context/checkpoints/": "检查点（可选快照）"
+      }
+    },
+
+    "data_structures": {
+      "ContextBranch": {
+        "description": "分支上下文数据结构",
+        "fields": {
+          "branch_id": "String - 分支唯一标识",
+          "branch_name": "String - 人类可读名称（如 'feature-refactor'）",
+          "parent_branch": "String - 父分支 ID",
+          "fork_point": "DateTime - 分支创建时间",
+          "head_hash": "String - 当前哈希链头",
+          "state": "BranchState enum (Active, Merged, Abandoned)",
+          "metadata": "BranchMetadata - 分支元数据"
+        }
+      },
+      "BranchState": {
+        "description": "分支状态枚举",
+        "variants": [
+          "Active - 活跃分支，可读写",
+          "Merged - 已合并到父分支",
+          "Abandoned - 已废弃",
+          "Conflicted - 合并冲突中"
+        ]
+      },
+      "BranchMetadata": {
+        "description": "分支元数据",
+        "fields": {
+          "created_by": "String - 创建者（用户或 Agent）",
+          "purpose": "String - 分支目的描述",
+          "tags": "Vec<String> - 标签",
+          "auto_merge": "bool - 是否自动合并",
+          "merge_strategy": "MergeStrategy - 合并策略",
+          "ttl_hours": "Option<u32> - 生存时间（可选自动清理）"
+        }
+      },
+      "ContextGraph": {
+        "description": "上下文图，管理所有分支及其关系",
+        "fields": {
+          "branches": "HashMap<branch_id, ContextBranch>",
+          "current_branch": "String - 当前活跃分支",
+          "main_branch": "String - 主分支 ID（通常为 'main'）",
+          "merge_history": "Vec<MergeRecord> - 合并历史",
+          "created_at": "DateTime",
+          "updated_at": "DateTime"
+        }
+      },
+      "MergeRecord": {
+        "description": "合并记录",
+        "fields": {
+          "merge_id": "String",
+          "source_branch": "String",
+          "target_branch": "String",
+          "merge_time": "DateTime",
+          "merged_items": "Vec<MergedItem> - 合并的项目",
+          "conflicts": "Vec<Conflict> - 冲突列表",
+          "resolution": "ConflictResolution - 解决策略",
+          "success": "bool"
+        }
+      },
+      "MergedItem": {
+        "description": "合并的单个项目",
+        "fields": {
+          "item_id": "String",
+          "layer": "StorageLayer enum",
+          "content_hash": "String",
+          "from_branch": "String",
+          "to_branch": "String",
+          "merge_decision": "MergeDecision"
+        }
+      },
+      "MergeDecision": {
+        "description": "合并决策",
+        "variants": [
+          "KeepSource - 保留源分支版本",
+          "KeepTarget - 保留目标分支版本",
+          "Combine - 合并两者",
+          "Discard - 丢弃",
+          "AIResolved - AI 辅助解决"
+        ]
+      },
+      "Conflict": {
+        "description": "合并冲突",
+        "fields": {
+          "conflict_id": "String",
+          "item_id": "String",
+          "source_version": "ConflictVersion",
+          "target_version": "ConflictVersion",
+          "conflict_type": "ConflictType",
+          "resolution": "Option<ConflictResolution>"
+        }
+      },
+      "ConflictType": {
+        "description": "冲突类型",
+        "variants": [
+          "ContentConflict - 内容不同",
+          "MetadataConflict - 元数据不同",
+          "SemanticConflict - 语义冲突（AI 判断）",
+          "OrderConflict - 顺序冲突"
+        ]
+      }
+    },
+
+    "operations": {
+      "fork": {
+        "signature": "fork(branch_name: &str, from_branch: &str) -> Result<ContextBranch>",
+        "description": "从指定分支创建新分支",
+        "semantics": "Copy-on-Write: 新分支继承源分支的短期层和长期层，瞬时层清空",
+        "implementation_steps": [
+          "1. 验证源分支存在",
+          "2. 创建新分支目录结构",
+          "3. 复制源分支的 short-term 和 long-term 层（符号链接，非复制文件）",
+          "4. 创建新的 hash_chain.json（继承源链）",
+          "5. 更新 ContextGraph 添加新分支",
+          "6. 记录 BranchPoint 到图历史"
+        ],
+        "performance_target": "<10ms（符号链接，O(1) 复杂度）"
+      },
+      "checkout": {
+        "signature": "checkout(branch_name: &str) -> Result<()>",
+        "description": "切换到指定分支",
+        "semantics": "更新当前分支指针，加载对应存储层",
+        "implementation_steps": [
+          "1. 验证分支存在且状态为 Active",
+          "2. 更新 current_branch 指针",
+          "3. 重新加载三层存储管理器",
+          "4. 记录 checkout 日志"
+        ],
+        "performance_target": "<5ms"
+      },
+      "merge": {
+        "signature": "merge(source_branch: &str, target_branch: &str, strategy: MergeStrategy) -> Result<MergeResult>",
+        "description": "将源分支合并到目标分支",
+        "semantics": "选择性合并短期层和长期层，瞬时层不合并",
+        "implementation_steps": [
+          "1. 验证两分支存在",
+          "2. 检测冲突（内容哈希对比）",
+          "3. 无冲突：自动合并",
+          "4. 有冲突：根据策略解决（AI 辅助/用户选择）",
+          "5. 更新目标分支的 hash_chain",
+          "6. 记录 MergeRecord",
+          "7. 可选：标记源分支为 Merged"
+        ],
+        "merge_strategies": {
+          "FastForward": "源分支是目标分支的直接后代，直接移动指针",
+          "SelectiveMerge": "选择性合并（基于重要性评分）",
+          "AIAssisted": "AI 辅助决策冲突解决",
+          "Manual": "用户手动解决所有冲突",
+          "Ours": "始终保留目标分支版本",
+          "Theirs": "始终保留源分支版本"
+        },
+        "performance_target": "<100ms（不含 AI 决策）"
+      },
+      "abort": {
+        "signature": "abort(branch_name: &str) -> Result<()>",
+        "description": "废弃指定分支",
+        "semantics": "标记分支为 Abandoned，可选删除数据",
+        "implementation_steps": [
+          "1. 验证分支存在且非 main",
+          "2. 更新分支状态为 Abandoned",
+          "3. 可选：删除分支目录（带 TTL 延迟）",
+          "4. 记录 abort 日志"
+        ],
+        "performance_target": "<5ms"
+      },
+      "list_branches": {
+        "signature": "list_branches() -> Vec<ContextBranch>",
+        "description": "列出所有分支及其状态",
+        "output_format": "类似 git branch，当前分支标 *，显示状态标签"
+      },
+      "diff": {
+        "signature": "diff(branch1: &str, branch2: &str) -> Result<BranchDiff>",
+        "description": "比较两个分支的差异",
+        "output": {
+          "added_items": "Vec<ContextItem> - 分支 2 新增的项目",
+          "removed_items": "Vec<ContextItem> - 分支 2 删除的项目",
+          "modified_items": "Vec<ModifiedItem> - 修改的项目",
+          "conflicts": "Vec<Conflict> - 潜在冲突"
+        }
+      },
+      "log": {
+        "signature": "log(branch_name: &str, limit: usize) -> Vec<ChainNode>",
+        "description": "查看分支历史",
+        "output": "类似 git log，显示哈希链节点"
+      },
+      "time_travel": {
+        "signature": "time_travel(branch_name: &str, target_hash: &str) -> Result<()>",
+        "description": "回溯到历史某个状态",
+        "semantics": "创建临时分支指向历史状态，不修改原分支",
+        "implementation_steps": [
+          "1. 验证目标哈希存在",
+          "2. 创建临时分支（名称：branch_name@hash）",
+          "3. 切换到临时分支",
+          "4. 用户探索后可返回原分支"
+        ]
+      }
+    }
+  },
+
+  "integration_with_existing": {
+    "three_layer_storage": {
+      "description": "平行上下文架构与现有三层存储的集成",
+      "integration_points": [
+        {
+          "layer": "TransientLayer",
+          "branch_behavior": "每个分支独立，fork 时清空，不继承",
+          "rationale": "瞬时层是单轮临时数据，不应污染新分支"
+        },
+        {
+          "layer": "ShortTermLayer",
+          "branch_behavior": "Copy-on-Write 继承，fork 时创建符号链接",
+          "rationale": "保留最近 N 轮对话，支持分支独立演进"
+        },
+        {
+          "layer": "LongTermLayer",
+          "branch_behavior": "符号链接共享，写入时复制",
+          "rationale": "长期知识（项目规则、工具配置）应跨分支共享"
+        }
+      ],
+      "hash_chain_integration": "每个分支独立哈希链，fork 时继承源链，merge 时更新目标链"
+    },
+    "context_distiller": {
+      "description": "分层上下文蒸馏的分支感知扩展",
+      "new_features": [
+        "跨分支摘要对比",
+        "合并时的摘要融合",
+        "分支专用摘要（记录分支目的和进展）"
+      ]
+    },
+    "semantic_index": {
+      "description": "语义指纹索引的分支扩展",
+      "new_features": [
+        "分支级语义索引",
+        "跨分支语义搜索",
+        "合并时的语义去重"
+      ]
+    },
+    "knowledge_index": {
+      "description": "知识索引保持全局共享",
+      "rationale": "项目知识结构不应随分支变化"
+    }
+  },
+
+  "implementation_plan": {
+    "phase_1_core_structures": {
+      "duration": "2 weeks",
+      "tasks": [
+        {
+          "id": "P1-T1",
+          "task": "创建 src/context/branch.rs",
+          "description": "实现 ContextBranch 数据结构和基本操作",
+          "estimated_lines": 400,
+          "dependencies": ["layers.rs", "hash_chain.rs"]
+        },
+        {
+          "id": "P1-T2",
+          "task": "创建 src/context/graph.rs",
+          "description": "实现 ContextGraph 管理所有分支",
+          "estimated_lines": 500,
+          "dependencies": ["branch.rs"]
+        },
+        {
+          "id": "P1-T3",
+          "task": "创建 src/context/merge.rs",
+          "description": "实现合并操作和冲突检测",
+          "estimated_lines": 600,
+          "dependencies": ["branch.rs", "graph.rs"]
+        },
+        {
+          "id": "P1-T4",
+          "task": "修改 src/context/mod.rs",
+          "description": "集成平行上下文管理到根管理器",
+          "estimated_lines": 200,
+          "dependencies": ["P1-T1", "P1-T2", "P1-T3"]
+        }
+      ],
+      "deliverables": [
+        "基本的 fork/checkout/merge/abort 操作",
+        "分支状态管理",
+        "简单的冲突检测"
+      ],
+      "exit_criteria": "所有单元测试通过，可以手动创建和切换分支"
+    },
+    "phase_2_advanced_features": {
+      "duration": "2 weeks",
+      "tasks": [
+        {
+          "id": "P2-T1",
+          "task": "实现 Copy-on-Write 机制",
+          "description": "使用符号链接实现高效的分支继承",
+          "estimated_lines": 300,
+          "dependencies": ["phase_1"]
+        },
+        {
+          "id": "P2-T2",
+          "task": "实现多种合并策略",
+          "description": "FastForward, SelectiveMerge, AIAssisted 等",
+          "estimated_lines": 400,
+          "dependencies": ["P1-T3"]
+        },
+        {
+          "id": "P2-T3",
+          "task": "实现时间旅行功能",
+          "description": "基于哈希链快照的回溯",
+          "estimated_lines": 250,
+          "dependencies": ["hash_chain.rs"]
+        },
+        {
+          "id": "P2-T4",
+          "task": "实现分支 diff 和 log 命令",
+          "description": "类似 git 的差异查看和历史浏览",
+          "estimated_lines": 350,
+          "dependencies": ["P1-T1", "P1-T2"]
+        }
+      ],
+      "deliverables": [
+        "高效的 COW 分支",
+        "5+ 种合并策略",
+        "时间旅行支持",
+        "diff/log 查看工具"
+      ],
+      "exit_criteria": "功能完整，性能达标，集成测试通过"
+    },
+    "phase_3_ai_integration": {
+      "duration": "2 weeks",
+      "tasks": [
+        {
+          "id": "P3-T1",
+          "task": "AI 辅助冲突解决",
+          "description": "使用 LLM 判断冲突项目的合并策略",
+          "estimated_lines": 400,
+          "dependencies": ["phase_2", "autonomy module"]
+        },
+        {
+          "id": "P3-T2",
+          "task": "分支目的自动推断",
+          "description": "AI 分析对话内容，自动标注分支目的",
+          "estimated_lines": 300,
+          "dependencies": ["P3-T1"]
+        },
+        {
+          "id": "P3-T3",
+          "task": "智能合并推荐",
+          "description": "AI 推荐最佳合并时机和策略",
+          "estimated_lines": 350,
+          "dependencies": ["P3-T2"]
+        },
+        {
+          "id": "P3-T4",
+          "task": "分支摘要生成",
+          "description": "AI 生成分支进展摘要",
+          "estimated_lines": 250,
+          "dependencies": ["distiller.rs"]
+        }
+      ],
+      "deliverables": [
+        "AI 冲突解决器",
+        "自动分支标注",
+        "智能合并推荐",
+        "分支摘要生成"
+      ],
+      "exit_criteria": "AI 功能集成，端到端测试通过"
+    },
+    "phase_4_experiments": {
+      "duration": "3 weeks",
+      "tasks": [
+        {
+          "id": "P4-T1",
+          "task": "设计基准测试任务",
+          "description": "20+ 需要平行探索的复杂任务",
+          "estimated_lines": 200,
+          "dependencies": []
+        },
+        {
+          "id": "P4-T2",
+          "task": "执行对比实验",
+          "description": "平行上下文 vs 线性上下文",
+          "estimated_lines": 300,
+          "dependencies": ["P4-T1", "phase_3"]
+        },
+        {
+          "id": "P4-T3",
+          "task": "性能基准测试",
+          "description": "分支操作延迟、内存占用、存储效率",
+          "estimated_lines": 250,
+          "dependencies": ["phase_2"]
+        },
+        {
+          "id": "P4-T4",
+          "task": "用户研究",
+          "description": "10+ 用户使用反馈，任务完成率对比",
+          "estimated_lines": 150,
+          "dependencies": ["P4-T2"]
+        }
+      ],
+      "deliverables": [
+        "20+ 基准测试任务",
+        "实验结果数据",
+        "性能基准报告",
+        "用户研究反馈"
+      ],
+      "exit_criteria": "实验数据完整，支持论文主张"
+    },
+    "phase_5_paper_writing": {
+      "duration": "3 weeks",
+      "tasks": [
+        {
+          "id": "P5-T1",
+          "task": "撰写论文初稿",
+          "description": "按 ACL/EMNLP 格式撰写",
+          "estimated_lines": 8000,
+          "dependencies": ["phase_4"]
+        },
+        {
+          "id": "P5-T2",
+          "task": "制作图表和可视化",
+          "description": "架构图、实验结果图、用例演示",
+          "estimated_lines": 0,
+          "dependencies": ["P5-T1"]
+        },
+        {
+          "id": "P5-T3",
+          "task": "内部评审和修改",
+          "description": "合作者评审，多轮修改",
+          "estimated_lines": 0,
+          "dependencies": ["P5-T2"]
+        },
+        {
+          "id": "P5-T4",
+          "task": "开源代码整理",
+          "description": "代码清理、文档、示例",
+          "estimated_lines": 500,
+          "dependencies": ["phase_4"]
+        }
+      ],
+      "deliverables": [
+        "完整论文草稿",
+        "所有图表",
+        "开源代码仓库",
+        "演示视频（可选）"
+      ],
+      "exit_criteria": "论文 ready for submission"
+    }
+  },
+
+  "technical_challenges": {
+    "challenge_1_copy_on_write": {
+      "description": "实现高效的 Copy-on-Write 机制",
+      "solution": "使用文件系统符号链接（symlink），fork 时只创建链接，写入时复制文件",
+      "platform_support": "Linux/macOS 原生支持，Windows 需要管理员权限或使用 junction points",
+      "fallback": "Windows 无符号链接时使用硬链接或实际复制（性能降级）"
+    },
+    "challenge_2_conflict_detection": {
+      "description": "准确检测上下文冲突",
+      "solution": "三层检测机制：1) 内容哈希对比 2) 元数据对比 3) AI 语义冲突检测",
+      "false_positive_handling": "AI 二次确认，用户最终决定"
+    },
+    "challenge_3_merge_complexity": {
+      "description": "上下文合并的复杂性（不同于代码合并）",
+      "solution": "定义 5 种合并决策：KeepSource, KeepTarget, Combine, Discard, AIResolved",
+      "combine_strategy": "Combine 时 AI 生成融合版本，保留双方信息"
+    },
+    "challenge_4_storage_overhead": {
+      "description": "多分支可能导致存储膨胀",
+      "solution": "1) COW 减少复制 2) 长期层共享 3) TTL 自动清理 4) 分支压缩工具",
+      "expected_overhead": "<20%（基于 10 个活跃分支的估算）"
+    },
+    "challenge_5_consistency": {
+      "description": "分支间状态一致性保证",
+      "solution": "1) 原子操作（文件锁）2) 操作日志 3) 崩溃恢复机制",
+      "isolation_level": "Read Committed（分支间读取隔离）"
+    }
+  },
+
+  "api_design": {
+    "rust_api": {
+      "ContextManager": {
+        "methods": [
+          "fn create_branch(&mut self, name: &str, from: &str) -> Result<ContextBranch>",
+          "fn checkout(&mut self, branch: &str) -> Result<()>",
+          "fn merge(&mut self, source: &str, target: &str, strategy: MergeStrategy) -> Result<MergeResult>",
+          "fn abort_branch(&mut self, branch: &str) -> Result<()>",
+          "fn list_branches(&self) -> Vec<ContextBranch>",
+          "fn diff(&self, branch1: &str, branch2: &str) -> Result<BranchDiff>",
+          "fn log(&self, branch: &str, limit: usize) -> Vec<ChainNode>",
+          "fn time_travel(&mut self, branch: &str, target_hash: &str) -> Result<()>"
+        ]
+      },
+      "example_usage": "// 创建分支探索不同方案\nctx.create_branch(\"refactor-v1\", \"main\")?;\nctx.checkout(\"refactor-v1\")?;\n// ... 探索 ...\n\nctx.checkout(\"main\")?;\nctx.create_branch(\"refactor-v2\", \"main\")?;\nctx.checkout(\"refactor-v2\")?;\n// ... 探索 ...\n\n// 合并最佳方案\nctx.checkout(\"main\")?;\nctx.merge(\"refactor-v1\", \"main\", MergeStrategy::Selective)?;"
+    },
+    "cli_commands": {
+      "description": "命令行接口（类似 git）",
+      "commands": [
+        "tokitai ctx branch [name] - 创建或列出分支",
+        "tokitai ctx checkout <branch> - 切换分支",
+        "tokitai ctx merge <source> [target] - 合并分支",
+        "tokitai ctx abort <branch> - 废弃分支",
+        "tokitai ctx diff <branch1> [branch2] - 查看差异",
+        "tokitai ctx log [branch] - 查看历史",
+        "tokitai ctx time-travel <branch> <hash> - 时间旅行"
+      ]
+    }
+  },
+
+  "evaluation_metrics": {
+    "performance_metrics": {
+      "fork_latency": {
+        "target": "<10ms",
+        "measurement": "创建分支的平均延迟"
+      },
+      "merge_latency": {
+        "target": "<100ms（不含 AI）",
+        "measurement": "合并操作的平均延迟"
+      },
+      "checkout_latency": {
+        "target": "<5ms",
+        "measurement": "切换分支的平均延迟"
+      },
+      "storage_overhead": {
+        "target": "<20%",
+        "measurement": "10 个活跃分支 vs 单分支的存储比"
+      },
+      "memory_overhead": {
+        "target": "<15%",
+        "measurement": "多分支状态管理的内存占用"
+      }
+    },
+    "effectiveness_metrics": {
+      "task_success_rate": {
+        "target": "+40%",
+        "measurement": "复杂任务使用平行上下文 vs 线性上下文的完成率",
+        "baseline": "线性上下文 ~55%",
+        "expected": "平行上下文 ~75%+"
+      },
+      "exploration_depth": {
+        "target": "+60%",
+        "measurement": "平均探索的解决方案路径数量"
+      },
+      "error_recovery_rate": {
+        "target": "+80%",
+        "measurement": "错误决策后成功回溯并恢复的比例"
+      },
+      "user_satisfaction": {
+        "target": ">4.5/5",
+        "measurement": "用户研究评分"
+      }
+    },
+    "paper_claims": [
+      "平行上下文使复杂任务成功率提升 40%+",
+      "分支操作延迟<10ms，存储开销<20%",
+      "支持 10+ 活跃分支同时探索",
+      "AI 辅助冲突解决准确率>85%",
+      "用户满意度>4.5/5"
+    ]
+  },
+
+  "novelty_analysis": {
+    "vs_existing_research": {
+      "fork_explore_commit_paper": {
+        "their_focus": "OS 级原语，文件系统和进程隔离",
+        "our_focus": "LLM 上下文管理，语义级合并",
+        "our_novelty": "首次将分支语义应用于 AI Agent 记忆，AI 辅助冲突解决"
+      },
+      "conversation_tree_architecture": {
+        "their_focus": "对话 UX，节点间上下文流动",
+        "our_focus": "Agent 自主管理，程序化 API",
+        "our_novelty": "完整的分支生命周期管理，合并策略"
+      },
+      "llms_cant_play_hangman": {
+        "their_focus": "理论分析，私有工作记忆必要性",
+        "our_focus": "完整实现，系统评估",
+        "our_novelty": "实用的平行上下文系统，大规模评估"
+      }
+    },
+    "key_contributions": [
+      "首次提出面向 AI Agent 的平行上下文架构",
+      "定义上下文分支原语（fork/checkout/merge/abort）",
+      "提出 AI 辅助的语义级冲突解决算法",
+      "实现高效的 Copy-on-Write 分支机制",
+      "大规模实验验证（20+ 任务，10+ 用户）"
+    ],
+    "target_venues": [
+      {
+        "venue": "ACL 2027",
+        "track": "Systems and Infrastructure for NLP",
+        "fit": "AI Agent 系统基础设施",
+        "deadline": "2027-02-15"
+      },
+      {
+        "venue": "EMNLP 2027",
+        "track": "Efficient Methods for NLP",
+        "fit": "高效上下文管理",
+        "deadline": "2027-06-30"
+      },
+      {
+        "venue": "AAAI 2027",
+        "track": "Agent Systems",
+        "fit": "AI Agent 架构创新",
+        "deadline": "2026-08-15"
+      }
+    ]
+  },
+
+  "timeline": {
+    "total_duration": "12 weeks",
+    "phases": {
+      "phase_1": "Weeks 1-2: Core Structures",
+      "phase_2": "Weeks 3-4: Advanced Features",
+      "phase_3": "Weeks 5-6: AI Integration",
+      "phase_4": "Weeks 7-9: Experiments",
+      "phase_5": "Weeks 10-12: Paper Writing"
+    },
+    "milestones": [
+      {
+        "name": "M1: Core Implementation Complete",
+        "week": 2,
+        "deliverables": ["fork/checkout/merge/abort", "basic tests"]
+      },
+      {
+        "name": "M2: Full Feature Set",
+        "week": 4,
+        "deliverables": ["COW", "merge strategies", "time travel"]
+      },
+      {
+        "name": "M3: AI Integration Complete",
+        "week": 6,
+        "deliverables": ["AI conflict resolution", "smart merge"]
+      },
+      {
+        "name": "M4: Experiments Complete",
+        "week": 9,
+        "deliverables": ["benchmark results", "user study"]
+      },
+      {
+        "name": "M5: Paper Ready",
+        "week": 12,
+        "deliverables": ["full paper", "code release"]
+      }
+    ]
+  },
+
+  "risk_analysis": {
+    "technical_risks": [
+      {
+        "risk": "Windows 符号链接支持问题",
+        "mitigation": "使用 junction points 或降级为实际复制",
+        "probability": "Medium",
+        "impact": "Low"
+      },
+      {
+        "risk": "合并冲突过于复杂，AI 解决率低",
+        "mitigation": "提供多种策略，用户最终决定",
+        "probability": "Medium",
+        "impact": "Medium"
+      },
+      {
+        "risk": "存储开销超出预期",
+        "mitigation": "TTL 自动清理，分支压缩工具",
+        "probability": "Low",
+        "impact": "Medium"
+      }
+    ],
+    "research_risks": [
+      {
+        "risk": "实验结果不显著",
+        "mitigation": "设计更复杂的基准任务，增加用户数量",
+        "probability": "Low",
+        "impact": "High"
+      },
+      {
+        "risk": "相关工作已有类似实现",
+        "mitigation": "持续监控 arXiv，强调我们的 AI 集成创新",
+        "probability": "Low",
+        "impact": "Medium"
+      }
+    ]
+  },
+
+  "code_organization": {
+    "new_files": [
+      "src/context/branch.rs - ContextBranch 数据结构",
+      "src/context/graph.rs - ContextGraph 管理",
+      "src/context/merge.rs - 合并操作和冲突检测",
+      "src/context/cow.rs - Copy-on-Write 机制",
+      "src/context/time_travel.rs - 时间旅行功能",
+      "src/context/ai_resolver.rs - AI 冲突解决"
+    ],
+    "modified_files": [
+      "src/context/mod.rs - 集成平行上下文管理",
+      "src/context/layers.rs - 分支感知的存储层",
+      "src/context/hash_chain.rs - 分支哈希链",
+      "src/cli/commands/context.rs - CLI 命令"
+    ],
+    "test_files": [
+      "tests/context_branching.rs - 分支操作测试",
+      "tests/merge_strategies.rs - 合并策略测试",
+      "tests/time_travel.rs - 时间旅行测试",
+      "tests/ai_conflict_resolution.rs - AI 冲突解决测试"
+    ]
+  },
+
+  "example_workflows": {
+    "workflow_1_code_refactoring": {
+      "scenario": "Agent 探索 3 种代码重构方案",
+      "steps": [
+        "1. 用户在 main 分支提出重构需求",
+        "2. Agent 创建 refactor-v1, refactor-v2, refactor-v3 三个分支",
+        "3. 每个分支独立探索一种方案",
+        "4. Agent 对比三种方案的效果",
+        "5. 选择最佳方案合并到 main",
+        "6. 废弃其他分支"
+      ],
+      "commands": [
+        "tokitai ctx branch refactor-v1",
+        "# Agent 探索方案 1...",
+        "tokitai ctx branch refactor-v2",
+        "# Agent 探索方案 2...",
+        "tokitai ctx diff refactor-v1 refactor-v2",
+        "tokitai checkout main",
+        "tokitai ctx merge refactor-v1"
+      ]
+    },
+    "workflow_2_debugging": {
+      "scenario": "多假设验证调试",
+      "steps": [
+        "1. Agent 提出 3 个可能的 bug 原因",
+        "2. 为每个假设创建验证分支",
+        "3. 并行验证每个假设",
+        "4. 汇总验证结果到 main",
+        "5. 定位真正 bug 并修复"
+      ],
+      "commands": [
+        "tokitai ctx branch hypothesis-1",
+        "# 验证假设 1...",
+        "tokitai ctx branch hypothesis-2",
+        "# 验证假设 2...",
+        "tokitai ctx merge hypothesis-1 main --strategy selective"
+      ]
+    },
+    "workflow_3_creative_writing": {
+      "scenario": "创意写作多剧情线",
+      "steps": [
+        "1. 用户在 main 分支开始故事",
+        "2. 在关键情节点创建多个分支探索不同走向",
+        "3. 每个分支发展独立剧情",
+        "4. 对比不同剧情线的用户反馈",
+        "5. 合并最佳创意或选择最受欢迎剧情"
+      ],
+      "commands": [
+        "tokitai ctx branch plot-twist-a",
+        "# 发展剧情 A...",
+        "tokitai ctx branch plot-twist-b",
+        "# 发展剧情 B...",
+        "tokitai ctx diff plot-twist-a plot-twist-b"
+      ]
+    }
+  },
+
+  "references": {
+    "academic_papers": [
+      {
+        "title": "Fork, Explore, Commit: OS Primitives for Agentic Exploration",
+        "authors": "Cong Wang, Yusheng Zheng",
+        "venue": "arXiv:2602.08199",
+        "year": 2026,
+        "url": "https://arxiv.org/abs/2602.08199"
+      },
+      {
+        "title": "Conversation Tree Architecture: A Structured Framework for Context-Aware Multi-Branch LLM Conversations",
+        "authors": "Pranav Hemanth, Sampriti Saha",
+        "venue": "arXiv:2603.21278",
+        "year": 2026,
+        "url": "https://arxiv.org/abs/2603.21278"
+      },
+      {
+        "title": "LLMs Can't Play Hangman: On the Necessity of a Private Working Memory for Language Agents",
+        "authors": "Davide Baldelli, et al.",
+        "venue": "arXiv:2601.06973",
+        "year": 2026,
+        "url": "https://arxiv.org/abs/2601.06973"
+      }
+    ],
+    "systems": [
+      {
+        "name": "Delta",
+        "url": "https://github.com/danielcorin/delta",
+        "description": "LLM conversation branching tool"
+      },
+      {
+        "name": "Frond",
+        "url": "https://github.com/malbiruk/frond",
+        "description": "TUI LLM chat client with branching"
+      },
+      {
+        "name": "LangGraph",
+        "url": "https://langchain-ai.github.io/langgraph/",
+        "description": "Stateful LLM orchestration with time travel"
+      }
+    ]
+  }
+}

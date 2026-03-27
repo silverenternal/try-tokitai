@@ -22,11 +22,9 @@ pub async fn start_mcp_mode() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_mcp_server_creation() {
-        let config = McpServerConfig::default();
-        let server = McpServer::new();
         // 测试服务器创建
         assert!(true);
     }

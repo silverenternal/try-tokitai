@@ -16,7 +16,7 @@ mod command_resolver;
 mod path_resolver;
 mod sandbox;
 mod tools;
-mod context;
+pub mod context;
 mod autonomy;
 mod observability;
 mod dialogue;
@@ -41,6 +41,16 @@ pub use autonomy::gap_detector::{TaskExecutionRecord, ToolGap, GapType};
 pub use assistant_common::AssistantConfig;
 pub use cli_assistant::CliAssistant;
 pub use autonomous_assistant::AutonomousAssistant;
+
+// 重新导出 parallel context 类型（用于集成测试和论文实验）
+pub use context::{
+    ParallelContextManager, ParallelContextManagerConfig,
+    BranchState, MergeStrategy,
+    ContextBranch, BranchMetadata,
+    ContextGraph, ContextGraphManager,
+    Merger, MergeResult, BranchDiff,
+    CowManager, CowConfig, CowStats, ForkResult,
+};
 
 // 重新导出 orchestrator 公共类型（用于集成测试）
 pub use orchestrator::{
