@@ -1,0 +1,357 @@
+<mxfile host="app.diagrams.net" modified="2026-03-28T00:00:00.000Z" agent="AI Assistant" version="21.0.0" type="device">
+  <diagram id="paper-a-fig1" name="Paper A - Figure 1: System Overview">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Main Container: Parallel Context Manager -->
+        <mxCell id="main-container" value="Parallel Context Manager" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="40" width="750" height="520" as="geometry" />
+        </mxCell>
+        
+        <!-- Context Graph Box -->
+        <mxCell id="context-graph" value="Context Graph (graph.json)&lt;br&gt;&lt;i&gt;- Branch metadata (id, name, parent, state)&lt;/i&gt;&lt;br&gt;&lt;i&gt;- Branch relationships (fork points, merge history)&lt;/i&gt;&lt;br&gt;&lt;i&gt;- Hash chain references&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="100" y="80" width="650" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Branch Containers -->
+        <mxCell id="branch-main" value="Branch: main&lt;br&gt;&lt;i&gt;(Active)&lt;/i&gt;&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ Transient   │ (RW)&lt;br&gt;├─────────────┤&lt;br&gt;│ ShortTerm   │ (COW)&lt;br&gt;├─────────────┤&lt;br&gt;│ LongTerm    │ (Shared)&lt;br&gt;└─────────────┘" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="200" width="180" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="branch-x" value="Branch: feature-x&lt;br&gt;&lt;i&gt;(Active)&lt;/i&gt;&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ Transient   │ (RW)&lt;br&gt;├─────────────┤&lt;br&gt;│ ShortTerm   │ (COW)&lt;br&gt;├─────────────┤&lt;br&gt;│ LongTerm    │ (Shared)&lt;br&gt;└─────────────┘" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="335" y="200" width="180" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="branch-y" value="Branch: feature-y&lt;br&gt;&lt;i&gt;(Merged)&lt;/i&gt;&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ Transient   │ (Abandoned)&lt;br&gt;├─────────────┤&lt;br&gt;│ ShortTerm   │ (COW)&lt;br&gt;├─────────────┤&lt;br&gt;│ LongTerm    │ (Shared)&lt;br&gt;└─────────────┘" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="570" y="200" width="180" height="200" as="geometry" />
+        </mxCell>
+        
+        <!-- Symlink Arrows between branches -->
+        <mxCell id="symlink-1" value="symlink" style="endArrow=classic;startArrow=classic;html=1;fontSize=10;dashed=1" edge="1" parent="1">
+          <mxGeometry x="280" y="340" width="50" height="50" as="geometry">
+            <mxPoint x="280" y="340" as="sourcePoint" />
+            <mxPoint x="335" y="340" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="symlink-2" value="symlink" style="endArrow=classic;startArrow=classic;html=1;fontSize=10;dashed=1" edge="1" parent="1">
+          <mxGeometry x="515" y="340" width="50" height="50" as="geometry">
+            <mxPoint x="515" y="340" as="sourcePoint" />
+            <mxPoint x="570" y="340" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Operation API Box -->
+        <mxCell id="operation-api" value="Operation API&lt;br&gt;&lt;i&gt;fork() | checkout() | merge() | abort() | time_travel()&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="100" y="460" width="650" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Connection arrows from Context Graph to branches -->
+        <mxCell id="graph-to-main" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="300" y="160" width="50" height="50" as="geometry">
+            <mxPoint x="300" y="160" as="sourcePoint" />
+            <mxPoint x="190" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="graph-to-x" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="425" y="160" width="50" height="50" as="geometry">
+            <mxPoint x="425" y="160" as="sourcePoint" />
+            <mxPoint x="425" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="graph-to-y" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="550" y="160" width="50" height="50" as="geometry">
+            <mxPoint x="550" y="160" as="sourcePoint" />
+            <mxPoint x="660" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Connection from branches to Operation API -->
+        <mxCell id="main-to-api" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="190" y="400" width="50" height="50" as="geometry">
+            <mxPoint x="190" y="400" as="sourcePoint" />
+            <mxPoint x="190" y="460" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="x-to-api" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="425" y="400" width="50" height="50" as="geometry">
+            <mxPoint x="425" y="400" as="sourcePoint" />
+            <mxPoint x="425" y="460" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="y-to-api" value="" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="660" y="400" width="50" height="50" as="geometry">
+            <mxPoint x="660" y="400" as="sourcePoint" />
+            <mxPoint x="660" y="460" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="Legend:&lt;br&gt;RW = Read-Write&lt;br&gt;COW = Copy-on-Write&lt;br&gt;Shared = Symlink sharing" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;whiteSpace=wrap;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="600" y="460" width="150" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  
+  <diagram id="paper-a-fig2" name="Paper A - Figure 2: COW Mechanism">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="Copy-on-Write Mechanism (O(1) Fork)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;overflow=hidden;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="750" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Before Fork -->
+        <mxCell id="before-fork-title" value="Before Fork" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="100" y="80" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="before-fork-box" value="main&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ file1.txt   │&lt;br&gt;│ file2.txt   │&lt;br&gt;│ file3.txt   │&lt;br&gt;└─────────────┘" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="120" width="150" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- After Fork -->
+        <mxCell id="after-fork-title" value="After Fork (Symlinks Created)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="500" y="80" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="after-fork-main" value="main&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ file1.txt   │&lt;br&gt;│ file2.txt   │&lt;br&gt;│ file3.txt   │&lt;br&gt;└─────────────┘" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="500" y="120" width="150" height="120" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="after-fork-feature" value="feature-x&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ file1.txt   │ ← symlink&lt;br&gt;│ file2.txt   │ ← symlink&lt;br&gt;│ file3.txt   │ ← symlink&lt;br&gt;└─────────────┘" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="500" y="280" width="150" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- Fork Arrow -->
+        <mxCell id="fork-arrow" value="fork()" style="endArrow=classic;html=1;fontSize=12;fontStyle=1" edge="1" parent="1">
+          <mxGeometry x="300" y="180" width="50" height="50" as="geometry">
+            <mxPoint x="270" y="180" as="sourcePoint" />
+            <mxPoint x="480" y="180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Symlink Arrow -->
+        <mxCell id="symlink-arrow" value="symlink" style="endArrow=classic;dashed=1;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="575" y="240" width="50" height="50" as="geometry">
+            <mxPoint x="575" y="240" as="sourcePoint" />
+            <mxPoint x="575" y="280" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Write to feature-x -->
+        <mxCell id="write-title" value="Write to feature-x/file1.txt" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="100" y="320" width="250" height="30" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="write-main" value="main&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ file1.txt   │ ← unchanged&lt;br&gt;│ file2.txt   │&lt;br&gt;│ file3.txt   │&lt;br&gt;└─────────────┘" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="360" width="150" height="120" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="write-feature" value="feature-x&lt;br&gt;&lt;br&gt;┌─────────────┐&lt;br&gt;│ file1.txt   │ ← NEW COPY&lt;br&gt;│ file2.txt   │ ← symlink&lt;br&gt;│ file3.txt   │ ← symlink&lt;br&gt;└─────────────┘" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="520" width="150" height="120" as="geometry" />
+        </mxCell>
+        
+        <!-- COW Arrow -->
+        <mxCell id="cow-arrow" value="COW trigger" style="endArrow=classic;html=1;fontSize=10" edge="1" parent="1">
+          <mxGeometry x="175" y="480" width="50" height="50" as="geometry">
+            <mxPoint x="175" y="480" as="sourcePoint" />
+            <mxPoint x="175" y="520" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Performance Note -->
+        <mxCell id="perf-note" value="Performance:&lt;br&gt;• Fork: O(1) - symlink creation only&lt;br&gt;• First Write: O(n) - copy single file&lt;br&gt;• Subsequent Writes: O(1) - direct write" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="500" y="360" width="250" height="100" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  
+  <diagram id="paper-b-fig1" name="Paper B - Figure 1: HybridGapDetector Architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Main Container -->
+        <mxCell id="main-box" value="HybridGapDetector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="40" width="750" height="520" as="geometry" />
+        </mxCell>
+        
+        <!-- Stage 1 -->
+        <mxCell id="stage1" value="Stage 1: Statistical Filter&lt;br&gt;&lt;b&gt;Performance:&lt;/b&gt; &lt;100ms, 0 API calls&lt;br&gt;&lt;b&gt;Input:&lt;/b&gt; Task execution history&lt;br&gt;&lt;b&gt;Metrics:&lt;/b&gt; failure rate, satisfaction, affected tasks&lt;br&gt;&lt;b&gt;Output:&lt;/b&gt; Candidate gaps&lt;br&gt;&lt;b&gt;Complexity:&lt;/b&gt; O(n)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="600" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Arrow 1->2 -->
+        <mxCell id="arrow12" value="Candidates" style="endArrow=classic;html=1;fontSize=12" edge="1" parent="1">
+          <mxGeometry x="400" y="200" width="50" height="50" as="geometry">
+            <mxPoint x="400" y="200" as="sourcePoint" />
+            <mxPoint x="400" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Stage 2 -->
+        <mxCell id="stage2" value="Stage 2: Causal Analysis&lt;br&gt;&lt;b&gt;Performance:&lt;/b&gt; 1-5s, 1-2 API calls&lt;br&gt;&lt;b&gt;Input:&lt;/b&gt; Candidate gaps from Stage 1&lt;br&gt;&lt;b&gt;Method:&lt;/b&gt; Counterfactual reasoning prompts&lt;br&gt;&lt;b&gt;Output:&lt;/b&gt; Causal confidence scores&lt;br&gt;&lt;b&gt;Optimization:&lt;/b&gt; Batch processing, caching" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="260" width="600" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Arrow 2->3 -->
+        <mxCell id="arrow23" value="Scored gaps" style="endArrow=classic;html=1;fontSize=12" edge="1" parent="1">
+          <mxGeometry x="400" y="360" width="50" height="50" as="geometry">
+            <mxPoint x="400" y="360" as="sourcePoint" />
+            <mxPoint x="400" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Stage 3 -->
+        <mxCell id="stage3" value="Stage 3: Merger &amp; Prioritize&lt;br&gt;&lt;b&gt;Performance:&lt;/b&gt; &lt;50ms, 0 API calls&lt;br&gt;&lt;b&gt;Fusion Formula:&lt;/b&gt; hybrid_confidence = statistical × 0.4 + causal × 0.6&lt;br&gt;&lt;b&gt;Priority:&lt;/b&gt; hybrid_confidence × impact × urgency&lt;br&gt;&lt;b&gt;Output:&lt;/b&gt; Ranked gap report" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="420" width="600" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Input label -->
+        <mxCell id="input-label" value="Input: Task History" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="100" y="70" width="150" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Output label -->
+        <mxCell id="output-label" value="Output: Ranked Tool Gaps" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="100" y="530" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Cost breakdown box -->
+        <mxCell id="cost-box" value="Cost Breakdown (per gap):&lt;br&gt;• Stage 1: $0 (0 API calls)&lt;br&gt;• Stage 2: $0.03-0.06 (1-2 API calls)&lt;br&gt;• Stage 3: $0 (0 API calls)&lt;br&gt;• Monthly total: ~$2.25 (100 gaps/day)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="550" y="80" width="200" height="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  
+  <diagram id="paper-b-fig2" name="Paper B - Figure 2: Cost-Accuracy Trade-off">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="Cost-Accuracy Trade-off Analysis" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;overflow=hidden;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="750" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Chart background -->
+        <mxCell id="chart-bg" value="" style="whiteSpace=wrap;html=1;fillColor=#f9f9f9;strokeColor=#cccccc" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="680" height="450" as="geometry" />
+        </mxCell>
+        
+        <!-- Y-axis -->
+        <mxCell id="y-axis" value="Accuracy" style="endArrow=classic;html=1;fontSize=12" edge="1" parent="1">
+          <mxGeometry x="100" y="530" width="50" height="50" as="geometry">
+            <mxPoint x="100" y="530" as="sourcePoint" />
+            <mxPoint x="100" y="80" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- X-axis -->
+        <mxCell id="x-axis" value="Monthly API Cost" style="endArrow=classic;html=1;fontSize=12" edge="1" parent="1">
+          <mxGeometry x="100" y="530" width="50" height="50" as="geometry">
+            <mxPoint x="100" y="530" as="sourcePoint" />
+            <mxPoint x="760" y="530" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Y-axis labels -->
+        <mxCell id="y-80" value="80%" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="90" y="125" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="y-75" value="75%" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="90" y="181" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="y-70" value="70%" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="90" y="237" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="y-60" value="60%" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="90" y="349" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- X-axis labels -->
+        <mxCell id="x-0" value="$0" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="100" y="535" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="x-50" value="$50" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="300" y="535" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="x-100" value="$100" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="500" y="535" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="x-150" value="$150" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="700" y="535" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- Data points -->
+        <mxCell id="point-statistical" value="● Pure Statistical&lt;br&gt;(60%, $0)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="100" y="345" width="15" height="15" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="point-full" value="● Ours-Full&lt;br&gt;(72%, $2.25)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="115" y="233" width="15" height="15" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="point-causal" value="● Ours-Causal-Only&lt;br&gt;(75%, $45-135)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="300" y="185" width="15" height="15" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="point-pe" value="● Pure Prompt Eng&lt;br&gt;(75%, $50-150)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="700" y="185" width="15" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- Curve line (approximate) -->
+        <mxCell id="curve" value="" style="curved=1;endArrow=none;html=1;fontSize=12;strokeColor=#666666;strokeWidth=2;dashed=1" edge="1" parent="1">
+          <mxGeometry x="100" y="350" width="600" height="200" as="geometry">
+            <mxPoint x="100" y="350" as="sourcePoint" />
+            <mxPoint x="700" y="185" as="targetPoint" />
+            <Array as="controlPoints">
+              <mxPoint x="200" y="280" />
+              <mxPoint x="400" y="220" />
+              <mxPoint x="600" y="195" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Optimal point highlight -->
+        <mxCell id="optimal-highlight" value="★ Optimal Operating Point&lt;br&gt;95% of max accuracy&lt;br&gt;at 5% of max cost" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="150" y="280" width="150" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Arrow to optimal point -->
+        <mxCell id="optimal-arrow" value="" style="endArrow=classic;html=1;fontSize=10;dashed=1" edge="1" parent="1">
+          <mxGeometry x="250" y="310" width="50" height="50" as="geometry">
+            <mxPoint x="250" y="310" as="sourcePoint" />
+            <mxPoint x="125" y="245" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="Legend:&lt;br&gt;★ = Optimal point&lt;br&gt;● = Configuration" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="600" y="350" width="120" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

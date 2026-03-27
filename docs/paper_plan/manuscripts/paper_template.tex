@@ -1,0 +1,281 @@
+% =============================================================================
+% ACL/AAAI 论文 LaTeX 模板
+% 项目: Self-Evolving Tool Ecosystem for AI Agents
+% 目标会议: AAAI 2027 / ACL 2027
+% =============================================================================
+
+\documentclass[11pt]{article}
+
+% ============= 基础包 =============
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,calc}
+
+% ============= 页面设置 =============
+\usepackage[letterpaper,margin=1in]{geometry}
+\setlength{\textwidth}{6.5in}
+\setlength{\textheight}{9in}
+\setlength{\oddsidemargin}{0in}
+\setlength{\evensidemargin}{0in}
+\setlength{\topmargin}{-0.5in}
+
+% ============= 超链接设置 =============
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    citecolor=blue,
+    pdftitle={Self-Evolving Tool Ecosystem for AI Agents},
+    pdfauthor={Tokitai Team},
+}
+
+% ============= 自定义命令 =============
+\newcommand{\ours}{\textsc{Tokitai-Evo}\xspace}
+\newcommand{\toolformer}{ToolFormer\xspace}
+\newcommand{\toolllm}{ToolLLM\xspace}
+
+% ============= 定理环境 =============
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+
+% ============= 标题信息 =============
+\title{Self-Evolving Tool Ecosystem: Enabling AI Agents with Proactive Tool Management via Prompt Engineering}
+
+\author{
+  First Author$^1$ \quad Second Author$^1$ \quad Third Author$^2$ \\
+  \textbf{Fourth Author}$^1$ \quad \textbf{Fifth Author}$^2$ \\
+  \\
+  $^1$Tokitai Research Lab \\
+  $^2$Collaborating Institution \\
+  \\
+  \texttt{\{first,second,fourth\}@tokitai.ai} \\
+  \texttt{third@institution.edu}
+}
+
+\date{}
+
+% =============================================================================
+\begin{document}
+\maketitle
+
+% ============= 摘要 =============
+\begin{abstract}
+Large language models (LLMs) increasingly rely on external tools to accomplish complex tasks. However, existing tool ecosystems are static---tools are predefined by developers and cannot adapt to evolving user needs. We present \ours, a Self-Evolving Tool Ecosystem that enables AI agents to proactively manage their tool repositories through Prompt Engineering alone, without training specialized models. Our approach comprises three core mechanisms: (1) \textbf{Causal Reasoning Prompt} for detecting tool gaps, (2) \textbf{Multi-Agent Negotiation Protocol} for consensus-based evolution decisions, and (3) \textbf{Self-Correcting Code Generation} for creating new tools. A 30-day autonomous evolution experiment demonstrates that our system improves task completion rate by 18\% while reducing tool invocations by 32\%, with monthly API costs under \$50. This work represents the first demonstration of prompt-based self-evolving tool management for AI agents.
+\end{abstract}
+
+% ============= 1. 引言 =============
+\section{Introduction}\label{sec:intro}
+
+% 1.1 AI Agent 的工具使用场景
+\subsection{Motivation}
+
+Large language models (LLMs) have demonstrated remarkable capabilities in reasoning, code generation, and natural language understanding. However, they are inherently limited by their static knowledge cutoff and lack of access to external systems. To overcome these limitations, researchers have developed tool-augmented LLMs that can invoke external APIs, execute code, and interact with file systems.
+
+% 1.2 现有系统的局限
+\subsection{Limitations of Current Systems}
+
+Despite significant progress, existing tool ecosystems suffer from three fundamental limitations:
+
+\begin{enumerate}
+    \item \textbf{Static Tool Repositories}: Tools are predefined by developers and cannot adapt to new domains or user-specific requirements.
+    \item \textbf{Passive Tool Management}: AI agents wait for user instructions rather than proactively identifying and addressing tool gaps.
+    \item \textbf{Lack of Service-Oriented Metadata}: Most systems use flat lists without quality-of-service metrics, dependency tracking, or health monitoring.
+\end{enumerate}
+
+% 1.3 我们的贡献
+\subsection{Our Contributions}
+
+We propose \ours, a self-evolving tool ecosystem that enables AI agents to proactively manage their tool repositories. Our key contributions are:
+
+\begin{itemize}
+    \item \textbf{Causal Reasoning Prompt Design}: A novel prompting pattern that enables LLMs to perform reliable causal inference for tool gap detection without training specialized models.
+    \item \textbf{Multi-Agent Negotiation Protocol}: A structured debate framework where multiple LLM agents reach consensus on evolution decisions, reducing single-agent bias.
+    \item \textbf{Self-Correcting Code Generation}: An iterative code generation framework that uses compilation feedback to improve tool creation success rates from 40\% to 80\%.
+    \item \textbf{Tool Matrix Architecture}: A service-oriented metadata system that supports self-evolution through QoS tracking, dependency inference, and AI-readable documentation.
+\end{itemize}
+
+% ============= 2. 相关工作 =============
+\section{Related Work}\label{sec:related}
+
+% 2.1 Tool Learning
+\subsection{Tool Learning with LLMs}
+
+Recent work has explored various approaches to tool learning...
+
+% 对比表格示例
+\begin{table}[t]
+\centering
+\caption{Comparison with existing tool learning approaches}
+\label{tab:comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{Tool Source} & \textbf{Tool Optimization} & \textbf{Gap Detection} \\
+\midrule
+\toolformer & Predefined & Manual & User-driven \\
+\toolllm & Predefined & Manual & User-driven \\
+HuggingGPT & Predefined & Manual & User-driven \\
+\midrule
+\textbf{Ours} & AI-created & AI-optimized & AI-discovered \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============= 3. 背景 =============
+\section{Background: Tokitai Platform}\label{sec:background}
+
+\subsection{Core Concepts}
+
+Tokitai is a Rust-based AI tool invocation framework...
+
+% ============= 4. 工具矩阵架构 =============
+\section{Tool Matrix Architecture}\label{sec:architecture}
+
+\subsection{Service-Oriented Metadata}
+
+We introduce service-oriented metadata inspired by microservice architecture:
+
+\begin{definition}[Service Metadata]
+A service metadata structure $M$ for a tool $t$ is defined as:
+\begin{equation}
+M(t) = \langle C, Q, D, R, V, H \rangle
+\end{equation}
+where $C$ is the category, $Q$ represents QoS metrics, $D$ denotes dependencies, $R$ is rate limiting config, $V$ is version info, and $H$ indicates health status.
+\end{definition}
+
+% ============= 5. 方法 =============
+\section{Method: Prompt Engineering Framework}\label{sec:method}
+
+\subsection{Causal Reasoning Prompt Design}
+
+Our causal reasoning prompt follows a 4-step Chain-of-Thought framework:
+
+\begin{algorithm}[t]
+\caption{Causal Reasoning for Gap Detection}
+\label{alg:causal}
+\begin{algorithmic}[1]
+\Require Task history $\mathcal{H}$, Failed tasks $\mathcal{F}$
+\Ensure Tool gaps $\mathcal{G}$
+\State $\mathcal{G} \gets \emptyset$
+\For{each $t \in \mathcal{F}$}
+    \State $P \gets \textsc{BuildCausalPrompt}(t, \mathcal{H})$ \label{line:prompt}
+    \State $R \gets \textsc{LLM}(P)$ \Comment{Generate reasoning}
+    \State $G \gets \textsc{ParseJSON}(R)$ \Comment{Extract gaps}
+    \State $\mathcal{G} \gets \mathcal{G} \cup G$
+\EndFor
+\State \Return $\mathcal{G}$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Multi-Agent Negotiation Protocol}
+
+% ============= 6. 实现 =============
+\section{Implementation}\label{sec:implementation}
+
+\subsection{System Architecture}
+
+% TikZ 架构图示例
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    box/.style={rectangle, draw, minimum width=3cm, minimum height=0.8cm, align=center},
+    arrow/.style={->, >=stealth}
+]
+\node[box] (gap) {Gap Detector};
+\node[box, right=of gap] (opt) {Optimizer};
+\node[box, right=of opt] (create) {Tool Creator};
+\node[box, below=of opt] (registry) {Tool Registry};
+
+\draw[arrow] (gap) -- (opt);
+\draw[arrow] (opt) -- (create);
+\draw[arrow] (create) -- (registry);
+\draw[arrow] (registry) -- (opt);
+\end{tikzpicture}
+\caption{System architecture overview}
+\label{fig:architecture}
+\end{figure}
+
+% ============= 7. 实验 =============
+\section{Experiments}\label{sec:experiments}
+
+\subsection{Experimental Setup}
+
+\textbf{Baseline}: Original Tokitai without self-evolution\\
+\textbf{Our Method}: Full \ours system\\
+\textbf{Dataset}: 110 benchmark tasks over 30 days
+
+\subsection{Main Results}
+
+\begin{table}[t]
+\centering
+\caption{Main experimental results}
+\label{tab:main-results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{Ours} & \textbf{Improvement} \\
+\midrule
+Task Completion Rate & 65\% & 83\% & +18\% \\
+Avg. Tool Invocations & 8.5 & 5.8 & -32\% \\
+User Satisfaction & 3.5 & 4.3 & +0.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Study}
+
+% ============= 8. 讨论 =============
+\section{Discussion}\label{sec:discussion}
+
+\subsection{Limitations}
+
+\subsection{Future Work}
+
+% ============= 9. 结论 =============
+\section{Conclusion}\label{sec:conclusion}
+
+We presented \ours, a self-evolving tool ecosystem that enables AI agents to proactively manage their tool repositories through Prompt Engineering alone...
+
+% ============= 参考文献 =============
+\section*{References}
+\begin{enumerate}
+    \item Schick et al. Toolformer: Language models can teach themselves to use tools. NeurIPS 2023.
+    \item Qin et al. ToolLLM: Facilitating large language models to master 16000+ real-world APIs. ICLR 2024.
+    \item Shen et al. HuggingGPT: Solving AI tasks with ChatGPT and its friends in Hugging Face. NeurIPS 2023.
+    \item Lu et al. Chameleon: Plug-and-play compositional reasoning with large language models. NeurIPS 2023.
+    \item Wei et al. Chain-of-thought prompting elicits reasoning in large language models. NeurIPS 2022.
+\end{enumerate}
+
+% ============= 附录 =============
+\appendix
+\section{Prompt Templates}\label{app:prompts}
+
+\subsection{Causal Reasoning Prompt}
+
+\begin{verbatim}
+You are a causal inference expert. Analyze the following task failure...
+
+Step 1: List all possible failure factors
+Step 2: Apply counterfactual reasoning
+Step 3: Identify true tool gaps
+Step 4: Output JSON report
+\end{verbatim}
+
+\section{Complete Tool List}\label{app:tools}
+
+\end{document}
