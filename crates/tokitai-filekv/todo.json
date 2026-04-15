@@ -1,0 +1,574 @@
+{
+  "metadata": {
+    "title": "tokitai-filekv 大规模性能优化规划与追责机制",
+    "version": "v1.0",
+    "created": "2026-04-15",
+    "author": "P11 Performance Review Team",
+    "scope": "10M+ keys 生产级性能优化",
+    "baseline": {
+      "100K_keys_write": "101ms (vs RocksDB 628µs, 慢 161x)",
+      "1M_keys_write": "1.27s (vs RocksDB 6.3ms, 慢 200x)",
+      "target": "10M keys 场景缩小与 RocksDB 差距至 10x 以内"
+    }
+  },
+
+  "performance_accountability": {
+    "description": "性能追责机制 - 每个模块必须对自己的性能表现负责",
+    "rules": [
+      "每个性能优化任务必须明确：责任人、截止时间、验收标准、回滚计划",
+      "优化前后必须对比 benchmark 数据，提升 <5% 视为无效优化",
+      "任何新特性引入必须附带性能影响评估（benchmark 对比）",
+      "性能回归必须在 CI 中自动检测，回归 >10% 自动阻断合并",
+      "模块负责人必须每周提交性能报告（关键路径延迟分布、放大率指标）"
+    ],
+    "module_owners": {
+      "read_engine": "ReadEngine 负责人 - get() 路径性能",
+      "write_engine": "WriteEngine 负责人 - put/flush 路径性能",
+      "compaction": "Compaction 负责人 - 压缩放大率",
+      "global_index": "GlobalKeyIndex 负责人 - 索引命中率与内存",
+      "bloom_cache": "BloomCache 负责人 - Bloom 加载与查找延迟",
+      "block_cache": "BlockCache 负责人 - 缓存命中率与淘汰策略"
+    }
+  },
+
+  "root_cause_analysis": {
+    "title": "大规模场景性能瓶颈根因分析 (RCA)",
+    "critical_issues": [
+      {
+        "id": "RCA-001",
+        "severity": "P0-CRITICAL",
+        "module": "ReadEngine.get()",
+        "symptom": "100K+ keys 场景读取慢 200x",
+        "root_cause": "get() 路径遍历所有 L0 segments（可能数十上百个），每个 segment 执行：DenseIndex 查找 + Bloom 加载 + ZoneMap 检查 + SparseIndex 查找。L0 segments 未合并时，每次 get() 都要扫描全部 L0",
+        "evidence": [
+          "read_engine.rs:254-290 遍历所有 segments_snapshot.values()",
+          "每个 segment 调用 search_segment() 包含 6+ 步操作",
+          "GlobalKeyIndex 存在但仅在 get() 第 3 优先级使用，且可能 stale"
+        ],
+        "impact": "10M keys 场景假设有 100 个 L0 segments，每次 get() 最坏遍历 100 次",
+        "owner": "read_engine",
+        "deadline": "2026-04-22",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-002",
+        "severity": "P0-CRITICAL",
+        "module": "GlobalKeyIndex",
+        "symptom": "全局索引未能有效优化大规模读取",
+        "root_cause": "GlobalKeyIndex 使用 BTreeMap<Vec<u8>, KeyLocation>，内存开销巨大（~100 bytes/key），10M keys 需要 ~1GB 内存。且 query_cache 仅 50K capacity，TTL 300s，大规模场景命中率极低",
+        "evidence": [
+          "global_index.rs:127 - BTreeMap + 每个 key ~100 bytes",
+          "global_index.rs:137 - query_cache 仅 50K capacity",
+          "10M keys * 100 bytes = 1GB，超出合理内存预算"
+        ],
+        "impact": "全局索引在大规模场景下要么占用过多内存，要么命中率太低",
+        "owner": "global_index",
+        "deadline": "2026-04-22",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-003",
+        "severity": "P0-CRITICAL",
+        "module": "Bloom Filter",
+        "symptom": "Bloom Filter 加载延迟高，负向查询 62µs",
+        "root_cause": "Bloom Filter 从磁盘加载时需要解析 keys 列表并重建 filter（V2 格式），100K keys 场景可能有数百个 segments，每次 miss 都要从 L3 加载。bloom crate 的 RandomState 无法序列化导致无法持久化 bitset",
+        "evidence": [
+          "read_engine.rs:114-203 load_bloom_filter() 需要遍历所有 keys 重建",
+          "CHANGELOG 提到 V3 格式但 bloom crate 限制无法使用",
+          "62.37µs 负向查询时间说明 Bloom 加载成本高"
+        ],
+        "impact": "大量 segments 场景 Bloom 缓存失效率高，每次 miss 都要重新加载",
+        "owner": "bloom_cache",
+        "deadline": "2026-04-25",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-004",
+        "severity": "P1-MAJOR",
+        "module": "WriteEngine.put()",
+        "symptom": "写入放大率高，WAL + MemTable + Coalescer 多层开销",
+        "root_cause": "每次 put() 执行：WAL 写入（含 xxhash 计算）→ MemTable insert（DashMap）→ WriteCoalescer add → flush 检查 → compaction 采样。多层序列化/反序列化，DashMap 高并发下锁竞争",
+        "evidence": [
+          "write_engine.rs:289-337 put_buffered() 7+ 步骤",
+          "每次 WAL 写入都计算 xxhash + 构建 payload",
+          "DashMap 分片数默认 num_cpus*2，高负载下仍有竞争"
+        ],
+        "impact": "写放大率可能 >5x（目标 <3x），大规模写入性能受损",
+        "owner": "write_engine",
+        "deadline": "2026-04-25",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-005",
+        "severity": "P1-MAJOR",
+        "module": "Compaction",
+        "symptom": "Compaction 不及时导致 L0 segments 堆积",
+        "root_cause": "异步 compaction 通过 mpsc channel 触发，但 CompactionManager.record_write() 采样触发策略可能不够激进。L0 file count threshold 默认值可能过高，导致 compaction 启动晚",
+        "evidence": [
+          "compaction_engine.rs:173-196 maybe_run_compaction() 依赖采样触发",
+          "professional_benchmark.rs:82 - l0_file_count_threshold=3",
+          "10M keys 场景 L0 可能堆积数十个 segments"
+        ],
+        "impact": "L0 堆积加剧 RCA-001 的遍历问题，读取性能进一步恶化",
+        "owner": "compaction",
+        "deadline": "2026-04-25",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-006",
+        "severity": "P1-MAJOR",
+        "module": "BlockCache",
+        "symptom": "大规模场景缓存命中率骤降",
+        "root_cause": "BlockCache 使用 Moka 分片缓存，但 10M keys 场景下 1GB 缓存仅能覆盖 10% 数据。CLOCK 算法虽比 LRU 高效，但大规模随机访问下命中率仍然低",
+        "evidence": [
+          "professional_benchmark.rs:78 - max_memory_bytes=1GB",
+          "10M keys * 100B values = 1GB 数据，缓存仅覆盖部分",
+          "大规模随机访问工作负载缓存命中率 <20%"
+        ],
+        "impact": "缓存 miss 率高导致频繁磁盘 I/O，读取延迟飙升",
+        "owner": "block_cache",
+        "deadline": "2026-04-25",
+        "status": "OPEN"
+      },
+      {
+        "id": "RCA-007",
+        "severity": "P2-MODERATE",
+        "module": "Segment I/O",
+        "symptom": "磁盘 I/O 模式不优化",
+        "root_cause": "每次 segment 读取可能触发独立 syscalls，缺少批量预取优化。mmap 虽使用但未充分利用 OS page cache",
+        "evidence": [
+          "segment.rs 使用 memmap2 但未配置 madvise",
+          "缺少 io_uring 或 AIO 支持",
+          "readahead_multiplier 配置但未验证效果"
+        ],
+        "impact": "磁盘 I/O 延迟占读取总延迟比例高",
+        "owner": "read_engine",
+        "deadline": "2026-05-01",
+        "status": "OPEN"
+      }
+    ]
+  },
+
+  "optimization_phases": {
+    "phase_1_immediate_wins": {
+      "name": "Phase 1: 立即可见的性能优化 (Week 1-2)",
+      "timeline": "2026-04-15 ~ 2026-04-29",
+      "goal": "100K keys 场景从 161x 缩小到 50x 以内",
+      "tasks": [
+        {
+          "id": "OPT-001",
+          "title": "GlobalKeyIndex 优先级提升 + 内存优化",
+          "priority": "P0",
+          "owner": "global_index",
+          "description": "将 GlobalKeyIndex 查询优先级提升到 get() 路径第 2 位（MemTable 后直接查全局索引），并优化内存布局",
+          "actions": [
+            "修改 read_engine.rs get() 顺序：MemTable → GlobalKeyIndex → BlockCache → Segments",
+            "GlobalKeyIndex 改用更紧凑的内存布局（key 用 Arc<str> 替代 String，KeyLocation 用更小类型）",
+            "query_cache 扩容到 500K-1M，TTL 缩短到 60s",
+            "考虑使用 AHashMap 替代 BTreeMap（牺牲范围查询能力换取点查性能）"
+          ],
+          "expected_impact": "get() 路径减少 70% segment 遍历，100K keys 读取延迟降低 5-10x",
+          "acceptance_criteria": [
+            "100K keys 随机读取 P99 < 50µs（当前可能 >500µs）",
+            "GlobalKeyIndex 内存占用 < 500MB（10M keys 场景）",
+            "benchmark 对比：读取吞吐提升 >3x"
+          ],
+          "risk": "GlobalKeyIndex 维护成本高，flush/compaction 时必须及时更新",
+          "rollback": " revert 到旧优先级顺序，保持 GlobalKeyIndex 作为 fallback",
+          "deadline": "2026-04-22",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-002",
+          "title": "Bloom Filter V3 bitset 持久化（自研替代 bloom crate）",
+          "priority": "P0",
+          "owner": "bloom_cache",
+          "description": "放弃 bloom crate，自研 Bloom Filter 实现支持确定性 hash 和 bitset 直接序列化",
+          "actions": [
+            "实现自定义 Bloom Filter（使用 AHash 或 XXH3 作为 hash 函数）",
+            "支持 bitset 直接序列化/反序列化（消除重建开销）",
+            "V3 格式存储 [magic 4B][version 4B][num_bits 4B][num_hashes 4B][bitset_bytes]",
+            "兼容 V1/V2 格式自动迁移"
+          ],
+          "expected_impact": "Bloom 加载延迟从 ms 级降到 µs 级，负向查询 < 10µs",
+          "acceptance_criteria": [
+            "Bloom 加载时间 < 100µs（当前可能 >1ms）",
+            "负向查询延迟 < 10µs",
+            "1000 segments Bloom 缓存命中率 > 80%"
+          ],
+          "risk": "自研 Bloom 需要充分测试正确性，可能引入 bug",
+          "rollback": "保留 bloom crate 作为 fallback，新旧格式并存",
+          "deadline": "2026-04-25",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-003",
+          "title": "Compaction 触发策略优化",
+          "priority": "P1",
+          "owner": "compaction",
+          "description": "更激进的 L0 compaction 触发策略，避免 segments 堆积",
+          "actions": [
+            "降低 L0 file count threshold 从默认值到 2-3",
+            "实现 write-amplification-aware compaction（WA > 3x 时强制触发）",
+            "后台 compaction 线程数从 1 增加到 min(4, num_cpus/2)",
+            "实现 compaction 优先级队列（L0 > L1 > L2）"
+          ],
+          "expected_impact": "L0 segments 数量控制在 5 个以内，读取遍历减少 60%+",
+          "acceptance_criteria": [
+            "稳态下 L0 segments <= 3",
+            "写放大率 WA < 3x",
+            "compaction 不阻塞写入（异步执行）"
+          ],
+          "risk": "过度 compaction 可能增加写放大，需要权衡",
+          "rollback": "调高 threshold 回退到旧策略",
+          "deadline": "2026-04-25",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-004",
+          "title": "DashMap 分片优化 + MemTable 内存布局",
+          "priority": "P1",
+          "owner": "write_engine",
+          "description": "优化 MemTable DashMap 分片策略，减少高并发下锁竞争",
+          "actions": [
+            "DashMap 分片数从 num_cpus*2 提升到 num_cpus*4（更细粒度）",
+            "MemTableEntry 内存布局优化（减少 per-entry overhead）",
+            "实现 batch insert 优化（减少 DashMap 多次锁定）",
+            "考虑使用更轻量的并发 Map（如 flurry 或 lock-free skip list）"
+          ],
+          "expected_impact": "高并发写入吞吐提升 20-30%，MemTable 内存减少 20%",
+          "acceptance_criteria": [
+            "32 线程并发写入吞吐 > 500K entries/s",
+            "MemTable per-entry overhead < 50 bytes",
+            "DashMap 锁等待时间 P99 < 1µs"
+          ],
+          "risk": "过度分片可能增加内存开销",
+          "rollback": "回退到 num_cpus*2 分片",
+          "deadline": "2026-04-25",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-005",
+          "title": "BlockCache 淘汰策略优化",
+          "priority": "P1",
+          "owner": "block_cache",
+          "description": "针对大规模随机访问优化 CLOCK 算法参数，增加热点感知",
+          "actions": [
+            "CLOCK 算法增加访问频率计数（近似 LRU-K）",
+            "实现 admission policy（新条目仅在高价值时插入）",
+            "增加缓存预取支持（SequentialPrefetcher 更积极使用）",
+            "考虑使用 Tiered Cache（热点内存 + 温点 SSD + 冷点磁盘）"
+          ],
+          "expected_impact": "大规模随机访问缓存命中率从 <20% 提升到 40%+",
+          "acceptance_criteria": [
+            "10M keys 随机读缓存命中率 > 30%",
+            "BlockCache 淘汰率稳定（无 cache thrashing）",
+            "热点 key 重复读取命中率 > 95%"
+          ],
+          "risk": "复杂淘汰策略可能增加 CPU 开销",
+          "rollback": "回退到简单 CLOCK 或 LRU",
+          "deadline": "2026-04-25",
+          "status": "OPEN"
+        }
+      ]
+    },
+
+    "phase_2_architectural": {
+      "name": "Phase 2: 架构级优化 (Week 3-4)",
+      "timeline": "2026-04-29 ~ 2026-05-13",
+      "goal": "1M keys 场景从 200x 缩小到 30x 以内",
+      "tasks": [
+        {
+          "id": "OPT-006",
+          "title": "LSM-Tree 结构优化 - 减少 L0 segments",
+          "priority": "P0",
+          "owner": "compaction",
+          "description": "实现 Size-Tiered Compaction (STCS) 作为 L0 合并策略，减少 L0 segments 数量",
+          "actions": [
+            "L0 使用 STCS（相似大小 segments 合并），L1+ 保持 Leveled",
+            "实现 compaction 并行执行（不同 level 互不阻塞）",
+            "实现 universal compaction mode（读优化，segments 更少）",
+            "增加 compaction 优先级：L0 合并优先于 L1→L2"
+          ],
+          "expected_impact": "L0 segments 从可能 50+ 减少到 5-10 个，读取遍历减少 80%",
+          "acceptance_criteria": [
+            "1M keys 场景 L0 segments <= 10",
+            "compaction 并行度 >= 2",
+            "写放大率 WA < 4x（STCS 略高于 Leveled）"
+          ],
+          "risk": "STCS 空间放大率可能更高，需要权衡",
+          "rollback": "回退到纯 Leveled Compaction",
+          "deadline": "2026-05-06",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-007",
+          "title": "BlockCache 多级缓存架构",
+          "priority": "P1",
+          "owner": "block_cache",
+          "description": "实现 L1（内存热点）+ L2（mmap 温点）+ L3（磁盘冷点）三级缓存",
+          "actions": [
+            "L1: Moka 内存缓存（1GB，高频访问）",
+            "L2: mmap 映射的缓存文件（4GB，中频访问）",
+            "L3: 原始 segment 文件（低频访问）",
+            "实现自动层级迁移（基于访问频率和 recency）"
+          ],
+          "expected_impact": "有效缓存容量从 1GB 扩展到 5GB+，命中率提升 50%+",
+          "acceptance_criteria": [
+            "1M keys 场景整体缓存命中率 > 50%",
+            "L1→L2 迁移延迟 < 100µs",
+            "L2 缓存内存占用 < 100MB（仅 mmap 元数据）"
+          ],
+          "risk": "多级缓存复杂度增加，维护成本高",
+          "rollback": "回退到单级内存缓存",
+          "deadline": "2026-05-13",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-008",
+          "title": "写入路径优化 - 批量 WAL + 异步 MemTable flush",
+          "priority": "P1",
+          "owner": "write_engine",
+          "description": "实现真正的批量 WAL 写入和异步 MemTable flush，减少写放大",
+          "actions": [
+            "WAL 批量写入：收集 N ms 内的写入，单次 WAL record + fsync",
+            "异步 MemTable flush：MemTable 达到阈值时后台 flush，不阻塞新写入",
+            "实现 multi-MemTable（当前 active + 正在 flush 的 immutable）",
+            "WAL 使用更快的校验和（CRC32C → XXH3）"
+          ],
+          "expected_impact": "写入吞吐提升 3-5x，写放大率从 >5x 降到 <3x",
+          "acceptance_criteria": [
+            "单线程写入吞吐 > 200K entries/s",
+            "批量 WAL 延迟 < 5ms",
+            "写放大率 WA < 3x"
+          ],
+          "risk": "异步 flush 增加复杂度，崩溃恢复更复杂",
+          "rollback": "回退到同步 flush",
+          "deadline": "2026-05-13",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-009",
+          "title": "Segment 文件格式优化 - Block 索引 + 压缩元数据",
+          "priority": "P2",
+          "owner": "read_engine",
+          "description": "优化 segment 文件格式，在每个 block 头部添加元数据，减少查找开销",
+          "actions": [
+            "每个 block 头部添加 key range（min_key, max_key）",
+            "实现 block-level Bloom Filter（每个 block 独立小 Bloom）",
+            "segment 尾部添加完整索引（替代独立 sparse index 文件）",
+            "支持直接通过 mmap 查找（减少 syscalls）"
+          ],
+          "expected_impact": "segment 扫描延迟降低 40-60%，I/O 操作减少 50%",
+          "acceptance_criteria": [
+            "单次 segment 扫描时间 < 100µs",
+            "block-level Bloom FPR < 1%",
+            "索引加载时间减少 70%"
+          ],
+          "risk": "文件格式变更需要向后兼容",
+          "rollback": "保持旧格式，新旧格式并存",
+          "deadline": "2026-05-13",
+          "status": "OPEN"
+        }
+      ]
+    },
+
+    "phase_3_advanced": {
+      "name": "Phase 3: 高级优化与工业级特性 (Week 5-8)",
+      "timeline": "2026-05-13 ~ 2026-06-10",
+      "goal": "10M keys 场景达到生产级性能（与 RocksDB 差距 < 10x）",
+      "tasks": [
+        {
+          "id": "OPT-010",
+          "title": "全局有序索引重构 - 前缀树/跳表替代 BTreeMap",
+          "priority": "P0",
+          "owner": "global_index",
+          "description": "使用更高效的索引结构替代 BTreeMap，支持大规模 key 空间",
+          "actions": [
+            "实现并发跳表（SkipList）替代 BTreeMap（更低的锁竞争）",
+            "或者使用前缀树（Trie/Radix Tree）优化 key 查找",
+            "支持前缀压缩（减少 key 存储开销）",
+            "实现增量索引更新（compaction 时不完全重建）"
+          ],
+          "expected_impact": "10M keys 索引内存 < 800MB，查找性能提升 2-3x",
+          "acceptance_criteria": [
+            "10M keys 索引内存 < 800MB",
+            "索引查找延迟 P99 < 5µs",
+            "索引更新（flush/compaction）< 10ms"
+          ],
+          "risk": "新索引结构需要大量测试验证正确性",
+          "rollback": "保持 BTreeMap，优化内存布局",
+          "deadline": "2026-05-27",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-011",
+          "title": "IO_Uring / AIO 异步 I/O 支持",
+          "priority": "P1",
+          "owner": "read_engine",
+          "description": "实现 Linux io_uring 异步 I/O，减少同步 I/O 阻塞",
+          "actions": [
+            "集成 io_uring（通过 io-uring crate）",
+            "批量预取请求合并（多个连续读取合并为单次 I/O）",
+            "异步 I/O 回调机制（读取完成自动缓存）",
+            "fallback 到同步 I/O（非 Linux 平台）"
+          ],
+          "expected_impact": "磁盘 I/O 延迟降低 30-50%，吞吐提升 2x",
+          "acceptance_criteria": [
+            "随机读 I/O 延迟降低 > 30%",
+            "顺序读吞吐提升 > 2x",
+            "非 Linux 平台正常降级"
+          ],
+          "risk": "io_uring 仅 Linux 支持，增加平台差异",
+          "rollback": "保持同步 I/O，异步 I/O 作为可选 feature",
+          "deadline": "2026-06-03",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-012",
+          "title": "写放大/读放大/空间放大率实时监控体系",
+          "priority": "P1",
+          "owner": "all",
+          "description": "实现完整的放大率监控，实时追踪性能指标",
+          "actions": [
+            "实现 WA/RA/SA 实时计算（每次操作后更新）",
+            "Prometheus 指标导出：wa_ratio, ra_ratio, sa_ratio",
+            "实现放大率告警（WA > 5x 时自动触发优化）",
+            "dashboard 可视化（Grafana 集成）"
+          ],
+          "expected_impact": "性能问题可观测性提升，优化效果可量化",
+          "acceptance_criteria": [
+            "WA/RA/SA 指标实时更新（延迟 < 1s）",
+            "Prometheus 导出 10+ 放大率相关指标",
+            "CI 中自动检测性能回归（>10% 阻断合并）"
+          ],
+          "risk": "指标计算增加少量开销（<2%）",
+          "rollback": "无（纯可观测性特性，不影响功能）",
+          "deadline": "2026-06-03",
+          "status": "OPEN"
+        },
+        {
+          "id": "OPT-013",
+          "title": "RocksDB 对齐 Benchmark 套件完善",
+          "priority": "P1",
+          "owner": "all",
+          "description": "完善 10M+ keys 专业 benchmark，确保与 RocksDB 公平对比",
+          "actions": [
+            "实现 10M keys 写入/读取/混合负载 benchmark",
+            "测量 WA/RA/SA 并与 RocksDB 对比",
+            "实现 tail latency 分布（p50/p99/p999/p9999）",
+            "实现 24h+ 稳定性测试（验证长期性能衰减）"
+          ],
+          "expected_impact": "性能评估标准化，优化效果可量化对比",
+          "acceptance_criteria": [
+            "10M keys benchmark 可重复运行（3 次偏差 < 5%）",
+            "WA/RA/SA 指标完整测量",
+            "tail latency p999 完整记录"
+          ],
+          "risk": "benchmark 本身需要验证正确性",
+          "rollback": "无",
+          "deadline": "2026-06-10",
+          "status": "OPEN"
+        }
+      ]
+    }
+  },
+
+  "weekly_reporting": {
+    "description": "每周性能报告模板",
+    "template": {
+      "week": "YYYY-MM-DD ~ YYYY-MM-DD",
+      "reporter": "模块负责人",
+      "module": "模块名称",
+      "metrics": {
+        "read_latency_p50": "µs",
+        "read_latency_p99": "µs",
+        "read_latency_p999": "µs",
+        "write_throughput": "entries/s",
+        "write_amplification": "实际磁盘写入 / 逻辑写入",
+        "read_amplification": "实际磁盘读取 / 逻辑读取",
+        "space_amplification": "磁盘使用量 / 逻辑数据量",
+        "bloom_cache_hit_rate": "%",
+        "block_cache_hit_rate": "%",
+        "global_index_hit_rate": "%",
+        "l0_segment_count": "当前 L0 segments 数量"
+      },
+      "progress": "本周完成的任务",
+      "blockers": "遇到的障碍",
+      "next_week_plan": "下周计划",
+      "risk_assessment": "风险评估"
+    }
+  },
+
+  "ci_performance_gates": {
+    "description": "CI 性能门禁 - 自动检测性能回归",
+    "gates": [
+      {
+        "name": "baseline_comparison",
+        "description": "每次 PR 必须对比 baseline 性能",
+        "threshold": "回归 > 10% 自动失败",
+        "benchmark": "cargo bench --bench 01_basic_ops --features benchmarks"
+      },
+      {
+        "name": "cache_performance",
+        "description": "缓存命中率必须在预期范围内",
+        "threshold": "BlockCache 命中率 < 50% 警告，< 30% 失败",
+        "benchmark": "cargo bench --bench 02_cache_performance --features benchmarks"
+      },
+      {
+        "name": "amplification_check",
+        "description": "写放大/读放大/空间放大率必须在目标范围内",
+        "threshold": "WA > 5x 或 RA > 10x 或 SA > 3x 失败",
+        "benchmark": "cargo bench --bench 07_professional --features benchmarks"
+      }
+    ]
+  },
+
+  "success_criteria": {
+    "phase_1_target": {
+      "timeline": "2026-04-29",
+      "100K_keys_write": "< 20ms (vs RocksDB 628µs, 慢 32x)",
+      "100K_keys_read": "< 50µs P99",
+      "l0_segments": "<= 5",
+      "bloom_cache_hit": "> 80%",
+      "block_cache_hit": "> 60%"
+    },
+    "phase_2_target": {
+      "timeline": "2026-05-13",
+      "1M_keys_write": "< 100ms (vs RocksDB 6.3ms, 慢 16x)",
+      "1M_keys_read": "< 100µs P99",
+      "write_amplification": "< 3x",
+      "read_amplification": "< 5x",
+      "space_amplification": "< 2x"
+    },
+    "phase_3_target": {
+      "timeline": "2026-06-10",
+      "10M_keys_write": "< 1s (vs RocksDB ~63ms, 慢 16x)",
+      "10M_keys_read": "< 200µs P99",
+      "write_amplification": "< 4x",
+      "read_amplification": "< 5x",
+      "space_amplification": "< 2.5x",
+      "mixed_workload_throughput": "> 100K ops/s"
+    }
+  },
+
+  "risk_management": {
+    "high_risks": [
+      {
+        "risk": "自研 Bloom Filter 可能引入正确性 bug",
+        "mitigation": "保留 bloom crate 作为 fallback，新旧格式并存，充分测试",
+        "contingency": "发现问题立即回退，优先保证正确性"
+      },
+      {
+        "risk": "异步 compaction 可能与写入竞争 I/O 带宽",
+        "mitigation": "实现 I/O 优先级队列，compaction 使用低优先级 I/O",
+        "contingency": "限制 compaction 并发度，保证写入性能"
+      },
+      {
+        "risk": "多级缓存增加复杂度，维护成本高",
+        "mitigation": "模块化设计，每级缓存独立测试，清晰接口边界",
+        "contingency": "回退到单级缓存，保持简单"
+      }
+    ]
+  }
+}

@@ -1,0 +1,363 @@
+{
+  "title": "FileKV 性能优化任务清单",
+  "created_at": "2026-04-10",
+  "status": "pending",
+  "priority_levels": ["P0", "P1", "P2", "P3"],
+  "summary": "基于 FileKV vs RocksDB benchmark 发现的性能问题和优化方案",
+  
+  "benchmark_results": {
+    "filekv_vs_rocksdb": {
+      "write_64b_with_wal": {
+        "filekv_us": 962,
+        "rocksdb_us": 1800,
+        "advantage": "filekv",
+        "ratio": "1.87x faster"
+      },
+      "bloom_negative_lookup": {
+        "filekv_us": 177,
+        "rocksdb_us": 244,
+        "advantage": "filekv",
+        "ratio": "1.38x faster"
+      },
+      "hot_cache_read_100k_keys": {
+        "filekv_ms": 154,
+        "rocksdb_ms": 0.628,
+        "advantage": "rocksdb",
+        "ratio": "245x slower"
+      },
+      "range_query_10k_keys": {
+        "filekv_ms": 85,
+        "rocksdb_estimated_ms": 5,
+        "advantage": "rocksdb",
+        "ratio": "17x slower"
+      },
+      "range_query_100k_keys": {
+        "filekv_ms": 1000,
+        "rocksdb_estimated_ms": 50,
+        "advantage": "rocksdb",
+        "ratio": "20x slower"
+      }
+    }
+  },
+
+  "root_cause_analysis": {
+    "issue_1_sparse_index_linear_scan": {
+      "file": "src/sparse_index.rs:55",
+      "problem": "find() 使用 O(n) 线性扫描",
+      "code": "self.entries.iter().find(|e| e.key == key)",
+      "impact": "每次查找最多 n 次比较，n 为 segment 中 key 数量",
+      "worst_case": "100K keys → 100,000 次比较",
+      "rocksdb_comparison": "RocksDB 使用 Block Hash Index O(1) 或 Binary Search O(log n)",
+      "severity": "P0"
+    },
+    "issue_2_multiple_lock_acquisitions": {
+      "file": "src/lib.rs:917",
+      "problem": "get() 方法多次获取读锁",
+      "details": [
+        "segments.read() - 获取 segments 读锁",
+        "index_manager.read() - 获取 index_manager 读锁",
+        "bloom_filter_cache.get() - 可能回源到磁盘",
+        "index_manager.get_index() - 在循环中重复调用"
+      ],
+      "impact": "多次锁获取增加延迟，尤其在并发场景",
+      "severity": "P1"
+    },
+    "issue_3_block_cache_inefficiency": {
+      "file": "src/lib.rs:929",
+      "problem": "Block Cache 命中率极低，且使用 BTreeMap O(log n) 查找",
+      "evidence": "热缓存测试仍需要 154ms，说明 cache 未生效",
+      "possible_causes": [
+        "get_by_key() 使用 O(log n) 查找",
+        "Cache 容量不足导致频繁淘汰",
+        "预热后 cache 未正确填充",
+        "cache key 设计不合理"
+      ],
+      "severity": "P0"
+    },
+    "issue_4_range_query_no_batching": {
+      "file": "benches/file_kv_inno002_bench.rs",
+      "problem": "Range Query 逐个 key 读取，无批量 I/O",
+      "evidence": "10K keys: 85ms, 100K keys: 1000ms",
+      "complexity": "O(n) 次独立 I/O 操作",
+      "severity": "P0"
+    },
+    "issue_5_get_method_complexity": {
+      "file": "src/lib.rs:917-990",
+      "problem": "get() 方法调用链过长，多层检查",
+      "steps": [
+        "MemTable 查找",
+        "Block Cache 查找",
+        "遍历 segments (newest to oldest)",
+        "Bloom Filter 检查 (可能回源)",
+        "Zone Map 检查",
+        "SparseIndex 查找 (O(n))",
+        "磁盘 I/O 读取"
+      ],
+      "worst_case_complexity": "O(n_segments × n_keys) = O(n²)",
+      "severity": "P1"
+    }
+  },
+
+  "optimization_plan": {
+    "P0_immediate_fixes": {
+      "description": "立即修复，预期提升 100-200x",
+      "estimated_time": "4-6 hours",
+      "tasks": [
+        {
+          "id": "P0-1",
+          "title": "SparseIndex 改用 HashMap",
+          "file": "src/sparse_index.rs",
+          "current": "Vec<SparseIndexEntry> - O(n) 查找",
+          "target": "HashMap<String, SparseIndexEntry> - O(1) 查找",
+          "expected_improvement": "100-1000x",
+          "implementation": {
+            "struct_change": "pub entries: HashMap<String, SparseIndexEntry>",
+            "find_method": "self.entries.get(key).map(|e| e.offset)",
+            "add_method": "self.entries.insert(key, entry)",
+            "serialization": "需要调整 save/load 方法"
+          },
+          "risks": [
+            "内存开销增加约 20-30%",
+            "需要调整序列化/反序列化逻辑",
+            "可能影响现有的 save/load 兼容性"
+          ]
+        },
+        {
+          "id": "P0-2",
+          "title": "Block Cache 改用 HashMap",
+          "file": "src/block_cache.rs",
+          "current": "BTreeMap<String, Bytes> - O(log n) 查找",
+          "target": "HashMap<String, Bytes> - O(1) 查找",
+          "expected_improvement": "2-5x",
+          "implementation": {
+            "struct_change": "使用 HashMap 替代 BTreeMap",
+            "considerations": [
+              "需要保持 LRU 淘汰策略",
+              "可能需要结合 HashMap + DoublyLinkedList",
+              "或使用 dashmap 用于并发场景"
+            ]
+          },
+          "risks": [
+            "HashMap 不保证顺序，可能影响调试",
+            "需要重新实现 LRU 逻辑"
+          ]
+        },
+        {
+          "id": "P0-3",
+          "title": "Range Query 批量读取优化",
+          "file": "src/lib.rs - range() 方法",
+          "current": "逐个 key 独立 I/O 读取",
+          "target": "按 segment 分组，批量顺序读取",
+          "expected_improvement": "10-20x",
+          "implementation": {
+            "approach_1": "收集 range 内所有 key，按 segment 分组",
+            "approach_2": "对每个 segment 执行批量读取",
+            "approach_3": "启用 readahead 顺序扫描",
+            "pseudocode": [
+              "1. 确定涉及的 segments",
+              "2. 对每个 segment:",
+              "   - 收集该 segment 内的 keys",
+              "   - 批量读取 (一次 I/O 或多个顺序 I/O)",
+              "3. 合并所有结果并排序"
+            ]
+          },
+          "risks": [
+            "实现复杂度较高",
+            "需要处理跨 segment 的 key 版本问题",
+            "内存占用可能增加"
+          ]
+        },
+        {
+          "id": "P0-4",
+          "title": "验证 Block Cache 预热逻辑",
+          "file": "src/lib.rs, src/block_cache.rs",
+          "current": "预热后 cache 命中率仍然很低",
+          "target": "预热后 cache hit 率 > 95%",
+          "expected_improvement": "50-100x (如果 cache 真正生效)",
+          "debugging_steps": [
+            "添加 cache hit/miss 统计",
+            "检查 cache 容量是否足够",
+            "验证 insert_by_key 是否正确执行",
+            "检查 key 格式是否一致"
+          ],
+          "risks": [
+            "可能是架构设计问题，需要更大改动",
+            "Cache 策略可能不适合当前 workload"
+          ]
+        }
+      ]
+    },
+
+    "P1_short_term_optimizations": {
+      "description": "短期优化，预期提升 2-5x",
+      "estimated_time": "8-12 hours",
+      "tasks": [
+        {
+          "id": "P1-1",
+          "title": "减少 get() 方法锁粒度",
+          "file": "src/lib.rs:917",
+          "current": "多次获取读锁 (segments, index_manager)",
+          "target": "减少到 1 次读锁获取",
+          "expected_improvement": "1.5-2x",
+          "implementation": {
+            "approach": "提前获取所需数据的快照，在锁外处理",
+            "example": [
+              "let segments_snapshot = self.segments.read().clone();",
+              "let index_snapshot = self.index_manager.read().clone();",
+              "drop locks before processing"
+            ]
+          }
+        },
+        {
+          "id": "P1-2",
+          "title": "Bloom Filter Cache 预加载",
+          "file": "src/adaptive_bloom_cache.rs",
+          "current": "按需加载 bloom filter",
+          "target": "启动时预加载所有 bloom filter",
+          "expected_improvement": "1.5-2x (负向查找)",
+          "implementation": "open() 时加载所有 bloom filters 到内存"
+        },
+        {
+          "id": "P1-3",
+          "title": "Index 常驻内存优化",
+          "file": "src/sparse_index.rs",
+          "current": "可能动态加载/卸载 index",
+          "target": "index 一旦加载就常驻内存",
+          "expected_improvement": "1.5-2x",
+          "considerations": "需要评估内存开销"
+        },
+        {
+          "id": "P1-4",
+          "title": "Zone Map 优化",
+          "file": "src/sparse_index.rs:64",
+          "current": "只使用 min/max 检查",
+          "target": "使用多级 zone map 或更细粒度过滤",
+          "expected_improvement": "2-3x (range query)"
+        }
+      ]
+    },
+
+    "P2_medium_term_optimizations": {
+      "description": "中期优化，预期提升 5-10x",
+      "estimated_time": "1-2 weeks",
+      "tasks": [
+        {
+          "id": "P2-1",
+          "title": "Block 级索引 (类似 RocksDB)",
+          "current": "只有 segment 级索引",
+          "target": "block 级 hash index + 索引过滤",
+          "expected_improvement": "5-10x",
+          "complexity": "高"
+        },
+        {
+          "id": "P2-2",
+          "title": "Readahead 完整实现",
+          "file": "src/lib.rs",
+          "current": "enable_sequential_prefetch 配置存在",
+          "target": "完整实现顺序读取预加载",
+          "expected_improvement": "2-5x (range query)"
+        },
+        {
+          "id": "P2-3",
+          "title": "Leveled Compaction 非重叠 key range",
+          "current": "key range 可能重叠",
+          "target": "L1+ segments 非重叠 key range",
+          "expected_improvement": "2-3x (减少需要检查的 segments)"
+        },
+        {
+          "id": "P2-4",
+          "title": "Write Batch 优化",
+          "current": "put_batch 逐条写入",
+          "target": "真正的批量写入 (减少 WAL sync 次数)",
+          "expected_improvement": "2-3x (批量写入)"
+        }
+      ]
+    },
+
+    "P3_long_term_optimizations": {
+      "description": "长期优化",
+      "estimated_time": "2-4 weeks",
+      "tasks": [
+        {
+          "id": "P3-1",
+          "title": "数据压缩支持",
+          "expected_improvement": "减少空间 50%+, 减少 I/O"
+        },
+        {
+          "id": "P3-2",
+          "title": "并发读写优化",
+          "expected_improvement": "2-4x (并发场景)"
+        },
+        {
+          "id": "P3-3",
+          "title": "异步 I/O 支持",
+          "expected_improvement": "减少写延迟"
+        }
+      ]
+    }
+  },
+
+  "expected_performance_after_optimization": {
+    "after_P0_only": {
+      "hot_cache_read_100k_keys_ms": "~1 ms",
+      "range_query_10k_keys_ms": "~10 ms",
+      "range_query_100k_keys_ms": "~100 ms",
+      "write_64b_with_wal_us": "~900",
+      "vs_rocksdb_read": "接近持平",
+      "vs_rocksdb_write": "2x faster"
+    },
+    "after_P0_P1_P2": {
+      "hot_cache_read_100k_keys_ms": "~0.5 ms",
+      "range_query_10k_keys_ms": "~3 ms",
+      "range_query_100k_keys_ms": "~30 ms",
+      "write_64b_with_wal_us": "~800",
+      "vs_rocksdb_read": "可能更优",
+      "vs_rocksdb_write": "2x+ faster",
+      "vs_rocksdb_range": "接近或更优"
+    }
+  },
+
+  "competitive_analysis": {
+    "current_strengths": [
+      "写入性能领先 RocksDB 87%",
+      "Bloom Filter 负向查找领先 28%",
+      "架构设计合理 (LSM-Tree)",
+      "代码清晰，易于优化"
+    ],
+    "current_weaknesses": [
+      "读取性能落后 245x (实现问题)",
+      "Range Query 性能差",
+      "功能完整性不如 RocksDB",
+      "生产成熟度低"
+    ],
+    "after_optimization_strengths": [
+      "写入性能保持 2x 领先",
+      "读取性能追平 RocksDB",
+      "Range Query 接近或超越",
+      "更简洁的架构，更低的操作开销"
+    ],
+    "conclusion": "FileKV 有潜力在核心性能指标上达到或超过 RocksDB，关键是立即执行 P0 修复"
+  },
+
+  "next_actions": [
+    "1. 立即修复 SparseIndex → HashMap (P0-1)",
+    "2. 修复 Block Cache 查找逻辑 (P0-2)",
+    "3. 验证 Block Cache 预热逻辑 (P0-4)",
+    "4. 运行 RocksDB 对比 benchmark 验证改进",
+    "5. 根据结果继续 P1/P2 优化"
+  ],
+
+  "references": {
+    "benchmark_files": [
+      "benches/file_kv_bench.rs",
+      "benches/file_kv_inno002_bench.rs",
+      "benches/rocksdb_comprehensive_bench.rs",
+      "benches/rocksdb_fair_comparison.rs"
+    ],
+    "source_files_to_modify": [
+      "src/sparse_index.rs",
+      "src/block_cache.rs",
+      "src/lib.rs (get, range methods)"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+/target
+.env
+sandbox/
+downloads/
+*.context/
+
+# Runtime data (LSM store)
+segments/
+index/
+wal/
+checkpoints/
+cache_l2/
+
+# Proptest regressions
+proptest-regressions/
+
+# Log files
+*.log
+
+# Backup files
+*.bak
+*~

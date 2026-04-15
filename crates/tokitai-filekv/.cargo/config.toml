@@ -1,0 +1,12 @@
+# Cargo configuration for parallel test execution
+# This provides basic parallel test execution
+# For optimal parallel performance, use cargo-nextest instead
+
+[test]
+# Number of parallel test jobs (adjust based on CPU cores)
+# Default is number of logical CPUs if not specified
+jobs = 4
+
+[build]
+# Incremental compilation for faster rebuilds during development
+incremental = true

@@ -1,0 +1,92 @@
+# Justfile for tokitai-filekv
+# Usage: just <recipe>
+# See all recipes: just --list
+
+# Default target: check build + lint
+default:
+    just check
+
+# ─── Build & Check ────────────────────────────────────────────────────────
+
+# Full build with all features
+build:
+    cargo build --all-features
+
+# Quick check (faster than build, catches most errors)
+check:
+    cargo check --all-features
+
+# Release build
+build-release:
+    cargo build --release --all-features
+
+# ─── Lint & Format ────────────────────────────────────────────────────────
+
+# Run clippy with all features
+lint:
+    cargo clippy --all-features --all-targets -- -D warnings
+
+# Format code
+fmt:
+    cargo fmt --all
+
+# Format + lint (pre-commit check)
+pre-commit: fmt lint check
+
+# ─── Test ─────────────────────────────────────────────────────────────────
+
+# Run all tests (uses nextest if available)
+test:
+    #!/usr/bin/env bash
+    if command -v cargo-nextest &> /dev/null; then
+        cargo nextest run --all-features
+    else
+        cargo test --all-features
+    fi
+
+# Run tests with output on failure only
+test-quiet:
+    #!/usr/bin/env bash
+    if command -v cargo-nextest &> /dev/null; then
+        cargo nextest run --all-features --no-fail-fast
+    else
+        cargo test --all-features -- --show-output failures
+    fi
+
+# Run single test by name (just test-name test_filter)
+test-one test_name:
+    #!/usr/bin/env bash
+    if command -v cargo-nextest &> /dev/null; then
+        cargo nextest run --all-features "{{test_name}}"
+    else
+        cargo test --all-features "{{test_name}}"
+    fi
+
+# Run doc tests
+test-docs:
+    cargo test --doc --all-features
+
+# ─── Benchmark ────────────────────────────────────────────────────────────
+
+# Run all benchmarks
+bench:
+    cargo bench --features benchmarks
+
+# Run single benchmark (just bench-one bench_name)
+bench-one bench_name:
+    cargo bench --features benchmarks -- "{{bench_name}}"
+
+# RocksDB comparison benchmark
+bench-rocksdb:
+    cargo bench --features rocksdb-compare
+
+# ─── Cleanup ──────────────────────────────────────────────────────────────
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Clean test data (segments, indexes, etc.)
+clean-data:
+    rm -rf segments/* index/* wal/* checkpoints/* 2>/dev/null || true
+    echo "Test data cleaned"
