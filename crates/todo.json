@@ -1,33 +1,33 @@
 {
   "project": "tokitai-context",
-  "round": 1,
+  "round": 30,
   "tasks": [
     {
       "id": "T001",
       "subject": "Fix feature_flag.rs clippy warning: field assignment outside of initializer",
       "priority": "P1",
-      "status": "pending",
+      "status": "done",
       "description": "feature_flag.rs:1612 - use struct literal initialization instead of Default::default() + field reassignment"
     },
     {
       "id": "T002",
       "subject": "Remove #![allow(dead_code)] and #![allow(unused_imports)] from lib.rs",
       "priority": "P1",
-      "status": "pending",
+      "status": "done",
       "description": "lib.rs lines 95-96 have crate-level allowances that hide real issues. Remove them and fix actual dead code/unused imports."
     },
     {
       "id": "T003",
       "subject": "Implement facade ContextStats properly",
       "priority": "P2",
-      "status": "pending",
+      "status": "done",
       "description": "facade.rs:538 - Context::stats() returns default empty stats. Implement proper stats collection from FileKV and file_service backends."
     },
     {
       "id": "T004",
       "subject": "Move root-level merge algorithm modules into parallel/merge/",
       "priority": "P2",
-      "status": "pending",
+      "status": "done",
       "description": "lib.rs:120 - bloom_conflict.rs, optimized_merge.rs, parallel_merge.rs, three_way_merge.rs should be in parallel/merge/ directory per architecture documentation."
     },
     {
@@ -36,9 +36,675 @@
       "priority": "P2",
       "status": "pending",
       "description": "consistency_check.rs has multiple TODO stubs at lines 254, 264, 274. Implement comparison logic for iterators, bloom filter consistency, and index integrity."
+    },
+    {
+      "id": "T006",
+      "subject": "Remove unsafe self-mutation in audit log rotation",
+      "priority": "P0",
+      "status": "done",
+      "description": "audit_log.rs rotate() used raw pointer cast to mutate current_log_path under &self. Replaced with Arc<RwLock<PathBuf>> guarded update/read."
+    },
+    {
+      "id": "T007",
+      "subject": "Eliminate baseline compiler warnings in context crate",
+      "priority": "P1",
+      "status": "done",
+      "description": "Removed unused imports in metrics_prometheus.rs and removed unused SemanticIndex::is_dirty() method to keep baseline clean."
+    },
+    {
+      "id": "T008",
+      "subject": "Sync parallel architecture docs with actual module paths",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/PARALLEL_CONTEXT_IMPLEMENTATION.md, doc/ARCHITECTURE.md, doc/IMPLEMENTATION_SUMMARY_v2.md still reference old src/context/* or root merge file paths."
+    },
+    {
+      "id": "T009",
+      "subject": "Resolve doc claim mismatch for context_cli/storage_optimization",
+      "priority": "P1",
+      "status": "done",
+      "description": "PARALLEL_CONTEXT_IMPLEMENTATION.md marks context_cli.rs and storage_optimization.rs as completed but crate exports/modules do not contain these names."
+    },
+    {
+      "id": "T010",
+      "subject": "Do not silently swallow merge layer failures",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/merge/parallel_merge.rs currently logs per-layer errors and still returns Ok; propagate aggregated failure."
+    },
+    {
+      "id": "T011",
+      "subject": "Preserve WAL on replay failure",
+      "priority": "P0",
+      "status": "done",
+      "description": "wal.rs RecoveryEngine::replay() must not clear WAL when any handler invocation fails; return explicit replay failure."
+    },
+    {
+      "id": "T012",
+      "subject": "Stop swallowing merge read failures in diff3 path",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/merge/mod.rs uses read_to_string(...).unwrap_or_else(|_| String::new()) during diff3 merge; propagate I/O errors instead of empty fallback."
+    },
+    {
+      "id": "T013",
+      "subject": "Sync FileKV namespace docs to current API",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/filekv/* still references src/file_kv and tokitai_context::file_kv; update to crate re-export path tokitai_context::filekv and current layout."
+    },
+    {
+      "id": "T014",
+      "subject": "Fix QUICKSTART runtime mode drift",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/QUICKSTART.md documents cargo run and --tui/--mcp/--autonomous modes, but crate currently exposes only library targets."
+    },
+    {
+      "id": "T015",
+      "subject": "Propagate merge binary read failures in conflict path",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/merge/mod.rs still has binary merge/conflict branches using read(...).unwrap_or_default() / if let Ok(...), which silently drops read I/O failures."
+    },
+    {
+      "id": "T016",
+      "subject": "Surface knowledge store/graph load failures",
+      "priority": "P0",
+      "status": "done",
+      "description": "knowledge_extraction.rs and parallel/knowledge_graph.rs use .ok() in load/import paths; stop swallowing load/add_edge errors and expose degraded/failure state."
+    },
+    {
+      "id": "T017",
+      "subject": "Fix USER_GUIDE crate-mode and version drift",
+      "priority": "P0",
+      "status": "done",
+      "description": "doc/USER_GUIDE.md describes cargo run/CLI and MCP client APIs not present in this crate and reports version 0.4.0 instead of Cargo.toml 0.1.2."
+    },
+    {
+      "id": "T018",
+      "subject": "Align documented feature flags with Cargo.toml",
+      "priority": "P0",
+      "status": "done",
+      "description": "doc/USER_GUIDE.md references non-existent tensor feature; update docs to current feature list (ai, wal, benchmarks, distributed, fuse, metrics, full)."
+    },
+    {
+      "id": "T019",
+      "subject": "Document exported API map for lib.rs re-exports",
+      "priority": "P1",
+      "status": "done",
+      "description": "Create/expand docs to map public exports in src/lib.rs (ConsistencyChecker, TokenBudgetManager, Mvcc/Pitr, QueryOptimizer, AutoTuner, etc.) to usage docs."
+    },
+    {
+      "id": "T020",
+      "subject": "Reduce duplicate merge I/O in diff3 path",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/merge/mod.rs computes hashes then reads full contents again for diff3; optimize read/hash flow to avoid redundant I/O and allocations."
+    },
+    {
+      "id": "T021",
+      "subject": "Fix DOC_INDEX stale link and status contradictions",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/DOC_INDEX.md references FILEKV_OPTIMIZATION_REPORT.md in active/recommended sections while file is archived; reconcile links and classification."
+    },
+    {
+      "id": "T022",
+      "subject": "Harden KnowledgeWatcher callback error handling",
+      "priority": "P0",
+      "status": "done",
+      "description": "knowledge_watcher.rs callback uses lock unwrap and ignores update_file/add_file errors; avoid panic on poisoned locks and surface indexing failures."
+    },
+    {
+      "id": "T023",
+      "subject": "Validate BloomFilter false-positive-rate input",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/merge/bloom_conflict.rs BloomFilter::new does not validate false_positive_rate, risking zero-size filters and modulo-by-zero panic in hashing."
+    },
+    {
+      "id": "T024",
+      "subject": "Stop swallowing WalkDir traversal errors",
+      "priority": "P1",
+      "status": "done",
+      "description": "knowledge_index.rs from_directory uses filter_map(|e| e.ok()) and silently drops filesystem traversal failures; return explicit error context."
+    },
+    {
+      "id": "T025",
+      "subject": "Fix BranchCache resize/capacity consistency",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/parallel_cache.rs resize does not update self.capacity and get path clones under write lock; fix stale-capacity eviction semantics and hot-path overhead."
+    },
+    {
+      "id": "T026",
+      "subject": "Fix ThreeWayMerger dropping merge outputs",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/merge/three_way_merge.rs merge() accumulates merged/conflict data but returns empty vectors; return actual all_merged_items and all_conflicts."
+    },
+    {
+      "id": "T027",
+      "subject": "Preserve selective merge collected artifacts",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/merge/mod.rs selective/advanced selective merge now preserve merged_items and full conflict context instead of dropping artifacts via Vec::new()."
+    },
+    {
+      "id": "T028",
+      "subject": "Stop swallowing traversal/read errors in merge/cache scanners",
+      "priority": "P1",
+      "status": "done",
+      "description": "three_way_merge.rs and optimization/cache/cuckoo.rs now propagate WalkDir traversal failures and file-read errors with explicit context instead of filter_map(|e| e.ok())/silent read fallback."
+    },
+    {
+      "id": "T029",
+      "subject": "Optimize LRU hot path lookup/removal complexity",
+      "priority": "P1",
+      "status": "pending",
+      "description": "optimization/cache/lru.rs uses repeated map lookups and VecDeque::position+remove on access; reduce O(n) hot-path overhead."
+    },
+    {
+      "id": "T030",
+      "subject": "Remove panic-prone unwrap and avoid clone in semantic parsing",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/merge/optimized_merge.rs uses path.file_name().unwrap() and unnecessary content.clone() in block parsing; make robust and cheaper."
+    },
+    {
+      "id": "T031",
+      "subject": "Propagate CAS directory creation failures",
+      "priority": "P1",
+      "status": "done",
+      "description": "optimization/dedup/cas.rs uses let _ = create_dir_all(...), hiding root causes before write failure; return explicit setup error."
+    },
+    {
+      "id": "T032",
+      "subject": "Deduplicate and stream merge hash computation",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel merge stack repeats full-file read+SHA helpers across files; extract shared helper and prefer streaming hash to reduce memory spikes."
+    },
+    {
+      "id": "T033",
+      "subject": "Remove merge-stack dead-code allowances",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel merge modules still carry #[allow(dead_code)] around unused fields (base_merger/temp_dir); remove allowances and resolve dead members."
+    },
+    {
+      "id": "T034",
+      "subject": "Fix root docs namespace drift to tokitai_context",
+      "priority": "P1",
+      "status": "done",
+      "description": "root docs/ still reference ai_assistant::context namespace while crate exports tokitai_context; align examples and imports."
+    },
+    {
+      "id": "T035",
+      "subject": "Fix file_service delete index/session consistency",
+      "priority": "P0",
+      "status": "done",
+      "description": "file_service.rs delete() uses session path unwrap_or_default and always removes hash index even when layer delete path is not validated; enforce session existence and backend delete-before-index removal."
+    },
+    {
+      "id": "T036",
+      "subject": "Update USER_GUIDE facade API examples to compilable calls",
+      "priority": "P0",
+      "status": "done",
+      "description": "doc/USER_GUIDE.md still shows Context::new/add_layer/Layer::new and LayerId exports not present in facade; align quickstart and export list with Context::open/store and current Layer enum."
+    },
+    {
+      "id": "T037",
+      "subject": "Propagate parallel COW traversal/copy failures",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/cow/mod.rs drops traversal errors with filter_map(|e| e.ok()) and logs copy/symlink failures while still returning Ok(count); return explicit error/partial-failure signal."
+    },
+    {
+      "id": "T038",
+      "subject": "Optimize ARC cache O(n) hot-path queue operations",
+      "priority": "P1",
+      "status": "pending",
+      "description": "optimization/cache/arc.rs uses repeated VecDeque position/remove scans in get/remove/adaptation paths; reduce linear hot-path overhead with O(1)-friendly bookkeeping."
+    },
+    {
+      "id": "T039",
+      "subject": "Enforce DenseIndex max_entries hard cap semantics",
+      "priority": "P0",
+      "status": "done",
+      "description": "sparse_index.rs DenseIndex::add_index_point warns when max_entries is exceeded but still pushes every point; enforce configured cap with explicit fallback behavior and regression tests."
+    },
+    {
+      "id": "T040",
+      "subject": "Fix AI_FEATURES_GUIDE API/examples to match current ai module",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/AI_FEATURES_GUIDE.md has stale ai_workflow CLI flags and outdated LLMClient/AIContext snippets; align imports, trait methods, and examples to compile against current APIs."
+    },
+    {
+      "id": "T041",
+      "subject": "Make GlobalIndexFinder query dense indexes too",
+      "priority": "P1",
+      "status": "done",
+      "description": "sparse_index.rs GlobalIndexFinder::find_key currently iterates sparse indexes only; include dense index lookup path to avoid false misses in dense mode."
+    },
+    {
+      "id": "T042",
+      "subject": "Stream sparse/dense index persistence writes",
+      "priority": "P1",
+      "status": "pending",
+      "description": "sparse_index.rs save_sparse_index/save_dense_index build full in-memory points buffers before write; stream records to writer incrementally to reduce peak memory and copies."
+    },
+    {
+      "id": "T043",
+      "subject": "Fix FILEKV_GUIDE wal_inspect command drift",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/filekv/FILEKV_GUIDE.md references cargo run syntax/targets that do not exist in this crate for WAL inspection; replace with valid commands or explicit cross-crate guidance."
+    },
+    {
+      "id": "T044",
+      "subject": "Expose DictionaryContentAddressableStorage stats without panic",
+      "priority": "P0",
+      "status": "done",
+      "description": "optimization/compression/dictionary.rs stats() was unimplemented! and contradicted docs claiming completion; return underlying CAS and dictionary stats and cover with test."
+    },
+    {
+      "id": "T045",
+      "subject": "Fix IMPLEMENTATION_SUMMARY_v2 broken intra-doc links",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/IMPLEMENTATION_SUMMARY_v2.md now uses doc-local relative links (README.md, ARCHITECTURE.md, etc.) instead of broken doc/doc/* paths."
+    },
+    {
+      "id": "T046",
+      "subject": "Fix stale BENCHMARK_REPORT links in performance docs",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/P1_001_PERFORMANCE_STATUS.md and doc/PERFORMANCE_BENCHMARKS_2026.md reference BENCHMARK_REPORT.md at root doc/ but file is archived; update links."
+    },
+    {
+      "id": "T047",
+      "subject": "Align performance status doc version with Cargo.toml",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/P1_001_PERFORMANCE_STATUS.md reports v0.1.0 while crate version is 0.1.2; update version scope note."
+    },
+    {
+      "id": "T048",
+      "subject": "Fix FILEKV_POSITION capability claims vs current APIs",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/filekv/FILEKV_POSITION.md claims no MVCC/PITR while crate exports MvccManager/PitrManager; align claims with current code or clearly scope legacy mode."
+    },
+    {
+      "id": "T049",
+      "subject": "Align ARCHITECTURE ai module filenames with source tree",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/ARCHITECTURE.md still references ai_resolver.rs and purpose_inference.rs; update to src/ai/resolver.rs and src/ai/purpose.rs plus current module paths."
+    },
+    {
+      "id": "T050",
+      "subject": "Repair PARALLEL_CONTEXT_IMPLEMENTATION missing-path references",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/PARALLEL_CONTEXT_IMPLEMENTATION.md references non-existent docs/* and src/context/README.md paths; replace with valid paths or explicit migration notes."
+    },
+    {
+      "id": "T051",
+      "subject": "Stop silent checksum fallback in WAL entry hashing",
+      "priority": "P2",
+      "status": "pending",
+      "description": "wal.rs and wal_binary.rs use serialization unwrap_or_default in checksum paths; propagate serialization errors or use explicit invalid-state handling."
+    },
+    {
+      "id": "T052",
+      "subject": "Fix FILEKV_POSITION broken relative reference links",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/filekv/FILEKV_POSITION.md linked filekv/FILEKV_GUIDE.md and ../patent_disclosure_zone_map.md with incorrect relative paths; update to in-directory links."
+    },
+    {
+      "id": "T053",
+      "subject": "Optimize semantic-index batch delete hot path",
+      "priority": "P1",
+      "status": "pending",
+      "description": "facade delete_batch repeatedly calls SemanticIndex::remove_index which scans index_cache each time; add batch-oriented removal/indexing to avoid O(batch*index) behavior."
+    },
+    {
+      "id": "T054",
+      "subject": "Harden ShortTermLayer trim against panic and silent parse drops",
+      "priority": "P2",
+      "status": "pending",
+      "description": "layers.rs ShortTermLayer::trim uses file_stem().unwrap() and silently skips metadata parse/read failures; remove panic path and surface invalid metadata handling."
+    },
+    {
+      "id": "T055",
+      "subject": "Enforce real fallback/propagation when COW fork fails in ParallelContextManager",
+      "priority": "P1",
+      "status": "pending",
+      "description": "parallel/manager/mod.rs create_branch logs COW fork failure as fallback but currently performs neither explicit recursive copy fallback nor failure propagation; implement one of these paths with explicit error context."
+    },
+    {
+      "id": "T056",
+      "subject": "Remove dead_code suppressions in parallel/cache hot modules",
+      "priority": "P2",
+      "status": "pending",
+      "description": "Remove non-test #[allow(dead_code)] in parallel/manager/mod.rs, parallel/cow/mod.rs, parallel/parallel_cache.rs, and optimization/cache/arc.rs by wiring fields into behavior/metrics or deleting dead members."
+    },
+    {
+      "id": "T057",
+      "subject": "Apply ParallelMerger thread config to real execution pool",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/merge/parallel_merge.rs records config.num_threads in stats but does not enforce it in Rayon execution; wire config into a scoped thread pool or update semantics explicitly."
+    },
+    {
+      "id": "T058",
+      "subject": "Fix inverted Bloom-vs-naive speedup metric",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/merge/bloom_conflict.rs PerformanceComparison::compare computes speedup as bloom/naive; invert to naive/bloom so faster Bloom path reports >1x."
+    },
+    {
+      "id": "T059",
+      "subject": "Remove panic path from ThreeWayMerger clock timestamping",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/merge/three_way_merge.rs uses duration_since(UNIX_EPOCH).unwrap() while building merge metadata; return explicit error/context instead of panicking."
+    },
+    {
+      "id": "T060",
+      "subject": "Align library-only runtime guidance across remaining docs",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/P2_P3_FEATURES_SUMMARY.md and doc/TRACING_CLASSIFICATION.md still include cargo run CLI/mount examples conflicting with library-only crate guidance in USER_GUIDE."
+    },
+    {
+      "id": "T061",
+      "subject": "Make AncestorCache common-ancestor lookup linear-time",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/parallel_cache.rs find_common_ancestor uses Vec::contains in a loop (O(n^2)) for deep histories; switch to HashSet/bidirectional approach to reduce hot-path cost."
+    },
+    {
+      "id": "T062",
+      "subject": "Sync feature-flag persistence docs with implemented API",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/filekv/FEATURE_FLAG_RUNTIME_CONTROL.md marks persistence as future capability, but feature_flag.rs already implements configure_persistence/save_persistence/load_persistence."
+    },
+    {
+      "id": "T063",
+      "subject": "Fix feature-flag doc test command drift",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/filekv/FEATURE_FLAG_RUNTIME_CONTROL.md references cargo test --lib file_kv::feature_flag_tests, but this target path does not exist in current crate/module layout."
+    },
+    {
+      "id": "T064",
+      "subject": "Repair dead links in filekv docs",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/filekv/README.md and FEATURE_FLAG_RUNTIME_CONTROL.md contain broken relative links (e.g., ../USAGE.md and FILEKV_ARCHITECTURE.md) that should point to existing docs."
+    },
+    {
+      "id": "T065",
+      "subject": "Guard branch ancestor traversal against parent cycles",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/graph.rs now guards ancestor traversal with a visited-set cycle detector, and ContextGraphManager create/update paths reject parent assignments that would create cycles."
+    },
+    {
+      "id": "T066",
+      "subject": "Optimize auto-fork carry-turn membership checks",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/auto_fork.rs filters parent turns via Vec::contains for each turn; prebuild HashSet from carry_turn_ids to avoid O(turns*ids) hot path."
+    },
+    {
+      "id": "T067",
+      "subject": "Deduplicate semantic merge knowledge-map builders",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/semantic_merge.rs has duplicated map-construction loops in build_knowledge_map and build_knowledge_map_raw; extract shared helper to avoid drift."
+    },
+    {
+      "id": "T068",
+      "subject": "Fix README facade branch-management API mismatch",
+      "priority": "P1",
+      "status": "done",
+      "description": "README.md branch examples call methods on facade::Context, but create_branch/checkout/merge/diff live on ParallelContextManager; align examples or add wrappers."
+    },
+    {
+      "id": "T069",
+      "subject": "Wire block_cache_size_bytes config or document as inactive",
+      "priority": "P1",
+      "status": "pending",
+      "description": "doc/ARCHITECTURE.md documents block_cache_size_bytes as effective config, but Context::open_with_config currently does not pass it into FileKVConfig."
+    },
+    {
+      "id": "T070",
+      "subject": "Fix SemanticIndex add() stale time_index keys",
+      "priority": "P1",
+      "status": "pending",
+      "description": "semantic_index.rs add() updates updated_at before removing old time_index entry; capture old timestamp before mutation and keep time_index/index_cache consistent to prevent stale-key eviction drift."
+    },
+    {
+      "id": "T071",
+      "subject": "Surface malformed fingerprint rows during semantic index load",
+      "priority": "P1",
+      "status": "pending",
+      "description": "semantic_index.rs load_index silently drops invalid fingerprint rows via if-let Ok parse; add explicit warn/failure accounting so index corruption is observable."
+    },
+    {
+      "id": "T072",
+      "subject": "Remove per-call allocation in BloomFilter hash index generation",
+      "priority": "P2",
+      "status": "pending",
+      "description": "parallel/merge/bloom_conflict.rs get_hash_indices allocates Vec on every contains/insert; refactor hot path to avoid per-call heap allocation."
+    },
+    {
+      "id": "T073",
+      "subject": "Fix README merge-strategy count mismatch",
+      "priority": "P2",
+      "status": "done",
+      "description": "Root README says there are 5 merge strategies but enumerates 6 and code defines 6; align the count text with actual enum variants."
+    },
+    {
+      "id": "T074",
+      "subject": "Unify branch storage path between graph and manager",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/manager/mod.rs uses <context_root>/branches while graph.rs create/reload uses <context_root>/graph/branches; align to a single branch root to avoid split branch trees."
+    },
+    {
+      "id": "T075",
+      "subject": "Update auto-fork cooldown timestamp on manual trigger path",
+      "priority": "P1",
+      "status": "pending",
+      "description": "parallel/auto_fork.rs evaluate_trigger creates branch decisions without updating last_fork_timestamp, allowing cooldown bypass under repeated trigger calls."
+    },
+    {
+      "id": "T076",
+      "subject": "Rework semantic fingerprint bit-accumulation algorithm",
+      "priority": "P1",
+      "status": "pending",
+      "description": "semantic_index.rs fingerprint generation maps token index directly to bit index and only scans a prefix of tokens; switch to per-bit weighted accumulation to reduce collision drift."
+    },
+    {
+      "id": "T077",
+      "subject": "Resolve README CLI command drift for library-only crate",
+      "priority": "P1",
+      "status": "done",
+      "description": "README.md still documents cargo run -- context ... flows while Cargo.toml currently exposes library/examples without a matching context CLI binary; either implement binary commands or rewrite README workflow."
+    },
+    {
+      "id": "T078",
+      "subject": "Fix Async I/O ownership mismatch in P2/P3 docs",
+      "priority": "P0",
+      "status": "done",
+      "description": "doc/P2_P3_FEATURES_SUMMARY.md marks async I/O as completed within tokitai-context, but current crate delegates async I/O to tokitai-filekv; either expose context-level async APIs or update docs to correct crate boundary."
+    },
+    {
+      "id": "T079",
+      "subject": "Wire bloom prefilter into parallel merge conflict detection",
+      "priority": "P0",
+      "status": "done",
+      "description": "parallel/merge/mod.rs currently ignores provided BloomFilter in conflict detection and keeps bloom precheck as dead path; integrate might_conflict prefilter (or remove dead API) so bloom path has real effect."
+    },
+    {
+      "id": "T080",
+      "subject": "Fail WAL replay/load on partial decode corruption",
+      "priority": "P1",
+      "status": "pending",
+      "description": "wal.rs read path breaks on decode errors and still returns partial Ok(entries); add explicit corruption/partial-read error mode instead of success-shaped fallback."
+    },
+    {
+      "id": "T081",
+      "subject": "Fix CuckooConflictDetector key space to use branch-relative paths",
+      "priority": "P0",
+      "status": "done",
+      "description": "optimization/cache/cuckoo.rs indexes conflicts by absolute paths, causing cross-branch source/target key mismatches. Normalize to branch-relative keys and add regression coverage."
+    },
+    {
+      "id": "T082",
+      "subject": "Make BranchLRUCache insert idempotent for existing branch IDs",
+      "priority": "P1",
+      "status": "pending",
+      "description": "optimization/cache/lru.rs insert path can duplicate branch IDs across main/history caches and LRU queues; enforce single-owner invariant with queue cleanup and update-in-place semantics."
+    },
+    {
+      "id": "T083",
+      "subject": "Reject unknown layer names in ParallelMerger",
+      "priority": "P1",
+      "status": "done",
+      "description": "parallel/merge/parallel_merge.rs merge_single_layer currently returns empty success for unknown layer names; return explicit error instead of silent no-op."
+    },
+    {
+      "id": "T084",
+      "subject": "Remove or wire inactive LRU-K fields and methods",
+      "priority": "P2",
+      "status": "pending",
+      "description": "optimization/cache/lru.rs contains unused state/methods (enable_stats, in_history, get_kth_access) that are disconnected from behavior; either integrate with configured k or remove dead code."
+    },
+    {
+      "id": "T085",
+      "subject": "Sync ARCHITECTURE FileKV section with external crate boundary",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/ARCHITECTURE.md still documents an in-crate src/filekv tree; update architecture docs to reflect external tokitai-filekv dependency boundary."
+    },
+    {
+      "id": "T086",
+      "subject": "Resolve ConsistencyChecker repair semantics drift",
+      "priority": "P1",
+      "status": "pending",
+      "description": "doc/CONSISTENCY_CHECK.md claims automatic backend repair/sync while current consistency_check.rs repair flow records report entries only; implement true repair or downgrade docs explicitly."
+    },
+    {
+      "id": "T087",
+      "subject": "Sync filekv benchmark report version with crate version",
+      "priority": "P2",
+      "status": "pending",
+      "description": "doc/filekv/PERFORMANCE_BENCHMARK_REPORT.md still shows example version 0.1.0 while Cargo.toml is 0.1.2; align version text to avoid doc drift."
+    },
+    {
+      "id": "T088",
+      "subject": "Reduce BranchCache read-hit lock contention and cloning overhead",
+      "priority": "P1",
+      "status": "pending",
+      "description": "parallel/parallel_cache.rs BranchCache::get currently takes write lock and clones CachedBranch on read hits; reduce hot-path contention/allocation."
+    },
+    {
+      "id": "T089",
+      "subject": "Optimize SemanticIndex top-N search to avoid full-result sorting",
+      "priority": "P2",
+      "status": "pending",
+      "description": "semantic_index.rs search_top_n builds and sorts full result set via search() before truncate; use bounded selection for small-N queries."
+    },
+    {
+      "id": "T090",
+      "subject": "Reset WAL in-memory size on clear() to prevent stale rotation trigger",
+      "priority": "P1",
+      "status": "pending",
+      "description": "wal.rs clear() truncates WAL file but leaves current_size stale, which can trigger premature rotation after clear/replay paths."
+    },
+    {
+      "id": "T091",
+      "subject": "Validate CuckooFilter constructor parameters and fingerprint bounds",
+      "priority": "P1",
+      "status": "pending",
+      "description": "optimization/cache/cuckoo.rs does not bound false_positive_rate/expected_items/fingerprint_bits, leaving panic-prone paths under invalid inputs; add validation and safe bounds."
+    },
+    {
+      "id": "T092",
+      "subject": "Batch-load ConversationStore turns in diff/conflict paths",
+      "priority": "P1",
+      "status": "pending",
+      "description": "parallel/branch/conversation_store.rs get_all_turns repeatedly calls get_turn per id and is re-invoked by diff_branches/detect_conflicts; add a batched loading path to reduce repeated disk reads/deserialization."
+    },
+    {
+      "id": "T093",
+      "subject": "Propagate ConversationStore delete_turn parse failures",
+      "priority": "P1",
+      "status": "pending",
+      "description": "parallel/branch/conversation_store.rs delete_turn currently ignores ConversationTurn decode errors via if let Ok(...); surface deserialization failures instead of silently skipping token-accounting updates."
+    },
+    {
+      "id": "T094",
+      "subject": "Deduplicate LRU get/get_mut promotion logic",
+      "priority": "P2",
+      "status": "pending",
+      "description": "optimization/cache/lru.rs contains duplicated main/history promotion and hit-update logic across get and get_mut; extract shared path to reduce drift and maintenance risk."
+    },
+    {
+      "id": "T095",
+      "subject": "Sync FILEKV_GUIDE facade maintenance/checkpoint API signatures",
+      "priority": "P1",
+      "status": "done",
+      "description": "doc/filekv/FILEKV_GUIDE.md maintenance/checkpoint signatures drift from facade.rs (flush_filekv/run_compaction/create_checkpoint/restore_checkpoint return/params); align docs with current API."
+    },
+    {
+      "id": "T096",
+      "subject": "Align MIGRATION_GUIDE version text with current crate release",
+      "priority": "P2",
+      "status": "done",
+      "description": "doc/MIGRATION_GUIDE.md uses v0.2.0 positioning and dependency snippets inconsistent with Cargo.toml version 0.1.2; update version guidance to current release."
     }
   ],
   "round_notes": {
-    "round_1": "Phase 1 exploration complete. Key findings: (1) 1 clippy warning in feature_flag.rs, (2) lib.rs has crate-level dead_code/unused_imports allowances, (3) facade ContextStats returns empty defaults, (4) merge modules at wrong location per architecture, (5) consistency_check has unimplemented TODOs. Baseline: clean compilation, 417 tests passing."
+    "round_1": "Phase 1 exploration complete. Key findings: (1) 1 clippy warning in feature_flag.rs, (2) lib.rs has crate-level dead_code/unused_imports allowances, (3) facade ContextStats returns empty defaults, (4) merge modules at wrong location per architecture, (5) consistency_check has unimplemented TODOs. Baseline: clean compilation, 417 tests passing.",
+    "round_2": "Phase 0 baseline: cargo check/clippy pass with all features. Phase 1 exploration added safety and docs-drift tasks. Phase 2 completed P0 unsafe fix in audit_log rotation and cleared baseline compiler warnings. Phase 3 synced architecture docs to real module paths and corrected outdated module-completion claims.",
+    "round_3": "Phase 0: repository has no just precommit/test recipe, so baseline executed with cargo fmt + clippy + check + tests; full cargo test currently fails on pre-existing doctests. Phase 1: found merge/WAL error handling and doc drift. Phase 2: completed T010 (parallel merge now returns aggregated failures) and T011 (WAL replay no longer clears log when replay handler fails, plus regression test). Phase 3: no additional doc updates applied; new doc-drift tasks queued as T013/T014.",
+    "round_4": "Phase 0 baseline passed via cargo fmt/clippy/check fallback (just pre-commit recipe unavailable). Phase 1 explored code/doc drift with two agents and queued T015-T020. Phase 2 completed T012 and T015 by replacing diff3/compare-layer silent file-read fallbacks with context-rich propagated I/O errors in parallel/merge/mod.rs. Phase 3 ran cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test successfully (just test recipes still include unsupported --timeout flags).",
+    "round_5": "Phase 0 baseline passed via cargo fallback (just pre-commit/precommit missing). Phase 1 dual-agent scan found additional docs/code bottlenecks and queued T021-T025 (deduped against existing T014/T017/T018). Phase 2 completed T016 by removing knowledge store/graph initialization .ok() swallowing and surfacing load failures via explicit state accessors, and completed T017/T018 by rewriting doc/USER_GUIDE.md to the current library-only crate model, version 0.1.2, and real Cargo feature flags. Phase 3 validated with cargo fmt, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test (just test recipe unavailable in this justfile).",
+    "round_6": "Phase 0 baseline ran via cargo fallback because tokitai-context justfile has no pre-commit/precommit recipes. Phase 1 parallel exploration added T026-T034, deduping doc-scan hits against existing T004/T014/T024/T025. Phase 2 completed T022 by replacing KnowledgeWatcher callback lock unwrap/silent update failures with explicit error handling + tracing::error, and completed T023 by validating BloomFilter false_positive_rate with explicit Result-based constructor errors. Phase 3 passed with cargo fmt, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_7": "Phase 0 baseline: just pre-commit/precommit missing, fallback cargo fmt/clippy/check passed. Phase 1 parallel exploration queued T035-T038 (deduped with existing T013/T014). Phase 2 completed T026 by returning real merged_items/conflicts from ThreeWayMerger, completed T035 by requiring existing session + canonicalized layer path checks before hash-index removal in file_service delete, and completed T036 by syncing USER_GUIDE facade examples/exports to current API. Phase 3 passed via fallback validation: cargo fmt --check, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, cargo test --test merge_strategies_test.",
+    "round_8": "Phase 0 baseline passed via cargo fallback (just pre-commit missing in this justfile). Phase 1 parallel exploration found sparse-index capacity/docs drift issues and queued T039-T043. Phase 2 completed T037 by propagating walkdir/copy failures in parallel/cow fork paths and added regression coverage for copy-failure behavior, and completed T040 by aligning AI_FEATURES_GUIDE commands, imports, and trait/type snippets with current ai APIs. Phase 3 validated with cargo fmt --check, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_9": "Phase 0 baseline: just pre-commit absent; fallback cargo fmt/clippy/check passed. Phase 1 dual-agent scan found no new non-duplicate tasks (all findings mapped to existing T013/T014/T020/T025/T028/T029/T031/T033/T038/T043). Phase 2 completed T039 by enforcing DenseIndex max_entries hard cap in add_index_point (skip new points after cap) and adding regression test test_dense_index_respects_max_entries_cap. Phase 3 validated with cargo fmt --check, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test; just precommit/test recipes remain unavailable in this justfile.",
+    "round_10": "Phase 0 baseline: just pre-commit recipe missing; fallback cargo fmt --check + clippy + check passed. Phase 1 dual-agent scan found one new P0 doc-code mismatch and queued T044-T047 after deduping cache/merge/CAS findings against existing T020/T025/T031. Phase 2 completed T044 by implementing DictionaryContentAddressableStorage::stats() and adding integration test coverage to remove unimplemented! panic path. Phase 3 validated with cargo fmt --check, cargo clippy --all-features --all-targets -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_11": "Phase 0 baseline: just precommit missing in tokitai-context justfile, continued with cargo fallback validation. Phase 1 dual-agent exploration found one new code bottleneck and three new doc-drift items, queued T048-T051 after dedupe against existing pending tasks. Phase 2 completed T027 (preserve selective-merge artifacts/conflict context) and T045 (fix broken intra-doc links in IMPLEMENTATION_SUMMARY_v2). Phase 3 passed with cargo fmt --check, cargo clippy --all-features --all-targets -- -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_12": "Phase 0 baseline: just pre-commit recipe absent in tokitai-context justfile; fallback cargo fmt --check + clippy + check passed. Phase 1 dual-agent exploration found one duplicate doc index drift, one duplicate benchmark-link drift, one new FILEKV_POSITION relative-link drift, and two code bottlenecks; queued T053/T054 and completed T052. Phase 2 completed T021 and T046 by repairing stale archived links in DOC_INDEX and performance docs, plus fixed FILEKV_POSITION reference links. Phase 3 passed with cargo fmt --check, cargo clippy --all-features --all-targets -- -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_13": "Phase 0 baseline passed via cargo fallback because just precommit/pre-commit is unavailable in this justfile. Phase 1 dual-agent exploration found no new doc-drift tasks (all mapped to existing T013/T014/T034/T043/T048/T049) and identified two code bottlenecks, queued as T055/T056. Phase 2 completed T014 by rewriting doc/QUICKSTART.md for library-only usage and removing stale TUI/MCP/autonomous run-mode guidance from this crate. Phase 3 passed with cargo fmt --check, cargo clippy --all-features --all-targets -- -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_14": "Phase 0 baseline: just pre-commit/precommit still unavailable in tokitai-context justfile; cargo check --all-features passed. Phase 1 dual-agent exploration found no new non-duplicate tasks and mapped findings to existing T013/T020/T024/T025/T028/T029/T030/T031/T038/T043/T047/T048/T049/T050/T055/T056. Phase 2 completed T013 by updating doc/filekv namespace/path references from tokitai_context::file_kv and src/file_kv/* to current tokitai_context::filekv and tokitai-filekv/src/* layout across filekv docs. Phase 3 validation used cargo fmt --check, cargo clippy --all-features --all-targets -- -D warnings, cargo check --all-features, cargo test --lib, and cargo test --test merge_strategies_test.",
+    "round_15": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration found no new non-duplicate tasks and mapped findings to existing T004/T019/T020/T024/T025/T028/T029/T030/T031/T033/T038/T049/T050/T051/T055/T056. Phase 2 closed stale pending T013 after confirming no remaining doc/filekv references to tokitai_context::file_kv or src/file_kv/. Phase 3 validation passed with just precommit and just test.",
+    "round_16": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration added T057-T060 (thread-pool config drift, bloom speedup metric inversion, UNIX_EPOCH unwrap panic risk, and remaining library-only runtime doc drift) after dedupe against existing pending tasks. Phase 2 completed T019 by adding a lib.rs public API export map in doc/README.md linking crate-root re-exports to current usage docs.",
+    "round_17": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration found one new code bottleneck and three new filekv doc drifts, queued as T061-T064 after dedupe against existing pending tasks (T025/T028/T032/T043/T048/T060). Phase 2 completed T041 by making GlobalIndexFinder::find_key check dense indexes before sparse indexes and adding regression test test_global_index_finder_checks_dense_indexes. Phase 3 validation passed with cargo check --all-features, cargo test --lib test_global_index_finder_checks_dense_indexes, just precommit, and just test.",
+    "round_18": "Phase 0 baseline passed with just pre-commit. Phase 2 completed T061 by changing AncestorCache::find_common_ancestor to HashSet-based membership checks, reducing common-ancestor lookup from quadratic contains scans to linear behavior on deep histories; completed T062/T063/T064 by syncing feature-flag persistence docs to implemented APIs, correcting the feature-flag test command to a valid module filter, and repairing broken filekv relative links. Phase 3 validation passed with cargo check --all-features, cargo test --lib test_ancestor_cache_common_ancestor, just precommit, and just test.",
+    "round_19": "Phase 0 baseline passed with just pre-commit. Phase 2 completed T013 by removing remaining file_kv namespace drift in filekv docs (now using filekv:: paths) and completed T060 by replacing cargo-run/mount runtime examples with library-only guidance in P2_P3_FEATURES_SUMMARY and TRACING_CLASSIFICATION. Phase 3 validation passed with just precommit and just test.",
+    "round_20": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration queued T065-T069 (branch-cycle guard, auto-fork membership optimization, semantic-map dedupe, README branch API mismatch, block-cache config wiring drift). Phase 2 completed T030 by removing file_name unwrap panic path and eliminating content clone in semantic block parsing, and completed T031 by propagating CAS subdirectory creation errors instead of swallowing create_dir_all failures. Phase 3 validation passed with just precommit and just test (702 passed, 18 skipped).",
+    "round_21": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration identified semantic-index consistency/visibility and Bloom allocation hot-path issues; queued T070-T072 after dedupe against existing T025/T029/T043/T047/T048/T049/T050/T068/T069. Phase 2 completed T020 by removing duplicate diff3 I/O in parallel/merge/mod.rs via single-read text+hash flow for source/target files.",
+    "round_22": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration found one new docs contradiction (queued T073) and otherwise deduped findings to existing T025/T028/T029/T034/T038/T042/T056/T068/T069/T072. Phase 2 completed T024 by replacing WalkDir filter_map(.ok()) in knowledge_index::from_directory with explicit traversal error propagation and context-rich error messages. Phase 3 passed with just precommit and just test (702 passed, 18 skipped).",
+    "round_23": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration added T074-T076 and identified T073 as already fixed in README. Phase 2 completed T065 by adding ancestor-chain cycle guards and rejecting cycle-causing parent updates in ContextGraphManager. Phase 3 passed with just precommit and just test.",
+    "round_24": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration mainly mapped to existing pending tasks (T025/T028/T029/T038/T068/T069/T070/T071/T072/T075/T076) with one additional README CLI drift candidate. Phase 2 completed T074 by adding a configurable branch storage root to ContextGraphManager and wiring ParallelContextManager to use <context_root>/branches consistently for graph reload/create operations. Phase 3 passed with just precommit and just test.",
+    "round_25": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration deduped most findings to existing tasks and queued T078-T080 for async-I/O docs ownership drift, inactive bloom prefilter path, and WAL partial-decode success fallback. Phase 2 completed T025 by making BranchCache capacity runtime-mutable (AtomicUsize), updating resize() to persist new capacity semantics, fixing get() to update access metadata in-place, and adding resize regression coverage. Phase 3 passed with just precommit and just test.",
+    "round_26": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration added T081-T086 (conflict detector key normalization, LRU insert invariants, unknown-layer error propagation, LRU dead fields cleanup, and doc alignment drift items) after dedupe. Phase 2 completed T079 by wiring BloomConflictDetector into merge conflict detection and applying might_conflict prefilter in detect_layer_conflicts_with_bloom with exact-scan fallback on detector setup failure. Phase 3 passed with just precommit and just test.",
+    "round_27": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration added T087-T091 after dedupe (doc version drift, BranchCache hot-path lock/clone overhead, SemanticIndex top-N sorting inefficiency, WAL clear size drift, CuckooFilter parameter validation). Phase 2 completed T081 by normalizing CuckooConflictDetector keys to branch-relative layer paths and adding regression coverage, and completed T078 by clarifying async I/O ownership in P2_P3 docs as delegated to tokitai-filekv. Phase 3 passed with just precommit and just test.",
+    "round_28": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration found no new non-duplicate tasks. Phase 2 completed T083 by making ParallelMerger reject unknown layer names with explicit errors instead of silent empty success, and added regression test test_unknown_layer_returns_error. Task-level validation used cargo check --all-features and targeted test; Phase 3 passed with just precommit and just test.",
+    "round_29": "Phase 0 baseline passed with just pre-commit. Phase 1 dual-agent exploration added T092-T096 after dedupe (ConversationStore batch I/O, delete_turn parse error propagation, LRU logic dedupe, FILEKV_GUIDE API drift, MIGRATION_GUIDE version drift). Phase 2 completed T028 by replacing WalkDir filter_map(.ok()) and silent file-read fallbacks in three_way_merge/cuckoo scanners with explicit context-rich error propagation. Phase 3 passed with cargo check --all-features, targeted three_way/cuckoo tests, just precommit, and just test (706 passed, 18 skipped).",
+    "round_30": "Focused documentation alignment round: fully refreshed README + core docs to current library-only/API status, completed T034/T043/T047/T048/T049/T050/T068/T077/T085/T095/T096, updated stale source-tree references (file_kv -> tokitai-filekv paths) across key technical docs, and synchronized migration/version metadata to 0.1.2. Validation passed with just precommit and just test (706 passed, 18 skipped)."
   }
 }
