@@ -7,10 +7,8 @@
 //!
 //! Run with: `cargo bench --bench 08_compression --features benchmarks`
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use tokitai_filekv::compression::{
-    CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor,
-};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use tokitai_filekv::compression::{CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor};
 
 /// Generate test data with the given size
 fn generate_data(size: usize, pattern: &str) -> Vec<u8> {
@@ -39,9 +37,10 @@ fn bench_decompression_speed(c: &mut Criterion, compressor: &dyn CompressionStra
     let compressed = compressor.compress(data).unwrap();
     let mut group = c.benchmark_group(format!("decompress_{}", name));
     group.throughput(Throughput::Bytes(compressed.len() as u64));
-    group.bench_function(format!("{}/{}_bytes_compressed", compressor.name(), compressed.len()), |b| {
-        b.iter(|| compressor.decompress(&compressed).unwrap())
-    });
+    group.bench_function(
+        format!("{}/{}_bytes_compressed", compressor.name(), compressed.len()),
+        |b| b.iter(|| compressor.decompress(&compressed).unwrap()),
+    );
     group.finish();
 }
 
@@ -63,24 +62,14 @@ fn compression_benchmarks(c: &mut Criterion, size: usize, label: &str, pattern: 
     bench_decompression_speed(c, &snappy, &data, label);
     bench_decompression_speed(c, &lz4, &data, label);
 
-    // Compression ratio comparison
-    let zstd_size = zstd.compress(&data).unwrap().len();
-    let snappy_size = snappy.compress(&data).unwrap().len();
-    let lz4_size = lz4.compress(&data).unwrap().len();
-
+    // Compression ratio comparison — measure actual compress/decompress in iter
     let mut ratio_group = c.benchmark_group(format!("ratio_{}", label));
     ratio_group.bench_function("compression_ratio", |b| {
         b.iter(|| {
-            format!(
-                "original={} zstd={} snappy={} lz4={} zstd_ratio={:.2}% snappy_ratio={:.2}% lz4_ratio={:.2}%",
-                data.len(),
-                zstd_size,
-                snappy_size,
-                lz4_size,
-                zstd_size as f64 / data.len() as f64 * 100.0,
-                snappy_size as f64 / data.len() as f64 * 100.0,
-                lz4_size as f64 / data.len() as f64 * 100.0,
-            )
+            let zstd_compressed = zstd.compress(&data).unwrap();
+            let snappy_compressed = snappy.compress(&data).unwrap();
+            let lz4_compressed = lz4.compress(&data).unwrap();
+            black_box((zstd_compressed.len(), snappy_compressed.len(), lz4_compressed.len()));
         })
     });
     ratio_group.finish();

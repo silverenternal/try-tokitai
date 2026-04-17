@@ -1,0 +1,44 @@
+{
+  "project": "tokitai-context",
+  "round": 1,
+  "tasks": [
+    {
+      "id": "T001",
+      "subject": "Fix feature_flag.rs clippy warning: field assignment outside of initializer",
+      "priority": "P1",
+      "status": "pending",
+      "description": "feature_flag.rs:1612 - use struct literal initialization instead of Default::default() + field reassignment"
+    },
+    {
+      "id": "T002",
+      "subject": "Remove #![allow(dead_code)] and #![allow(unused_imports)] from lib.rs",
+      "priority": "P1",
+      "status": "pending",
+      "description": "lib.rs lines 95-96 have crate-level allowances that hide real issues. Remove them and fix actual dead code/unused imports."
+    },
+    {
+      "id": "T003",
+      "subject": "Implement facade ContextStats properly",
+      "priority": "P2",
+      "status": "pending",
+      "description": "facade.rs:538 - Context::stats() returns default empty stats. Implement proper stats collection from FileKV and file_service backends."
+    },
+    {
+      "id": "T004",
+      "subject": "Move root-level merge algorithm modules into parallel/merge/",
+      "priority": "P2",
+      "status": "pending",
+      "description": "lib.rs:120 - bloom_conflict.rs, optimized_merge.rs, parallel_merge.rs, three_way_merge.rs should be in parallel/merge/ directory per architecture documentation."
+    },
+    {
+      "id": "T005",
+      "subject": "Consistency check module: implement TODO comparison logic",
+      "priority": "P2",
+      "status": "pending",
+      "description": "consistency_check.rs has multiple TODO stubs at lines 254, 264, 274. Implement comparison logic for iterators, bloom filter consistency, and index integrity."
+    }
+  ],
+  "round_notes": {
+    "round_1": "Phase 1 exploration complete. Key findings: (1) 1 clippy warning in feature_flag.rs, (2) lib.rs has crate-level dead_code/unused_imports allowances, (3) facade ContextStats returns empty defaults, (4) merge modules at wrong location per architecture, (5) consistency_check has unimplemented TODOs. Baseline: clean compilation, 417 tests passing."
+  }
+}

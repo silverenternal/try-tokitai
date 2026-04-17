@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use fst::{Set, Streamer, IntoStreamer};
+use fst::{IntoStreamer, Set, Streamer};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -104,7 +104,10 @@ impl TrieIndex {
     }
 
     /// 从工具列表构建索引（自定义配置）
-    pub fn build_with_config(tools: &[(&str, u64)], config: TrieIndexConfig) -> Result<Self, String> {
+    pub fn build_with_config(
+        tools: &[(&str, u64)],
+        config: TrieIndexConfig,
+    ) -> Result<Self, String> {
         let mut tool_map = HashMap::new();
         let mut keyword_index: HashMap<String, Vec<String>> = HashMap::new();
         let mut tool_names: Vec<String> = Vec::with_capacity(tools.len());
@@ -125,8 +128,8 @@ impl TrieIndex {
         tool_names.sort();
         tool_names.dedup();
 
-        let tool_set = Set::from_iter(tool_names.iter())
-            .map_err(|e| format!("构建 fst Set 失败：{}", e))?;
+        let tool_set =
+            Set::from_iter(tool_names.iter()).map_err(|e| format!("构建 fst Set 失败：{}", e))?;
 
         info!(
             "Trie 索引构建完成：{} 个工具，{} 个关键词，fst 大小：{} bytes",
@@ -176,8 +179,13 @@ impl TrieIndex {
             self.needs_rebuild = true;
         }
 
-        debug!("添加工具到索引：{} (id: {}), 待重建：{}/{}", 
-               name, id, self.pending_adds.len(), self.config.rebuild_threshold);
+        debug!(
+            "添加工具到索引：{} (id: {}), 待重建：{}/{}",
+            name,
+            id,
+            self.pending_adds.len(),
+            self.config.rebuild_threshold
+        );
     }
 
     /// 强制重建 fst Set（用于手动触发或关闭前）
@@ -203,8 +211,11 @@ impl TrieIndex {
                 self.needs_rebuild = false;
 
                 let elapsed = rebuild_start.elapsed();
-                info!("fst Set 重建完成：{} 个工具，耗时 {:?}", 
-                      self.tool_map.len(), elapsed);
+                info!(
+                    "fst Set 重建完成：{} 个工具，耗时 {:?}",
+                    self.tool_map.len(),
+                    elapsed
+                );
             }
             Err(e) => {
                 debug!("fst Set 重建失败：{}", e);
@@ -258,7 +269,11 @@ impl TrieIndex {
             }
         } else {
             let range_end = prefix_lower.clone() + "\u{7F}";
-            let range = self.tool_set.range().ge(prefix_lower.as_str()).lt(range_end.as_str());
+            let range = self
+                .tool_set
+                .range()
+                .ge(prefix_lower.as_str())
+                .lt(range_end.as_str());
             let mut stream = range.into_stream();
             while let Some(bytes) = stream.next() {
                 if let Ok(word) = std::str::from_utf8(bytes) {
@@ -269,7 +284,8 @@ impl TrieIndex {
 
         // 3. 添加待持久化工具（去重）
         for (name, _) in &self.pending_adds {
-            if name.to_lowercase().starts_with(&prefix_lower) && !results.iter().any(|s| s == name) {
+            if name.to_lowercase().starts_with(&prefix_lower) && !results.iter().any(|s| s == name)
+            {
                 results.push(name.clone());
             }
         }
@@ -345,9 +361,7 @@ impl TrieIndex {
         let mut prefixes = Vec::new();
         let name_lower = name.to_lowercase();
 
-        let parts: Vec<&str> = name_lower
-            .split(['_', '-', ' '])
-            .collect();
+        let parts: Vec<&str> = name_lower.split(['_', '-', ' ']).collect();
 
         for (i, _) in parts.iter().enumerate() {
             if i >= 2 {
@@ -420,7 +434,10 @@ struct BKTreeNode {
 
 impl BKTreeNode {
     fn new(word: String) -> Self {
-        Self { word, children: HashMap::new() }
+        Self {
+            word,
+            children: HashMap::new(),
+        }
     }
 }
 
@@ -431,7 +448,10 @@ pub struct BKTree {
 
 impl BKTree {
     pub fn new() -> Self {
-        Self { root: None, words: HashMap::new() }
+        Self {
+            root: None,
+            words: HashMap::new(),
+        }
     }
 
     pub fn build(words: &[(&str, Vec<String>)]) -> Self {
@@ -452,7 +472,9 @@ impl BKTree {
 
     fn insert_node(node: &mut BKTreeNode, word: String) {
         let dist = Self::levenshtein_distance(&node.word, &word) as u32;
-        if dist == 0 { return; }
+        if dist == 0 {
+            return;
+        }
         if let Some(child) = node.children.get_mut(&dist) {
             Self::insert_node(child, word);
         } else {
@@ -473,7 +495,11 @@ impl BKTree {
         if dist <= max_dist {
             results.push(node.word.clone());
         }
-        let min_d = if dist as i32 - max_dist as i32 > 0 { (dist as i32 - max_dist as i32) as u32 } else { 0 };
+        let min_d = if dist as i32 - max_dist as i32 > 0 {
+            (dist as i32 - max_dist as i32) as u32
+        } else {
+            0
+        };
         let max_d = dist + max_dist;
         for (&d, child) in &node.children {
             if d >= min_d && d <= max_d {
@@ -491,16 +517,26 @@ impl BKTree {
         let s2: Vec<char> = s2.chars().collect();
         let m = s1.len();
         let n = s2.len();
-        if m == 0 { return n; }
-        if n == 0 { return m; }
+        if m == 0 {
+            return n;
+        }
+        if n == 0 {
+            return m;
+        }
         let mut dp = vec![vec![0; n + 1]; m + 1];
-        for i in 0..=m { dp[i][0] = i; }
-        for j in 0..=n { dp[0][j] = j; }
+        for i in 0..=m {
+            dp[i][0] = i;
+        }
+        for j in 0..=n {
+            dp[0][j] = j;
+        }
         #[allow(clippy::needless_range_loop)]
         for i in 1..=m {
             for j in 1..=n {
-                let cost = if s1[i-1] == s2[j-1] { 0 } else { 1 };
-                dp[i][j] = (dp[i-1][j] + 1).min(dp[i][j-1] + 1).min(dp[i-1][j-1] + cost);
+                let cost = if s1[i - 1] == s2[j - 1] { 0 } else { 1 };
+                dp[i][j] = (dp[i - 1][j] + 1)
+                    .min(dp[i][j - 1] + 1)
+                    .min(dp[i - 1][j - 1] + cost);
             }
         }
         dp[m][n]
@@ -516,13 +552,22 @@ impl BKTree {
     fn calc_depth(node: &Option<BKTreeNode>) -> usize {
         match node {
             None => 0,
-            Some(n) => 1 + n.children.values().map(|c| Self::calc_depth(&Some(c.clone()))).max().unwrap_or(0),
+            Some(n) => {
+                1 + n
+                    .children
+                    .values()
+                    .map(|c| Self::calc_depth(&Some(c.clone())))
+                    .max()
+                    .unwrap_or(0)
+            }
         }
     }
 }
 
 impl Default for BKTree {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -543,16 +588,29 @@ pub struct HybridIndex {
 
 impl HybridIndex {
     pub fn new() -> Self {
-        Self { trie: TrieIndex::new(), bk_tree: BKTree::new(), tool_map: HashMap::new() }
+        Self {
+            trie: TrieIndex::new(),
+            bk_tree: BKTree::new(),
+            tool_map: HashMap::new(),
+        }
     }
 
     pub fn build(tools: &[(&str, u64)]) -> Result<Self, String> {
         let trie = TrieIndex::build(tools)?;
-        let bk_words: Vec<(&str, Vec<String>)> = tools.iter().map(|(n, _)| (*n, vec![n.to_string()])).collect();
+        let bk_words: Vec<(&str, Vec<String>)> = tools
+            .iter()
+            .map(|(n, _)| (*n, vec![n.to_string()]))
+            .collect();
         let bk_tree = BKTree::build(&bk_words);
         let mut tool_map = HashMap::new();
-        for (name, id) in tools { tool_map.insert(name.to_string(), *id); }
-        Ok(Self { trie, bk_tree, tool_map })
+        for (name, id) in tools {
+            tool_map.insert(name.to_string(), *id);
+        }
+        Ok(Self {
+            trie,
+            bk_tree,
+            tool_map,
+        })
     }
 
     pub fn add_tool(&mut self, name: &str, id: u64) {
@@ -566,7 +624,9 @@ impl HybridIndex {
         for word in self.bk_tree.query(query, max_distance) {
             if let Some(tools) = self.bk_tree.get_tools(&word) {
                 for tool in tools {
-                    if !results.iter().any(|r| r == tool) { results.push(tool.clone()); }
+                    if !results.iter().any(|r| r == tool) {
+                        results.push(tool.clone());
+                    }
                 }
             }
         }
@@ -576,14 +636,24 @@ impl HybridIndex {
         results
     }
 
-    pub fn get(&self, name: &str) -> Option<u64> { self.tool_map.get(name).copied() }
+    pub fn get(&self, name: &str) -> Option<u64> {
+        self.tool_map.get(name).copied()
+    }
 
     pub fn stats(&self) -> HybridIndexStats {
-        HybridIndexStats { tool_count: self.tool_map.len(), trie_stats: self.trie.stats(), bk_tree_stats: self.bk_tree.stats() }
+        HybridIndexStats {
+            tool_count: self.tool_map.len(),
+            trie_stats: self.trie.stats(),
+            bk_tree_stats: self.bk_tree.stats(),
+        }
     }
 }
 
-impl Default for HybridIndex { fn default() -> Self { Self::new() } }
+impl Default for HybridIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct HybridIndexStats {
@@ -628,16 +698,18 @@ mod tests {
 
     #[test]
     fn test_trie_index_add_tool_pending() {
-        let mut index = TrieIndex::with_config(TrieIndexConfig { rebuild_threshold: 10 });
+        let mut index = TrieIndex::with_config(TrieIndexConfig {
+            rebuild_threshold: 10,
+        });
         index.add_tool("read_file", 1);
         index.add_tool("write_file", 2);
-        
+
         // 工具应该能被搜到（即使在待持久化缓冲区）
         assert!(index.contains("read_file"));
         assert!(index.contains("write_file"));
         assert_eq!(index.pending_count(), 2);
         assert!(index.needs_rebuild());
-        
+
         // 前缀搜索应该包含待持久化工具
         let results = index.search_prefix("read");
         assert!(results.iter().any(|s| s == "read_file"));
@@ -645,13 +717,15 @@ mod tests {
 
     #[test]
     fn test_trie_index_batch_rebuild() {
-        let mut index = TrieIndex::with_config(TrieIndexConfig { rebuild_threshold: 5 });
-        
+        let mut index = TrieIndex::with_config(TrieIndexConfig {
+            rebuild_threshold: 5,
+        });
+
         // 添加 5 个工具，应该触发自动重建
         for i in 0..5 {
             index.add_tool(&format!("tool_{}", i), i as u64);
         }
-        
+
         // 重建后待持久化应该为空
         assert_eq!(index.pending_count(), 0);
         assert!(!index.needs_rebuild());
@@ -660,13 +734,15 @@ mod tests {
 
     #[test]
     fn test_trie_index_manual_rebuild() {
-        let mut index = TrieIndex::with_config(TrieIndexConfig { rebuild_threshold: 100 });
+        let mut index = TrieIndex::with_config(TrieIndexConfig {
+            rebuild_threshold: 100,
+        });
         index.add_tool("read_file", 1);
         index.add_tool("write_file", 2);
-        
+
         // 手动触发重建
         index.rebuild_fst();
-        
+
         assert_eq!(index.pending_count(), 0);
         assert!(!index.needs_rebuild());
     }
@@ -675,7 +751,7 @@ mod tests {
     fn test_trie_index_remove_tool() {
         let tools = vec![("read_file", 1), ("write_file", 2)];
         let mut index = TrieIndex::build(&tools).unwrap();
-        
+
         let removed = index.remove_tool("read_file");
         assert_eq!(removed, Some(1));
         assert!(!index.contains("read_file"));
@@ -700,10 +776,12 @@ mod tests {
 
     #[test]
     fn test_trie_index_stats() {
-        let mut index = TrieIndex::with_config(TrieIndexConfig { rebuild_threshold: 10 });
+        let mut index = TrieIndex::with_config(TrieIndexConfig {
+            rebuild_threshold: 10,
+        });
         index.add_tool("read_file", 1);
         index.add_tool("write_file", 2);
-        
+
         let stats = index.stats();
         assert_eq!(stats.tool_count, 2);
         assert_eq!(stats.pending_count, 2);

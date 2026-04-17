@@ -10,3 +10,36 @@ jobs = 4
 [build]
 # Incremental compilation for faster rebuilds during development
 incremental = true
+
+# ─── Cargo Aliases for faster development ────────────────────────────────
+
+[alias]
+# Quick clippy check with all features
+x = "clippy --all-features --all-targets -- -D warnings"
+
+# Run tests with nextest (falls back to cargo test if not installed)
+t = "test --all-features"
+
+# Build with all features
+ba = "build --all-features"
+
+# Quick check with all features
+ca = "check --all-features"
+
+# Benchmark
+bench-all = "bench --features benchmarks"
+
+# Run specific test (usage: cargo rt -- test_name)
+rt = "test --all-features --"
+
+# Check formatting
+check-fmt = "fmt --all --check"
+
+# Pre-commit check
+precommit = "fmt --all && clippy --all-features --all-targets -- -D warnings && check --all-features"
+
+# ─── Environment ─────────────────────────────────────────────────────────
+
+[env]
+# Increase stack size for deep recursion in tests (LSM-Tree can be deep)
+# RUST_MIN_STACK = "8388608"

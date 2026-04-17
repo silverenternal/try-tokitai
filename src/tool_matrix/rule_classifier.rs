@@ -83,30 +83,30 @@ pub struct RuleClassifier {
 impl RuleClassifier {
     /// 从文件加载规则分类器
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let content = fs::read_to_string(path.as_ref())
-            .map_err(|e| format!("读取规则文件失败：{}", e))?;
-        
+        let content =
+            fs::read_to_string(path.as_ref()).map_err(|e| format!("读取规则文件失败：{}", e))?;
+
         Self::from_json(&content)
     }
 
     /// 从 JSON 字符串加载规则分类器
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let config: ToolboxRulesConfig = serde_json::from_str(json)
-            .map_err(|e| format!("解析规则配置失败：{}", e))?;
-        
+        let config: ToolboxRulesConfig =
+            serde_json::from_str(json).map_err(|e| format!("解析规则配置失败：{}", e))?;
+
         let mut classifier = Self {
             rules: config.rules,
             compiled_regex: HashMap::new(),
             keyword_index: HashMap::new(),
         };
-        
+
         // 预编译正则表达式
         classifier.compile_regexes();
         // 构建关键词索引
         classifier.build_keyword_index();
-        
+
         info!("规则分类器加载完成，共 {} 条规则", classifier.rules.len());
-        
+
         Ok(classifier)
     }
 
@@ -119,21 +119,25 @@ impl RuleClassifier {
     /// 分类工具描述
     pub fn classify(&self, tool_name: &str, tool_description: &str) -> Option<RuleMatchResult> {
         let query = format!("{} {}", tool_name, tool_description);
-        
+
         // 尝试关键词匹配
         if let Some(result) = self.match_keywords(&query) {
-            debug!("规则分类器：关键词匹配 -> {} (置信度：{:.2})", 
-                result.toolbox_id, result.confidence);
+            debug!(
+                "规则分类器：关键词匹配 -> {} (置信度：{:.2})",
+                result.toolbox_id, result.confidence
+            );
             return Some(result);
         }
-        
+
         // 尝试正则匹配
         if let Some(result) = self.match_regex(&query) {
-            debug!("规则分类器：正则匹配 -> {} (置信度：{:.2})", 
-                result.toolbox_id, result.confidence);
+            debug!(
+                "规则分类器：正则匹配 -> {} (置信度：{:.2})",
+                result.toolbox_id, result.confidence
+            );
             return Some(result);
         }
-        
+
         None
     }
 
@@ -141,13 +145,14 @@ impl RuleClassifier {
     fn match_keywords(&self, query: &str) -> Option<RuleMatchResult> {
         let query_lower = query.to_lowercase();
         let mut best_match: Option<RuleMatchResult> = None;
-        
+
         for (keyword, toolbox_ids) in &self.keyword_index {
             if query_lower.contains(keyword) {
                 for toolbox_id in toolbox_ids {
                     let confidence = self.calculate_keyword_confidence(keyword, &query_lower);
-                    
-                    if best_match.is_none() || confidence > best_match.as_ref().unwrap().confidence {
+
+                    if best_match.is_none() || confidence > best_match.as_ref().unwrap().confidence
+                    {
                         best_match = Some(RuleMatchResult {
                             toolbox_id: toolbox_id.clone(),
                             confidence,
@@ -158,21 +163,23 @@ impl RuleClassifier {
                 }
             }
         }
-        
+
         best_match
     }
 
     /// 正则表达式匹配
     fn match_regex(&self, query: &str) -> Option<RuleMatchResult> {
         let mut best_match: Option<RuleMatchResult> = None;
-        
+
         for (toolbox_id, rule) in &self.rules {
             for pattern_str in &rule.patterns {
                 if let Some(regex) = self.compiled_regex.get(pattern_str) {
                     if regex.is_match(query) {
                         let confidence = 0.7; // 正则匹配的固定置信度
-                        
-                        if best_match.is_none() || confidence > best_match.as_ref().unwrap().confidence {
+
+                        if best_match.is_none()
+                            || confidence > best_match.as_ref().unwrap().confidence
+                        {
                             best_match = Some(RuleMatchResult {
                                 toolbox_id: toolbox_id.clone(),
                                 confidence,
@@ -184,7 +191,7 @@ impl RuleClassifier {
                 }
             }
         }
-        
+
         best_match
     }
 
@@ -192,24 +199,24 @@ impl RuleClassifier {
     fn calculate_keyword_confidence(&self, keyword: &str, query: &str) -> f32 {
         let keyword_len = keyword.len() as f32;
         let query_len = query.len() as f32;
-        
+
         // 基础置信度
         let mut confidence = 0.5;
-        
+
         // 关键词长度占比越高，置信度越高
         let length_ratio = keyword_len / query_len;
         confidence += length_ratio * 0.3;
-        
+
         // 精确匹配提升置信度
         if query == keyword {
             confidence += 0.2;
         }
-        
+
         // 关键词在查询开头提升置信度
         if query.starts_with(keyword) {
             confidence += 0.1;
         }
-        
+
         confidence.min(1.0)
     }
 
@@ -222,8 +229,10 @@ impl RuleClassifier {
                         self.compiled_regex.insert(pattern_str.clone(), regex);
                     }
                     Err(e) => {
-                        warn!("编译工具箱 {} 的正则表达式失败：{} - {}", 
-                            toolbox_id, pattern_str, e);
+                        warn!(
+                            "编译工具箱 {} 的正则表达式失败：{} - {}",
+                            toolbox_id, pattern_str, e
+                        );
                     }
                 }
             }
@@ -289,19 +298,60 @@ impl RuleClassifier {
         // 定义标签到工具箱的映射规则
         let tag_mappings = [
             // 文件操作
-            (vec!["file", "path", "read", "write", "copy", "delete", "create", "modify", "move", "rename"], "file_ops"),
+            (
+                vec![
+                    "file", "path", "read", "write", "copy", "delete", "create", "modify", "move",
+                    "rename",
+                ],
+                "file_ops",
+            ),
             // Git 操作
-            (vec!["git", "commit", "branch", "merge", "push", "pull", "checkout", "rebase", "stash", "diff", "log"], "git_ops"),
+            (
+                vec![
+                    "git", "commit", "branch", "merge", "push", "pull", "checkout", "rebase",
+                    "stash", "diff", "log",
+                ],
+                "git_ops",
+            ),
             // 网络操作
-            (vec!["http", "network", "download", "upload", "request", "response", "url", "api", "ping", "port", "get", "post"], "network_ops"),
+            (
+                vec![
+                    "http", "network", "download", "upload", "request", "response", "url", "api",
+                    "ping", "port", "get", "post",
+                ],
+                "network_ops",
+            ),
             // 系统操作
-            (vec!["system", "command", "process", "env", "path", "execute", "shell", "binary"], "system_ops"),
+            (
+                vec![
+                    "system", "command", "process", "env", "path", "execute", "shell", "binary",
+                ],
+                "system_ops",
+            ),
             // 数据操作
-            (vec!["data", "json", "csv", "xml", "parse", "format", "serialize", "deserialize"], "data_ops"),
+            (
+                vec![
+                    "data",
+                    "json",
+                    "csv",
+                    "xml",
+                    "parse",
+                    "format",
+                    "serialize",
+                    "deserialize",
+                ],
+                "data_ops",
+            ),
             // 代码操作
-            (vec!["code", "analyze", "function", "language", "count", "detect"], "code_ops"),
+            (
+                vec!["code", "analyze", "function", "language", "count", "detect"],
+                "code_ops",
+            ),
             // 搜索操作
-            (vec!["search", "find", "grep", "lookup", "query"], "search_ops"),
+            (
+                vec!["search", "find", "grep", "lookup", "query"],
+                "search_ops",
+            ),
             // PDF 操作
             (vec!["pdf", "document"], "pdf_ops"),
         ];
@@ -329,7 +379,10 @@ impl RuleClassifier {
 
             // 从描述中提取关键词（简单的分词）
             for word in tool.description.split_whitespace() {
-                let clean_word = word.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+                let clean_word = word
+                    .to_lowercase()
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_string();
                 if !clean_word.is_empty() {
                     keywords.push(clean_word);
                 }
@@ -367,15 +420,12 @@ impl RuleClassifier {
             keywords.sort();
             keywords.dedup();
 
-            let patterns = toolbox_patterns.get(&toolbox_id).cloned().unwrap_or_default();
+            let patterns = toolbox_patterns
+                .get(&toolbox_id)
+                .cloned()
+                .unwrap_or_default();
 
-            rules.insert(
-                toolbox_id,
-                ToolboxRule {
-                    keywords,
-                    patterns,
-                },
-            );
+            rules.insert(toolbox_id, ToolboxRule { keywords, patterns });
         }
 
         // 构建分类器
@@ -476,7 +526,7 @@ impl SimHasher {
     /// 计算文本的 SimHash 值
     pub fn compute(&self, text: &str) -> u64 {
         let mut v = vec![0i32; self.hash_bits];
-        
+
         // 分词并计算每个词的哈希
         let tokens = self.tokenize(text);
 
@@ -503,17 +553,17 @@ impl SimHasher {
 
         simhash
     }
-    
+
     /// 计算两个 SimHash 值的海明距离
     pub fn hamming_distance(&self, hash1: u64, hash2: u64) -> u32 {
         (hash1 ^ hash2).count_ones()
     }
-    
+
     /// 检查两个 SimHash 值是否相似（海明距离 <= max_distance）
     pub fn is_similar(&self, hash1: u64, hash2: u64, max_distance: u32) -> bool {
         self.hamming_distance(hash1, hash2) <= max_distance
     }
-    
+
     /// 简单的分词函数（按非字母数字字符分割）
     fn tokenize(&self, text: &str) -> Vec<String> {
         text.split(|c: char| !c.is_alphanumeric())
@@ -521,12 +571,12 @@ impl SimHasher {
             .map(|s| s.to_lowercase())
             .collect()
     }
-    
+
     /// FNV-1a 哈希算法
     fn fnv1a_hash(&self, s: &str) -> u64 {
         const FNV_OFFSET: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x100000001b3;
-        
+
         let mut hash = FNV_OFFSET;
         for byte in s.as_bytes() {
             hash ^= *byte as u64;
@@ -592,10 +642,17 @@ impl HierarchicalClassifier {
             let fuzzy = self.fuzzy_cache.read();
             // 查找相似的哈希值
             for (cached_hash, toolbox_id) in fuzzy.iter() {
-                if self.simhasher.is_similar(query_hash, *cached_hash, self.max_hamming_distance) {
+                if self
+                    .simhasher
+                    .is_similar(query_hash, *cached_hash, self.max_hamming_distance)
+                {
                     let elapsed = start.elapsed();
-                    debug!("L2 模糊匹配缓存命中：{} (海明距离：{}, 耗时：{:?})",
-                        toolbox_id, self.simhasher.hamming_distance(query_hash, *cached_hash), elapsed);
+                    debug!(
+                        "L2 模糊匹配缓存命中：{} (海明距离：{}, 耗时：{:?})",
+                        toolbox_id,
+                        self.simhasher.hamming_distance(query_hash, *cached_hash),
+                        elapsed
+                    );
                     return Some(RuleMatchResult {
                         toolbox_id: toolbox_id.clone(),
                         confidence: 0.85, // 模糊匹配略低置信度
@@ -609,7 +666,10 @@ impl HierarchicalClassifier {
         // L3: 规则分类器 (~5ms)
         if let Some(result) = self.rule_classifier.classify(query, query) {
             let elapsed = start.elapsed();
-            debug!("L3 规则分类器匹配：{} (耗时：{:?})", result.toolbox_id, elapsed);
+            debug!(
+                "L3 规则分类器匹配：{} (耗时：{:?})",
+                result.toolbox_id, elapsed
+            );
 
             // 写入缓存
             self.update_cache(query, &result.toolbox_id);
@@ -630,11 +690,15 @@ impl HierarchicalClassifier {
     /// 更新缓存
     pub fn update_cache(&self, query: &str, toolbox_id: &str) {
         // 更新 L1 精确匹配缓存
-        self.exact_cache.write().insert(query.to_string(), toolbox_id.to_string());
+        self.exact_cache
+            .write()
+            .insert(query.to_string(), toolbox_id.to_string());
 
         // 更新 L2 模糊匹配缓存（使用真正的 SimHash）
         let query_hash = self.simhasher.compute(query);
-        self.fuzzy_cache.write().insert(query_hash, toolbox_id.to_string());
+        self.fuzzy_cache
+            .write()
+            .insert(query_hash, toolbox_id.to_string());
     }
 
     /// 计算 SimHash 值（使用 SimHasher）
@@ -680,14 +744,14 @@ mod tests {
                 "patterns": ["(?i)git|commit"]
             }
         }"#;
-        
+
         let classifier = RuleClassifier::from_json(json).unwrap();
-        
+
         // 测试文件操作匹配
         let result = classifier.classify("read_file", "Read file content");
         assert!(result.is_some());
         assert_eq!(result.unwrap().toolbox_id, "file_ops");
-        
+
         // 测试 git 操作匹配
         let result = classifier.classify("git_commit", "Git commit operation");
         assert!(result.is_some());

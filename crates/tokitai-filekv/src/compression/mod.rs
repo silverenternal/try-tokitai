@@ -10,8 +10,6 @@ pub mod factory;
 pub mod strategy;
 
 // Re-exports for convenience
-pub use dictionary::{DictionaryCompressor, DictionaryCompressionConfig, DictionaryStats};
+pub use dictionary::{DictionaryCompressionConfig, DictionaryCompressor, DictionaryStats};
 pub use factory::{create_compressor, NoCompression};
-pub use strategy::{
-    CompressionAlgorithmId, CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor,
-};
+pub use strategy::{CompressionAlgorithmId, CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor};

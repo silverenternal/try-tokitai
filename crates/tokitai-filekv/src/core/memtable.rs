@@ -27,47 +27,50 @@
 //! - Relaxed memory ordering for counters (performance optimization)
 //! - Bytes for zero-copy value storage
 
-use std::sync::atomic::{AtomicUsize, AtomicU32, Ordering};
+use crate::core::error::TransientError;
+use crate::core::types::ValuePointer;
+use ahash::AHasher;
 use bytes::Bytes;
 use dashmap::DashMap;
-use crate::core::types::ValuePointer;
-use crate::core::error::TransientError;
+use std::collections::HashMap;
+use std::hash::BuildHasher;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// 每条目固定内存开销估算（字节）- OPT-004 优化后
 ///
 /// 包括：
-/// - MemTableEntry: ~32 字节（优化后：u32 seq_num + Instant 时间戳 + 紧凑布局）
+/// - MemTableEntry: ~24 字节（优化后：u32 seq_num + 紧凑 bool + 自动对齐）
 /// - Bytes 结构体头部: ~32 字节
 /// - String 结构体头部: ~24 字节（String 本身是 fat pointer，堆上有 UTF-8 数据）
 /// - DashMap 每条目内部开销: ~16-24 字节（分片哈希表 entry 元数据）
 ///
-/// OPT-004 优化：从 80 字节降低到 64 字节
+/// OPT-004 优化：从 80 字节降低到 ~48 字节
 /// - 使用 u32 替代 u64 作为 seq_num（足够支持 40 亿次操作）
-/// - 使用 Instant 替代 SystemTime（如果需要时间戳）
-/// - 使用 #[repr(align(8))] 优化内存对齐
+/// - 删除手动 padding，依赖编译器自动对齐
+/// - 字段按大小排序减少内部填充
 ///
 /// 这是一个经验值，实际可能因平台和 Rust 版本而异。
-const PER_ENTRY_OVERHEAD: usize = 64;
+const PER_ENTRY_OVERHEAD: usize = 48;
 
 /// MemTable 条目
 ///
 /// OPT-004 内存布局优化：
 /// - 使用 u32 替代 u64 作为 seq_num（足够支持 40 亿次操作）
 /// - 字段按大小对齐排列，减少填充
-/// - 使用 #[repr(align(8))] 确保内存对齐优化
+/// - 删除手动 padding，依赖编译器自动对齐
+/// - Option<Bytes> 和 Option<ValuePointer> 使用 niche 优化（零成本表示 None）
 #[derive(Debug, Clone)]
-#[repr(align(8))]
 pub struct MemTableEntry {
     /// 值数据（如果还在 MemTable 中）- 使用 Bytes 实现零拷贝
+    /// 放在前面因为它是最大的字段
     pub value: Option<Bytes>,
-    /// 值指针（如果已刷盘）
+    /// 值指针（如果已刷盘）- 28 字节，使用 niche 优化
     pub pointer: Option<ValuePointer>,
     /// 序列号（用于并发控制）- OPT-004: u32 足够（40 亿次操作）
     pub seq_num: u32,
-    /// 是否被删除
+    /// 是否被删除 - 放在最后，编译器自动填充
     pub deleted: bool,
-    /// OPT-004: 填充字段，确保内存对齐
-    _padding: [u8; 3],
 }
 
 /// MemTable 配置
@@ -79,27 +82,45 @@ pub struct MemTableConfig {
     pub max_entries: usize,
     /// P2-007: 最大内存限制（字节）- 达到此限制时触发背压
     pub max_memory_bytes: usize,
-    /// POL-007: DashMap 分片数量（MemTable 并发度）
+    /// POL-007 / OPT-004: DashMap 分片数量（MemTable 并发度）
     ///
     /// 分片数量决定了 DashMap 的内部并发度。更多的分片可以减少高负载下的锁竞争，
     /// 但会稍微增加内存开销。
     ///
-    /// **默认值**: CPU 核心数 * 2
+    /// **默认值**: CPU 核心数 * 4（OPT-004 优化：从 *2 提升到 *4）
     /// **推荐配置**:
     /// - 低负载场景（<8 线程）: 16
-    /// - 中等负载（8-16 线程）: 32
-    /// - 高负载（16-32 线程）: 64
-    /// - 极高负载（32+ 线程）: 128
+    /// - 中等负载（8-16 线程）: 32-64
+    /// - 高负载（16-32 线程）: 64-128
+    /// - 极高负载（32+ 线程）: 128-256
     pub shards: usize,
+    /// OPT-008: Enable async MemTable flush (default: false)
+    ///
+    /// When enabled, flush operations run in the background and don't block new writes.
+    /// Supports multi-MemTable: active memtable (accepts writes) + immutable memtable (being flushed).
+    pub enable_async_flush: bool,
+    /// OPT-008: Maximum number of immutable memtables (default: 1)
+    ///
+    /// Controls how many memtables can be waiting for flush simultaneously.
+    /// Higher values allow more concurrent writes during flush, but increase memory usage.
+    pub max_immutable_memtables: usize,
+    /// OPT-008: Flush threshold for immutable memtables (bytes)
+    ///
+    /// When the active memtable reaches this threshold, it's swapped to immutable
+    /// and a background flush is triggered.
+    pub immutable_flush_threshold_bytes: usize,
 }
 
 impl Default for MemTableConfig {
     fn default() -> Self {
         Self {
-            flush_threshold_bytes: 4 * 1024 * 1024, // 4MB
-            max_entries: 100_000,                   // 10 万条
-            max_memory_bytes: 64 * 1024 * 1024,     // 64MB - P2-007 backpressure limit
-            shards: num_cpus::get() * 4,             // OPT-004: 默认 CPU 核心数 * 4（更细粒度分片）
+            flush_threshold_bytes: 4 * 1024 * 1024,           // 4MB
+            max_entries: 100_000,                             // 10 万条
+            max_memory_bytes: 64 * 1024 * 1024,               // 64MB - P2-007 backpressure limit
+            shards: num_cpus::get() * 4,                      // OPT-004: 默认 CPU 核心数 * 4（更细粒度分片）
+            enable_async_flush: false,                        // OPT-008: disabled by default
+            max_immutable_memtables: 1,                       // OPT-008: default 1 immutable table
+            immutable_flush_threshold_bytes: 4 * 1024 * 1024, // 4MB - same as flush_threshold
         }
     }
 }
@@ -107,7 +128,8 @@ impl Default for MemTableConfig {
 /// MemTable（内存缓冲表）
 pub struct MemTable {
     /// 数据：key → entry
-    data: DashMap<String, MemTableEntry>,
+    /// OPT-004: 使用 ahash 作为 hasher，比默认 RandomState 更快
+    data: DashMap<String, MemTableEntry, std::hash::BuildHasherDefault<AHasher>>,
     /// 当前大小（字节）
     size_bytes: AtomicUsize,
     /// 条目数
@@ -116,6 +138,10 @@ pub struct MemTable {
     config: MemTableConfig,
     /// 序列号计数器 - OPT-004: u32 足够（40 亿次操作）
     seq_num: AtomicU32,
+    /// 分片数量（保存以便批量插入时使用）
+    shard_count: u64,
+    /// PERF-MEM-001: Optional memory tracker for real-time allocation tracking
+    memory_tracker: Option<Arc<crate::ops::memory_tracker::MemoryTracker>>,
 }
 
 impl MemTable {
@@ -123,15 +149,36 @@ impl MemTable {
     ///
     /// # POL-007: DashMap 分片配置
     /// 使用 `config.shards` 指定的分片数量创建 DashMap。更多分片可以减少高并发下的锁竞争。
+    ///
+    /// # OPT-004: ahash 哈希器
+    /// 使用 ahash 作为哈希器，比默认 RandomState 更快，尤其适合短字符串 key。
+    ///
+    /// # PERF-MEM-001: Memory Tracker
+    /// Pass an optional `Arc<MemoryTracker>` for real-time allocation tracking.
+    /// When provided, `insert()` and `insert_batch()` will report memory deltas
+    /// to the tracker via `record_allocation`/`record_deallocation`.
     pub fn new(config: MemTableConfig) -> Self {
-        // POL-007: 使用配置的分片数量，至少为 1
-        let shard_count = config.shards.max(1);
+        Self::with_memory_tracker(config, None)
+    }
+
+    /// Create a MemTable with optional memory tracker for real-time tracking
+    pub fn with_memory_tracker(
+        config: MemTableConfig,
+        memory_tracker: Option<Arc<crate::ops::memory_tracker::MemoryTracker>>,
+    ) -> Self {
+        // POL-007: 使用配置的分片数量，DashMap 要求至少为 2
+        let shard_count = config.shards.max(2) as u64;
         Self {
-            data: DashMap::with_shard_amount(shard_count),
+            data: DashMap::with_hasher_and_shard_amount(
+                std::hash::BuildHasherDefault::<AHasher>::default(),
+                shard_count as usize,
+            ),
             size_bytes: AtomicUsize::new(0),
             entry_count: AtomicUsize::new(0),
             config,
             seq_num: AtomicU32::new(0),
+            shard_count,
+            memory_tracker,
         }
     }
 
@@ -163,7 +210,6 @@ impl MemTable {
             pointer: None,
             seq_num: seq,
             deleted: false,
-            _padding: [0; 3],
         };
 
         // P2-006: DashMap insert is atomic - returns Option with old value if key existed
@@ -185,6 +231,15 @@ impl MemTable {
             self.size_bytes.fetch_sub(-delta as usize, Ordering::Relaxed);
         }
 
+        // PERF-MEM-001: Report memory delta to tracker
+        if let Some(ref tracker) = self.memory_tracker {
+            if delta >= 0 {
+                tracker.record_allocation(delta as u64);
+            } else {
+                tracker.record_deallocation((-delta) as u64);
+            }
+        }
+
         // Only increment entry count if this is a new key (not an update)
         if old_entry.is_none() {
             self.entry_count.fetch_add(1, Ordering::Relaxed);
@@ -196,89 +251,32 @@ impl MemTable {
         (new_size, seq)
     }
 
-    /// Batch insert entries atomically
-    /// All entries are inserted with a single sequence number gap.
-    /// This ensures atomicity: either all entries are inserted or none (if WAL fails first).
+    /// OPT-004: 批量插入优化版本
     ///
-    /// # Returns
-    /// - Total size added to memtable (includes key, value, and per-entry overhead)
-    /// - Starting sequence number (entries get seq, seq+1, seq+2, ...)
-    pub fn insert_batch(&self, entries: &[(String, Vec<u8>)]) -> (usize, u32) {
-        let start_seq = self.seq_num.fetch_add(entries.len() as u32, Ordering::Relaxed);
-        let mut total_size_added = 0usize;
-        let mut new_keys_count = 0usize;
-
-        for (i, (key, value)) in entries.iter().enumerate() {
-            let seq = start_seq + i as u32;
-            let value_bytes = Bytes::copy_from_slice(value);
-            let value_len = value_bytes.len();
-            let key_len = key.len();
-
-            let entry = MemTableEntry {
-                value: Some(value_bytes),
-                pointer: None,
-                seq_num: seq,
-                deleted: false,
-                _padding: [0; 3],
-            };
-
-            // Check if key already exists
-            let old_entry = self.data.insert(key.clone(), entry);
-
-            // Calculate precise size delta
-            let new_entry_size = key_len + value_len + PER_ENTRY_OVERHEAD;
-            let old_entry_size = old_entry
-                .as_ref()
-                .and_then(|e| e.value.as_ref().map(|v| key_len + v.len() + PER_ENTRY_OVERHEAD))
-                .unwrap_or(0);
-
-            let delta = new_entry_size as isize - old_entry_size as isize;
-            if delta >= 0 {
-                self.size_bytes.fetch_add(delta as usize, Ordering::Relaxed);
-            } else {
-                self.size_bytes.fetch_sub(-delta as usize, Ordering::Relaxed);
-            }
-
-            total_size_added = total_size_added.saturating_add(new_entry_size);
-
-            // Count new keys (not updates)
-            if old_entry.is_none() {
-                new_keys_count += 1;
-            }
-        }
-
-        // Update entry count for new keys only
-        if new_keys_count > 0 {
-            self.entry_count.fetch_add(new_keys_count, Ordering::Relaxed);
-        }
-
-        let final_size = self.size_bytes.load(Ordering::Relaxed);
-        (final_size, start_seq)
-    }
-
-    /// OPT-004: Optimized batch insert with reduced lock contention
+    /// 使用分片分组策略减少锁竞争：
+    /// 1. 预计算所有 entry 数据
+    /// 2. 按哈希分片分组
+    /// 3. 按分片批量插入（减少跨分片锁定）
+    /// 4. 统一更新大小和计数
     ///
-    /// This method pre-allocates all entry data upfront and uses a more efficient
-    /// insertion path that minimizes DashMap lock acquisitions.
-    ///
-    /// For large batches, this can reduce lock contention by:
-    /// - Pre-computing all entry sizes in a single pass
-    /// - Reducing redundant key length calculations
-    /// - Using DashMap's internal batching where possible
+    /// # 性能优化
+    /// - 预分配所有 Bytes，避免在锁内分配
+    /// - 分片分组减少 DashMap 内部锁竞争
+    /// - 批量更新 size_bytes，减少原子操作次数
     ///
     /// # Returns
     /// - Final memtable size after batch insert
     /// - Starting sequence number
-    pub fn insert_batch_optimized(&self, entries: &[(String, Vec<u8>)]) -> (usize, u32) {
+    pub fn insert_batch(&self, entries: &[(String, Vec<u8>)]) -> (usize, u32) {
         if entries.is_empty() {
             return (self.size_bytes.load(Ordering::Relaxed), 0);
         }
 
         let start_seq = self.seq_num.fetch_add(entries.len() as u32, Ordering::Relaxed);
 
-        // Phase 1: Pre-allocate all value bytes and compute sizes upfront
-        // This avoids holding locks during allocation
-        let prepared_entries: Vec<(String, Bytes, u32)> = entries
+        // Phase 1: 预分配所有 value bytes 并计算序列号
+        // 避免在插入时进行内存分配
+        let prepared: Vec<(String, Bytes, u32)> = entries
             .iter()
             .enumerate()
             .map(|(i, (key, value))| {
@@ -288,42 +286,62 @@ impl MemTable {
             })
             .collect();
 
-        // Phase 2: Batch insert into DashMap
-        // While DashMap doesn't have true batch insert, we can optimize by:
-        // - Grouping entries by hash shard (entries with similar keys may hit same shard)
-        // - Reducing per-entry overhead
+        // Phase 2: 按分片分组
+        // 使用 ahash 计算每个 key 的分片索引
+        // 这样相同分片的 key 可以连续插入，减少锁竞争
+        let mut shards: HashMap<u64, Vec<(String, Bytes, u32)>> = HashMap::new();
+
+        for (key, value_bytes, seq) in prepared {
+            let hasher = std::hash::BuildHasherDefault::<AHasher>::default();
+            let hash = hasher.hash_one(&key);
+            let shard_idx = hash % self.shard_count;
+            shards.entry(shard_idx).or_default().push((key, value_bytes, seq));
+        }
+
+        // Phase 3: 按分片批量插入
+        // 虽然 DashMap 没有真正的分片锁定 API，但按分片顺序插入可以：
+        // - 提高缓存局部性
+        // - 减少跨分片的锁竞争
+        // - 更好地利用 CPU 缓存
         let mut new_keys_count = 0usize;
         let mut total_delta: isize = 0;
 
-        for (key, value_bytes, seq) in prepared_entries {
-            let value_len = value_bytes.len();
-            let key_len = key.len();
+        // 按分片索引排序，确保一致的访问模式
+        let mut shard_indices: Vec<_> = shards.keys().cloned().collect();
+        shard_indices.sort();
 
-            let entry = MemTableEntry {
-                value: Some(value_bytes),
-                pointer: None,
-                seq_num: seq,
-                deleted: false,
-                _padding: [0; 3],
-            };
+        for shard_idx in shard_indices {
+            if let Some(entries) = shards.remove(&shard_idx) {
+                for (key, value_bytes, seq) in entries {
+                    let value_len = value_bytes.len();
+                    let key_len = key.len();
 
-            let old_entry = self.data.insert(key.clone(), entry);
+                    let entry = MemTableEntry {
+                        value: Some(value_bytes),
+                        pointer: None,
+                        seq_num: seq,
+                        deleted: false,
+                    };
 
-            // Calculate size delta
-            let new_entry_size = key_len + value_len + PER_ENTRY_OVERHEAD;
-            let old_entry_size = old_entry
-                .as_ref()
-                .and_then(|e| e.value.as_ref().map(|v| key_len + v.len() + PER_ENTRY_OVERHEAD))
-                .unwrap_or(0);
+                    let old_entry = self.data.insert(key.clone(), entry);
 
-            total_delta += new_entry_size as isize - old_entry_size as isize;
+                    // 计算大小增量
+                    let new_entry_size = key_len + value_len + PER_ENTRY_OVERHEAD;
+                    let old_entry_size = old_entry
+                        .as_ref()
+                        .and_then(|e| e.value.as_ref().map(|v| key_len + v.len() + PER_ENTRY_OVERHEAD))
+                        .unwrap_or(0);
 
-            if old_entry.is_none() {
-                new_keys_count += 1;
+                    total_delta += new_entry_size as isize - old_entry_size as isize;
+
+                    if old_entry.is_none() {
+                        new_keys_count += 1;
+                    }
+                }
             }
         }
 
-        // Phase 3: Single atomic update for total size
+        // Phase 4: 单次原子更新总大小
         if total_delta >= 0 {
             self.size_bytes.fetch_add(total_delta as usize, Ordering::Relaxed);
         } else {
@@ -338,7 +356,7 @@ impl MemTable {
         (final_size, start_seq)
     }
 
-    /// 标记删除
+    /// Mark key as deleted (tombstone)
     pub fn delete(&self, key: &str) -> Option<u32> {
         let seq = self.seq_num.fetch_add(1, Ordering::Relaxed);
 
@@ -364,7 +382,6 @@ impl MemTable {
             pointer: None,
             seq_num: seq,
             deleted: true,
-            _padding: [0; 3],
         };
 
         // If key already existed, adjust size
@@ -406,7 +423,11 @@ impl MemTable {
     ///
     /// # Returns
     /// * Iterator over key-value pairs
-    pub fn iter(&self) -> impl Iterator<Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry>> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry, std::hash::BuildHasherDefault<AHasher>>,
+    > + '_ {
         self.data.iter()
     }
 
@@ -469,9 +490,10 @@ impl MemTable {
     pub fn backpressure_error(&self) -> Option<TransientError> {
         if self.should_apply_backpressure() {
             let ratio = self.memory_usage_ratio();
-            Some(TransientError::Backpressure(
-                format!("MemTable memory limit exceeded (usage: {:.1}%)", ratio * 100.0)
-            ))
+            Some(TransientError::Backpressure(format!(
+                "MemTable memory limit exceeded (usage: {:.1}%)",
+                ratio * 100.0
+            )))
         } else {
             None
         }
@@ -494,6 +516,14 @@ impl MemTable {
 
     /// 清空 MemTable（刷盘后调用）
     pub fn clear(&self) {
+        // PERF-MEM-001: Report total deallocation
+        let old_size = self.size_bytes.load(Ordering::Relaxed);
+        if old_size > 0 {
+            if let Some(ref tracker) = self.memory_tracker {
+                tracker.record_deallocation(old_size as u64);
+            }
+        }
+
         self.data.clear();
         self.size_bytes.store(0, Ordering::Relaxed);
         self.entry_count.store(0, Ordering::Relaxed);
@@ -502,11 +532,6 @@ impl MemTable {
     /// 获取所有条目（用于刷盘）
     pub fn get_entries(&self) -> Vec<(String, MemTableEntry)> {
         self.data.iter().map(|e| (e.key().clone(), e.value().clone())).collect()
-    }
-
-    /// Get all entries (alias for get_entries)
-    pub fn entries(&self) -> Vec<(String, MemTableEntry)> {
-        self.get_entries()
     }
 
     /// Get all entries sorted by key (for ordered flush to segment files)
@@ -589,14 +614,15 @@ mod tests {
             max_entries: 10,
             max_memory_bytes: 64 * 1024 * 1024, // 64MB - P2-007 backpressure limit
             shards: 16,
+            ..Default::default()
         };
         let mt = MemTable::new(config);
 
         assert!(!mt.should_flush());
 
         // Insert enough to trigger size-based flush
-        // Each entry: "key_N" (6) + "value" (5) + 64 overhead = 75 bytes
-        // 20 entries = 1500 bytes > 1000 threshold
+        // Each entry: "key_N" (6) + "value" (5) + 48 overhead = 59 bytes
+        // 20 entries = 1180 bytes > 1000 threshold
         for i in 0..20 {
             mt.insert(format!("key_{}", i), b"value");
         }
@@ -609,10 +635,11 @@ mod tests {
         let config = MemTableConfig {
             flush_threshold_bytes: 10000,
             max_entries: 1000,
-            // Each entry: "key_N" (6) + 10 value + 64 overhead = 80 bytes (OPT-004)
-            // 30 entries = ~2400 bytes, so 2500 is a reasonable limit
+            // Each entry: "key_N" (6) + 10 value + 48 overhead = 64 bytes (OPT-004)
+            // 40 entries = ~2560 bytes, so 2500 is a reasonable limit
             max_memory_bytes: 2500,
             shards: 16,
+            ..Default::default()
         };
         let mt = MemTable::new(config);
 
@@ -620,8 +647,8 @@ mod tests {
         assert!(!mt.should_apply_backpressure());
         assert!(mt.memory_usage_ratio() < 1.0);
 
-        // Insert until we exceed the limit (each entry ~80 bytes)
-        for i in 0..35 {
+        // Insert until we exceed the limit (each entry ~64 bytes)
+        for i in 0..45 {
             mt.insert(format!("key_{}", i), &[0u8; 10]); // 10 bytes each
         }
 
@@ -771,16 +798,22 @@ mod tests {
         // but the final count depends on timing (last writer wins per key)
         // We should have exactly inserts_per_thread unique keys
         let entry_count = mt.entry_count();
-        assert_eq!(entry_count, inserts_per_thread,
-            "Expected {} unique keys, got {}", inserts_per_thread, entry_count);
+        assert_eq!(
+            entry_count, inserts_per_thread,
+            "Expected {} unique keys, got {}",
+            inserts_per_thread, entry_count
+        );
 
         // Size should be reasonable (100 keys * (12 bytes key + 100 bytes value + 64 overhead) = ~17600)
         let size = mt.size_bytes();
         assert!(size > 0);
         // Each key has overhead: String key + entry metadata + value
         // Upper bound: 100 keys * (100 bytes value + ~100 bytes key + 64 overhead)
-        assert!(size < inserts_per_thread * 300,
-            "Size {} exceeds expected upper bound", size);
+        assert!(
+            size < inserts_per_thread * 300,
+            "Size {} exceeds expected upper bound",
+            size
+        );
     }
 
     /// P2-007: Test memory headroom calculation
@@ -789,22 +822,23 @@ mod tests {
         let config = MemTableConfig {
             flush_threshold_bytes: 10000,
             max_entries: 1000,
-            // 10 entries * (7 key + 100 value + 64 overhead) = 1710, plus some margin (OPT-004)
-            max_memory_bytes: 1800,
+            // 10 entries * (7 key + 100 value + 48 overhead) = 1550, plus some margin (OPT-004)
+            max_memory_bytes: 1700,
             shards: 16,
+            ..Default::default()
         };
         let mt = MemTable::new(config);
 
         // Initially should have full headroom
-        assert_eq!(mt.memory_headroom(), 1800);
+        assert_eq!(mt.memory_headroom(), 1700);
         assert_eq!(mt.backpressure_level(), 0.0);
 
-        // Insert some data: "key1" (4) + 100 value + 64 overhead = 168 bytes
+        // Insert some data: "key1" (4) + 100 value + 48 overhead = 152 bytes
         mt.insert("key1".to_string(), &[0u8; 100]);
-        assert!(mt.memory_headroom() < 1800);
+        assert!(mt.memory_headroom() < 1700);
         assert!(mt.backpressure_level() > 0.0);
 
-        // Insert more until near limit (each entry ~168-171 bytes with OPT-004 overhead)
+        // Insert more until near limit (each entry ~152-155 bytes with OPT-004 overhead)
         for i in 0..8 {
             mt.insert(format!("key_{}", i), &[0u8; 100]);
         }
@@ -821,21 +855,22 @@ mod tests {
         let config = MemTableConfig {
             flush_threshold_bytes: 10000,
             max_entries: 1000,
-            max_memory_bytes: 1100, // Enough for ~2 entries (OPT-004: 64 overhead)
+            max_memory_bytes: 1100, // Enough for ~2 entries (OPT-004: 48 overhead)
             shards: 16,
+            ..Default::default()
         };
         let mt = MemTable::new(config);
 
         // Start at 0%
         assert!(mt.backpressure_level() < 0.1);
 
-        // Insert to ~50%: "key1" (4) + 500 value + 64 overhead = 568 bytes
+        // Insert to ~50%: "key1" (4) + 500 value + 48 overhead = 552 bytes
         mt.insert("key1".to_string(), &[0u8; 500]);
         let level = mt.backpressure_level();
         assert!((0.4..=0.6).contains(&level), "Expected ~0.5, got {}", level);
 
-        // Insert to exceed limit: "key2" (5) + 600 value + 64 overhead = 669 bytes
-        // Total: 568 + 669 = 1237 > 1100
+        // Insert to exceed limit: "key2" (5) + 600 value + 48 overhead = 653 bytes
+        // Total: 552 + 653 = 1205 > 1100
         mt.insert("key2".to_string(), &[0u8; 600]);
         assert!(mt.backpressure_level() >= 1.0);
         assert!(mt.should_apply_backpressure());
@@ -851,22 +886,220 @@ mod tests {
 
         assert_eq!(mt.size_bytes(), 0);
 
-        // Insert first entry: "hello" (5) + "world" (5) + 64 overhead = 74 bytes (OPT-004)
+        // Insert first entry: "hello" (5) + "world" (5) + 48 overhead = 58 bytes (OPT-004)
         let (size1, _) = mt.insert("hello".to_string(), b"world");
-        assert_eq!(size1, 74);
+        assert_eq!(size1, 58);
 
-        // Insert second entry: "foo" (3) + "bar" (3) + 64 overhead = 70 bytes
+        // Insert second entry: "foo" (3) + "bar" (3) + 48 overhead = 54 bytes
         let (size2, _) = mt.insert("foo".to_string(), b"bar");
-        assert_eq!(size2, 74 + 70);
+        assert_eq!(size2, 58 + 54);
 
-        // Update existing key: "hello" (5) + "new_value" (9) + 64 overhead = 78 bytes
-        // Delta: 78 - 74 = +4 bytes
+        // Update existing key: "hello" (5) + "new_value" (9) + 48 overhead = 62 bytes
+        // Delta: 62 - 58 = +4 bytes
         let (size3, _) = mt.insert("hello".to_string(), b"new_value");
-        assert_eq!(size3, 74 + 70 + 4);
+        assert_eq!(size3, 58 + 54 + 4);
 
-        // Insert tombstone for "foo": key (3) + 64 overhead = 67 bytes (no value)
-        // Old entry was 70 bytes, so delta = 67 - 70 = -3 bytes
+        // Insert tombstone for "foo": key (3) + 48 overhead = 51 bytes (no value)
+        // Old entry was 54 bytes, so delta = 51 - 54 = -3 bytes
         let (size4, _) = mt.insert_tombstone("foo".to_string());
-        assert_eq!(size4, 74 + 70 + 4 - 3);
+        assert_eq!(size4, 58 + 54 + 4 - 3);
+    }
+
+    /// OPT-004: Test batch insert correctness
+    #[test]
+    fn test_memtable_insert_batch_correctness() {
+        let config = MemTableConfig::default();
+        let mt = MemTable::new(config);
+
+        // Test empty batch
+        let (size, _seq) = mt.insert_batch(&[]);
+        assert_eq!(size, 0);
+        assert_eq!(mt.entry_count(), 0);
+
+        // Test single entry batch
+        let entries = vec![("batch_key1".to_string(), b"value1".to_vec())];
+        let (size, seq) = mt.insert_batch(&entries);
+        assert!(size > 0);
+        assert_eq!(seq, 0);
+        assert_eq!(mt.entry_count(), 1);
+
+        // Verify entry exists
+        let (val, _, deleted) = mt.get("batch_key1").unwrap();
+        assert!(val.is_some());
+        assert_eq!(val.unwrap().as_ref(), b"value1");
+        assert!(!deleted);
+
+        // Test multiple entries batch
+        let entries: Vec<(String, Vec<u8>)> = (0..10)
+            .map(|i| (format!("batch_key_{}", i), format!("value_{}", i).into_bytes()))
+            .collect();
+        let (size, seq) = mt.insert_batch(&entries);
+        assert!(size > 0);
+        assert_eq!(seq, 1); // Continues from previous
+        assert_eq!(mt.entry_count(), 11); // 1 + 10 new
+
+        // Verify all entries
+        for i in 0..10 {
+            let key = format!("batch_key_{}", i);
+            let (val, _, deleted) = mt.get(&key).unwrap();
+            assert!(val.is_some());
+            assert_eq!(val.unwrap().as_ref(), format!("value_{}", i).as_bytes());
+            assert!(!deleted);
+        }
+    }
+
+    /// OPT-004: Test batch insert with updates
+    #[test]
+    fn test_memtable_insert_batch_with_updates() {
+        let config = MemTableConfig::default();
+        let mt = MemTable::new(config);
+
+        // Insert initial entries
+        let initial: Vec<(String, Vec<u8>)> = (0..5)
+            .map(|i| (format!("update_key_{}", i), format!("initial_{}", i).into_bytes()))
+            .collect();
+        let (_size1, _) = mt.insert_batch(&initial);
+        assert_eq!(mt.entry_count(), 5);
+
+        // Update some entries in new batch
+        let updates: Vec<(String, Vec<u8>)> = (0..3)
+            .map(|i| (format!("update_key_{}", i), format!("updated_{}", i).into_bytes()))
+            .collect();
+        let (_size2, _) = mt.insert_batch(&updates);
+
+        // Entry count should not increase (all updates)
+        assert_eq!(mt.entry_count(), 5);
+
+        // Verify updated values
+        for i in 0..3 {
+            let key = format!("update_key_{}", i);
+            let (val, _, _deleted) = mt.get(&key).unwrap();
+            assert!(val.is_some());
+            assert_eq!(val.unwrap().as_ref(), format!("updated_{}", i).as_bytes());
+        }
+
+        // Verify unchanged entries
+        for i in 3..5 {
+            let key = format!("update_key_{}", i);
+            let (val, _, _deleted) = mt.get(&key).unwrap();
+            assert!(val.is_some());
+            assert_eq!(val.unwrap().as_ref(), format!("initial_{}", i).as_bytes());
+        }
+    }
+
+    /// OPT-004: Test concurrent batch insert stress
+    #[test]
+    fn test_memtable_concurrent_batch_insert_stress() {
+        use std::thread;
+
+        let config = MemTableConfig {
+            shards: num_cpus::get() * 4,
+            ..Default::default()
+        };
+        let mt = Arc::new(MemTable::new(config));
+        let num_threads = 8;
+        let batch_size = 500;
+
+        let mut handles = Vec::new();
+
+        // Spawn threads inserting batches
+        for t in 0..num_threads {
+            let mt_clone = Arc::clone(&mt);
+            let handle = thread::spawn(move || {
+                let batch: Vec<(String, Vec<u8>)> = (0..batch_size)
+                    .map(|i| {
+                        (
+                            format!("thread_{}_batch_key_{}", t, i),
+                            format!("value_{}_{}", t, i).into_bytes(),
+                        )
+                    })
+                    .collect();
+                mt_clone.insert_batch(&batch);
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify all entries
+        let expected_entries = num_threads * batch_size;
+        assert_eq!(mt.entry_count(), expected_entries);
+
+        // Verify size is consistent
+        let size = mt.size_bytes();
+        assert!(size > 0);
+
+        // Spot check some entries
+        for t in 0..num_threads {
+            for i in (0..batch_size).step_by(100) {
+                let key = format!("thread_{}_batch_key_{}", t, i);
+                let (val, _, deleted) = mt.get(&key).expect("Entry should exist");
+                assert!(val.is_some(), "Value should be present");
+                assert!(!deleted, "Entry should not be deleted");
+            }
+        }
+    }
+
+    /// OPT-004: Test shard configuration
+    #[test]
+    fn test_memtable_shard_configuration() {
+        // Test with explicit shard count
+        let config1 = MemTableConfig {
+            shards: 32,
+            ..Default::default()
+        };
+        let _mt1 = MemTable::new(config1);
+        // Should create successfully with custom shard count
+
+        // Test with default (should use num_cpus * 4)
+        let expected_shards = num_cpus::get() * 4;
+        let config2 = MemTableConfig::default();
+        let _mt2 = MemTable::new(config2.clone());
+        assert_eq!(expected_shards, config2.shards);
+
+        // Test with minimum shard count (should not panic with 0)
+        let config3 = MemTableConfig {
+            shards: 0,
+            ..Default::default()
+        };
+        let _mt3 = MemTable::new(config3);
+        // Should use at least 1 shard
+    }
+
+    /// OPT-004: Test batch insert with mixed new and update entries
+    #[test]
+    fn test_memtable_insert_batch_mixed() {
+        let config = MemTableConfig::default();
+        let mt = MemTable::new(config);
+
+        // Insert initial entries
+        let initial: Vec<(String, Vec<u8>)> = vec![
+            ("mixed_key_1".to_string(), b"initial_1".to_vec()),
+            ("mixed_key_2".to_string(), b"initial_2".to_vec()),
+        ];
+        mt.insert_batch(&initial);
+        assert_eq!(mt.entry_count(), 2);
+
+        // Batch with mix of new and update entries
+        let mixed: Vec<(String, Vec<u8>)> = vec![
+            ("mixed_key_1".to_string(), b"updated_1".to_vec()), // Update
+            ("mixed_key_3".to_string(), b"new_3".to_vec()),     // New
+            ("mixed_key_2".to_string(), b"updated_2".to_vec()), // Update
+            ("mixed_key_4".to_string(), b"new_4".to_vec()),     // New
+        ];
+        mt.insert_batch(&mixed);
+
+        // Should have 4 entries total (2 original + 2 new)
+        assert_eq!(mt.entry_count(), 4);
+
+        // Verify values
+        let (val1, _, _) = mt.get("mixed_key_1").unwrap();
+        assert_eq!(val1.unwrap().as_ref(), b"updated_1");
+
+        let (val3, _, _) = mt.get("mixed_key_3").unwrap();
+        assert_eq!(val3.unwrap().as_ref(), b"new_3");
     }
 }

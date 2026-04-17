@@ -1,41 +1,41 @@
 //! Experiment framework for Tokitai Prompt Engineering self-evolution system
-//! 
+//!
 //! This module provides the infrastructure for running controlled experiments
 //! to validate the effectiveness of the self-evolution system.
-//! 
+//!
 //! # Experiment Groups
-//! 
+//!
 //! - **Control**: Original tokitai without self-evolution
 //! - **Ours-Full**: Complete Prompt Engineering system
 //! - **Ours-Single**: Single LLM decision (no multi-agent negotiation)
 //! - **Ours-NoCoT**: Without Chain-of-Thought reasoning
 //! - **Ours-NoFix**: Without self-correction loop
-//! 
+//!
 //! # Usage
-//! 
+//!
 //! ```bash
 //! # Run benchmark for a single group
 //! cargo run -- experiment run --group Ours-Full --days 30
-//! 
+//!
 //! # Run all comparison groups
 //! cargo run -- experiment run --all-groups
-//! 
+//!
 //! # Run ablation study
 //! cargo run -- experiment run --ablation
-//! 
+//!
 //! # Analyze results
 //! cargo run -- experiment analyze
 //! ```
 
-pub mod cli;
-pub mod runner;
-pub mod collector;
 pub mod benchmark_tasks;
+pub mod cli;
+pub mod collector;
+pub mod runner;
 // pub mod metrics;  // Temporarily disabled due to compilation issues
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use chrono::{DateTime, Utc};
 
 /// Experiment group configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

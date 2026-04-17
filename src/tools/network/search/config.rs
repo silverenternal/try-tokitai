@@ -5,8 +5,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::types::{EngineHealth, SearchEngineType, SearchStats};
 use super::search_error::SearchError;
+use super::types::{EngineHealth, SearchEngineType, SearchStats};
 use crate::tools::network::NetworkResult;
 
 // ============================================================================
@@ -187,10 +187,7 @@ impl SearchEngineManager {
 
     /// 获取引擎健康状态列表
     pub fn get_health_status(&self) -> Vec<EngineHealth> {
-        self.engines
-            .iter()
-            .map(|e| e.get_health())
-            .collect()
+        self.engines.iter().map(|e| e.get_health()).collect()
     }
 
     /// 按健康度排序引擎

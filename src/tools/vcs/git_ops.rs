@@ -26,11 +26,11 @@
 //! let current = git.git_current_commit(None)?;
 //! ```
 
-use tokitai::tool;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tokitai::tool;
 use tracing::{debug, error, info, span, Level};
 
 use crate::tools::io::security::validate_path;
@@ -157,7 +157,7 @@ impl GitOperations {
     /// 验证路径是否为有效的 git 仓库
     fn validate_repo_path(path_str: &str) -> Result<PathBuf, String> {
         let validation = validate_path(path_str);
-        
+
         if !validation.is_valid {
             return Err(format!(
                 "路径验证失败：{}。建议：{}",
@@ -166,13 +166,19 @@ impl GitOperations {
             ));
         }
 
-        let canonical_path = validation.canonical_path
+        let canonical_path = validation
+            .canonical_path
             .map(PathBuf::from)
             .ok_or_else(|| "无法解析路径".to_string())?;
 
         // 验证是否为 git 仓库
         let output = Command::new("git")
-            .args(["-C", canonical_path.to_str().unwrap(), "rev-parse", "--git-dir"])
+            .args([
+                "-C",
+                canonical_path.to_str().unwrap(),
+                "rev-parse",
+                "--git-dir",
+            ])
             .output()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -199,7 +205,7 @@ impl GitOperations {
         span: &tracing::Span,
     ) -> Result<String, String> {
         let _enter = span.enter();
-        
+
         info!(
             target: "git_ops",
             command = format!("git {}", args.join(" ")),
@@ -241,8 +247,8 @@ impl GitOperations {
             return Err(format!("Git 命令失败：{}", stderr));
         }
 
-        let stdout = String::from_utf8(output.stdout)
-            .map_err(|e| format!("UTF-8 解码失败：{}", e))?;
+        let stdout =
+            String::from_utf8(output.stdout).map_err(|e| format!("UTF-8 解码失败：{}", e))?;
 
         debug!(
             target: "git_ops",
@@ -265,10 +271,7 @@ impl GitOperations {
     }
 
     /// 解析 git status 输出为结构化数据
-    fn parse_status_output(
-        output: &str,
-        branch: &str,
-    ) -> Result<GitStatus, String> {
+    fn parse_status_output(output: &str, branch: &str) -> Result<GitStatus, String> {
         let mut changed_files = Vec::new();
         let mut has_unstaged_changes = false;
         let mut has_staged_changes = false;
@@ -317,7 +320,7 @@ impl GitOperations {
             if chars.len() >= 3 {
                 let staged = chars[0];
                 let unstaged = chars[1];
-                
+
                 // 提取文件名（跳过状态字符和空格）
                 let filename_start = if trimmed.contains("->") {
                     // 重命名：提取新文件名
@@ -325,9 +328,9 @@ impl GitOperations {
                 } else {
                     3
                 };
-                
+
                 let filename = trimmed[filename_start..].trim().to_string();
-                
+
                 if filename.is_empty() {
                     continue;
                 }
@@ -403,33 +406,33 @@ impl GitOperations {
         upstream: Option<&str>,
     ) -> String {
         let mut parts = Vec::new();
-        
+
         parts.push(format!("分支：{}", branch));
-        
+
         if let Some(up) = upstream {
             parts.push(format!("上游：{}", up));
         }
-        
+
         if has_conflicts {
             parts.push("⚠️ 存在合并冲突".to_string());
         }
-        
+
         if has_staged {
             parts.push("✓ 有已暂存的更改".to_string());
         }
-        
+
         if has_unstaged {
             parts.push("✗ 有未暂存的更改".to_string());
         }
-        
+
         if has_untracked {
             parts.push("? 有未跟踪的文件".to_string());
         }
-        
+
         if file_count > 0 {
             parts.push(format!("共 {} 个文件变更", file_count));
         }
-        
+
         if parts.len() == 2 {
             "工作区干净".to_string()
         } else {
@@ -469,7 +472,7 @@ impl GitOperations {
     /// ```
     pub fn git_status(&self, repo_path: Option<String>) -> Result<Value, String> {
         let path_str = repo_path.unwrap_or_else(|| ".".to_string());
-        
+
         let span = span!(
             Level::INFO,
             "git_status",
@@ -480,11 +483,7 @@ impl GitOperations {
         let validated_path = Self::validate_repo_path(&path_str)?;
         let branch = Self::get_current_branch(&validated_path)?;
 
-        let output = Self::execute_git_command(
-            &validated_path,
-            &["status"],
-            &span,
-        )?;
+        let output = Self::execute_git_command(&validated_path, &["status"], &span)?;
 
         let status = Self::parse_status_output(&output, &branch)?;
 
@@ -559,7 +558,8 @@ impl GitOperations {
                 "--shortstat",
             ],
             &span,
-        ).unwrap_or_default();
+        )
+        .unwrap_or_default();
 
         let stats_lines: Vec<&str> = stats_output.lines().filter(|l| !l.is_empty()).collect();
 
@@ -576,7 +576,7 @@ impl GitOperations {
                         let mut files = 0;
                         let mut ins = 0;
                         let mut del = 0;
-                        
+
                         for part in s.split(',') {
                             let part = part.trim();
                             if part.contains("file") {
@@ -589,7 +589,7 @@ impl GitOperations {
                                 del = part.split_whitespace().next()?.parse().unwrap_or(0);
                             }
                         }
-                        
+
                         Some(CommitStats {
                             files_changed: files,
                             insertions: ins,
@@ -654,7 +654,12 @@ impl GitOperations {
         // 获取当前提交信息
         let output = Self::execute_git_command(
             &validated_path,
-            &["show", "-s", "--pretty=format:%H%x00%an%x00%ae%x00%s%x00%cr", "HEAD"],
+            &[
+                "show",
+                "-s",
+                "--pretty=format:%H%x00%an%x00%ae%x00%s%x00%cr",
+                "HEAD",
+            ],
             &span,
         )?;
 
@@ -663,7 +668,8 @@ impl GitOperations {
             &validated_path,
             &["show", "-s", "--pretty=format:", "--shortstat", "HEAD"],
             &span,
-        ).unwrap_or_default();
+        )
+        .unwrap_or_default();
 
         let parts: Vec<&str> = output.trim().split('\0').collect();
         if parts.len() < 5 {
@@ -717,11 +723,7 @@ impl GitOperations {
 
         let validated_path = Self::validate_repo_path(&path_str)?;
 
-        let output = Self::execute_git_command(
-            &validated_path,
-            &["diff"],
-            &span,
-        )?;
+        let output = Self::execute_git_command(&validated_path, &["diff"], &span)?;
 
         if output.is_empty() {
             Ok(json!({
@@ -768,11 +770,7 @@ impl GitOperations {
 
         let validated_path = Self::validate_repo_path(&path_str)?;
 
-        let output = Self::execute_git_command(
-            &validated_path,
-            &["diff", "--staged"],
-            &span,
-        )?;
+        let output = Self::execute_git_command(&validated_path, &["diff", "--staged"], &span)?;
 
         if output.is_empty() {
             Ok(json!({
@@ -833,18 +831,11 @@ impl GitOperations {
             vec!["branch"]
         };
 
-        let output = Self::execute_git_command(
-            &validated_path,
-            &args,
-            &span,
-        )?;
+        let output = Self::execute_git_command(&validated_path, &args, &span)?;
 
         // 获取上游分支信息
-        let upstream_output = Self::execute_git_command(
-            &validated_path,
-            &["branch", "-vv"],
-            &span,
-        ).unwrap_or_default();
+        let upstream_output = Self::execute_git_command(&validated_path, &["branch", "-vv"], &span)
+            .unwrap_or_default();
 
         let branches: Vec<Branch> = output
             .lines()
@@ -933,7 +924,7 @@ fn parse_commit_stats(output: &str) -> Option<CommitStats> {
     let mut files = 0;
     let mut ins = 0;
     let mut del = 0;
-    
+
     for part in output.split(',') {
         let part = part.trim();
         if part.contains("file") {
@@ -946,7 +937,7 @@ fn parse_commit_stats(output: &str) -> Option<CommitStats> {
             del = part.split_whitespace().next()?.parse().unwrap_or(0);
         }
     }
-    
+
     if files == 0 && ins == 0 && del == 0 {
         None
     } else {
@@ -967,7 +958,7 @@ mod tests {
     fn get_test_temp_dir(name: &str) -> PathBuf {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let test_dir = current_dir.join("target").join("test_tmp").join(name);
-        let _ = std::fs::remove_dir_all(&test_dir);  // 清理旧目录
+        let _ = std::fs::remove_dir_all(&test_dir); // 清理旧目录
         let _ = std::fs::create_dir_all(&test_dir);
         test_dir
     }
@@ -1020,7 +1011,7 @@ mod tests {
         let data = value.get("data").expect("应该有 data 字段");
         let branch = data.get("branch").expect("应该有 branch 字段");
         assert!(!branch.as_str().unwrap().is_empty());
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1037,8 +1028,12 @@ mod tests {
         let data = value.get("data").unwrap();
         let branch = data.get("branch").unwrap().as_str().unwrap();
         assert!(!branch.is_empty());
-        assert!(branch == "master" || branch == "main", "分支应为 master 或 main，实际：{}", branch);
-        
+        assert!(
+            branch == "master" || branch == "main",
+            "分支应为 master 或 main，实际：{}",
+            branch
+        );
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1055,8 +1050,11 @@ mod tests {
         let data = value.get("data").unwrap();
         let commits = data.get("commits").unwrap().as_array().unwrap();
         assert!(!commits.is_empty(), "应该至少有一个提交");
-        assert_eq!(commits[0].get("message").unwrap().as_str().unwrap(), "Initial commit");
-        
+        assert_eq!(
+            commits[0].get("message").unwrap().as_str().unwrap(),
+            "Initial commit"
+        );
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1073,7 +1071,7 @@ mod tests {
         let data = value.get("data").unwrap();
         let hash = data.get("hash").unwrap().as_str().unwrap();
         assert!(!hash.is_empty(), "提交哈希不应为空");
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1090,11 +1088,13 @@ mod tests {
         let data = value.get("data").unwrap();
         let branches = data.get("branches").unwrap().as_array().unwrap();
         assert!(!branches.is_empty(), "应该至少有一个分支");
-        let current = branches.iter().find(|b| b.get("is_current").unwrap().as_bool().unwrap());
+        let current = branches
+            .iter()
+            .find(|b| b.get("is_current").unwrap().as_bool().unwrap());
         assert!(current.is_some(), "应该有当前分支");
         let current_name = current.unwrap().get("name").unwrap().as_str().unwrap();
         assert!(current_name == "master" || current_name == "main");
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1111,7 +1111,7 @@ mod tests {
         let temp_dir = get_test_temp_dir("not_git_repo_test");
         // 创建一个空目录（不是 git 仓库）
         std::fs::create_dir_all(&temp_dir).unwrap();
-        
+
         let git = GitOperations;
         let result = git.git_status(Some(temp_dir.to_string_lossy().to_string()));
 
@@ -1139,7 +1139,7 @@ mod tests {
         let value = result.unwrap();
         let data = value.get("data").unwrap();
         assert!(!data.get("has_changes").unwrap().as_bool().unwrap());
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

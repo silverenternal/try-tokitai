@@ -9,10 +9,10 @@
 //! - `metrics_dashboard`: 性能指标仪表盘（PEND-005）
 //! - `tool_timeline`: 工具调用链可视化（PEND-006）
 
-pub mod tracing;
+pub mod metrics_dashboard;
 pub mod observability_tools;
 pub mod replay;
-pub mod metrics_dashboard;
 pub mod tool_timeline;
+pub mod tracing;
 
 pub use observability_tools::ObservabilityTools;

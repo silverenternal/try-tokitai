@@ -13,13 +13,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tracing::{debug, info, warn};
 use bloom::ASMS;
+use tracing::{debug, info, warn};
 
-use crate::engine::EngineState;
+use crate::cache::warmup::{CacheWarmer, CacheWarmingConfig};
 use crate::core::segment::SegmentFile;
 use crate::core::sparse_index::IndexManager;
-use crate::cache::warmup::{CacheWarmer, CacheWarmingConfig};
+use crate::engine::EngineState;
 
 /// Lifecycle manager for FileKV
 pub struct LifecycleManager {
@@ -88,11 +88,17 @@ impl LifecycleManager {
         {
             // Use atomic counters for segment stats
             engine_state.stats_state.stats.segment_count.store(
-                engine_state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed),
+                engine_state
+                    .segment_state
+                    .segment_count
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 std::sync::atomic::Ordering::Relaxed,
             );
             engine_state.stats_state.stats.total_size_bytes.store(
-                engine_state.segment_state.total_size_bytes.load(std::sync::atomic::Ordering::Relaxed),
+                engine_state
+                    .segment_state
+                    .total_size_bytes
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 std::sync::atomic::Ordering::Relaxed,
             );
         }
@@ -111,15 +117,21 @@ impl LifecycleManager {
             warn!("{}", warning);
         }
 
-        config.fs.create_dir_all(&config.segment_dir)
+        config
+            .fs
+            .create_dir_all(&config.segment_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create segment dir: {}", e))?;
 
         if config.enable_wal {
-            config.fs.create_dir_all(&config.wal_dir)
+            config
+                .fs
+                .create_dir_all(&config.wal_dir)
                 .map_err(|e| anyhow::anyhow!("Failed to create WAL dir: {}", e))?;
         }
 
-        config.fs.create_dir_all(&config.index_dir)
+        config
+            .fs
+            .create_dir_all(&config.index_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create index dir: {}", e))?;
 
         Ok(())
@@ -189,10 +201,8 @@ impl LifecycleManager {
         let mut cache_config = config.cache.clone();
         if config.aggressive.cache_max_memory_bytes > 0 {
             cache_config.max_memory_bytes = config.aggressive.cache_max_memory_bytes as u64;
-            cache_config.max_items = std::cmp::max(
-                cache_config.max_items,
-                config.aggressive.cache_max_memory_bytes / 4096,
-            );
+            cache_config.max_items =
+                std::cmp::max(cache_config.max_items, config.aggressive.cache_max_memory_bytes / 4096);
         }
         let block_cache = Arc::new(crate::cache::block_cache::BlockCache::new(cache_config));
         let memtable = Arc::new(crate::core::memtable::MemTable::new(config.memtable.clone()));
@@ -209,20 +219,26 @@ impl LifecycleManager {
         let global_index = Arc::new(crate::core::global_index::GlobalKeyIndex::new());
         if !segments.is_empty() {
             global_index.rebuild_from_segments(&segments)?;
-            debug!("Global key index rebuilt with {} keys from {} segments", global_index.len(), segments.len());
+            debug!(
+                "Global key index rebuilt with {} keys from {} segments",
+                global_index.len(),
+                segments.len()
+            );
         }
 
         // ENG-007: Use builder pattern instead of 10+ parameter constructor
-        let engine_state = Arc::new(EngineState::builder(config)
-            .segments(segments)
-            .next_segment_id(max_id + 1)
-            .index_manager(index_manager)
-            .stats(stats)
-            .memtable(memtable)
-            .bloom_filter_cache(bloom_filter_cache)
-            .block_cache(block_cache)
-            .global_index(global_index)
-            .build());
+        let engine_state = Arc::new(
+            EngineState::builder(config)
+                .segments(segments)
+                .next_segment_id(max_id + 1)
+                .index_manager(index_manager)
+                .stats(stats)
+                .memtable(memtable)
+                .bloom_filter_cache(bloom_filter_cache)
+                .block_cache(block_cache)
+                .global_index(global_index)
+                .build(),
+        );
 
         Ok(engine_state)
     }
@@ -283,7 +299,11 @@ impl LifecycleManager {
             }
 
             // Save atomically
-            let temp_path = self.state.config.index_dir.join(format!(".bloom_{:06}.bin.tmp", segment_id));
+            let temp_path = self
+                .state
+                .config
+                .index_dir
+                .join(format!(".bloom_{:06}.bin.tmp", segment_id));
             let mut file = self.state.config.fs.create_file(&temp_path)?;
 
             // Write header
@@ -305,7 +325,10 @@ impl LifecycleManager {
             self.state.config.fs.rename(&temp_path, &bloom_path)?;
 
             // Insert into bloom filter cache (without keys list)
-            self.state.cache_state.bloom_filter_cache.insert(segment_id, bloom);
+            self.state
+                .cache_state
+                .bloom_filter_cache
+                .insert(segment_id, crate::bloom::FilterWrapper::Bloom(bloom));
 
             rebuilt += 1;
         }
@@ -325,14 +348,18 @@ impl LifecycleManager {
     ///
     /// T-004: Validates WAL integrity before reading entries.
     /// T-018: Validates WAL sequence number continuity during recovery.
-    pub fn recover_from_wal(&self, wal: &parking_lot::Mutex<crate::core::wal::WalManager>) -> anyhow::Result<usize> {
+    pub fn recover_from_wal(
+        &self,
+        wal: &Arc<parking_lot::Mutex<crate::core::wal::WalManager>>,
+    ) -> anyhow::Result<usize> {
         use crate::core::wal::WalOperation;
-        use tracing::{info, warn, error};
+        use tracing::{error, info, warn};
 
         let mut wal_guard = wal.lock();
 
         // T-004: Validate WAL integrity before reading entries
-        wal_guard.validate_wal_integrity()
+        wal_guard
+            .validate_wal_integrity()
             .map_err(|e| anyhow::anyhow!("WAL integrity check failed: {}", e))?;
 
         // T-018: Validate sequence number continuity and collect entries
@@ -354,7 +381,11 @@ impl LifecycleManager {
 
         for (idx, entry) in entries.iter().enumerate() {
             match &entry.operation {
-                WalOperation::Add { session: key, hash: _, layer: _ } => {
+                WalOperation::Add {
+                    session: key,
+                    hash: _,
+                    layer: _,
+                } => {
                     if let Some(payload) = &entry.payload {
                         // PERF-005 FIX: Parse binary payload format
                         // Format: [8 bytes length][8 bytes hash][value bytes]
@@ -364,7 +395,8 @@ impl LifecycleManager {
                             continue;
                         }
 
-                        let len_bytes: [u8; 8] = payload[0..8].try_into()
+                        let len_bytes: [u8; 8] = payload[0..8]
+                            .try_into()
                             .map_err(|e| anyhow::anyhow!("WAL data corrupted: {}", e))?;
                         let value_len = u64::from_le_bytes(len_bytes) as usize;
 
@@ -402,14 +434,16 @@ impl LifecycleManager {
                     // Replay batch add atomically
                     let batch_entries: Vec<(String, Vec<u8>)> = entries
                         .iter()
-                        .map(|batch_entry| {
-                            (batch_entry.key.clone(), batch_entry.value.clone())
-                        })
+                        .map(|batch_entry| (batch_entry.key.clone(), batch_entry.value.clone()))
                         .collect();
 
                     if !batch_entries.is_empty() {
                         let (_, start_seq) = self.state.memtable_state.memtable.insert_batch(&batch_entries);
-                        info!("Replayed BatchAdd for {} keys, starting seq={}", batch_entries.len(), start_seq);
+                        info!(
+                            "Replayed BatchAdd for {} keys, starting seq={}",
+                            batch_entries.len(),
+                            start_seq
+                        );
                         recovered_count += batch_entries.len();
                     }
                 }
@@ -456,7 +490,9 @@ impl LifecycleManager {
                     ));
                     warn!(
                         "WAL entry {} has unexpected sequence_number={} (expected={}), skipping",
-                        idx, entry.sequence_number, prev_seq + 1
+                        idx,
+                        entry.sequence_number,
+                        prev_seq + 1
                     );
                     continue;
                 }
@@ -532,7 +568,7 @@ impl crate::engine::traits::LifecycleManagerAPI for LifecycleManager {
         LifecycleManager::open(config)
     }
 
-    fn recover_from_wal(&self, wal: &parking_lot::Mutex<crate::core::wal::WalManager>) -> anyhow::Result<usize> {
+    fn recover_from_wal(&self, wal: &Arc<parking_lot::Mutex<crate::core::wal::WalManager>>) -> anyhow::Result<usize> {
         LifecycleManager::recover_from_wal(self, wal)
     }
 

@@ -3,11 +3,11 @@
 //! 提供 CLI 助手和自主助手共享的配置和工具管理器
 
 use reqwest::blocking::Client;
-use std::sync::Arc;
 use serde_json::Value;
+use std::sync::Arc;
 
-use crate::tool_matrix::registry::ToolRegistry;
 use crate::tool_matrix::dispatcher::ToolDispatcher;
+use crate::tool_matrix::registry::ToolRegistry;
 use crate::tool_matrix::tool_selector::LightweightToolSelector;
 
 // ============================================================================
@@ -32,7 +32,7 @@ pub struct AssistantConfig {
 
 impl AssistantConfig {
     /// 创建新的助手配置
-    /// 
+    ///
     /// # 参数
     /// - `api_url`: AI API 端点 URL
     /// - `api_key`: AI API 密钥（可选）
@@ -40,9 +40,9 @@ impl AssistantConfig {
     pub fn new(api_url: String, api_key: Option<String>, model: String) -> Self {
         // 创建持久的 HTTP 客户端（带连接池和超时配置）
         let reqwest_client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))  // 120 秒超时
-            .connect_timeout(std::time::Duration::from_secs(30))  // 30 秒连接超时
-            .pool_max_idle_per_host(10)  // 每个主机最多 10 个空闲连接
+            .timeout(std::time::Duration::from_secs(120)) // 120 秒超时
+            .connect_timeout(std::time::Duration::from_secs(30)) // 30 秒连接超时
+            .pool_max_idle_per_host(10) // 每个主机最多 10 个空闲连接
             .build()
             .expect("创建 HTTP 客户端失败");
 
@@ -75,7 +75,7 @@ pub struct ToolManager {
 
 impl ToolManager {
     /// 创建新的工具管理器
-    /// 
+    ///
     /// # 参数
     /// - `tool_registry`: 工具注册表
     pub fn new(tool_registry: ToolRegistry) -> Self {
@@ -146,58 +146,100 @@ impl ToolManager {
 // ============================================================================
 
 /// 注册所有内置工具到工具注册表
-/// 
+///
 /// # 参数
 /// - `tool_registry`: 工具注册表
 pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
-    use crate::tools::{
-        CodeTools, DownloadTools, FileOperations, GitOperations, SystemTools,
-        SearchTools, HttpClientTools, FileSearchTools, ProcessTools,
-        NetworkTools, WikipediaTools, ProjectTemplates, PdfTools,
-    };
-    use crate::tools::data::{JsonQueryTools, JsonMergeTools, DataConversionTools};
-    use crate::tools::data::JsonFormatTools as JsonTools;
-    use crate::tools::system::system_monitor::SystemMonitor;
     use crate::dialogue::DialogueTools;
     use crate::observability::ObservabilityTools;
     use crate::prompt_engineering::PromptTools;
     use crate::tool_matrix::matrix::ToolBox;
     use crate::tool_matrix::registry::ToolSource;
+    use crate::tools::data::JsonFormatTools as JsonTools;
+    use crate::tools::data::{DataConversionTools, JsonMergeTools, JsonQueryTools};
+    use crate::tools::system::system_monitor::SystemMonitor;
+    use crate::tools::{
+        CodeTools, DownloadTools, FileOperations, FileSearchTools, GitOperations, HttpClientTools,
+        NetworkTools, PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools,
+        WikipediaTools,
+    };
 
     // 创建工具箱
-    let _ = tool_registry.create_toolbox(ToolBox::new("file_ops", "File Operations", "File operations tools"));
-    let _ = tool_registry.create_toolbox(ToolBox::new("system", "System Tools", "System operations tools"));
-    let _ = tool_registry.create_toolbox(ToolBox::new("code", "Code Tools", "Code analysis and processing tools"));
-    let _ = tool_registry.create_toolbox(ToolBox::new("web", "Web Tools", "Web search and network tools"));
-    let _ = tool_registry.create_toolbox(ToolBox::new("git", "Git Tools", "Git version control tools"));
-    let _ = tool_registry.create_toolbox(ToolBox::new("data", "Data Tools", "Data processing tools"));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "file_ops",
+        "File Operations",
+        "File operations tools",
+    ));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "system",
+        "System Tools",
+        "System operations tools",
+    ));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "code",
+        "Code Tools",
+        "Code analysis and processing tools",
+    ));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "web",
+        "Web Tools",
+        "Web search and network tools",
+    ));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "git",
+        "Git Tools",
+        "Git version control tools",
+    ));
+    let _ =
+        tool_registry.create_toolbox(ToolBox::new("data", "Data Tools", "Data processing tools"));
 
     // 从各个 ToolProvider 注册工具
-    let _ = tool_registry.register_from_provider_sync::<FileOperations>(Some("file_ops"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<SystemTools>(Some("system"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<CodeTools>(Some("code"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<SearchTools>(Some("web"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<DownloadTools>(Some("web"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<GitOperations>(Some("git"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<HttpClientTools>(Some("web"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<JsonTools>(Some("data"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<FileSearchTools>(Some("file_ops"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<ProcessTools>(Some("system"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<NetworkTools>(Some("web"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<WikipediaTools>(Some("web"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<ProjectTemplates>(Some("data"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<PdfTools>(Some("file_ops"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<FileOperations>(Some("file_ops"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<SystemTools>(Some("system"), ToolSource::Builtin);
+    let _ =
+        tool_registry.register_from_provider_sync::<CodeTools>(Some("code"), ToolSource::Builtin);
+    let _ =
+        tool_registry.register_from_provider_sync::<SearchTools>(Some("web"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<DownloadTools>(Some("web"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<GitOperations>(Some("git"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<HttpClientTools>(Some("web"), ToolSource::Builtin);
+    let _ =
+        tool_registry.register_from_provider_sync::<JsonTools>(Some("data"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<FileSearchTools>(Some("file_ops"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<ProcessTools>(Some("system"), ToolSource::Builtin);
+    let _ =
+        tool_registry.register_from_provider_sync::<NetworkTools>(Some("web"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<WikipediaTools>(Some("web"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<ProjectTemplates>(Some("data"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<PdfTools>(Some("file_ops"), ToolSource::Builtin);
 
     // 注册数据模块工具
-    let _ = tool_registry.register_from_provider_sync::<JsonQueryTools>(Some("data"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<JsonMergeTools>(Some("data"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<DataConversionTools>(Some("data"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<JsonQueryTools>(Some("data"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<JsonMergeTools>(Some("data"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<DataConversionTools>(Some("data"), ToolSource::Builtin);
 
     // 注册系统监控工具
-    let _ = tool_registry.register_from_provider_sync::<SystemMonitor>(Some("system"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<SystemMonitor>(Some("system"), ToolSource::Builtin);
 
     // 注册集成模块工具
-    let _ = tool_registry.register_from_provider_sync::<DialogueTools>(Some("system"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<ObservabilityTools>(Some("system"), ToolSource::Builtin);
-    let _ = tool_registry.register_from_provider_sync::<PromptTools>(Some("system"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<DialogueTools>(Some("system"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<ObservabilityTools>(Some("system"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<PromptTools>(Some("system"), ToolSource::Builtin);
 }

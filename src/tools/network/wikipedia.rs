@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokitai::tool;
 
 use super::error::{NetworkResult, SearchError};
-use super::search::types::{SearchResult, SearchResponse};
+use super::search::types::{SearchResponse, SearchResult};
 
 // ============================================================================
 // 配置结构
@@ -81,12 +81,10 @@ impl WikipediaTools {
     /// # 返回
     /// 返回 JSON 格式的搜索结果列表，包含标题、URL、摘要
     #[tool(default_limit = "null")]
-    pub fn search_wikipedia(
-        &self,
-        query: String,
-        limit: Option<usize>,
-    ) -> NetworkResult<String> {
-        let limit = limit.unwrap_or(self.config.default_limit).min(self.config.max_limit);
+    pub fn search_wikipedia(&self, query: String, limit: Option<usize>) -> NetworkResult<String> {
+        let limit = limit
+            .unwrap_or(self.config.default_limit)
+            .min(self.config.max_limit);
 
         tracing::info!("📚 搜索维基百科：{} (limit={})", query, limit);
 
@@ -105,7 +103,8 @@ impl WikipediaTools {
             return Err(SearchError::ApiError {
                 status,
                 message: "维基百科 API 返回错误状态".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         let json: WikipediaApiQuery = response.json()?;
@@ -115,9 +114,9 @@ impl WikipediaTools {
             .search
             .into_iter()
             .map(|r| {
-                let wiki_url = r.url.unwrap_or_else(|| {
-                    format!("https://zh.wikipedia.org/wiki/{}", r.title)
-                });
+                let wiki_url = r
+                    .url
+                    .unwrap_or_else(|| format!("https://zh.wikipedia.org/wiki/{}", r.title));
                 SearchResult {
                     title: r.title,
                     url: wiki_url,
@@ -152,7 +151,9 @@ impl WikipediaTools {
         query: String,
         limit: Option<usize>,
     ) -> NetworkResult<String> {
-        let limit = limit.unwrap_or(self.config.default_limit).min(self.config.max_limit);
+        let limit = limit
+            .unwrap_or(self.config.default_limit)
+            .min(self.config.max_limit);
 
         tracing::info!("📚 搜索英文维基百科：{} (limit={})", query, limit);
 
@@ -171,7 +172,8 @@ impl WikipediaTools {
             return Err(SearchError::ApiError {
                 status,
                 message: "维基百科 API 返回错误状态".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         let json: WikipediaApiQuery = response.json()?;
@@ -180,9 +182,9 @@ impl WikipediaTools {
             .search
             .into_iter()
             .map(|r| {
-                let wiki_url = r.url.unwrap_or_else(|| {
-                    format!("https://en.wikipedia.org/wiki/{}", r.title)
-                });
+                let wiki_url = r
+                    .url
+                    .unwrap_or_else(|| format!("https://en.wikipedia.org/wiki/{}", r.title));
                 SearchResult {
                     title: r.title,
                     url: wiki_url,
@@ -217,7 +219,8 @@ impl WikipediaTools {
             return Err(SearchError::ApiError {
                 status: response.status().as_u16(),
                 message: "获取页面失败".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         // 解析响应获取内容
@@ -272,7 +275,10 @@ fn clean_snippet(snippet: &str) -> String {
         .replace("<span class=\"searchmatch\">", "")
         .replace("</span>", "");
 
-    without_html.split_whitespace().collect::<Vec<_>>().join(" ")
+    without_html
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ============================================================================

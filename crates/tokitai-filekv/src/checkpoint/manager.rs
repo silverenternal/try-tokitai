@@ -2,13 +2,13 @@
 //!
 //! Main implementation of IncrementalCheckpointManager for managing checkpoint lifecycle.
 
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use sha2::{Sha256, Digest};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::core::error::FatalError;
 use std::io;
@@ -37,8 +37,7 @@ impl IncrementalCheckpointManager {
     pub fn new<P: AsRef<Path>>(checkpoint_dir: P) -> Result<Self> {
         let checkpoint_dir = checkpoint_dir.as_ref().to_path_buf();
 
-        fs::create_dir_all(&checkpoint_dir)
-            .map_err(FatalError::Io)?;
+        fs::create_dir_all(&checkpoint_dir).map_err(FatalError::Io)?;
 
         let mut manager = Self {
             checkpoint_dir,
@@ -66,9 +65,7 @@ impl IncrementalCheckpointManager {
         }
 
         // Clean up any leftover temp files from previous crashes
-        for entry in fs::read_dir(&self.checkpoint_dir)
-            .map_err(FatalError::Io)?
-        {
+        for entry in fs::read_dir(&self.checkpoint_dir).map_err(FatalError::Io)? {
             let entry = entry.map_err(io::Error::other)?;
             let path = entry.path();
             if path.is_file() && path.extension().is_some_and(|e| e == "tmp") {
@@ -83,9 +80,7 @@ impl IncrementalCheckpointManager {
 
         let mut checkpoints = Vec::new();
 
-        for entry in fs::read_dir(&self.checkpoint_dir)
-            .map_err(FatalError::Io)?
-        {
+        for entry in fs::read_dir(&self.checkpoint_dir).map_err(FatalError::Io)? {
             let entry = entry.map_err(io::Error::other)?;
             let path = entry.path();
 
@@ -107,7 +102,9 @@ impl IncrementalCheckpointManager {
             self.checkpoints.insert(checkpoint_id.clone(), checkpoint);
             self.chain.checkpoint_ids.push(checkpoint_id.clone());
             self.chain.sequence_map.insert(checkpoint_id.clone(), sequence);
-            self.chain.type_map.insert(checkpoint_id.clone(), checkpoint_type.clone());
+            self.chain
+                .type_map
+                .insert(checkpoint_id.clone(), checkpoint_type.clone());
 
             if let CheckpointType::Full = checkpoint_type {
                 self.chain.latest_full = Some(checkpoint_id.clone());
@@ -124,12 +121,10 @@ impl IncrementalCheckpointManager {
 
     /// Load a single checkpoint file
     fn load_checkpoint_file(&self, path: &Path) -> Result<IncrementalCheckpoint> {
-        let file = File::open(path)
-            .map_err(FatalError::Io)?;
+        let file = File::open(path).map_err(FatalError::Io)?;
         let mut reader = BufReader::new(file);
         let mut content = Vec::new();
-        reader.read_to_end(&mut content)
-            .map_err(FatalError::Io)?;
+        reader.read_to_end(&mut content).map_err(FatalError::Io)?;
 
         let checkpoint: IncrementalCheckpoint = serde_json::from_slice(&content)
             .map_err(|e| FatalError::Corruption(format!("Failed to deserialize checkpoint: {}", e)))?;
@@ -296,13 +291,19 @@ impl IncrementalCheckpointManager {
         self.add_to_chain(checkpoint);
 
         // Check if we need to create a full checkpoint
-        let since_full = self.chain.checkpoint_ids.len() -
-            self.chain.checkpoint_ids.iter().position(|id|
-                Some(id.clone()) == self.chain.latest_full
-            ).unwrap_or(0);
+        let since_full = self.chain.checkpoint_ids.len()
+            - self
+                .chain
+                .checkpoint_ids
+                .iter()
+                .position(|id| Some(id.clone()) == self.chain.latest_full)
+                .unwrap_or(0);
 
         if since_full >= self.full_checkpoint_interval as usize {
-            info!("Full checkpoint interval reached ({} increments since last full), auto-triggering full checkpoint", since_full);
+            info!(
+                "Full checkpoint interval reached ({} increments since last full), auto-triggering full checkpoint",
+                since_full
+            );
             // Note: Actual full checkpoint creation requires the full state,
             // which is not available in this method. The caller (FileKV layer)
             // should check needs_full_checkpoint() and create it accordingly.
@@ -352,7 +353,10 @@ impl IncrementalCheckpointManager {
                         Ok(full_id)
                     }
                     Err(e) => {
-                        warn!("Auto full checkpoint creation failed: {}. Continuing with incremental checkpoint: {}", e, incr_id);
+                        warn!(
+                            "Auto full checkpoint creation failed: {}. Continuing with incremental checkpoint: {}",
+                            e, incr_id
+                        );
                         // Don't fail the whole operation - the incremental checkpoint is still valid
                         Ok(incr_id)
                     }
@@ -368,18 +372,18 @@ impl IncrementalCheckpointManager {
 
     /// Check if a full checkpoint should be created based on the interval
     pub fn needs_full_checkpoint(&self) -> bool {
-        let since_full = self.chain.checkpoint_ids.len() -
-            self.chain.checkpoint_ids.iter().position(|id|
-                Some(id.clone()) == self.chain.latest_full
-            ).unwrap_or(0);
+        let since_full = self.chain.checkpoint_ids.len()
+            - self
+                .chain
+                .checkpoint_ids
+                .iter()
+                .position(|id| Some(id.clone()) == self.chain.latest_full)
+                .unwrap_or(0);
         since_full >= self.full_checkpoint_interval as usize
     }
 
     /// Compute diff between old and new state
-    pub fn compute_diff<K, V>(
-        old_state: &HashMap<K, V>,
-        new_state: &HashMap<K, V>,
-    ) -> Vec<CheckpointEntry>
+    pub fn compute_diff<K, V>(old_state: &HashMap<K, V>, new_state: &HashMap<K, V>) -> Vec<CheckpointEntry>
     where
         K: Clone + ToString + Eq + std::hash::Hash,
         V: Clone + AsRef<[u8]> + std::hash::Hash,
@@ -499,7 +503,9 @@ impl IncrementalCheckpointManager {
 
                     // Update oldest_full_seq if we're deleting a full checkpoint
                     if is_full {
-                        oldest_full_seq = self.checkpoints.values()
+                        oldest_full_seq = self
+                            .checkpoints
+                            .values()
                             .filter(|c| matches!(c.checkpoint_type, CheckpointType::Full))
                             .min_by_key(|c| c.sequence)
                             .map(|c| c.sequence);
@@ -522,8 +528,7 @@ impl IncrementalCheckpointManager {
         if let Some(checkpoint) = self.checkpoints.remove(checkpoint_id) {
             let path = self.get_checkpoint_path(&checkpoint.checkpoint_id);
             if path.exists() {
-                fs::remove_file(&path)
-                    .map_err(FatalError::Io)?;
+                fs::remove_file(&path).map_err(FatalError::Io)?;
             }
 
             self.chain.checkpoint_ids.retain(|id| id != checkpoint_id);
@@ -533,7 +538,9 @@ impl IncrementalCheckpointManager {
             if let Some(latest_full) = &self.chain.latest_full {
                 if latest_full == checkpoint_id {
                     // Find new latest full
-                    self.chain.latest_full = self.checkpoints.values()
+                    self.chain.latest_full = self
+                        .checkpoints
+                        .values()
                         .filter(|c| matches!(c.checkpoint_type, CheckpointType::Full))
                         .max_by_key(|c| c.sequence)
                         .map(|c| c.checkpoint_id.clone());
@@ -571,25 +578,20 @@ impl IncrementalCheckpointManager {
         let size = content.len() as u64;
 
         // Write to temporary file first
-        let mut file = BufWriter::new(File::create(&tmp_path)
-            .map_err(FatalError::Io)?);
-        file.write_all(&content)
-            .map_err(FatalError::Io)?;
+        let mut file = BufWriter::new(File::create(&tmp_path).map_err(FatalError::Io)?);
+        file.write_all(&content).map_err(FatalError::Io)?;
 
         // Ensure data is flushed to disk
-        file.flush()
-            .map_err(FatalError::Io)?;
-        file.get_ref().sync_all()
-            .map_err(FatalError::Io)?;
+        file.flush().map_err(FatalError::Io)?;
+        file.get_ref().sync_all().map_err(FatalError::Io)?;
         drop(file);
 
         // Atomically rename temp file to target file
-        std::fs::rename(&tmp_path, &path)
-            .map_err(|e| {
-                // Clean up temp file on failure
-                let _ = std::fs::remove_file(&tmp_path);
-                FatalError::Io(e)
-            })?;
+        std::fs::rename(&tmp_path, &path).map_err(|e| {
+            // Clean up temp file on failure
+            let _ = std::fs::remove_file(&tmp_path);
+            FatalError::Io(e)
+        })?;
 
         Ok(size)
     }
@@ -617,8 +619,19 @@ impl IncrementalCheckpointManager {
                 CheckpointEntry::Delete { key, timestamp } => {
                     format!("DELETE|{}|{}", key, timestamp)
                 }
-                CheckpointEntry::Modify { key, old_value_hash, new_value, timestamp } => {
-                    format!("MODIFY|{}|{}|{}|{}", key, old_value_hash, hex::encode(new_value), timestamp)
+                CheckpointEntry::Modify {
+                    key,
+                    old_value_hash,
+                    new_value,
+                    timestamp,
+                } => {
+                    format!(
+                        "MODIFY|{}|{}|{}|{}",
+                        key,
+                        old_value_hash,
+                        hex::encode(new_value),
+                        timestamp
+                    )
                 }
             };
             hasher.update(entry_data.as_bytes());
@@ -650,16 +663,14 @@ impl IncrementalCheckpointManager {
     /// Get statistics about checkpoints
     pub fn get_stats(&self) -> CheckpointStats {
         let total_checkpoints = self.checkpoints.len();
-        let full_checkpoints = self.checkpoints.values()
+        let full_checkpoints = self
+            .checkpoints
+            .values()
             .filter(|c| matches!(c.checkpoint_type, CheckpointType::Full))
             .count();
         let incremental_checkpoints = total_checkpoints - full_checkpoints;
-        let total_size_bytes: u64 = self.checkpoints.values()
-            .map(|c| c.metadata.size_bytes)
-            .sum();
-        let total_entries: usize = self.checkpoints.values()
-            .map(|c| c.metadata.total_entries)
-            .sum();
+        let total_size_bytes: u64 = self.checkpoints.values().map(|c| c.metadata.size_bytes).sum();
+        let total_entries: usize = self.checkpoints.values().map(|c| c.metadata.total_entries).sum();
 
         CheckpointStats {
             total_checkpoints,
@@ -673,7 +684,9 @@ impl IncrementalCheckpointManager {
 
     /// Restore state from a checkpoint
     pub fn restore(&self, checkpoint_id: &CheckpointId) -> Result<HashMap<String, Vec<u8>>> {
-        let checkpoint = self.checkpoints.get(checkpoint_id)
+        let checkpoint = self
+            .checkpoints
+            .get(checkpoint_id)
             .ok_or_else(|| FatalError::Corruption(format!("Checkpoint not found: {}", checkpoint_id)))?;
 
         let mut state = HashMap::new();
@@ -703,9 +716,12 @@ impl IncrementalCheckpointManager {
         let target_seq = checkpoint.sequence;
 
         for seq in (start_seq + 1)..=target_seq {
-            if let Some(ckpt_id) = self.chain.checkpoint_ids.iter().find(|id| {
-                self.chain.sequence_map.get(*id) == Some(&seq)
-            }) {
+            if let Some(ckpt_id) = self
+                .chain
+                .checkpoint_ids
+                .iter()
+                .find(|id| self.chain.sequence_map.get(*id) == Some(&seq))
+            {
                 if let Some(ckpt) = self.checkpoints.get(ckpt_id) {
                     for entry in &ckpt.entries {
                         match entry {
@@ -724,7 +740,11 @@ impl IncrementalCheckpointManager {
             }
         }
 
-        info!("Restored state from checkpoint {} ({} keys)", checkpoint_id, state.len());
+        info!(
+            "Restored state from checkpoint {} ({} keys)",
+            checkpoint_id,
+            state.len()
+        );
         Ok(state)
     }
 
@@ -733,7 +753,9 @@ impl IncrementalCheckpointManager {
         match &checkpoint.checkpoint_type {
             CheckpointType::Full => Ok(checkpoint.checkpoint_id.clone()),
             CheckpointType::Incremental { base_checkpoint } => {
-                let base = self.checkpoints.get(base_checkpoint)
+                let base = self
+                    .checkpoints
+                    .get(base_checkpoint)
                     .ok_or_else(|| FatalError::Corruption(format!("Base checkpoint not found: {}", base_checkpoint)))?;
                 self.find_base_full_checkpoint(base)
             }

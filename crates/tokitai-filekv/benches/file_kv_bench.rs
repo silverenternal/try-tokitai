@@ -8,16 +8,16 @@
 //! **修复记录 (2026-04-10)**:
 //! - BENCH-001/002: 修复 setup 在 iter 内的问题，现在测量的是真实操作
 
-use std::time::Duration;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::atomic::{AtomicU64, Ordering};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use std::time::Duration;
 
-use tokitai_filekv::{FileKV, FileKVConfig, MemTableConfig, DictionaryCompressionConfig, AggressiveConfig};
 use tokitai_filekv::cache::block_cache::BlockCacheConfig;
-use tokitai_filekv::io::StdFs;
 use tokitai_filekv::compaction::CompactionConfig;
 use tokitai_filekv::core::types::BlockCompressionConfig;
+use tokitai_filekv::io::StdFs;
 use tokitai_filekv::AuditLogConfig;
+use tokitai_filekv::{AggressiveConfig, FileKV, FileKVConfig, MemTableConfig};
 
 /// 创建测试用的 FileKV 实例
 fn setup_file_kv_internal(enable_wal: bool) -> (tempfile::TempDir, FileKV) {
@@ -35,6 +35,7 @@ fn setup_file_kv_internal(enable_wal: bool) -> (tempfile::TempDir, FileKV) {
             flush_threshold_bytes: 4 * 1024 * 1024,
             max_entries: 100_000,
             max_memory_bytes: 64 * 1024 * 1024,
+            ..Default::default()
         },
         segment_dir,
         enable_wal,
@@ -43,10 +44,10 @@ fn setup_file_kv_internal(enable_wal: bool) -> (tempfile::TempDir, FileKV) {
         cache: BlockCacheConfig {
             max_items: 10_000,
             max_memory_bytes: 64 * 1024 * 1024,
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 100,
         block_size: 8192,
         block_compression: BlockCompressionConfig::default(),
         compaction: CompactionConfig {
@@ -62,32 +63,17 @@ fn setup_file_kv_internal(enable_wal: bool) -> (tempfile::TempDir, FileKV) {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: true,
             streaming_compaction_enabled: true,
+            ..Default::default()
         },
-        segment_preallocate_size: 16 * 1024 * 1024,
-        wal_max_size_bytes: 100 * 1024 * 1024,
-        wal_max_files: 5,
-        
-        cache_warming_enabled: false,
-        compression: DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 4,
-        async_io_max_queue_depth: 1024,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         audit_log: AuditLogConfig {
             log_dir: temp_dir.path().join("audit_logs"),
             enabled: false,
-            rotation_interval_hours: 24,
-            retention_days: 30,
+            ..Default::default()
         },
         aggressive: AggressiveConfig::performance(),
-        enable_adaptive_bloom_cache: true,
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: std::sync::Arc::new(StdFs),
+        ..Default::default()
     };
 
     let kv = FileKV::open(config).unwrap();
@@ -115,9 +101,10 @@ fn setup_file_kv_with_small_flush() -> (tempfile::TempDir, FileKV) {
 
     let config = FileKVConfig {
         memtable: MemTableConfig {
-            flush_threshold_bytes: 64 * 1024,  // 64KB，最小允许值
+            flush_threshold_bytes: 64 * 1024, // 64KB，最小允许值
             max_entries: 100_000,
             max_memory_bytes: 64 * 1024 * 1024,
+            ..Default::default()
         },
         segment_dir,
         enable_wal: false,
@@ -126,10 +113,10 @@ fn setup_file_kv_with_small_flush() -> (tempfile::TempDir, FileKV) {
         cache: BlockCacheConfig {
             max_items: 10_000,
             max_memory_bytes: 64 * 1024 * 1024,
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 100,
         block_size: 8192,
         block_compression: BlockCompressionConfig::default(),
         compaction: CompactionConfig {
@@ -145,32 +132,17 @@ fn setup_file_kv_with_small_flush() -> (tempfile::TempDir, FileKV) {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: true,
             streaming_compaction_enabled: true,
+            ..Default::default()
         },
-        segment_preallocate_size: 16 * 1024 * 1024,
-        wal_max_size_bytes: 100 * 1024 * 1024,
-        wal_max_files: 5,
-        
-        cache_warming_enabled: false,
-        compression: DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 4,
-        async_io_max_queue_depth: 1024,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         audit_log: AuditLogConfig {
             log_dir: temp_dir.path().join("audit_logs"),
             enabled: false,
-            rotation_interval_hours: 24,
-            retention_days: 30,
+            ..Default::default()
         },
         aggressive: AggressiveConfig::performance(),
-        enable_adaptive_bloom_cache: true,
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: std::sync::Arc::new(StdFs),
+        ..Default::default()
     };
 
     let kv = FileKV::open(config).unwrap();
@@ -258,20 +230,19 @@ fn bench_batch_write(c: &mut Criterion) {
     group_loop.warm_up_time(Duration::from_secs(2));
 
     for &count in &[10, 100, 1000] {
-        group_loop.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &n| {
-                let (_temp_dir, kv) = setup_file_kv_no_wal();
-                b.iter(|| {
-                    for i in 0..n {
-                        let key = format!("key_{:08}", i);
-                        let value = format!("value_{:08}_{}", i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-                        kv.put(key.as_str(), value.as_bytes()).unwrap();
-                    }
-                });
-            },
-        );
+        group_loop.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &n| {
+            let (_temp_dir, kv) = setup_file_kv_no_wal();
+            b.iter(|| {
+                for i in 0..n {
+                    let key = format!("key_{:08}", i);
+                    let value = format!(
+                        "value_{:08}_{}",
+                        i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    );
+                    kv.put(key.as_str(), value.as_bytes()).unwrap();
+                }
+            });
+        });
     }
     group_loop.finish();
 
@@ -281,27 +252,25 @@ fn bench_batch_write(c: &mut Criterion) {
     group_batch.warm_up_time(Duration::from_secs(2));
 
     for &count in &[10, 100, 1000] {
-        group_batch.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &n| {
-                let data: Vec<(String, Vec<u8>)> = (0..n)
-                    .map(|i| {
-                        let key = format!("key_{:08}", i);
-                        let value = format!("value_{:08}_{}", i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx").into_bytes();
-                        (key, value)
-                    })
-                    .collect();
+        group_batch.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &n| {
+            let data: Vec<(String, Vec<u8>)> = (0..n)
+                .map(|i| {
+                    let key = format!("key_{:08}", i);
+                    let value = format!(
+                        "value_{:08}_{}",
+                        i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    )
+                    .into_bytes();
+                    (key, value)
+                })
+                .collect();
 
-                let (_temp_dir, kv) = setup_file_kv_no_wal();
-                b.iter(|| {
-                    let entries: Vec<(&str, &[u8])> = data.iter()
-                        .map(|(k, v)| (k.as_str(), v.as_slice()))
-                        .collect();
-                    black_box(kv.put_batch(&entries)).unwrap();
-                });
-            },
-        );
+            let (_temp_dir, kv) = setup_file_kv_no_wal();
+            b.iter(|| {
+                let entries: Vec<(&str, &[u8])> = data.iter().map(|(k, v)| (k.as_str(), v.as_slice())).collect();
+                black_box(kv.put_batch(&entries)).unwrap();
+            });
+        });
     }
     group_batch.finish();
 
@@ -311,27 +280,25 @@ fn bench_batch_write(c: &mut Criterion) {
     group_batch_wal.warm_up_time(Duration::from_secs(2));
 
     for &count in &[10, 100, 1000] {
-        group_batch_wal.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &n| {
-                let data: Vec<(String, Vec<u8>)> = (0..n)
-                    .map(|i| {
-                        let key = format!("key_{:08}", i);
-                        let value = format!("value_{:08}_{}", i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx").into_bytes();
-                        (key, value)
-                    })
-                    .collect();
+        group_batch_wal.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &n| {
+            let data: Vec<(String, Vec<u8>)> = (0..n)
+                .map(|i| {
+                    let key = format!("key_{:08}", i);
+                    let value = format!(
+                        "value_{:08}_{}",
+                        i, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    )
+                    .into_bytes();
+                    (key, value)
+                })
+                .collect();
 
-                let (_temp_dir, kv) = setup_file_kv_with_wal();
-                b.iter(|| {
-                    let entries: Vec<(&str, &[u8])> = data.iter()
-                        .map(|(k, v)| (k.as_str(), v.as_slice()))
-                        .collect();
-                    black_box(kv.put_batch(&entries)).unwrap();
-                });
-            },
-        );
+            let (_temp_dir, kv) = setup_file_kv_with_wal();
+            b.iter(|| {
+                let entries: Vec<(&str, &[u8])> = data.iter().map(|(k, v)| (k.as_str(), v.as_slice())).collect();
+                black_box(kv.put_batch(&entries)).unwrap();
+            });
+        });
     }
     group_batch_wal.finish();
 }
@@ -486,32 +453,28 @@ fn bench_write_throughput(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     for &count in &[100, 1000, 10000, 100000] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &n| {
-                b.iter_custom(|iters| {
-                    // BENCH-006 FIX: FileKV 创建在循环外，只创建一次
-                    let (_temp_dir, kv) = setup_file_kv_no_wal();
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &n| {
+            b.iter_custom(|iters| {
+                // BENCH-006 FIX: FileKV 创建在循环外，只创建一次
+                let (_temp_dir, kv) = setup_file_kv_no_wal();
 
-                    // BENCH-007 FIX: 使用原子计数器生成唯一 key
-                    let key_counter = AtomicU64::new(0);
+                // BENCH-007 FIX: 使用原子计数器生成唯一 key
+                let key_counter = AtomicU64::new(0);
 
-                    let start = std::time::Instant::now();
-                    // 在同一实例上运行多次写入迭代
-                    for _ in 0..iters {
-                        for i in 0..n {
-                            // 使用唯一 key 而不是重复写入相同 key
-                            let unique_id = key_counter.fetch_add(1, Ordering::Relaxed);
-                            let key = format!("key_{:010}_{:08}", unique_id / 1000000, i);
-                            let value = format!("value_{:08}", i);
-                            kv.put(&key, value.as_bytes()).unwrap();
-                        }
+                let start = std::time::Instant::now();
+                // 在同一实例上运行多次写入迭代
+                for _ in 0..iters {
+                    for i in 0..n {
+                        // 使用唯一 key 而不是重复写入相同 key
+                        let unique_id = key_counter.fetch_add(1, Ordering::Relaxed);
+                        let key = format!("key_{:010}_{:08}", unique_id / 1000000, i);
+                        let value = format!("value_{:08}", i);
+                        kv.put(&key, value.as_bytes()).unwrap();
                     }
-                    start.elapsed()
-                });
-            },
-        );
+                }
+                start.elapsed()
+            });
+        });
     }
 
     group.finish();
@@ -565,6 +528,7 @@ fn bench_compaction(c: &mut Criterion) {
                         flush_threshold_bytes: 64 * 1024, // 64KB，快速触发 flush
                         max_entries: 100_000,
                         max_memory_bytes: 64 * 1024 * 1024,
+                        ..Default::default()
                     },
                     segment_dir,
                     enable_wal: false,
@@ -573,10 +537,10 @@ fn bench_compaction(c: &mut Criterion) {
                     cache: BlockCacheConfig {
                         max_items: 10_000,
                         max_memory_bytes: 64 * 1024 * 1024,
+                        frequency_aware: false,
                     },
                     enable_bloom: true,
                     enable_background_flush: false,
-                    background_flush_interval_ms: 100,
                     block_size: 8192,
                     block_compression: BlockCompressionConfig::default(),
                     compaction: CompactionConfig {
@@ -592,32 +556,17 @@ fn bench_compaction(c: &mut Criterion) {
                         l0_file_count_threshold: 4,
                         parallel_compaction_enabled: true,
                         streaming_compaction_enabled: true,
+                        ..Default::default()
                     },
-                    segment_preallocate_size: 16 * 1024 * 1024,
-                    wal_max_size_bytes: 100 * 1024 * 1024,
-                    wal_max_files: 5,
-                    
-                    cache_warming_enabled: false,
-                    compression: DictionaryCompressionConfig::default(),
-                    async_io_enabled: false,
-                    async_io_max_concurrent_writes: 4,
-                    async_io_max_queue_depth: 1024,
-                    async_io_write_timeout_ms: 5000,
-                    async_io_enable_coalescing: false,
-                    async_io_coalesce_window_ms: 10,
                     checkpoint_dir: temp_dir.path().join("checkpoints"),
                     audit_log: AuditLogConfig {
                         log_dir: temp_dir.path().join("audit_logs"),
                         enabled: false,
-                        rotation_interval_hours: 24,
-                        retention_days: 30,
+                        ..Default::default()
                     },
                     aggressive: AggressiveConfig::performance(),
-                    enable_adaptive_bloom_cache: true,
-                    enable_zone_map_pruning: true,
-                    enable_sequential_prefetch: true,
-                    enable_background_cache_rebalance: false,
-        fs: std::sync::Arc::new(StdFs),
+                    fs: std::sync::Arc::new(StdFs),
+                    ..Default::default()
                 };
 
                 let kv = FileKV::open(config).unwrap();
@@ -705,130 +654,112 @@ fn bench_write_amplification(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(3));
 
     for &num_keys in &[10_000, 50_000, 100_000] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(num_keys),
-            &num_keys,
-            |b, &n| {
-                b.iter_custom(|iters| {
-                    let mut total_user_bytes: u64 = 0;
-                    let mut total_disk_bytes: u64 = 0;
+        group.bench_with_input(BenchmarkId::from_parameter(num_keys), &num_keys, |b, &n| {
+            b.iter_custom(|iters| {
+                let mut total_user_bytes: u64 = 0;
+                let mut total_disk_bytes: u64 = 0;
 
-                    for _ in 0..iters {
-                        let temp_dir = tempfile::tempdir().unwrap();
-                        let segment_dir = temp_dir.path().join("segments");
-                        let index_dir = temp_dir.path().join("index");
-                        let wal_dir = temp_dir.path().join("wal");
+                for _ in 0..iters {
+                    let temp_dir = tempfile::tempdir().unwrap();
+                    let segment_dir = temp_dir.path().join("segments");
+                    let index_dir = temp_dir.path().join("index");
+                    let wal_dir = temp_dir.path().join("wal");
 
-                        std::fs::create_dir_all(&segment_dir).unwrap();
-                        std::fs::create_dir_all(&index_dir).unwrap();
-                        std::fs::create_dir_all(&wal_dir).unwrap();
+                    std::fs::create_dir_all(&segment_dir).unwrap();
+                    std::fs::create_dir_all(&index_dir).unwrap();
+                    std::fs::create_dir_all(&wal_dir).unwrap();
 
-                        let config = FileKVConfig {
-                            memtable: MemTableConfig {
-                                flush_threshold_bytes: 256 * 1024, // 256KB
-                                max_entries: 100_000,
-                                max_memory_bytes: 64 * 1024 * 1024,
-                            },
-                            segment_dir: segment_dir.clone(), // Clone to keep ownership
-                            enable_wal: false,
-                            wal_dir,
-                            index_dir,
-                            cache: BlockCacheConfig {
-                                max_items: 10_000,
-                                max_memory_bytes: 64 * 1024 * 1024,
-                            },
-                            enable_bloom: true,
-                            enable_background_flush: false,
-                            background_flush_interval_ms: 100,
-                            block_size: 8192,
-                            block_compression: BlockCompressionConfig::default(),
-                            compaction: CompactionConfig {
-                                min_segments: 4,
-                                auto_compact: true,
-                                check_interval: 100,
-                                max_segment_size_bytes: 16 * 1024 * 1024,
-                                target_segment_size_bytes: 8 * 1024 * 1024,
-                                async_compaction_enabled: false,
-                                leveled_compaction_enabled: true,
-                                level_size_multiplier: 10,
-                                max_level: 3,
-                                l0_file_count_threshold: 4,
-                                parallel_compaction_enabled: true,
-                                streaming_compaction_enabled: true,
-                            },
-                            segment_preallocate_size: 16 * 1024 * 1024,
-                            wal_max_size_bytes: 100 * 1024 * 1024,
-                            wal_max_files: 5,
-                            
-                            cache_warming_enabled: false,
-                            compression: DictionaryCompressionConfig::default(),
-                            async_io_enabled: false,
-                            async_io_max_concurrent_writes: 4,
-                            async_io_max_queue_depth: 1024,
-                            async_io_write_timeout_ms: 5000,
-                            async_io_enable_coalescing: false,
-                            async_io_coalesce_window_ms: 10,
-                            checkpoint_dir: temp_dir.path().join("checkpoints"),
-                            audit_log: AuditLogConfig {
-                                log_dir: temp_dir.path().join("audit_logs"),
-                                enabled: false,
-                                rotation_interval_hours: 24,
-                                retention_days: 30,
-                            },
-                            aggressive: AggressiveConfig::performance(),
-                            enable_adaptive_bloom_cache: true,
-                            enable_zone_map_pruning: true,
-                            enable_sequential_prefetch: true,
-                            enable_background_cache_rebalance: false,
-        fs: std::sync::Arc::new(StdFs),
-                        };
+                    let config = FileKVConfig {
+                        memtable: MemTableConfig {
+                            flush_threshold_bytes: 256 * 1024, // 256KB
+                            max_entries: 100_000,
+                            max_memory_bytes: 64 * 1024 * 1024,
+                            ..Default::default()
+                        },
+                        segment_dir: segment_dir.clone(), // Clone to keep ownership
+                        enable_wal: false,
+                        wal_dir,
+                        index_dir,
+                        cache: BlockCacheConfig {
+                            max_items: 10_000,
+                            max_memory_bytes: 64 * 1024 * 1024,
+                            frequency_aware: false,
+                        },
+                        enable_bloom: true,
+                        enable_background_flush: false,
+                        block_size: 8192,
+                        block_compression: BlockCompressionConfig::default(),
+                        compaction: CompactionConfig {
+                            min_segments: 4,
+                            auto_compact: true,
+                            check_interval: 100,
+                            max_segment_size_bytes: 16 * 1024 * 1024,
+                            target_segment_size_bytes: 8 * 1024 * 1024,
+                            async_compaction_enabled: false,
+                            leveled_compaction_enabled: true,
+                            level_size_multiplier: 10,
+                            max_level: 3,
+                            l0_file_count_threshold: 4,
+                            parallel_compaction_enabled: true,
+                            streaming_compaction_enabled: true,
+                            ..Default::default()
+                        },
+                        checkpoint_dir: temp_dir.path().join("checkpoints"),
+                        audit_log: AuditLogConfig {
+                            log_dir: temp_dir.path().join("audit_logs"),
+                            enabled: false,
+                            ..Default::default()
+                        },
+                        aggressive: AggressiveConfig::performance(),
+                        fs: std::sync::Arc::new(StdFs),
+                        ..Default::default()
+                    };
 
-                        let kv = FileKV::open(config).unwrap();
+                    let kv = FileKV::open(config).unwrap();
 
-                        let start = std::time::Instant::now();
+                    let start = std::time::Instant::now();
 
-                        // 用户写入
-                        for i in 0..n {
-                            let key = format!("amp_key_{:010}", i);
-                            let value = vec![b'x'; 1024]; // 1KB
-                            total_user_bytes += key.len() as u64 + value.len() as u64;
-                            kv.put(&key, &value).unwrap();
-                        }
+                    // 用户写入
+                    for i in 0..n {
+                        let key = format!("amp_key_{:010}", i);
+                        let value = vec![b'x'; 1024]; // 1KB
+                        total_user_bytes += key.len() as u64 + value.len() as u64;
+                        kv.put(&key, &value).unwrap();
+                    }
 
-                        // 等待 flush 和 compaction 完成
-                        kv.flush_memtable().unwrap();
-                        std::thread::sleep(Duration::from_secs(1));
+                    // 等待 flush 和 compaction 完成
+                    kv.flush_memtable().unwrap();
+                    std::thread::sleep(Duration::from_secs(1));
 
-                        // 测量磁盘写入量（通过 segment 文件大小）
-                        if let Ok(entries) = std::fs::read_dir(&segment_dir) {
-                            for entry in entries.flatten() {
-                                if let Ok(metadata) = entry.metadata() {
-                                    total_disk_bytes += metadata.len();
-                                }
+                    // 测量磁盘写入量（通过 segment 文件大小）
+                    if let Ok(entries) = std::fs::read_dir(&segment_dir) {
+                        for entry in entries.flatten() {
+                            if let Ok(metadata) = entry.metadata() {
+                                total_disk_bytes += metadata.len();
                             }
                         }
-
-                        // 测量耗时
-                        let _elapsed = start.elapsed();
                     }
 
-                    // 输出写入放大比率
-                    if total_user_bytes > 0 {
-                        let amplification = total_disk_bytes as f64 / total_user_bytes as f64;
-                        eprintln!(
-                            "Write Amplification ({} keys): {:.2}x (user: {} MB, disk: {} MB)",
-                            n,
-                            amplification,
-                            total_user_bytes / (1024 * 1024),
-                            total_disk_bytes / (1024 * 1024)
-                        );
-                    }
+                    // 测量耗时
+                    let _elapsed = start.elapsed();
+                }
 
-                    // 返回总磁盘写入量作为 benchmark 指标
-                    std::time::Duration::from_millis(total_disk_bytes / (1024 * 1024))
-                });
-            },
-        );
+                // 输出写入放大比率
+                if total_user_bytes > 0 {
+                    let amplification = total_disk_bytes as f64 / total_user_bytes as f64;
+                    eprintln!(
+                        "Write Amplification ({} keys): {:.2}x (user: {} MB, disk: {} MB)",
+                        n,
+                        amplification,
+                        total_user_bytes / (1024 * 1024),
+                        total_disk_bytes / (1024 * 1024)
+                    );
+                }
+
+                // 返回总磁盘写入量作为 benchmark 指标
+                std::time::Duration::from_millis(total_disk_bytes / (1024 * 1024))
+            });
+        });
     }
 
     group.finish();

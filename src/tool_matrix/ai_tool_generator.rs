@@ -13,13 +13,13 @@
 //! 4. 编译验证
 //! 5. 生成单元测试模板
 
-use crate::llm::{LLMManager, ChatRequest, Message};
+use crate::llm::{ChatRequest, LLMManager, Message};
 use crate::tool_matrix::tool_generator::ToolGenerator;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 use tracing::{info, warn};
-use anyhow::{Result, Context};
 
 /// AI 工具生成请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,17 +92,16 @@ impl AIToolGenerator {
     /// 创建新的 AI 工具生成器
     pub async fn new() -> Result<Self> {
         let llm_manager = LLMManager::new();
-        
+
         // TODO: 从配置加载提供商
         // 目前 AI 工具生成器需要用户先配置 LLM 提供商
-        
+
         // 尝试从默认目录加载模板
-        let tool_generator = ToolGenerator::from_default_dir()
-            .unwrap_or_else(|e| {
-                warn!("加载模板目录失败：{}, 使用空模板", e);
-                let empty_dir = tempfile::tempdir().unwrap_or_else(|_| tempfile::tempdir().unwrap());
-                ToolGenerator::new(empty_dir.path()).unwrap()
-            });
+        let tool_generator = ToolGenerator::from_default_dir().unwrap_or_else(|e| {
+            warn!("加载模板目录失败：{}, 使用空模板", e);
+            let empty_dir = tempfile::tempdir().unwrap_or_else(|_| tempfile::tempdir().unwrap());
+            ToolGenerator::new(empty_dir.path()).unwrap()
+        });
 
         Ok(Self {
             llm_manager,
@@ -117,15 +116,21 @@ impl AIToolGenerator {
     }
 
     /// 生成工具代码
-    pub async fn generate_tool(&self, request: AIToolGenerationRequest) -> Result<AIToolGenerationResult> {
+    pub async fn generate_tool(
+        &self,
+        request: AIToolGenerationRequest,
+    ) -> Result<AIToolGenerationResult> {
         let mut generation_log = Vec::new();
 
-        info!("开始 AI 生成工具：{} (类别：{})", request.tool_name, request.category);
+        info!(
+            "开始 AI 生成工具：{} (类别：{})",
+            request.tool_name, request.category
+        );
         generation_log.push(format!("开始生成工具：{}", request.tool_name));
 
         // 检查是否有可用的提供商
         let provider = self.llm_manager.get_default_provider();
-        
+
         if provider.is_none() {
             warn!("没有可用的 LLM 提供商，使用模板生成");
             generation_log.push("无可用 LLM 提供商，使用模板生成".to_string());
@@ -174,7 +179,7 @@ impl AIToolGenerator {
         // 3. 生成测试代码（如果需要）
         let test_code = if request.generate_tests {
             let test_prompt = self.build_test_generation_prompt(&request, &formatted_code);
-            
+
             let test_chat_request = ChatRequest {
                 model: provider.default_model().to_string(),
                 messages: vec![Message {
@@ -188,8 +193,9 @@ impl AIToolGenerator {
                 stop: None,
                 stream: false,
             };
-            
-            let test_response: Option<crate::llm::ChatResponse> = provider.chat(test_chat_request).await.ok();
+
+            let test_response: Option<crate::llm::ChatResponse> =
+                provider.chat(test_chat_request).await.ok();
 
             test_response.map(|r| {
                 generation_log.push("测试代码生成完成".to_string());
@@ -200,7 +206,8 @@ impl AIToolGenerator {
         };
 
         // 4. 保存文件
-        let tool_file_path = self.save_tool_code(&request.tool_name, &formatted_code, &request.output_dir)?;
+        let tool_file_path =
+            self.save_tool_code(&request.tool_name, &formatted_code, &request.output_dir)?;
         generation_log.push(format!("工具代码已保存：{:?}", tool_file_path));
 
         let test_file_path = if let Some(tests) = &test_code {
@@ -328,7 +335,11 @@ impl {struct_name} {{
     }
 
     /// 构建测试生成提示
-    fn build_test_generation_prompt(&self, request: &AIToolGenerationRequest, code: &str) -> String {
+    fn build_test_generation_prompt(
+        &self,
+        request: &AIToolGenerationRequest,
+        code: &str,
+    ) -> String {
         format!(
             r#"# 测试生成任务
 
@@ -376,7 +387,7 @@ impl {struct_name} {{
             // 尝试修复结构体名称
             formatted = formatted.replace(
                 &format!("struct {}", request.tool_name),
-                &format!("struct {}", expected_struct)
+                &format!("struct {}", expected_struct),
             );
         }
 

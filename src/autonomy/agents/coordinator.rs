@@ -8,14 +8,14 @@
 
 #![allow(dead_code)]
 
-use super::{PlannerAgent, ExecutorAgent, ReviewerAgent};
 use super::planner::RiskLevel;
-use crate::autonomy::iteration_tracker::{IterationTracker, IterationState};
+use super::{ExecutorAgent, PlannerAgent, ReviewerAgent};
+use crate::autonomy::iteration_tracker::{IterationState, IterationTracker};
 use crate::tool_matrix::registry::ToolRegistry;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use thiserror::Error;
 
 /// 协调器状态
@@ -61,24 +61,34 @@ pub struct AgentCoordinator {
 
 impl AgentCoordinator {
     /// 创建新的协调器
-    pub fn new(base_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, CoordinatorError> {
+    pub fn new(
+        base_dir: PathBuf,
+        tool_registry: Arc<RwLock<ToolRegistry>>,
+    ) -> Result<Self, CoordinatorError> {
         let planner_dir = base_dir.join("planner");
         let executor_dir = base_dir.join("executor");
         let reviewer_dir = base_dir.join("reviewer");
         let tracker_dir = base_dir.join("tracker");
 
         Ok(Self {
-            planner: PlannerAgent::new(planner_dir).map_err(|e| CoordinatorError::PlanningFailed(e.to_string()))?,
-            executor: ExecutorAgent::new(executor_dir, tool_registry.clone()).map_err(|e| CoordinatorError::ExecutionFailed(e.to_string()))?,
-            reviewer: ReviewerAgent::new(reviewer_dir).map_err(|e| CoordinatorError::ReviewFailed(e.to_string()))?,
-            tracker: IterationTracker::new(tracker_dir).map_err(|e| CoordinatorError::IterationFailed(e.to_string()))?,
+            planner: PlannerAgent::new(planner_dir)
+                .map_err(|e| CoordinatorError::PlanningFailed(e.to_string()))?,
+            executor: ExecutorAgent::new(executor_dir, tool_registry.clone())
+                .map_err(|e| CoordinatorError::ExecutionFailed(e.to_string()))?,
+            reviewer: ReviewerAgent::new(reviewer_dir)
+                .map_err(|e| CoordinatorError::ReviewFailed(e.to_string()))?,
+            tracker: IterationTracker::new(tracker_dir)
+                .map_err(|e| CoordinatorError::IterationFailed(e.to_string()))?,
             tool_registry,
             state: CoordinatorState::Idle,
         })
     }
 
     /// 创建协调器（带自定义工具注册表）
-    pub fn with_registry(base_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, CoordinatorError> {
+    pub fn with_registry(
+        base_dir: PathBuf,
+        tool_registry: Arc<RwLock<ToolRegistry>>,
+    ) -> Result<Self, CoordinatorError> {
         Self::new(base_dir, tool_registry)
     }
 
@@ -117,15 +127,17 @@ impl AgentCoordinator {
             let plan_id = plan.id.clone();
             let _ = plan; // 释放借用
 
-            self.planner.add_step_to_plan(
-                &plan_id,
-                description,
-                tools,
-                expected_output,
-                dependencies,
-                estimated_minutes,
-                risk_level,
-            ).map_err(|e| CoordinatorError::PlanningFailed(e.to_string()))?;
+            self.planner
+                .add_step_to_plan(
+                    &plan_id,
+                    description,
+                    tools,
+                    expected_output,
+                    dependencies,
+                    estimated_minutes,
+                    risk_level,
+                )
+                .map_err(|e| CoordinatorError::PlanningFailed(e.to_string()))?;
         }
         Ok(())
     }
@@ -151,7 +163,11 @@ impl AgentCoordinator {
     }
 
     /// 审查结果
-    pub fn review(&mut self, file_path: &std::path::Path, content: &str) -> Result<(), CoordinatorError> {
+    pub fn review(
+        &mut self,
+        file_path: &std::path::Path,
+        content: &str,
+    ) -> Result<(), CoordinatorError> {
         // 转换到审查状态
         self.tracker
             .transition_state(IterationState::Reviewing, None)
@@ -160,7 +176,8 @@ impl AgentCoordinator {
         self.state = CoordinatorState::Reviewing;
 
         // 执行审查
-        let report = self.reviewer
+        let report = self
+            .reviewer
             .review_file(file_path, content)
             .map_err(|e| CoordinatorError::ReviewFailed(e.to_string()))?;
 
@@ -169,7 +186,11 @@ impl AgentCoordinator {
             .record_review(
                 report.grade.to_string(),
                 report.summary.clone(),
-                report.issues.iter().map(|i| i.description.clone()).collect(),
+                report
+                    .issues
+                    .iter()
+                    .map(|i| i.description.clone())
+                    .collect(),
             )
             .map_err(|e| CoordinatorError::IterationFailed(e.to_string()))?;
 
@@ -222,28 +243,33 @@ mod tests {
     fn test_coordinator_lifecycle() {
         let temp_dir = TempDir::new().unwrap();
         let registry = create_test_registry();
-        let mut coordinator = AgentCoordinator::new(temp_dir.path().to_path_buf(), registry).unwrap();
+        let mut coordinator =
+            AgentCoordinator::new(temp_dir.path().to_path_buf(), registry).unwrap();
 
         // 开始迭代
         coordinator.start_iteration("测试目标".to_string()).unwrap();
         assert_eq!(coordinator.state(), &CoordinatorState::Planning);
 
         // 添加步骤
-        coordinator.add_plan_step(
-            "测试步骤".to_string(),
-            vec!["read_file".to_string()],
-            "输出".to_string(),
-            vec![],
-            10,
-            RiskLevel::Low,
-        ).unwrap();
+        coordinator
+            .add_plan_step(
+                "测试步骤".to_string(),
+                vec!["read_file".to_string()],
+                "输出".to_string(),
+                vec![],
+                10,
+                RiskLevel::Low,
+            )
+            .unwrap();
 
         // 开始执行
         coordinator.start_execution().unwrap();
         assert_eq!(coordinator.state(), &CoordinatorState::Executing);
 
         // 完成迭代
-        coordinator.complete_iteration("测试完成".to_string()).unwrap();
+        coordinator
+            .complete_iteration("测试完成".to_string())
+            .unwrap();
         assert_eq!(coordinator.state(), &CoordinatorState::Completed);
     }
 }

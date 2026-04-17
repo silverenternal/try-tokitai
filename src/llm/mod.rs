@@ -25,22 +25,22 @@
 //!     .await?;
 //! ```
 
-pub mod providers;
-pub mod router;
+pub mod model_command;
 pub mod performance_tracker;
 pub mod provider_initializer;
-pub mod model_command;
+pub mod providers;
+pub mod router;
 
-pub use providers::*;
-pub use router::ModelRouter;
+pub use model_command::ModelCommandHandler;
 pub use performance_tracker::PerformanceTracker;
 pub use provider_initializer::ProviderInitializer;
-pub use model_command::ModelCommandHandler;
+pub use providers::*;
+pub use router::ModelRouter;
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
@@ -90,22 +90,22 @@ impl std::fmt::Display for ProviderType {
 pub trait LLMProvider: Send + Sync {
     /// Get provider type
     fn provider_type(&self) -> &ProviderType;
-    
+
     /// Get provider name
     fn name(&self) -> &str;
-    
+
     /// Get default model
     fn default_model(&self) -> &str;
-    
+
     /// Send a chat request
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse>;
-    
+
     /// Send a streaming chat request
     async fn chat_stream(
-        &self, 
-        request: ChatRequest
+        &self,
+        request: ChatRequest,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>>;
-    
+
     /// Check if provider is available
     async fn health_check(&self) -> bool;
 }
@@ -222,7 +222,7 @@ impl LLMManager {
     pub fn register_provider(&mut self, provider: Arc<dyn LLMProvider>) {
         let provider_type = provider.provider_type().clone();
         self.providers.insert(provider_type.clone(), provider);
-        
+
         // Set as current if not set
         if self.current.is_none() {
             self.current = Some(provider_type);
@@ -265,7 +265,8 @@ impl LLMManager {
 
     /// Get default provider (first registered or OpenAI)
     pub fn get_default_provider(&self) -> Option<&Arc<dyn LLMProvider>> {
-        self.current.as_ref()
+        self.current
+            .as_ref()
             .and_then(|t| self.providers.get(t))
             .or_else(|| self.providers.values().next())
     }

@@ -8,8 +8,8 @@
 //! - 使用编译期选择后端，零运行时开销
 
 use crate::tools::system::error::{ProcessError, SystemInfoError, ToErrorString};
-use std::process::Command;
 use std::io;
+use std::process::Command;
 
 /// 进程信息结构体
 ///
@@ -67,31 +67,57 @@ impl ProcessInfo {
 
     // 访问器方法
     #[allow(dead_code)]
-    pub fn pid(&self) -> u32 { self.pid }
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
     #[allow(dead_code)]
-    pub fn ppid(&self) -> u32 { self.ppid }
+    pub fn ppid(&self) -> u32 {
+        self.ppid
+    }
     #[allow(dead_code)]
-    pub fn user(&self) -> &str { &self.user }
+    pub fn user(&self) -> &str {
+        &self.user
+    }
     #[allow(dead_code)]
-    pub fn cpu_percent(&self) -> f32 { self.cpu_percent }
+    pub fn cpu_percent(&self) -> f32 {
+        self.cpu_percent
+    }
     #[allow(dead_code)]
-    pub fn mem_percent(&self) -> f32 { self.mem_percent }
+    pub fn mem_percent(&self) -> f32 {
+        self.mem_percent
+    }
     #[allow(dead_code)]
-    pub fn vsz(&self) -> u64 { self.vsz }
+    pub fn vsz(&self) -> u64 {
+        self.vsz
+    }
     #[allow(dead_code)]
-    pub fn rss(&self) -> u64 { self.rss }
+    pub fn rss(&self) -> u64 {
+        self.rss
+    }
     #[allow(dead_code)]
-    pub fn tty(&self) -> &str { &self.tty }
+    pub fn tty(&self) -> &str {
+        &self.tty
+    }
     #[allow(dead_code)]
-    pub fn stat(&self) -> &str { &self.stat }
+    pub fn stat(&self) -> &str {
+        &self.stat
+    }
     #[allow(dead_code)]
-    pub fn start(&self) -> &str { &self.start }
+    pub fn start(&self) -> &str {
+        &self.start
+    }
     #[allow(dead_code)]
-    pub fn time(&self) -> &str { &self.time }
+    pub fn time(&self) -> &str {
+        &self.time
+    }
     #[allow(dead_code)]
-    pub fn comm(&self) -> &str { &self.comm }
+    pub fn comm(&self) -> &str {
+        &self.comm
+    }
     #[allow(dead_code)]
-    pub fn args(&self) -> &str { &self.args }
+    pub fn args(&self) -> &str {
+        &self.args
+    }
 
     /// 转换为 JSON 友好的结构
     pub fn to_json_value(&self) -> serde_json::Value {
@@ -157,13 +183,14 @@ pub trait ProcessBackend: Send + Sync {
     fn list_processes(&self, limit: usize) -> Result<Vec<ProcessInfo>, ProcessError> {
         let output = self.run_ps_command(&["aux"])?;
         let mut processes = parse_ps_output(&output, usize::MAX)?;
-        
+
         // 按 CPU 使用率降序排序
         processes.sort_by(|a, b| {
-            b.cpu_percent().partial_cmp(&a.cpu_percent())
+            b.cpu_percent()
+                .partial_cmp(&a.cpu_percent())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        
+
         processes.truncate(limit);
         Ok(processes)
     }
@@ -173,8 +200,10 @@ pub trait ProcessBackend: Send + Sync {
     /// 默认实现：单次 ps 调用获取所有信息，避免 TOCTOU
     fn get_process_info(&self, pid: u32) -> Result<ProcessInfo, ProcessError> {
         let output = self.run_ps_command(&[
-            "-p", &pid.to_string(),
-            "-o", "pid,ppid,user,%cpu,%mem,vsz,rss,tty,stat,start,time,comm,args"
+            "-p",
+            &pid.to_string(),
+            "-o",
+            "pid,ppid,user,%cpu,%mem,vsz,rss,tty,stat,start,time,comm,args",
         ])?;
 
         let lines: Vec<&str> = output.lines().collect();
@@ -257,8 +286,7 @@ pub trait ProcessBackend: Send + Sync {
             return Err(ProcessError::CommandFailed("获取进程列表失败".to_string()));
         }
 
-        String::from_utf8(output.stdout)
-            .map_err(|e| ProcessError::ParseFailed(e.to_error_string()))
+        String::from_utf8(output.stdout).map_err(|e| ProcessError::ParseFailed(e.to_error_string()))
     }
 }
 
@@ -295,14 +323,13 @@ impl ProcessBackend for LinuxBackend {
         use std::fs;
 
         let env_path = format!("/proc/{}/environ", pid);
-        let content = fs::read(&env_path)
-            .map_err(|e| {
-                if e.kind() == io::ErrorKind::PermissionDenied {
-                    ProcessError::PermissionDenied(pid, "无权限读取环境变量".to_string())
-                } else {
-                    ProcessError::CommandFailed(format!("读取环境变量失败：{}", e))
-                }
-            })?;
+        let content = fs::read(&env_path).map_err(|e| {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                ProcessError::PermissionDenied(pid, "无权限读取环境变量".to_string())
+            } else {
+                ProcessError::CommandFailed(format!("读取环境变量失败：{}", e))
+            }
+        })?;
 
         let vars: Vec<&str> = content
             .split(|&b| b == 0)
@@ -365,12 +392,10 @@ impl ProcessBackend for LinuxBackend {
         let disk_usage = get_disk_usage("/")?;
 
         // 运行时间
-        let uptime_secs = fs::read_to_string("/proc/uptime")
-            .ok()
-            .and_then(|c| {
-                let first = c.split_whitespace().next()?.to_string();
-                first.parse::<f64>().ok().map(|s| s as u64)
-            });
+        let uptime_secs = fs::read_to_string("/proc/uptime").ok().and_then(|c| {
+            let first = c.split_whitespace().next()?.to_string();
+            first.parse::<f64>().ok().map(|s| s as u64)
+        });
 
         Ok(SystemResourceInfo {
             cpu_cores,
@@ -390,8 +415,8 @@ impl ProcessBackend for LinuxBackend {
     }
 
     fn check_process_ownership(&self, pid: u32) -> Result<(), ProcessError> {
-        use std::os::unix::fs::MetadataExt;
         use std::fs;
+        use std::os::unix::fs::MetadataExt;
 
         let proc_exe_path = format!("/proc/{}/exe", pid);
 
@@ -402,7 +427,7 @@ impl ProcessBackend for LinuxBackend {
             if current_uid != 0 && process_uid != current_uid {
                 return Err(ProcessError::PermissionDenied(
                     pid,
-                    format!("进程属于 UID {}，当前用户 UID {}", process_uid, current_uid)
+                    format!("进程属于 UID {}，当前用户 UID {}", process_uid, current_uid),
                 ));
             }
         }
@@ -422,7 +447,8 @@ impl ProcessBackend for MacOSBackend {
 
         // 按 CPU 使用率降序排序
         processes.sort_by(|a, b| {
-            b.cpu_percent().partial_cmp(&a.cpu_percent())
+            b.cpu_percent()
+                .partial_cmp(&a.cpu_percent())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -454,7 +480,10 @@ impl ProcessBackend for MacOSBackend {
             .map_err(|e| ProcessError::CommandFailed(format!("获取环境变量失败：{}", e)))?;
 
         if !output.status.success() {
-            return Err(ProcessError::PermissionDenied(pid, "无法获取环境变量".to_string()));
+            return Err(ProcessError::PermissionDenied(
+                pid,
+                "无法获取环境变量".to_string(),
+            ));
         }
 
         let stdout = String::from_utf8(output.stdout)
@@ -501,8 +530,7 @@ impl ProcessBackend for MacOSBackend {
             .unwrap_or((None, None, None));
 
         // 内存信息
-        let (mem_total, mem_free, mem_available) = get_macos_memory_info()
-            .unwrap_or((0, 0, None));
+        let (mem_total, mem_free, mem_available) = get_macos_memory_info().unwrap_or((0, 0, None));
 
         // 磁盘使用
         let disk_usage = get_disk_usage("/")?;
@@ -548,11 +576,14 @@ impl ProcessBackend for MacOSBackend {
             if current_uid != 0 && process_uid != current_uid {
                 return Err(ProcessError::PermissionDenied(
                     pid,
-                    format!("进程属于 UID {}，当前用户 UID {}", process_uid, current_uid)
+                    format!("进程属于 UID {}，当前用户 UID {}", process_uid, current_uid),
                 ));
             }
         } else {
-            return Err(ProcessError::ParseFailed(format!("无法解析进程 UID: {}", process_uid_str)));
+            return Err(ProcessError::ParseFailed(format!(
+                "无法解析进程 UID: {}",
+                process_uid_str
+            )));
         }
 
         Ok(())
@@ -567,7 +598,9 @@ fn get_disk_usage(mount_point: &str) -> Result<DiskUsageInfo, SystemInfoError> {
         .map_err(|e| SystemInfoError::InfoFetchFailed(format!("执行 df 命令失败：{}", e)))?;
 
     if !output.status.success() {
-        return Err(SystemInfoError::InfoFetchFailed("获取磁盘信息失败".to_string()));
+        return Err(SystemInfoError::InfoFetchFailed(
+            "获取磁盘信息失败".to_string(),
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -600,10 +633,7 @@ fn get_disk_usage(mount_point: &str) -> Result<DiskUsageInfo, SystemInfoError> {
     let used_gb = parse_size(parts[2]);
     let available_gb = parse_size(parts[3]);
 
-    let usage_percent = parts[4]
-        .trim_end_matches('%')
-        .parse::<f32>()
-        .unwrap_or(0.0);
+    let usage_percent = parts[4].trim_end_matches('%').parse::<f32>().unwrap_or(0.0);
 
     Ok(DiskUsageInfo {
         total_gb,
@@ -763,11 +793,19 @@ mod tests {
     #[test]
     fn test_process_info_accessors() {
         let info = ProcessInfo::new(
-            1234, 1, "user".to_string(),
-            1.5, 2.0, 1000000, 500000,
-            "ttys000".to_string(), "S".to_string(),
-            "10:00".to_string(), "0:01".to_string(),
-            "bash".to_string(), "/bin/bash".to_string(),
+            1234,
+            1,
+            "user".to_string(),
+            1.5,
+            2.0,
+            1000000,
+            500000,
+            "ttys000".to_string(),
+            "S".to_string(),
+            "10:00".to_string(),
+            "0:01".to_string(),
+            "bash".to_string(),
+            "/bin/bash".to_string(),
         );
 
         assert_eq!(info.pid(), 1234);
@@ -779,11 +817,19 @@ mod tests {
     #[test]
     fn test_process_info_to_json() {
         let info = ProcessInfo::new(
-            1234, 1, "user".to_string(),
-            1.5, 2.0, 1000000, 500000,
-            "ttys000".to_string(), "S".to_string(),
-            "10:00".to_string(), "0:01".to_string(),
-            "bash".to_string(), "/bin/bash".to_string(),
+            1234,
+            1,
+            "user".to_string(),
+            1.5,
+            2.0,
+            1000000,
+            500000,
+            "ttys000".to_string(),
+            "S".to_string(),
+            "10:00".to_string(),
+            "0:01".to_string(),
+            "bash".to_string(),
+            "/bin/bash".to_string(),
         );
 
         let json = info.to_json_value();
@@ -793,7 +839,8 @@ mod tests {
 
     #[test]
     fn test_parse_process_line() {
-        let line = "  1234     1 user   1.5  2.0 1000000 500000 ttys000  S    10:00   0:01 bash /bin/bash";
+        let line =
+            "  1234     1 user   1.5  2.0 1000000 500000 ttys000  S    10:00   0:01 bash /bin/bash";
         let result = parse_process_line(line);
         assert!(result.is_ok());
         let info = result.unwrap();

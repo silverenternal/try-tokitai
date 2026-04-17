@@ -240,8 +240,8 @@ impl<T: LLMClient + ?Sized> AIDependencyAnalyzer<T> {
 
         let response = self.llm_client.chat(&prompt).await?;
 
-        let analysis: DependencyAnalysis = serde_json::from_str(&response)
-            .map_err(|e| format!("解析依赖分析失败：{}", e))?;
+        let analysis: DependencyAnalysis =
+            serde_json::from_str(&response).map_err(|e| format!("解析依赖分析失败：{}", e))?;
 
         // 更新依赖图
         self.update_dependency_graph(tool, &analysis).await?;
@@ -317,10 +317,7 @@ impl<T: LLMClient + ?Sized> AIDependencyAnalyzer<T> {
             if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
                 let mut types = Vec::new();
                 for (name, prop) in properties {
-                    let prop_type = prop
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("any");
+                    let prop_type = prop.get("type").and_then(|v| v.as_str()).unwrap_or("any");
                     types.push(format!("{}: {}", name, prop_type));
                 }
                 if !types.is_empty() {
@@ -340,7 +337,9 @@ impl<T: LLMClient + ?Sized> AIDependencyAnalyzer<T> {
             ServiceCategory::Network => "HttpResponse | String | DownloadedFile".to_string(),
             ServiceCategory::Data => "Json | Xml | Csv".to_string(),
             ServiceCategory::Development => "CodeAnalysis | String".to_string(),
-            ServiceCategory::Vcs | ServiceCategory::VersionControl => "GitStatus | GitLog | String".to_string(),
+            ServiceCategory::Vcs | ServiceCategory::VersionControl => {
+                "GitStatus | GitLog | String".to_string()
+            }
             ServiceCategory::System => "ProcessOutput | SystemInfo | String".to_string(),
             ServiceCategory::Ai => "LLMResponse | Embedding | String".to_string(),
             ServiceCategory::Dialogue => "DialogueState | String".to_string(),
@@ -450,7 +449,9 @@ pub struct SmartToolRecommender<T: LLMClient + ?Sized> {
 impl<T: LLMClient + ?Sized> SmartToolRecommender<T> {
     /// 创建新的推荐器
     pub fn new(dependency_analyzer: Arc<AIDependencyAnalyzer<T>>) -> Self {
-        Self { dependency_analyzer }
+        Self {
+            dependency_analyzer,
+        }
     }
 
     /// 推荐后续工具
@@ -506,7 +507,8 @@ mod tests {
                 "combinations": [
                     {"tool_name": "write_file", "scenario": "读写文件组合"}
                 ]
-            }"#.to_string())
+            }"#
+            .to_string())
         }
     }
 
@@ -521,7 +523,10 @@ mod tests {
             ToolDefinition::new("write_file", "Write file content", r#"{}"#),
         ];
 
-        let analysis = analyzer.analyze_dependencies(&tool, &all_tools).await.unwrap();
+        let analysis = analyzer
+            .analyze_dependencies(&tool, &all_tools)
+            .await
+            .unwrap();
 
         assert_eq!(analysis.prerequisites.len(), 1);
         assert_eq!(analysis.dependents.len(), 1);

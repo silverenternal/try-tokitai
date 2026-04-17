@@ -16,8 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Risk level for external tool execution
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RiskLevel {
     /// Low risk: Safe to execute without confirmation
     Low,
@@ -29,7 +28,6 @@ pub enum RiskLevel {
     /// Critical risk: Requires explicit approval and sandboxing
     Critical,
 }
-
 
 /// Configuration for process-based tools
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -448,7 +446,11 @@ mod tests {
     #[test]
     fn test_process_config_builder() {
         let config = ProcessConfig::new("git")
-            .with_args(vec!["commit".to_string(), "-m".to_string(), "{{message}}".to_string()])
+            .with_args(vec![
+                "commit".to_string(),
+                "-m".to_string(),
+                "{{message}}".to_string(),
+            ])
             .with_working_dir(PathBuf::from("/workspace"))
             .with_timeout(60000)
             .with_env("GIT_AUTHOR_NAME".to_string(), "AI Agent".to_string());
@@ -487,12 +489,14 @@ mod tests {
 
     #[test]
     fn test_tool_metadata_creation() {
-        let process_config = ProcessConfig::new("git")
-            .with_args(vec!["commit".to_string(), "-m".to_string(), "{{message}}".to_string()]);
-
-        let input_schema = schema_helpers::create_string_params_schema(vec![
-            ("message", "Commit message", true),
+        let process_config = ProcessConfig::new("git").with_args(vec![
+            "commit".to_string(),
+            "-m".to_string(),
+            "{{message}}".to_string(),
         ]);
+
+        let input_schema =
+            schema_helpers::create_string_params_schema(vec![("message", "Commit message", true)]);
 
         let metadata = ExternalToolMetadata::new(
             "git_commit",
@@ -502,7 +506,11 @@ mod tests {
             "version_control",
             "ai_agent",
         )
-        .with_tags(vec!["git".to_string(), "commit".to_string(), "vcs".to_string()])
+        .with_tags(vec![
+            "git".to_string(),
+            "commit".to_string(),
+            "vcs".to_string(),
+        ])
         .with_risk_level(RiskLevel::Medium);
 
         assert_eq!(metadata.name, "git_commit");
@@ -514,15 +522,13 @@ mod tests {
 
     #[test]
     fn test_execution_result_creation() {
-        let success_result =
-            ToolExecutionResult::success(json!({"result": "ok"}), 150);
+        let success_result = ToolExecutionResult::success(json!({"result": "ok"}), 150);
 
         assert!(success_result.success);
         assert!(success_result.error.is_none());
         assert_eq!(success_result.execution_time_ms, 150);
 
-        let failure_result =
-            ToolExecutionResult::failure("Timeout exceeded", 5000);
+        let failure_result = ToolExecutionResult::failure("Timeout exceeded", 5000);
 
         assert!(!failure_result.success);
         assert_eq!(failure_result.error, Some("Timeout exceeded".to_string()));

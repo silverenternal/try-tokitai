@@ -98,7 +98,7 @@ impl GitWorkflow {
 
         // 获取状态
         let status_output = self.run_git(&["status", "--porcelain"])?;
-        
+
         let mut modified = vec![];
         let mut staged = vec![];
         let mut untracked = vec![];
@@ -135,10 +135,13 @@ impl GitWorkflow {
     }
 
     /// 生成提交消息（AI 辅助）
-    pub fn generate_commit_message(&self, changes: &str) -> Result<(String, String), GitWorkflowError> {
+    pub fn generate_commit_message(
+        &self,
+        changes: &str,
+    ) -> Result<(String, String), GitWorkflowError> {
         // 简单实现：根据变更内容生成提交类型和消息
         // 实际应该调用 AI 生成
-        
+
         let commit_type = if changes.contains("feat") || changes.contains("add") {
             "feat"
         } else if changes.contains("fix") || changes.contains("修复") {
@@ -154,7 +157,7 @@ impl GitWorkflow {
         };
 
         let description = format!("自动提交：{}", changes.lines().next().unwrap_or("代码变更"));
-        
+
         Ok((commit_type.to_string(), description))
     }
 
@@ -170,7 +173,7 @@ impl GitWorkflow {
         if let Ok(output) = fmt_check {
             if !output.status.success() {
                 return Err(GitWorkflowError::PreCommitCheckFailed(
-                    "cargo fmt 检查失败".to_string()
+                    "cargo fmt 检查失败".to_string(),
                 ));
             }
         }
@@ -185,7 +188,7 @@ impl GitWorkflow {
         if let Ok(output) = clippy_check {
             if !output.status.success() {
                 return Err(GitWorkflowError::PreCommitCheckFailed(
-                    "cargo clippy 检查失败".to_string()
+                    "cargo clippy 检查失败".to_string(),
                 ));
             }
         }
@@ -207,12 +210,18 @@ impl GitWorkflow {
             self.run_git(&["reset", "--hard", checkpoint])?;
             Ok(())
         } else {
-            Err(GitWorkflowError::RollbackFailed("没有设置回滚检查点".to_string()))
+            Err(GitWorkflowError::RollbackFailed(
+                "没有设置回滚检查点".to_string(),
+            ))
         }
     }
 
     /// 提交变更
-    pub fn commit(&mut self, message: &str, run_pre_commit: bool) -> Result<CommitRecord, GitWorkflowError> {
+    pub fn commit(
+        &mut self,
+        message: &str,
+        run_pre_commit: bool,
+    ) -> Result<CommitRecord, GitWorkflowError> {
         // 设置回滚点
         self.set_rollback_checkpoint()?;
 
@@ -233,8 +242,12 @@ impl GitWorkflow {
         let hash = self.run_git(&["rev-parse", "HEAD"])?;
 
         // 获取变更文件
-        let changed_files_output = self.run_git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])?;
-        let changed_files: Vec<String> = changed_files_output.lines().map(|s| s.to_string()).collect();
+        let changed_files_output =
+            self.run_git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])?;
+        let changed_files: Vec<String> = changed_files_output
+            .lines()
+            .map(|s| s.to_string())
+            .collect();
 
         // 获取提交类型
         let commit_type = message.split(':').next().unwrap_or("chore").to_string();
@@ -272,7 +285,7 @@ impl GitWorkflow {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
             Err(GitWorkflowError::GitCommandFailed(
-                String::from_utf8_lossy(&output.stderr).to_string()
+                String::from_utf8_lossy(&output.stderr).to_string(),
             ))
         }
     }
@@ -323,8 +336,12 @@ mod tests {
             .output()
             .unwrap();
 
-        let workflow = GitWorkflow::new(temp_dir.path().to_path_buf(), storage_dir.path().to_path_buf()).unwrap();
-        
+        let workflow = GitWorkflow::new(
+            temp_dir.path().to_path_buf(),
+            storage_dir.path().to_path_buf(),
+        )
+        .unwrap();
+
         assert!(workflow.repo_dir().exists());
     }
 }

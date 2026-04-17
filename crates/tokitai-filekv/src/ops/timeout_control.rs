@@ -9,9 +9,9 @@
 //! - Timeout retry logic with exponential backoff
 //! - Timeout statistics and monitoring
 
+use crate::core::error::FatalError;
 use std::time::Duration;
 use tracing::debug;
-use crate::core::error::FatalError;
 
 /// Result type for timeout operations
 pub type Result<T> = std::result::Result<T, FatalError>;
@@ -220,13 +220,18 @@ where
                             let backoff = config.calculate_backoff(attempts);
                             debug!(
                                 "Operation {:?} timed out, retrying in {:?} (attempt {}/{})",
-                                op, backoff, attempts + 1, config.max_retry_attempts
+                                op,
+                                backoff,
+                                attempts + 1,
+                                config.max_retry_attempts
                             );
                             std::thread::sleep(backoff);
                         } else {
                             debug!(
                                 "Operation {:?} timed out, retrying (attempt {}/{})",
-                                op, attempts + 1, config.max_retry_attempts
+                                op,
+                                attempts + 1,
+                                config.max_retry_attempts
                             );
                         }
                         continue;
@@ -249,12 +254,8 @@ where
 /// Check if an error is a timeout error
 fn is_timeout_error(err: &FatalError) -> bool {
     match err {
-        FatalError::Corruption(msg) => {
-            msg.to_lowercase().contains("timeout")
-        }
-        FatalError::Io(io_err) => {
-            io_err.kind() == std::io::ErrorKind::TimedOut
-        }
+        FatalError::Corruption(msg) => msg.to_lowercase().contains("timeout"),
+        FatalError::Io(io_err) => io_err.kind() == std::io::ErrorKind::TimedOut,
         _ => false,
     }
 }
@@ -270,7 +271,7 @@ macro_rules! with_timeout {
             |timeout| {
                 // Pass timeout to operation if it accepts it
                 $op
-            }
+            },
         )
     };
 }
@@ -303,23 +304,32 @@ mod tests {
     #[test]
     fn test_get_timeout() {
         let config = TimeoutConfig::default();
-        
-        assert_eq!(config.get_timeout(OperationType::Read), Duration::from_millis(DEFAULT_READ_TIMEOUT_MS));
-        assert_eq!(config.get_timeout(OperationType::Write), Duration::from_millis(DEFAULT_WRITE_TIMEOUT_MS));
-        assert_eq!(config.get_timeout(OperationType::Compaction), Duration::from_millis(DEFAULT_COMPACTION_TIMEOUT_MS));
+
+        assert_eq!(
+            config.get_timeout(OperationType::Read),
+            Duration::from_millis(DEFAULT_READ_TIMEOUT_MS)
+        );
+        assert_eq!(
+            config.get_timeout(OperationType::Write),
+            Duration::from_millis(DEFAULT_WRITE_TIMEOUT_MS)
+        );
+        assert_eq!(
+            config.get_timeout(OperationType::Compaction),
+            Duration::from_millis(DEFAULT_COMPACTION_TIMEOUT_MS)
+        );
     }
 
     #[test]
     fn test_calculate_backoff() {
         let config = TimeoutConfig::default();
-        
+
         // Without backoff enabled
         let config_no_backoff = TimeoutConfig {
             enable_backoff: false,
             ..Default::default()
         };
         assert_eq!(config_no_backoff.calculate_backoff(0), Duration::from_millis(0));
-        
+
         // With backoff enabled - exponential growth
         assert_eq!(config.calculate_backoff(0), Duration::from_millis(BACKOFF_BASE_MS));
         assert_eq!(config.calculate_backoff(1), Duration::from_millis(BACKOFF_BASE_MS * 2));
@@ -329,12 +339,12 @@ mod tests {
     #[test]
     fn test_timeout_stats() {
         let mut stats = TimeoutStats::new();
-        
+
         stats.record_timeout();
         stats.record_timeout();
         stats.record_retry(true, 100);
         stats.record_retry(false, 200);
-        
+
         assert_eq!(stats.timeout_count, 2);
         assert_eq!(stats.retry_count, 2);
         assert_eq!(stats.successful_retries, 1);
@@ -346,16 +356,11 @@ mod tests {
     fn test_execute_with_timeout_success() {
         let config = TimeoutConfig::default();
         let mut stats = TimeoutStats::new();
-        
-        let result = execute_with_timeout(
-            OperationType::Read,
-            &config,
-            Some(&mut stats),
-            |_timeout| {
-                Ok("success".to_string())
-            }
-        );
-        
+
+        let result = execute_with_timeout(OperationType::Read, &config, Some(&mut stats), |_timeout| {
+            Ok("success".to_string())
+        });
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "success");
         assert_eq!(stats.timeout_count, 0);
@@ -368,16 +373,11 @@ mod tests {
             enable_retry: false, // Disable retry for this test
             ..Default::default()
         };
-        
-        let result = execute_with_timeout::<(), _>(
-            OperationType::Read,
-            &config,
-            None,
-            |_timeout| {
-                Err(FatalError::Corruption("test error".to_string()))
-            }
-        );
-        
+
+        let result = execute_with_timeout::<(), _>(OperationType::Read, &config, None, |_timeout| {
+            Err(FatalError::Corruption("test error".to_string()))
+        });
+
         assert!(result.is_err());
     }
 
@@ -386,10 +386,7 @@ mod tests {
         let timeout_err = FatalError::Corruption("operation timeout".to_string());
         assert!(is_timeout_error(&timeout_err));
 
-        let io_timeout = FatalError::Io(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "timed out"
-        ));
+        let io_timeout = FatalError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
         assert!(is_timeout_error(&io_timeout));
 
         let other_err = FatalError::Corruption("some other error".to_string());

@@ -11,11 +11,11 @@
 //! - Upgrade requires sustained high QPS for upgrade_window_ms
 //! - Downgrade requires sustained low QPS for downgrade_window_ms
 
+use dashmap::DashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use dashmap::DashMap;
 use tracing::debug;
 
 use crate::core::error::FatalError;
@@ -81,11 +81,11 @@ pub struct MigrationThresholds {
 impl Default for MigrationThresholds {
     fn default() -> Self {
         Self {
-            warm_threshold_qps: 10,    // 10 QPS for warm
-            hot_threshold_qps: 100,    // 100 QPS for hot
-            cooldown_threshold_qps: 5, // 5 QPS for cooldown
-            cold_threshold_qps: 1,     // 1 QPS for eviction
-            upgrade_window_ms: 60_000,  // 1 minute
+            warm_threshold_qps: 10,       // 10 QPS for warm
+            hot_threshold_qps: 100,       // 100 QPS for hot
+            cooldown_threshold_qps: 5,    // 5 QPS for cooldown
+            cold_threshold_qps: 1,        // 1 QPS for eviction
+            upgrade_window_ms: 60_000,    // 1 minute
             downgrade_window_ms: 300_000, // 5 minutes
             hot_tier_access_count: 100,   // 100+ accesses = Hot
             warm_tier_access_count: 10,   // 10-99 accesses = Warm, <10 = Cold
@@ -94,14 +94,23 @@ impl Default for MigrationThresholds {
     }
 }
 
+/// Process startup instant (used to avoid SystemTime::now() syscalls on hot path)
+static PROCESS_START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+/// Return milliseconds since process start (monotonic, no syscall)
+#[inline]
+fn elapsed_ms() -> u64 {
+    Instant::now().duration_since(*PROCESS_START).as_millis() as u64
+}
+
 /// Access frequency tracking for a single segment
 #[derive(Debug)]
 pub struct SegmentAccessTracker {
     /// Total access count
     access_count: AtomicU64,
-    /// Last access timestamp (ms since epoch)
+    /// Last access timestamp (ms since process start)
     last_access_ms: AtomicU64,
-    /// First access timestamp in current window (ms)
+    /// First access timestamp in current window (ms since process start)
     window_start_ms: AtomicU64,
     /// Access count in current window
     window_count: AtomicU64,
@@ -111,7 +120,7 @@ pub struct SegmentAccessTracker {
 
 impl SegmentAccessTracker {
     pub fn new(layer: usize) -> Self {
-        let now_ms = Instant::now().duration_since(Instant::now()).as_millis() as u64;
+        let now_ms = elapsed_ms();
         Self {
             access_count: AtomicU64::new(0),
             last_access_ms: AtomicU64::new(now_ms),
@@ -123,10 +132,7 @@ impl SegmentAccessTracker {
 
     /// Record an access event
     pub fn record_access(&self) -> AccessRecord {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now_ms = elapsed_ms();
 
         self.access_count.fetch_add(1, Ordering::Relaxed);
         self.last_access_ms.store(now_ms, Ordering::Relaxed);
@@ -135,7 +141,8 @@ impl SegmentAccessTracker {
         let window_start = self.window_start_ms.load(Ordering::Relaxed);
         let window_duration = now_ms.saturating_sub(window_start);
 
-        if window_duration > 60_000 { // Reset window every minute
+        if window_duration > 60_000 {
+            // Reset window every minute
             self.window_start_ms.store(now_ms, Ordering::Relaxed);
             self.window_count.store(1, Ordering::Relaxed);
         } else {
@@ -154,11 +161,8 @@ impl SegmentAccessTracker {
     pub fn get_qps(&self) -> f64 {
         let window_count = self.window_count.load(Ordering::Relaxed);
         let window_start = self.window_start_ms.load(Ordering::Relaxed);
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        
+        let now_ms = elapsed_ms();
+
         let window_duration_sec = (now_ms.saturating_sub(window_start)) as f64 / 1000.0;
         if window_duration_sec > 0.0 {
             window_count as f64 / window_duration_sec
@@ -276,7 +280,7 @@ impl MigrationController {
 
         // Decide migration based on current layer and QPS
         let decision = self.decide_migration(&record);
-        
+
         if decision != MigrationDecision::Stay {
             // Record pending migration
             let target_layer = match decision {
@@ -286,9 +290,9 @@ impl MigrationController {
                 MigrationDecision::DowngradeToL3 => 3,
                 MigrationDecision::Stay => return None,
             };
-            
+
             self.pending_migrations.insert(segment_id, target_layer);
-            
+
             match decision {
                 MigrationDecision::UpgradeToL1 | MigrationDecision::UpgradeToL2 => {
                     self.upgrades_triggered.fetch_add(1, Ordering::Relaxed);
@@ -319,7 +323,10 @@ impl MigrationController {
             1 => {
                 // Currently in L1
                 if self.should_downgrade_from_l1(qps, combined_score, record) {
-                    debug!("L1 -> L2 migration triggered for QPS={:.2}, freq_tier={:?}", qps, freq_tier);
+                    debug!(
+                        "L1 -> L2 migration triggered for QPS={:.2}, freq_tier={:?}",
+                        qps, freq_tier
+                    );
                     MigrationDecision::DowngradeToL2
                 } else {
                     MigrationDecision::Stay
@@ -328,10 +335,16 @@ impl MigrationController {
             2 => {
                 // Currently in L2
                 if self.should_upgrade_to_l1(qps, combined_score, freq_tier, record) {
-                    debug!("L2 -> L1 migration triggered for QPS={:.2}, freq_tier={:?}", qps, freq_tier);
+                    debug!(
+                        "L2 -> L1 migration triggered for QPS={:.2}, freq_tier={:?}",
+                        qps, freq_tier
+                    );
                     MigrationDecision::UpgradeToL1
                 } else if self.should_downgrade_to_l3(qps, combined_score, record) {
-                    debug!("L2 -> L3 migration triggered for QPS={:.2}, freq_tier={:?}", qps, freq_tier);
+                    debug!(
+                        "L2 -> L3 migration triggered for QPS={:.2}, freq_tier={:?}",
+                        qps, freq_tier
+                    );
                     MigrationDecision::DowngradeToL3
                 } else {
                     MigrationDecision::Stay
@@ -340,7 +353,10 @@ impl MigrationController {
             3 => {
                 // Currently in L3 (cold)
                 if self.should_upgrade_to_l2(qps, combined_score, freq_tier, record) {
-                    debug!("L3 -> L2 migration triggered for QPS={:.2}, freq_tier={:?}", qps, freq_tier);
+                    debug!(
+                        "L3 -> L2 migration triggered for QPS={:.2}, freq_tier={:?}",
+                        qps, freq_tier
+                    );
                     MigrationDecision::UpgradeToL2
                 } else {
                     MigrationDecision::Stay
@@ -379,7 +395,13 @@ impl MigrationController {
     }
 
     /// Check if L2 segment should be upgraded to L1
-    fn should_upgrade_to_l1(&self, qps: f64, combined_score: f64, freq_tier: FrequencyTier, record: &AccessRecord) -> bool {
+    fn should_upgrade_to_l1(
+        &self,
+        qps: f64,
+        combined_score: f64,
+        freq_tier: FrequencyTier,
+        record: &AccessRecord,
+    ) -> bool {
         // Either high QPS or Hot frequency tier can trigger upgrade
         let qps_above = qps > self.thresholds.hot_threshold_qps as f64;
         let freq_indicates_hot = freq_tier == FrequencyTier::Hot;
@@ -399,7 +421,13 @@ impl MigrationController {
     }
 
     /// Check if L3 segment should be upgraded to L2
-    fn should_upgrade_to_l2(&self, qps: f64, combined_score: f64, freq_tier: FrequencyTier, record: &AccessRecord) -> bool {
+    fn should_upgrade_to_l2(
+        &self,
+        qps: f64,
+        combined_score: f64,
+        freq_tier: FrequencyTier,
+        record: &AccessRecord,
+    ) -> bool {
         let qps_above = qps > self.thresholds.warm_threshold_qps as f64;
         let freq_indicates_warm_or_hot = matches!(freq_tier, FrequencyTier::Warm | FrequencyTier::Hot);
 
@@ -418,7 +446,7 @@ impl MigrationController {
         } else {
             self.thresholds.warm_threshold_qps as f64
         };
-        
+
         record.qps() > threshold && record.window_duration_ms >= window_ms
     }
 
@@ -429,21 +457,24 @@ impl MigrationController {
         } else {
             self.thresholds.cold_threshold_qps as f64
         };
-        
+
         record.qps() < threshold && record.window_duration_ms >= window_ms
     }
 
     /// Mark a migration as completed
     pub fn complete_migration(&self, segment_id: u64, target_layer: usize) {
         self.pending_migrations.remove(&segment_id);
-        
+
         if let Some(tracker) = self.trackers.get(&segment_id) {
             tracker.set_layer(target_layer);
         }
-        
+
         self.migrations_completed.fetch_add(1, Ordering::Relaxed);
-        
-        debug!("Migration completed for segment {} to layer {}", segment_id, target_layer);
+
+        debug!(
+            "Migration completed for segment {} to layer {}",
+            segment_id, target_layer
+        );
     }
 
     /// Get migration statistics
@@ -516,10 +547,7 @@ impl BloomFilterMigrator {
     /// - `Ok(Some((bloom, keys, migration_result)))`: Successfully loaded/migrated
     /// - `Ok(None)`: Filter doesn't exist or unsupported version
     /// - `Err(e)`: Error during loading/migration
-    pub fn load_with_migration(
-        &self,
-        segment_id: u64,
-    ) -> Result<Option<(BloomFilter, Vec<String>, MigrationResult)>> {
+    pub fn load_with_migration(&self, segment_id: u64) -> Result<Option<(BloomFilter, Vec<String>, MigrationResult)>> {
         use std::fs::File;
         use std::io::{BufReader, Read};
 
@@ -529,19 +557,16 @@ impl BloomFilterMigrator {
             return Ok(None);
         }
 
-        let file = File::open(&bloom_path)
-            .map_err(FatalError::Io)?;
+        let file = File::open(&bloom_path).map_err(FatalError::Io)?;
         let mut reader = BufReader::new(file);
 
         // Read header
         let mut magic_buf = [0u8; 4];
-        reader.read_exact(&mut magic_buf)
-            .map_err(FatalError::Io)?;
+        reader.read_exact(&mut magic_buf).map_err(FatalError::Io)?;
         let _magic = u32::from_le_bytes(magic_buf);
 
         let mut version_buf = [0u8; 4];
-        reader.read_exact(&mut version_buf)
-            .map_err(FatalError::Io)?;
+        reader.read_exact(&mut version_buf).map_err(FatalError::Io)?;
         let version = u32::from_le_bytes(version_buf);
 
         // Check version compatibility
@@ -562,36 +587,33 @@ impl BloomFilterMigrator {
         let num_keys = if version == 1 {
             // V1: just num_keys
             let mut num_keys_buf = [0u8; 8];
-            reader.read_exact(&mut num_keys_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut num_keys_buf).map_err(FatalError::Io)?;
             u64::from_le_bytes(num_keys_buf) as usize
         } else if version >= 2 {
             // V2+: skip num_bits and num_hashes, then read num_keys
             let mut _num_bits_buf = [0u8; 4];
-            reader.read_exact(&mut _num_bits_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut _num_bits_buf).map_err(FatalError::Io)?;
             let mut _num_hashes_buf = [0u8; 4];
-            reader.read_exact(&mut _num_hashes_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut _num_hashes_buf).map_err(FatalError::Io)?;
             let mut num_keys_buf = [0u8; 8];
-            reader.read_exact(&mut num_keys_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut num_keys_buf).map_err(FatalError::Io)?;
             u64::from_le_bytes(num_keys_buf) as usize
         } else {
-            return Err(FatalError::Corruption(format!("Unsupported bloom version: {}", version)));
+            return Err(FatalError::Corruption(format!(
+                "Unsupported bloom version: {}",
+                version
+            )));
         };
 
         // Read keys
         let mut keys = Vec::with_capacity(num_keys);
         for _ in 0..num_keys {
             let mut key_len_buf = [0u8; 4];
-            reader.read_exact(&mut key_len_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut key_len_buf).map_err(FatalError::Io)?;
             let key_len = u32::from_le_bytes(key_len_buf) as usize;
 
             let mut key_buf = vec![0u8; key_len];
-            reader.read_exact(&mut key_buf)
-                .map_err(FatalError::Io)?;
+            reader.read_exact(&mut key_buf).map_err(FatalError::Io)?;
 
             let key = String::from_utf8_lossy(&key_buf).to_string();
             keys.push(key);
@@ -770,10 +792,25 @@ mod tests {
         let cold_score = controller.compute_combined_score(1.0, 2, FrequencyTier::Cold);
 
         // Hot should have higher score than Cold
-        assert!(hot_score > cold_score, "Hot score ({}) should be > Cold score ({})", hot_score, cold_score);
+        assert!(
+            hot_score > cold_score,
+            "Hot score ({}) should be > Cold score ({})",
+            hot_score,
+            cold_score
+        );
         // Warm should be between Hot and Cold
-        assert!(hot_score > warm_score, "Hot score ({}) should be > Warm score ({})", hot_score, warm_score);
-        assert!(warm_score > cold_score, "Warm score ({}) should be > Cold score ({})", warm_score, cold_score);
+        assert!(
+            hot_score > warm_score,
+            "Hot score ({}) should be > Warm score ({})",
+            hot_score,
+            warm_score
+        );
+        assert!(
+            warm_score > cold_score,
+            "Warm score ({}) should be > Cold score ({})",
+            warm_score,
+            cold_score
+        );
     }
 
     #[test]
@@ -784,7 +821,10 @@ mod tests {
         };
 
         match result {
-            MigrationResult::Migrated { from_version, to_version } => {
+            MigrationResult::Migrated {
+                from_version,
+                to_version,
+            } => {
                 assert_eq!(from_version, 1);
                 assert_eq!(to_version, 2);
             }
@@ -796,7 +836,7 @@ mod tests {
     fn test_frequency_aware_migration() {
         // Test: verifies frequency-based migration tier classification
         let thresholds = MigrationThresholds {
-            upgrade_window_ms: 100,  // Short window for testing
+            upgrade_window_ms: 100, // Short window for testing
             downgrade_window_ms: 100,
             hot_tier_access_count: 50,
             warm_tier_access_count: 10,

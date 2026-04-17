@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::orchestrator::{AgentRole, ContextOptimizer, ContextMessage, MessageType, RoleSwitcher};
+use crate::orchestrator::{AgentRole, ContextMessage, ContextOptimizer, MessageType, RoleSwitcher};
 
 /// 步骤状态
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,9 +143,9 @@ impl Stage {
 
     /// 检查是否所有步骤都已完成
     pub fn is_complete(&self) -> bool {
-        self.steps.iter().all(|s| {
-            s.status == StepStatus::Completed || s.status == StepStatus::Skipped
-        })
+        self.steps
+            .iter()
+            .all(|s| s.status == StepStatus::Completed || s.status == StepStatus::Skipped)
     }
 
     /// 检查是否有步骤失败
@@ -412,9 +412,10 @@ impl WorkflowEngine {
             }
 
             // 获取当前阶段的 ID
-            let current_stage_id = self.context.workflow.stages
-                .iter()
-                .position(|s| s.status == StageStatus::Pending || s.status == StageStatus::Running);
+            let current_stage_id =
+                self.context.workflow.stages.iter().position(|s| {
+                    s.status == StageStatus::Pending || s.status == StageStatus::Running
+                });
 
             if current_stage_id.is_none() {
                 break;
@@ -535,7 +536,11 @@ impl WorkflowEngine {
         // 收集可执行的步骤 ID
         let step_ids: Vec<String> = {
             let stage = &self.context.workflow.stages[idx];
-            stage.get_ready_steps().iter().map(|s| s.id.clone()).collect()
+            stage
+                .get_ready_steps()
+                .iter()
+                .map(|s| s.id.clone())
+                .collect()
         };
 
         if step_ids.is_empty() {
@@ -619,7 +624,11 @@ impl WorkflowEngine {
         // 记录执行历史
         self.context.execution_history.push(ExecutionRecord {
             timestamp: current_timestamp(),
-            stage_id: self.context.workflow.get_current_stage_id().unwrap_or_else(|| "unknown".to_string()),
+            stage_id: self
+                .context
+                .workflow
+                .get_current_stage_id()
+                .unwrap_or_else(|| "unknown".to_string()),
             step_id: step_id.clone(),
             role: step_role.as_str().to_string(),
             status: "completed".to_string(),
@@ -643,7 +652,7 @@ impl WorkflowEngine {
         let (step_desc, step_role) = {
             let mut step_desc = String::new();
             let mut step_role = AgentRole::General;
-            
+
             for stage in &self.context.workflow.stages {
                 if let Some(step) = stage.steps.iter().find(|s| s.id == step_id) {
                     step_desc = step.description.clone();
@@ -651,11 +660,11 @@ impl WorkflowEngine {
                     break;
                 }
             }
-            
+
             if step_desc.is_empty() {
                 return Err(anyhow::anyhow!("步骤 {} 不存在", step_id));
             }
-            
+
             (step_desc, step_role)
         };
 
@@ -676,7 +685,11 @@ impl WorkflowEngine {
         let start = Instant::now();
 
         // 模拟执行
-        let output = format!("[模拟执行] 步骤 {} 由 {} 完成", step_desc, step_role.as_str());
+        let output = format!(
+            "[模拟执行] 步骤 {} 由 {} 完成",
+            step_desc,
+            step_role.as_str()
+        );
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -773,7 +786,8 @@ impl WorkflowEngine {
         self.log("执行声明式工作流", &workflow.name);
 
         let mut step_results: HashMap<String, Value> = HashMap::new();
-        let mut executed_steps: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut executed_steps: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // 执行步骤（按依赖顺序）
         loop {
@@ -798,16 +812,17 @@ impl WorkflowEngine {
             if ready_steps.is_empty() {
                 // 没有可执行的步骤，但还有未执行的步骤，说明存在循环依赖
                 if executed_steps.len() < workflow.steps.len() {
-                    return Err(anyhow::anyhow!(
-                        "检测到循环依赖或无法执行的步骤"
-                    ));
+                    return Err(anyhow::anyhow!("检测到循环依赖或无法执行的步骤"));
                 }
                 break;
             }
 
             // 并行执行可执行的步骤
             for step in ready_steps {
-                match self.execute_step_with_retry(step, &step_results, input).await {
+                match self
+                    .execute_step_with_retry(step, &step_results, input)
+                    .await
+                {
                     Ok(result) => {
                         step_results.insert(step.id.clone(), result);
                         executed_steps.insert(step.id.clone());
@@ -836,7 +851,13 @@ impl WorkflowEngine {
                                 ErrorStrategy::Fallback => {
                                     // 执行 fallback 工具（如果配置了 fallback_tool）
                                     if let Some(fallback_tool) = &handler.fallback_tool {
-                                        self.log("执行 Fallback", &format!("步骤 {} 使用 fallback 工具：{}", step.id, fallback_tool));
+                                        self.log(
+                                            "执行 Fallback",
+                                            &format!(
+                                                "步骤 {} 使用 fallback 工具：{}",
+                                                step.id, fallback_tool
+                                            ),
+                                        );
                                         // 记录 fallback 执行
                                         executed_steps.insert(step.id.clone());
                                         step_results.insert(step.id.clone(), json!({
@@ -846,7 +867,10 @@ impl WorkflowEngine {
                                         }));
                                     } else {
                                         // 没有配置 fallback 工具，按跳过处理
-                                        self.log("跳过步骤", &format!("{}: {} (fallback 未配置)", step.id, e));
+                                        self.log(
+                                            "跳过步骤",
+                                            &format!("{}: {} (fallback 未配置)", step.id, e),
+                                        );
                                         executed_steps.insert(step.id.clone());
                                     }
                                 }
@@ -910,7 +934,13 @@ impl WorkflowEngine {
                         delay *= 2;
                     }
 
-                    self.log("重试步骤", &format!("{} (第 {}/{} 次)", step.id, attempts, step.retry.max_retries));
+                    self.log(
+                        "重试步骤",
+                        &format!(
+                            "{} (第 {}/{} 次)",
+                            step.id, attempts, step.retry.max_retries
+                        ),
+                    );
                 }
             }
         }
@@ -922,12 +952,9 @@ impl WorkflowEngine {
         // 设置超时
         let timeout = step.timeout_secs.or(Some(self.timeout_secs)).unwrap_or(60);
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(timeout),
-            self.do_execute_step(step),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("步骤 {} 执行超时 ({}s)", step.id, timeout))??;
+        let result = tokio::time::timeout(Duration::from_secs(timeout), self.do_execute_step(step))
+            .await
+            .map_err(|_| anyhow::anyhow!("步骤 {} 执行超时 ({}s)", step.id, timeout))??;
 
         Ok(result)
     }
@@ -1188,8 +1215,12 @@ pub struct RetryConfig {
     pub exponential_backoff: bool,
 }
 
-fn default_max_retries() -> u32 { 3 }
-fn default_retry_interval() -> u64 { 1000 }
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_retry_interval() -> u64 {
+    1000
+}
 
 impl Default for RetryConfig {
     fn default() -> Self {
@@ -1217,7 +1248,6 @@ pub enum ErrorStrategy {
     /// 使用 fallback 工具
     Fallback,
 }
-
 
 /// 错误处理器
 #[allow(dead_code)]
@@ -1411,11 +1441,8 @@ impl DeclarativeWorkflow {
     /// 转换为传统 Workflow
     #[allow(dead_code)]
     pub fn to_workflow(&self) -> Workflow {
-        let mut workflow = Workflow::new(
-            self.id.clone(),
-            self.name.clone(),
-            self.description.clone(),
-        );
+        let mut workflow =
+            Workflow::new(self.id.clone(), self.name.clone(), self.description.clone());
 
         // 创建一个包含所有步骤的阶段
         let mut stage = Stage::new(
@@ -1425,11 +1452,8 @@ impl DeclarativeWorkflow {
         );
 
         for step in &self.steps {
-            let mut wf_step = Step::new(
-                step.id.clone(),
-                step.description.clone(),
-                step.role.clone(),
-            );
+            let mut wf_step =
+                Step::new(step.id.clone(), step.description.clone(), step.role.clone());
             wf_step.dependencies = step.depends_on.clone();
             stage.add_step(wf_step);
         }
@@ -1438,7 +1462,6 @@ impl DeclarativeWorkflow {
         workflow
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1485,7 +1508,11 @@ mod tests {
 
     #[test]
     fn test_step_dependencies() {
-        let mut step1 = Step::new("step1".to_string(), "步骤 1".to_string(), AgentRole::Executor);
+        let mut step1 = Step::new(
+            "step1".to_string(),
+            "步骤 1".to_string(),
+            AgentRole::Executor,
+        );
         step1.status = StepStatus::Completed;
 
         let step2 = Step::with_dependencies(

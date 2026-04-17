@@ -2,13 +2,13 @@
 //!
 //! 提供 JSON 格式化、压缩、验证等基础格式处理功能
 
-use tokitai::tool;
-use serde_json::{json, Value};
-use std::sync::Arc;
 use crate::tools::data::config::DataToolConfig;
 use crate::tools::data::error::DataToolError;
-use crate::tools::data::validator::{JsonLengthValidator, JsonDepthValidator, Validator};
-use crate::tools::data::metrics::{MetricsCollector, DataToolOperation};
+use crate::tools::data::metrics::{DataToolOperation, MetricsCollector};
+use crate::tools::data::validator::{JsonDepthValidator, JsonLengthValidator, Validator};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokitai::tool;
 
 /// JSON 格式化工具集
 #[derive(Debug)]
@@ -33,13 +33,15 @@ impl JsonFormatTools {
 impl JsonFormatTools {
     /// 解析并验证 JSON
     fn parse_and_validate(&self, json_string: &str) -> Result<Value, Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
 
         let parsed: Value = serde_json::from_str(json_string)
             .map_err(|e| DataToolError::json_parse(e.to_string()).to_value())?;
 
-        JsonDepthValidator { value: &parsed }.validate(&self.config)
+        JsonDepthValidator { value: &parsed }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
 
         Ok(parsed)
@@ -53,7 +55,8 @@ impl JsonFormatTools {
     }
 
     fn _minify_json(&self, json_string: &str) -> Result<String, Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
 
         let parsed: Value = serde_json::from_str(json_string)
@@ -65,7 +68,8 @@ impl JsonFormatTools {
     }
 
     fn _validate_json(&self, json_string: &str) -> Result<Value, Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
 
         match serde_json::from_str::<Value>(json_string) {
@@ -174,14 +178,17 @@ mod tests {
         assert!(!result.contains('\n'));
         // 验证 JSON 语义等价，而不是字符串完全相同（键顺序可能不同）
         let result_json: serde_json::Value = serde_json::from_str(&result).unwrap();
-        let expected_json: serde_json::Value = serde_json::from_str(r#"{"name":"Alice","age":30}"#).unwrap();
+        let expected_json: serde_json::Value =
+            serde_json::from_str(r#"{"name":"Alice","age":30}"#).unwrap();
         assert_eq!(result_json, expected_json);
     }
 
     #[test]
     fn test_validate_json_valid() {
         let tools = JsonFormatTools::new();
-        let result = tools.validate_json(r#"{"valid": true}"#.to_string()).unwrap();
+        let result = tools
+            .validate_json(r#"{"valid": true}"#.to_string())
+            .unwrap();
         assert_eq!(result.get("valid").unwrap(), true);
     }
 
@@ -195,9 +202,7 @@ mod tests {
 
     #[test]
     fn test_format_json_depth_limit() {
-        let tools = JsonFormatTools::with_config(
-            DataToolConfig::builder().max_depth(10).build()
-        );
+        let tools = JsonFormatTools::with_config(DataToolConfig::builder().max_depth(10).build());
         let mut deep = String::from("1");
         for _ in 0..15 {
             deep = format!("[{}]", deep);
@@ -208,9 +213,7 @@ mod tests {
 
     #[test]
     fn test_format_json_length_limit() {
-        let tools = JsonFormatTools::with_config(
-            DataToolConfig::builder().max_length(100).build()
-        );
+        let tools = JsonFormatTools::with_config(DataToolConfig::builder().max_length(100).build());
         let long_json = format!("{{\"data\": \"{}\"}}", "a".repeat(101));
         let result = tools.format_json(long_json);
         assert!(result.is_err());
@@ -224,7 +227,10 @@ mod tests {
         let _ = tools.format_json(r#"{"b":2}"#.to_string());
         let _ = tools.minify_json(r#"{"c":3}"#.to_string());
 
-        let metrics = tools.metrics.get_metrics(DataToolOperation::FormatJson).unwrap();
+        let metrics = tools
+            .metrics
+            .get_metrics(DataToolOperation::FormatJson)
+            .unwrap();
         assert_eq!(metrics.total_calls, 2);
         assert_eq!(metrics.successful_calls, 2);
     }

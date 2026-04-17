@@ -8,13 +8,13 @@
 //! All file operations in the codebase should go through `FileKVFileSystem`
 //! instead of calling `std::fs` directly.
 
-mod stdfs;
-pub(crate) mod memfs;
 mod fault_inject;
+pub(crate) mod memfs;
+mod stdfs;
 
-pub use stdfs::StdFs;
-pub use memfs::MemFs;
 pub use fault_inject::{FaultInjector, FaultRule, FaultStrategy};
+pub use memfs::MemFs;
+pub use stdfs::StdFs;
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
@@ -75,7 +75,12 @@ pub trait FileKVFile: Send + Sync {
     fn read_exact(&mut self, mut buf: &mut [u8]) -> IoResult<()> {
         while !buf.is_empty() {
             match self.read(buf)? {
-                0 => return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "failed to fill whole buffer")),
+                0 => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "failed to fill whole buffer",
+                    ))
+                }
                 n => buf = &mut buf[n..],
             }
         }
@@ -89,7 +94,12 @@ pub trait FileKVFile: Send + Sync {
     fn write_all(&mut self, mut buf: &[u8]) -> IoResult<()> {
         while !buf.is_empty() {
             match self.write(buf)? {
-                0 => return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "failed to write whole buffer")),
+                0 => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "failed to write whole buffer",
+                    ))
+                }
                 n => buf = &buf[n..],
             }
         }

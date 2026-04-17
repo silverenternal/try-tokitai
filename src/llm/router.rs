@@ -2,13 +2,13 @@
 //!
 //! Automatically selects the optimal model based on task type, cost, latency, and quality.
 
-use super::{ProviderType, ChatRequest, Message};
-use super::performance_tracker::{PerformanceTracker, ModelProfile, TaskType};
-use anyhow::{Result, Context, bail};
-use std::collections::HashMap;
-use std::sync::Arc;
+use super::performance_tracker::{ModelProfile, PerformanceTracker, TaskType};
+use super::{ChatRequest, Message, ProviderType};
+use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Routing strategy
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +110,8 @@ impl ModelRouter {
         }
 
         // Filter models based on constraints
-        let candidates: Vec<&ModelProfile> = self.models
+        let candidates: Vec<&ModelProfile> = self
+            .models
             .values()
             .filter(|m| {
                 // Apply latency constraint
@@ -141,26 +142,24 @@ impl ModelRouter {
 
         // Select based on strategy
         let selected = match self.config.strategy {
-            RoutingStrategy::CostOptimized => {
-                candidates.iter()
-                    .min_by(|a, b| a.cost_per_1k_tokens.partial_cmp(&b.cost_per_1k_tokens).unwrap())
-            }
-            RoutingStrategy::QualityOptimized => {
-                candidates.iter()
-                    .max_by(|a, b| a.quality_score.partial_cmp(&b.quality_score).unwrap())
-            }
-            RoutingStrategy::LatencyOptimized => {
-                candidates.iter()
-                    .min_by(|a, b| a.avg_latency_ms.partial_cmp(&b.avg_latency_ms).unwrap())
-            }
+            RoutingStrategy::CostOptimized => candidates.iter().min_by(|a, b| {
+                a.cost_per_1k_tokens
+                    .partial_cmp(&b.cost_per_1k_tokens)
+                    .unwrap()
+            }),
+            RoutingStrategy::QualityOptimized => candidates
+                .iter()
+                .max_by(|a, b| a.quality_score.partial_cmp(&b.quality_score).unwrap()),
+            RoutingStrategy::LatencyOptimized => candidates
+                .iter()
+                .min_by(|a, b| a.avg_latency_ms.partial_cmp(&b.avg_latency_ms).unwrap()),
             RoutingStrategy::Balanced => {
                 // Weighted score: 40% quality, 30% cost (inverted), 30% latency (inverted)
-                candidates.iter()
-                    .max_by(|a, b| {
-                        let score_a = self.calculate_balanced_score(a);
-                        let score_b = self.calculate_balanced_score(b);
-                        score_a.partial_cmp(&score_b).unwrap()
-                    })
+                candidates.iter().max_by(|a, b| {
+                    let score_a = self.calculate_balanced_score(a);
+                    let score_b = self.calculate_balanced_score(b);
+                    score_a.partial_cmp(&score_b).unwrap()
+                })
             }
         };
 
@@ -171,10 +170,10 @@ impl ModelRouter {
     fn calculate_balanced_score(&self, model: &ModelProfile) -> f64 {
         // Normalize scores (0-10 scale)
         let quality_norm = model.quality_score / 10.0;
-        
+
         // Cost: lower is better, invert and normalize (assume max $10/1K tokens)
         let cost_norm = 1.0 - (model.cost_per_1k_tokens / 10.0).min(1.0);
-        
+
         // Latency: lower is better, invert and normalize (assume max 10s)
         let latency_norm = 1.0 - (model.avg_latency_ms / 10000.0).min(1.0);
 
@@ -202,9 +201,9 @@ impl ModelRouter {
     pub fn get_model_stats(&self, model_key: &str) -> Option<ModelStats> {
         let tracker = self.performance_tracker.read();
         let profile = self.models.get(model_key)?;
-        
+
         let perf_stats = tracker.get_model_stats(model_key);
-        
+
         Some(ModelStats {
             model_name: profile.model_name.clone(),
             provider: profile.provider.to_string(),
@@ -217,12 +216,15 @@ impl ModelRouter {
     }
 
     /// Run benchmark for all models
-    pub async fn run_benchmarks(&self, providers: &HashMap<ProviderType, Arc<dyn super::LLMProvider>>) -> Result<Vec<BenchmarkResult>> {
-        use tokio::time::{Duration, timeout};
-        
+    pub async fn run_benchmarks(
+        &self,
+        providers: &HashMap<ProviderType, Arc<dyn super::LLMProvider>>,
+    ) -> Result<Vec<BenchmarkResult>> {
+        use tokio::time::{timeout, Duration};
+
         let mut results = Vec::new();
         let test_prompt = "Explain what is Rust programming language in one sentence.";
-        
+
         for (model_key, profile) in &self.models {
             let provider = match providers.get(&profile.provider) {
                 Some(p) => p,

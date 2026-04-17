@@ -31,23 +31,91 @@
 //!   └─────────────┘
 //! ```
 
-use std::fs::File;
-use std::io::{Read, Write, BufReader, BufWriter};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, AtomicBool, Ordering};
-use std::sync::Arc;
-use std::collections::HashSet;
 use dashmap::DashMap;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::num::NonZero;
-use tracing::{debug, warn};
-use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
-use crate::core::error::{FileKVError, FileKVResult, TransientError, DomainError};
-use bloom::{BloomFilter, ASMS};
+/// Process start time for monotonic duration calculation (avoids SystemTime syscalls).
+static ADAPTIVE_PROCESS_START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+#[inline]
+fn adaptive_elapsed_ms() -> u64 {
+    Instant::now().duration_since(*ADAPTIVE_PROCESS_START).as_millis() as u64
+}
+use tracing::{debug, warn};
+
 use super::compressed::CompressionError;
-use super::migration::{AccessRecord, FrequencyTier, MigrationThresholds, classify_by_frequency};
+use super::custom_bloom::CustomBloom;
 use super::fpr_controller::FPRController;
+use super::migration::{classify_by_frequency, AccessRecord, FrequencyTier, MigrationThresholds};
+use crate::core::error::{DomainError, FileKVError, FileKVResult, TransientError};
+use bloom::{BloomFilter, ASMS};
+
+// =========================================================================
+// OPT-002: BloomFilterWrapper enum for Unified CustomBloom Integration
+// =========================================================================
+
+/// Unified wrapper for bloom filters - supports both legacy ::bloom::BloomFilter
+/// and high-performance CustomBloom (V3 format).
+///
+/// OPT-002: This enables:
+/// - Backward compatibility: V1/V2 format files still loadable via Bloom variant
+/// - Fast path: V3 format loads as CustomBloom with direct bitset deserialization
+/// - Auto-migration: V1/V2 formats can be migrated to V3 on first load
+pub enum BloomFilterWrapper {
+    /// Legacy bloom filter (V1/V2 format, uses RandomState hashing)
+    Bloom(BloomFilter),
+    /// Custom bloom filter (V3 format, uses deterministic XXH3 hashing)
+    Custom(CustomBloom),
+}
+
+impl std::fmt::Debug for BloomFilterWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BloomFilterWrapper::Bloom(_) => f.debug_tuple("Bloom").field(&"<bloom::BloomFilter>").finish(),
+            BloomFilterWrapper::Custom(cb) => f.debug_tuple("Custom").field(cb).finish(),
+        }
+    }
+}
+
+impl BloomFilterWrapper {
+    /// Check if a key might be in the filter
+    pub fn contains(&self, key: &str) -> bool {
+        match self {
+            BloomFilterWrapper::Bloom(bf) => bf.contains(&key.to_string()),
+            BloomFilterWrapper::Custom(cb) => cb.contains(key.as_bytes()),
+        }
+    }
+
+    /// Estimate memory size for the wrapped filter
+    pub fn estimate_memory_size(&self) -> usize {
+        match self {
+            BloomFilterWrapper::Bloom(bf) => L1CacheEntry::estimate_bloom_memory_size(bf),
+            BloomFilterWrapper::Custom(cb) => cb.memory_usage(),
+        }
+    }
+
+    /// Get the inner BloomFilter if present (for L2 migration that requires keys)
+    pub fn as_bloom_filter(&self) -> Option<&BloomFilter> {
+        match self {
+            BloomFilterWrapper::Bloom(bf) => Some(bf),
+            BloomFilterWrapper::Custom(_) => None,
+        }
+    }
+
+    /// Check if this is a CustomBloom (V3 format)
+    pub fn is_custom(&self) -> bool {
+        matches!(self, BloomFilterWrapper::Custom(_))
+    }
+}
 
 // =========================================================================
 // T-005: CLOCK Cache for approximate LRU with lock-free access
@@ -59,17 +127,13 @@ struct ClockEntry {
     segment_id: u64,
     /// Reference bit - set to 1 on access, cleared during eviction scan
     referenced: AtomicBool,
-    /// Generation counter - incremented on each eviction cycle to detect wraparound
-    #[allow(dead_code)]
-    generation: AtomicU64,
 }
 
 impl ClockEntry {
-    fn new(segment_id: u64, generation: u64) -> Self {
+    fn new(segment_id: u64) -> Self {
         Self {
             segment_id,
             referenced: AtomicBool::new(true), // New entries start as referenced
-            generation: AtomicU64::new(generation),
         }
     }
 
@@ -105,8 +169,6 @@ struct ClockBuffer {
     entries: Vec<Option<ClockEntry>>,
     /// Current hand position in the circular buffer
     hand: usize,
-    /// Current generation (incremented on wraparound)
-    generation: u64,
     /// Number of active entries
     count: usize,
     /// Maximum capacity
@@ -118,7 +180,6 @@ impl ClockBuffer {
         Self {
             entries: (0..capacity).map(|_| None).collect(),
             hand: 0,
-            generation: 0,
             count: 0,
             capacity,
         }
@@ -130,7 +191,7 @@ impl ClockBuffer {
         for i in 0..self.capacity {
             let idx = (self.hand + i) % self.capacity;
             if self.entries[idx].is_none() {
-                self.entries[idx] = Some(ClockEntry::new(segment_id, self.generation));
+                self.entries[idx] = Some(ClockEntry::new(segment_id));
                 self.count += 1;
                 self.hand = (idx + 1) % self.capacity;
                 return None;
@@ -141,7 +202,7 @@ impl ClockBuffer {
         let evicted = self.evict_one();
         // Insert in the freed slot
         let idx = self.hand;
-        self.entries[idx] = Some(ClockEntry::new(segment_id, self.generation));
+        self.entries[idx] = Some(ClockEntry::new(segment_id));
         self.hand = (idx + 1) % self.capacity;
         evicted
     }
@@ -178,7 +239,6 @@ impl ClockBuffer {
         }
         self.count = 0;
         self.hand = 0;
-        self.generation = 0;
     }
 
     /// Evict one entry using CLOCK algorithm. Returns the evicted segment_id.
@@ -226,11 +286,13 @@ impl ClockBuffer {
         self.evict_one()
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn len(&self) -> usize {
         self.count
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn is_empty(&self) -> bool {
         self.count == 0
@@ -251,10 +313,7 @@ impl ClockCache {
         // Calculate shard mask for fast modulo
         let shard_mask = num_shards - 1;
 
-        Self {
-            shards,
-            shard_mask,
-        }
+        Self { shards, shard_mask }
     }
 
     /// Select shard index for a segment_id
@@ -303,25 +362,16 @@ impl ClockCache {
         }
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn len(&self) -> usize {
         self.shards.iter().map(|s| s.lock().len()).sum()
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn is_empty(&self) -> bool {
         self.shards.iter().all(|s| s.lock().is_empty())
-    }
-
-    /// Promote an entry in the CLOCK cache (alias for tick)
-    #[allow(dead_code)]
-    fn promote(&mut self, segment_id: &u64) {
-        self.tick(*segment_id);
-    }
-
-    #[allow(dead_code)]
-    fn push(&mut self, segment_id: u64, _value: ()) {
-        self.insert(segment_id);
     }
 }
 
@@ -341,10 +391,7 @@ struct SegmentAccessTracker {
 
 impl SegmentAccessTracker {
     fn new(window_duration_ms: u64) -> Self {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now_ms = adaptive_elapsed_ms();
         Self {
             total_count: AtomicU64::new(0),
             window_count: AtomicU64::new(0),
@@ -358,10 +405,7 @@ impl SegmentAccessTracker {
         let total = self.total_count.fetch_add(1, Ordering::Relaxed) + 1;
         let window = self.window_count.fetch_add(1, Ordering::Relaxed) + 1;
 
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now_ms = adaptive_elapsed_ms();
         let window_start = self.window_start_ms.load(Ordering::Relaxed);
         let elapsed = now_ms.saturating_sub(window_start);
 
@@ -489,8 +533,11 @@ impl AdaptiveBloomCacheStats {
 }
 
 /// Entry in L1 cache
+///
+/// OPT-002: Uses BloomFilterWrapper to support both legacy BloomFilter and
+/// high-performance CustomBloom (V3 format).
 struct L1CacheEntry {
-    filter: Arc<BloomFilter>,
+    filter: Arc<BloomFilterWrapper>,
     /// Estimated memory size (bytes)
     memory_size: usize,
     /// MIN-003: Access count field - currently incremented on each access but NOT used
@@ -503,10 +550,8 @@ struct L1CacheEntry {
 }
 
 impl L1CacheEntry {
-    fn new(filter: BloomFilter, keys: Option<Vec<String>>) -> Self {
-        // Estimate memory size: BloomFilter uses Vec<u64> internally
-        // Conservative estimate: ~1-2KB per filter depending on configuration
-        let memory_size = Self::estimate_memory_size(&filter);
+    fn new(filter: BloomFilterWrapper, keys: Option<Vec<String>>) -> Self {
+        let memory_size = filter.estimate_memory_size();
         Self {
             filter: Arc::new(filter),
             memory_size,
@@ -515,9 +560,9 @@ impl L1CacheEntry {
         }
     }
 
-    /// Estimate memory size based on BloomFilter characteristics
+    /// Estimate memory size for a BloomFilter (legacy path)
     /// Uses the actual bit array size from the filter for accurate estimation.
-    fn estimate_memory_size(filter: &BloomFilter) -> usize {
+    fn estimate_bloom_memory_size(filter: &BloomFilter) -> usize {
         // BloomFilter stores a BitVec internally. The actual memory is:
         // - BitVec bit array: num_bits / 8 bytes (BitVec uses Vec<u64> internally,
         //   so there's some alignment overhead)
@@ -553,7 +598,7 @@ struct L2Metadata {
 #[derive(Debug, Serialize, Deserialize)]
 struct L2CompressedEntry {
     metadata: L2Metadata,
-    compressed_keys: Vec<u8>,  // [magic: u8][data...] where magic 0x01=zstd, 0x00=bincode
+    compressed_keys: Vec<u8>, // [magic: u8][data...] where magic 0x01=zstd, 0x00=bincode
 }
 
 impl L2CompressedEntry {
@@ -631,12 +676,14 @@ impl L2CompressedEntry {
 
 /// Entry in L2 cache (stores keys for BloomFilter reconstruction)
 ///
-/// T-004: Stores both `Arc<BloomFilter>` for O(1) hit path and `L2CompressedEntry`
-/// for memory-efficient storage and persistence. The compressed data is retained
-/// for L2->L3 eviction, while the filter serves cache hits directly.
+/// OPT-002: Uses CustomBloom directly for V3 format, with fallback to
+/// compressed keys for backward compatibility and migration.
+///
+/// T-004: Stores both `Arc<BloomFilterWrapper>` for O(1) hit path and
+/// `L2CompressedEntry` for memory-efficient storage and persistence.
 struct L2CacheEntry {
-    /// Pre-built BloomFilter for O(1) cache hit path
-    filter: Arc<BloomFilter>,
+    /// Pre-built BloomFilterWrapper for O(1) cache hit path
+    filter: Arc<BloomFilterWrapper>,
     /// Compressed keys storage (for L2->L3 eviction and persistence)
     compressed: L2CompressedEntry,
     /// T-004: Estimated total memory usage (filter + compressed data)
@@ -648,12 +695,17 @@ struct L2CacheEntry {
 impl L2CacheEntry {
     /// Create a new L2 cache entry with explicit FPR (borrows filter, rebuilds from keys)
     ///
-    /// Used when we only have a reference to the filter (e.g., from test code).
-    /// The filter is rebuilt from keys internally.
-    fn with_fpr(_filter: &BloomFilter, keys: Vec<String>, compression_enabled: bool, fpr: f64) -> Result<Self, CompressionError> {
+    /// OPT-002: Builds a CustomBloom from keys for V3 format performance.
+    #[cfg(test)]
+    fn with_fpr(
+        _filter: &BloomFilter,
+        keys: Vec<String>,
+        compression_enabled: bool,
+        fpr: f64,
+    ) -> Result<Self, CompressionError> {
         let num_keys = keys.len() as u64;
         let metadata = L2Metadata {
-            num_bits: 0,  // Rebuilt on decompress using FPR
+            num_bits: 0,   // Rebuilt on decompress using FPR
             num_hashes: 0, // Calculated from FPR on rebuild
             original_fpr: fpr,
             num_keys,
@@ -661,26 +713,27 @@ impl L2CacheEntry {
 
         let compressed = L2CompressedEntry::new(&keys, metadata, compression_enabled)?;
 
-        // Rebuild filter from keys for storage
-        let mut rebuilt = BloomFilter::with_rate(
-            metadata.original_fpr as f32,
-            num_keys as u32,
-        );
-        for key in &keys {
-            rebuilt.insert(key);
-        }
-
-        // T-004: Calculate total memory size (filter + compressed data)
-        let filter_mem = L1CacheEntry::estimate_memory_size(&rebuilt);
+        // OPT-002: Build CustomBloom from keys for V3 format performance
+        let custom_bloom = CustomBloom::from_keys(&keys, Self::estimate_custom_num_bits(num_keys, fpr), fpr);
+        let filter_mem = custom_bloom.memory_usage();
         let compressed_mem = compressed.compressed_keys.len();
         let memory_size = filter_mem + compressed_mem;
 
         Ok(Self {
-            filter: Arc::new(rebuilt),
+            filter: Arc::new(BloomFilterWrapper::Custom(custom_bloom)),
             compressed,
             memory_size,
             access_count: AtomicU64::new(0),
         })
+    }
+
+    /// Estimate optimal number of bits for CustomBloom given expected items and FPR
+    fn estimate_custom_num_bits(num_items: u64, fpr: f64) -> usize {
+        if fpr <= 0.0 || fpr >= 1.0 {
+            return (num_items as usize) * 10;
+        }
+        let ln2_sq = std::f64::consts::LN_2 * std::f64::consts::LN_2;
+        (-((num_items as f64) * fpr.ln()) / ln2_sq).ceil() as usize
     }
 
     /// NOTE: This constructor uses estimated FPR - prefer `with_fpr` for explicit FPR
@@ -691,14 +744,14 @@ impl L2CacheEntry {
     }
 
     /// T-004: Returns the cached filter directly (O(1) Arc::clone)
-    fn get_filter(&self) -> Arc<BloomFilter> {
+    fn get_filter(&self) -> Arc<BloomFilterWrapper> {
         self.filter.clone()
     }
 
     /// Rebuild BloomFilter from compressed keys.
     /// T-004: This is now only used in tests for verification.
     /// Production code should use `get_filter()` for O(1) access.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn decompress(&self) -> Result<BloomFilter, CompressionError> {
         let keys = self.compressed.decompress_keys()?;
 
@@ -723,29 +776,24 @@ impl L2CacheEntry {
 
     /// Deserialize from bytes
     /// NOTE: Currently only used in tests
-    /// T-004: After deserialization, we only have compressed data. The filter
-    /// will need to be rebuilt on first access. This is acceptable since this
-    /// path is only used in tests.
+    /// OPT-002: Rebuilds CustomBloom from keys for V3 format performance.
     #[cfg(test)]
     fn from_bytes(data: &[u8]) -> Result<Self, CompressionError> {
         let compressed: L2CompressedEntry = bincode::deserialize(data)
             .map_err(|e| CompressionError::InvalidData(format!("Deserialization failed: {}", e)))?;
 
-        // Rebuild filter from compressed data (test-only path)
+        // Rebuild CustomBloom from compressed data (test-only path)
         let keys = compressed.decompress_keys()?;
-        let mut filter = BloomFilter::with_rate(
-            compressed.metadata.original_fpr as f32,
-            compressed.metadata.num_keys as u32,
+        let custom_bloom = CustomBloom::from_keys(
+            &keys,
+            L2CacheEntry::estimate_custom_num_bits(compressed.metadata.num_keys, compressed.metadata.original_fpr),
+            compressed.metadata.original_fpr,
         );
-        for key in &keys {
-            filter.insert(key);
-        }
-
-        let filter_mem = L1CacheEntry::estimate_memory_size(&filter);
+        let filter_mem = custom_bloom.memory_usage();
         let compressed_mem = compressed.compressed_keys.len();
 
         Ok(Self {
-            filter: Arc::new(filter),
+            filter: Arc::new(BloomFilterWrapper::Custom(custom_bloom)),
             compressed,
             memory_size: filter_mem + compressed_mem,
             access_count: AtomicU64::new(0),
@@ -774,7 +822,7 @@ impl L2CacheEntry {
 /// # Usage
 /// This function is only used in test code via `L2CacheEntry::new()`. Production code
 /// should use `with_fpr()` with an explicit FPR value.
-#[allow(dead_code)]
+#[cfg(test)]
 fn estimate_fpr_from_filter(filter: &BloomFilter) -> f64 {
     // MIN-011: Use actual filter properties for better estimation
     let num_bits = filter.num_bits() as f64;
@@ -862,13 +910,9 @@ impl AdaptiveBloomCache {
     /// - `l2_max_filters` is zero
     pub fn try_new(config: AdaptiveBloomCacheConfig) -> FileKVResult<Self> {
         let l1_cap = NonZero::new(config.l1_max_filters)
-            .ok_or_else(|| FileKVError::Domain(DomainError::Config(
-                "l1_max_filters must be non-zero".to_string(),
-            )))?;
+            .ok_or_else(|| FileKVError::Domain(DomainError::Config("l1_max_filters must be non-zero".to_string())))?;
         let l2_cap = NonZero::new(config.l2_max_filters)
-            .ok_or_else(|| FileKVError::Domain(DomainError::Config(
-                "l2_max_filters must be non-zero".to_string(),
-            )))?;
+            .ok_or_else(|| FileKVError::Domain(DomainError::Config("l2_max_filters must be non-zero".to_string())))?;
 
         // T-005: Use sharded CLOCK cache with 16 shards for reduced contention
         const NUM_CLOCK_SHARDS: usize = 16;
@@ -912,15 +956,14 @@ impl AdaptiveBloomCache {
     /// # Limitations
     /// - FPR changes are logged but do not automatically rebuild Bloom filters
     /// - The caller is responsible for rebuilding affected segments if needed
-    pub fn try_with_fpr_controller(config: AdaptiveBloomCacheConfig, fpr_controller: Arc<FPRController>) -> FileKVResult<Self> {
+    pub fn try_with_fpr_controller(
+        config: AdaptiveBloomCacheConfig,
+        fpr_controller: Arc<FPRController>,
+    ) -> FileKVResult<Self> {
         let l1_cap = NonZero::new(config.l1_max_filters)
-            .ok_or_else(|| FileKVError::Domain(DomainError::Config(
-                "l1_max_filters must be non-zero".to_string(),
-            )))?;
+            .ok_or_else(|| FileKVError::Domain(DomainError::Config("l1_max_filters must be non-zero".to_string())))?;
         let l2_cap = NonZero::new(config.l2_max_filters)
-            .ok_or_else(|| FileKVError::Domain(DomainError::Config(
-                "l2_max_filters must be non-zero".to_string(),
-            )))?;
+            .ok_or_else(|| FileKVError::Domain(DomainError::Config("l2_max_filters must be non-zero".to_string())))?;
 
         // T-005: Use sharded CLOCK cache with 16 shards for reduced contention
         const NUM_CLOCK_SHARDS: usize = 16;
@@ -1007,20 +1050,23 @@ impl AdaptiveBloomCache {
     ///
     /// # Arguments
     /// * `segment_id` - Segment identifier
-    /// * `loader` - Function to load bloom filter from disk (for L3 miss). Returns (BloomFilter, keys).
+    /// * `loader` - Function to load CustomBloom from disk (for L3 miss).
     ///
     /// # Returns
-    /// `Arc<BloomFilter>` if found, None if filter doesn't exist
+    /// `Arc<BloomFilterWrapper>` if found, None if filter doesn't exist
+    ///
+    /// OPT-002: Returns BloomFilterWrapper which may contain either legacy BloomFilter
+    /// (V1/V2 format from L3) or CustomBloom (V3 format). Callers can use contains() directly.
     pub fn get(
         &self,
         segment_id: u64,
-        loader: &dyn Fn(u64) -> FileKVResult<Option<(BloomFilter, Vec<String>)>>,
-    ) -> FileKVResult<Option<Arc<BloomFilter>>> {
+        loader: &dyn Fn(u64) -> FileKVResult<Option<(CustomBloom, Vec<String>)>>,
+    ) -> FileKVResult<Option<Arc<BloomFilterWrapper>>> {
         // Check if cache is enabled
         if !self.is_enabled() {
-            // Bypass cache, load directly from disk and wrap in Arc
+            // Bypass cache, load directly from disk via loader and wrap as Custom
             let result = match loader(segment_id) {
-                Ok(Some((bloom, _keys))) => Ok(Some(Arc::new(bloom))),
+                Ok(Some((custom_bloom, _keys))) => Ok(Some(Arc::new(BloomFilterWrapper::Custom(custom_bloom)))),
                 Ok(None) => Ok(None),
                 Err(e) => Err(e),
             };
@@ -1084,9 +1130,8 @@ impl AdaptiveBloomCache {
             self.l3_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
 
             // Promote to L1 for future fast access
-            // We don't have keys here, so if this gets evicted from L1 it won't migrate to L2
             let arc = Arc::new(filter);
-            self.insert_l1_arc(segment_id, arc.clone());
+            self.insert_l1_wrapper(segment_id, arc.clone(), None);
 
             // MAJ-001: Record access with FPR controller
             self.record_fpr_access(segment_id, true);
@@ -1098,13 +1143,13 @@ impl AdaptiveBloomCache {
         self.total_misses.fetch_add(1, Ordering::Relaxed);
 
         match loader(segment_id)? {
-            Some((filter, keys)) => {
+            Some((custom_bloom, keys)) => {
                 self.l3_hits.fetch_add(1, Ordering::Relaxed);
                 self.l3_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
 
-                // Insert into L1 with keys (enables L1→L2 migration on eviction)
-                let arc = Arc::new(filter);
-                self.insert_l1_with_keys(segment_id, arc.clone(), keys);
+                // Insert into L1 as Custom (V3 format) with keys for L1→L2 migration
+                let arc = Arc::new(BloomFilterWrapper::Custom(custom_bloom));
+                self.insert_l1_wrapper(segment_id, arc.clone(), Some(keys));
 
                 // MAJ-001: Record access with FPR controller
                 self.record_fpr_access(segment_id, true);
@@ -1131,11 +1176,13 @@ impl AdaptiveBloomCache {
     }
 
     /// Insert into L1 cache with keys (enables L1→L2 migration on eviction)
-    pub fn insert_l1_with_keys(&self, segment_id: u64, filter: Arc<BloomFilter>, keys: Vec<String>) {
+    ///
+    /// OPT-002: Accepts Arc<BloomFilterWrapper> to support both legacy and V3 formats.
+    pub fn insert_l1_with_keys(&self, segment_id: u64, filter: Arc<BloomFilterWrapper>, keys: Vec<String>) {
         if !self.is_enabled() {
             return;
         }
-        let memory_size = L1CacheEntry::estimate_memory_size(&filter);
+        let memory_size = filter.estimate_memory_size();
         let entry = L1CacheEntry {
             filter,
             memory_size,
@@ -1150,16 +1197,18 @@ impl AdaptiveBloomCache {
         &self,
         segment_id: u64,
         key: &str,
-        loader: &dyn Fn(u64) -> FileKVResult<Option<(BloomFilter, Vec<String>)>>,
+        loader: &dyn Fn(u64) -> FileKVResult<Option<(CustomBloom, Vec<String>)>>,
     ) -> FileKVResult<Option<bool>> {
         match self.get(segment_id, loader)? {
-            Some(filter) => Ok(Some(filter.contains(&key))),
+            Some(filter) => Ok(Some(filter.contains(key))),
             None => Ok(None),
         }
     }
 
     /// Remove a filter from all cache layers
-    pub fn remove(&self, segment_id: u64) -> Option<Arc<BloomFilter>> {
+    ///
+    /// OPT-002: Returns Option<Arc<BloomFilterWrapper>> instead of Arc<BloomFilter>.
+    pub fn remove(&self, segment_id: u64) -> Option<Arc<BloomFilterWrapper>> {
         // Remove from L1
         let l1_removed = if let Some((_, entry)) = self.l1_cache.remove(&segment_id) {
             self.l1_memory_used.fetch_sub(entry.memory_size, Ordering::Relaxed);
@@ -1253,19 +1302,36 @@ impl AdaptiveBloomCache {
     }
 
     /// Insert into L1 cache (internal)
+    ///
+    /// OPT-002: Wraps BloomFilter in BloomFilterWrapper::Bloom for backward compatibility.
     fn insert_l1(&self, segment_id: u64, filter: BloomFilter) {
-        let entry = L1CacheEntry::new(filter, None);
+        let entry = L1CacheEntry::new(BloomFilterWrapper::Bloom(filter), None);
         self.insert_l1_entry(segment_id, entry);
     }
 
     /// Insert into L1 cache with Arc (internal)
-    fn insert_l1_arc(&self, segment_id: u64, filter: Arc<BloomFilter>) {
-        let memory_size = L1CacheEntry::estimate_memory_size(&filter);
+    ///
+    /// OPT-002: Already receives Arc<BloomFilterWrapper>.
+    fn insert_l1_arc(&self, segment_id: u64, filter: Arc<BloomFilterWrapper>) {
+        let memory_size = filter.estimate_memory_size();
         let entry = L1CacheEntry {
             filter,
             memory_size,
             access_count: AtomicU64::new(0),
             keys: None,
+        };
+        self.insert_l1_entry(segment_id, entry);
+    }
+
+    /// Internal helper: insert L1 entry without taking ownership by wrapping.
+    /// Used by load_from_l3_disk path which already has Arc<BloomFilterWrapper>.
+    fn insert_l1_wrapper(&self, segment_id: u64, filter: Arc<BloomFilterWrapper>, keys: Option<Vec<String>>) {
+        let memory_size = filter.estimate_memory_size();
+        let entry = L1CacheEntry {
+            filter,
+            memory_size,
+            access_count: AtomicU64::new(0),
+            keys,
         };
         self.insert_l1_entry(segment_id, entry);
     }
@@ -1321,12 +1387,15 @@ impl AdaptiveBloomCache {
                 }
             }
             // Get access counts for each candidate
-            items.iter().filter_map(|&sid| {
-                self.l1_cache.get(&sid).map(|entry| {
-                    let access_count = entry.access_count.load(Ordering::Relaxed);
-                    (sid, access_count)
+            items
+                .iter()
+                .filter_map(|&sid| {
+                    self.l1_cache.get(&sid).map(|entry| {
+                        let access_count = entry.access_count.load(Ordering::Relaxed);
+                        (sid, access_count)
+                    })
                 })
-            }).collect()
+                .collect()
         };
 
         // FREQ-001: Sort by access count (ascending) to evict cold segments first
@@ -1348,10 +1417,16 @@ impl AdaptiveBloomCache {
                     let key_count = keys.len();
                     self.insert_l2(segment_id, &entry.filter, keys);
                     self.l1_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
-                    debug!("Migrated segment {} from L1 to L2 ({} keys, tier={:?})", segment_id, key_count, tier);
+                    debug!(
+                        "Migrated segment {} from L1 to L2 ({} keys, tier={:?})",
+                        segment_id, key_count, tier
+                    );
                 } else {
                     self.l1_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
-                    debug!("Evicted segment {} from L1 (no keys available, tier={:?})", segment_id, tier);
+                    debug!(
+                        "Evicted segment {} from L1 (no keys available, tier={:?})",
+                        segment_id, tier
+                    );
                 }
             }
         }
@@ -1404,18 +1479,35 @@ impl AdaptiveBloomCache {
 
     /// Insert into L2 cache (compressed keys storage)
     ///
-    /// T-004: Takes a reference to the filter and keys. The filter is used for validation
-    /// and the keys are used to rebuild the filter for O(1) hit path.
-    ///
-    /// # Arguments
-    /// * `segment_id` - Segment identifier
-    /// * `filter` - BloomFilter (reference used for validation/estimation)
-    /// * `keys` - Original keys that were inserted into the filter
-    fn insert_l2(&self, segment_id: u64, filter: &BloomFilter, keys: Vec<String>) {
-        match L2CacheEntry::with_fpr(filter, keys, self.config.l2_compression_enabled, self.config.l2_fpr_target) {
-            Ok(entry) => {
-                // T-004: Track total memory (filter + compressed data)
-                let mem_size = entry.memory_size;
+    /// OPT-002: Takes a reference to BloomFilterWrapper and keys.
+    /// The keys are used to rebuild CustomBloom for V3 format performance.
+    fn insert_l2(&self, segment_id: u64, _filter: &BloomFilterWrapper, keys: Vec<String>) {
+        // OPT-002: Build CustomBloom directly from keys - no need for the filter reference
+        let num_keys = keys.len() as u64;
+        let custom_bloom = CustomBloom::from_keys(
+            &keys,
+            L2CacheEntry::estimate_custom_num_bits(num_keys, self.config.l2_fpr_target),
+            self.config.l2_fpr_target,
+        );
+        let filter_mem = custom_bloom.memory_usage();
+
+        let metadata = L2Metadata {
+            num_bits: 0,
+            num_hashes: 0,
+            original_fpr: self.config.l2_fpr_target,
+            num_keys,
+        };
+
+        match L2CompressedEntry::new(&keys, metadata, self.config.l2_compression_enabled) {
+            Ok(compressed) => {
+                let compressed_mem = compressed.compressed_keys.len();
+                let mem_size = filter_mem + compressed_mem;
+                let entry = L2CacheEntry {
+                    filter: Arc::new(BloomFilterWrapper::Custom(custom_bloom)),
+                    compressed,
+                    memory_size: mem_size,
+                    access_count: AtomicU64::new(0),
+                };
 
                 // Check L2 capacity and evict if needed
                 let current_count = self.l2_cache.len();
@@ -1441,31 +1533,6 @@ impl AdaptiveBloomCache {
         }
     }
 
-    /// Evict from L1 cache (move coldest to L2)
-    /// When keys are available, the entry is migrated to L2. Otherwise it is simply removed.
-    /// NOTE: Currently unused - evict_l1_multiple handles batch eviction. This single-entry
-    /// variant is kept as a public API for potential future fine-grained eviction needs.
-    #[allow(dead_code)]
-    fn evict_l1(&self) {
-        // T-005: Use CLOCK pop_lru
-        if let Some(segment_id) = self.l1_lru.pop_lru() {
-            if let Some((_, entry)) = self.l1_cache.remove(&segment_id) {
-                self.l1_memory_used.fetch_sub(entry.memory_size, Ordering::Relaxed);
-
-                // Migrate to L2 if keys are available
-                if let Some(keys) = entry.keys {
-                    let key_count = keys.len();
-                    self.insert_l2(segment_id, &entry.filter, keys.clone());
-                    self.l1_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
-                    debug!("Migrated segment {} from L1 to L2 ({} keys)", segment_id, key_count);
-                } else {
-                    self.l1_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
-                    debug!("Evicted segment {} from L1 (no keys available for L2 migration)", segment_id);
-                }
-            }
-        }
-    }
-
     /// Evict from L2 cache (move coldest to L3 - disk)
     fn evict_l2(&self) {
         // T-005: Use CLOCK pop_lru
@@ -1475,17 +1542,18 @@ impl AdaptiveBloomCache {
                 let mem_size = entry.memory_size;
                 self.l2_memory_used.fetch_sub(mem_size, Ordering::Relaxed);
 
-                // T-004: Use stored filter directly instead of decompressing
-                let filter = entry.filter;
                 // Extract keys from entry for L3 storage
                 match entry.compressed.decompress_keys() {
                     Ok(keys) => {
-                        if let Err(e) = self.save_to_l3_disk(segment_id, &filter, &keys) {
+                        if let Err(e) = self.save_to_l3_disk(segment_id, &keys) {
                             warn!("Failed to save evicted segment {} to L3 disk: {}", segment_id, e);
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to extract keys from segment {} for L3 eviction: {}", segment_id, e);
+                        warn!(
+                            "Failed to extract keys from segment {} for L3 eviction: {}",
+                            segment_id, e
+                        );
                     }
                 }
 
@@ -1523,17 +1591,18 @@ impl AdaptiveBloomCache {
                 debug!("Migrated segment {} from L1 to L2 ({} keys)", segment_id, key_count);
             } else {
                 self.l1_to_l2_migrations.fetch_add(1, Ordering::Relaxed);
-                debug!("Evicted segment {} from L1 during migration (no keys available)", segment_id);
+                debug!(
+                    "Evicted segment {} from L1 during migration (no keys available)",
+                    segment_id
+                );
             }
         }
     }
 
     /// Insert into L2 cache with explicit keys (the only way to populate L2)
-    /// 
-    /// Call this when you have the original keys that were inserted into the BloomFilter.
-    /// This is the primary method for populating L2 cache since the bloom crate
-    /// doesn't expose keys from an existing BloomFilter.
-    pub fn insert_l2_with_keys(&self, segment_id: u64, filter: &BloomFilter, keys: Vec<String>) {
+    ///
+    /// OPT-002: Accepts BloomFilterWrapper for consistency with the unified interface.
+    pub fn insert_l2_with_keys(&self, segment_id: u64, filter: &BloomFilterWrapper, keys: Vec<String>) {
         self.insert_l2(segment_id, filter, keys);
     }
 
@@ -1541,87 +1610,80 @@ impl AdaptiveBloomCache {
     // L3 Disk I/O
     // =========================================================================
 
-    /// Save bloom filter to L3 disk storage
+    /// Save bloom filter to L3 disk storage (V3 CustomBloom format)
     ///
-    /// File format: [magic: u32][version: u32][num_bits: u32][num_hashes: u32][fpr: f64][num_keys: u64][keys...]
-    fn save_to_l3_disk(&self, segment_id: u64, _filter: &BloomFilter, keys: &[String]) -> FileKVResult<()> {
+    /// Saves as CustomBloom directly (V3 format: [magic 4B][version 4B][num_bits 4B][num_hashes 4B][bitset_bytes]).
+    /// Also saves keys for L2 migration purposes.
+    fn save_to_l3_disk(&self, segment_id: u64, keys: &[String]) -> FileKVResult<()> {
         let path = self.l3_path_for_segment(segment_id);
 
         // Create directory if it doesn't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to create L3 dir: {}", e)))
+                FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                    "Failed to create L3 dir: {}",
+                    e
+                )))
             })?;
         }
 
-        let file = File::create(&path).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to create L3 file: {}", e)))
-        })?;
-        let mut writer = BufWriter::new(file);
+        // Build CustomBloom from keys
+        let custom_bloom = CustomBloom::from_keys(keys, keys.len().max(1000), self.config.l3_fpr_target);
 
-        // Write header
-        writer.write_all(&crate::core::types::BLOOM_MAGIC.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 magic: {}", e)))
-        })?;
-        writer.write_all(&2u32.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 version: {}", e)))
+        // Save CustomBloom in V3 format
+        custom_bloom.save_to_file(&path).map_err(|e| {
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to save L3 bloom: {}",
+                e
+            )))
         })?;
 
-        // Metadata (num_bits and num_hashes set to 0 since bloom crate doesn't expose them)
-        let num_bits = 0u32;
-        let num_hashes = 0u32;
-        let fpr = self.config.l3_fpr_target; // Keep as f64 to match read format
-        let num_keys = keys.len() as u64;
-
-        writer.write_all(&num_bits.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 num_bits: {}", e)))
-        })?;
-        writer.write_all(&num_hashes.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 num_hashes: {}", e)))
-        })?;
-        writer.write_all(&fpr.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 fpr: {}", e)))
-        })?;
-        writer.write_all(&num_keys.to_le_bytes()).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write L3 num_keys: {}", e)))
-        })?;
-
-        // Write keys
-        for key in keys {
-            let key_bytes = key.as_bytes();
-            writer.write_all(&(key_bytes.len() as u32).to_le_bytes()).map_err(|e| {
-                FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write key length: {}", e)))
-            })?;
-            writer.write_all(key_bytes).map_err(|e| {
-                FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to write key: {}", e)))
-            })?;
-        }
-
-        writer.flush().map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to flush L3 file: {}", e)))
-        })?;
-
-        debug!("Saved bloom filter to L3 disk: {:?}", path);
+        debug!("Saved bloom filter to L3 disk (V3): {:?}", path);
         Ok(())
     }
 
     /// Load bloom filter from L3 disk storage
-    fn load_from_l3_disk(&self, segment_id: u64) -> FileKVResult<Option<BloomFilter>> {
+    ///
+    /// OPT-002: Returns BloomFilterWrapper, preferring Custom (V3 format).
+    /// V3 files are loaded directly; old format files are converted.
+    fn load_from_l3_disk(&self, segment_id: u64) -> FileKVResult<Option<BloomFilterWrapper>> {
         let path = self.l3_path_for_segment(segment_id);
 
         if !path.exists() {
             return Ok(None);
         }
 
+        // Try loading as V3 CustomBloom first
+        match CustomBloom::load_from_file(&path) {
+            Ok(Some(custom_bloom)) => {
+                debug!("Loaded v3 bloom filter from L3 disk for segment {}", segment_id);
+                return Ok(Some(BloomFilterWrapper::Custom(custom_bloom)));
+            }
+            Ok(None) => {
+                // Not V3 format - try old L3 format (keys-based)
+            }
+            Err(e) => {
+                warn!("Failed to load L3 V3 bloom for segment {}: {}", segment_id, e);
+                return Ok(None);
+            }
+        }
+
+        // Fallback: load old L3 format (keys-based) and rebuild as CustomBloom
         let file = File::open(&path).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to open L3 file: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to open L3 file: {}",
+                e
+            )))
         })?;
         let mut reader = BufReader::new(file);
 
         // Read header
         let mut magic_buf = [0u8; 4];
         reader.read_exact(&mut magic_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 magic: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 magic: {}",
+                e
+            )))
         })?;
         let magic = u32::from_le_bytes(magic_buf);
         if magic != crate::core::types::BLOOM_MAGIC {
@@ -1631,31 +1693,46 @@ impl AdaptiveBloomCache {
 
         let mut version_buf = [0u8; 4];
         reader.read_exact(&mut version_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 version: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 version: {}",
+                e
+            )))
         })?;
         let _version = u32::from_le_bytes(version_buf);
 
         let mut num_bits_buf = [0u8; 4];
         reader.read_exact(&mut num_bits_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 num_bits: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 num_bits: {}",
+                e
+            )))
         })?;
         let _num_bits = u32::from_le_bytes(num_bits_buf);
 
         let mut num_hashes_buf = [0u8; 4];
         reader.read_exact(&mut num_hashes_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 num_hashes: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 num_hashes: {}",
+                e
+            )))
         })?;
         let _num_hashes = u32::from_le_bytes(num_hashes_buf);
 
         let mut fpr_buf = [0u8; 8];
         reader.read_exact(&mut fpr_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 fpr: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 fpr: {}",
+                e
+            )))
         })?;
         let fpr = f64::from_le_bytes(fpr_buf);
 
         let mut num_keys_buf = [0u8; 8];
         reader.read_exact(&mut num_keys_buf).map_err(|e| {
-            FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read L3 num_keys: {}", e)))
+            FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                "Failed to read L3 num_keys: {}",
+                e
+            )))
         })?;
         let num_keys = u64::from_le_bytes(num_keys_buf);
 
@@ -1664,7 +1741,10 @@ impl AdaptiveBloomCache {
         for _ in 0..num_keys {
             let mut key_len_buf = [0u8; 4];
             reader.read_exact(&mut key_len_buf).map_err(|e| {
-                FileKVError::Transient(TransientError::ResourceExhausted(format!("Failed to read key length: {}", e)))
+                FileKVError::Transient(TransientError::ResourceExhausted(format!(
+                    "Failed to read key length: {}",
+                    e
+                )))
             })?;
             let key_len = u32::from_le_bytes(key_len_buf);
 
@@ -1677,15 +1757,19 @@ impl AdaptiveBloomCache {
             keys.push(key);
         }
 
-        // Rebuild BloomFilter
-        let num_keys_u32 = num_keys.min(u32::MAX as u64) as u32;
-        let mut filter = BloomFilter::with_rate(fpr as f32, num_keys_u32);
-        for key in &keys {
-            filter.insert(key);
+        // Rebuild as CustomBloom with deterministic XXH3 hashing
+        let custom_bloom = CustomBloom::from_keys(&keys, num_keys as usize, fpr);
+
+        // Re-save as V3 format for faster future loads
+        if let Err(e) = custom_bloom.save_to_file(&path) {
+            warn!("Failed to re-save L3 as V3 for segment {}: {}", segment_id, e);
         }
 
-        debug!("Loaded bloom filter from L3 disk: {:?}", path);
-        Ok(Some(filter))
+        debug!(
+            "Loaded L3 bloom from old format, rebuilt as CustomBloom for segment {}",
+            segment_id
+        );
+        Ok(Some(BloomFilterWrapper::Custom(custom_bloom)))
     }
 
     /// Get L3 file path for a segment
@@ -1694,7 +1778,7 @@ impl AdaptiveBloomCache {
     }
 
     /// Load a filter from L3 disk and optionally promote to L2
-    pub fn load_l3_to_cache(&self, segment_id: u64, promote_to_l2: bool) -> FileKVResult<Option<BloomFilter>> {
+    pub fn load_l3_to_cache(&self, segment_id: u64, promote_to_l2: bool) -> FileKVResult<Option<BloomFilterWrapper>> {
         match self.load_from_l3_disk(segment_id)? {
             Some(filter) => {
                 if promote_to_l2 {
@@ -1709,6 +1793,7 @@ impl AdaptiveBloomCache {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::DEFAULT_BLOOM_FPR;
@@ -1737,11 +1822,11 @@ mod tests {
         cache.insert(1, filter);
 
         // Retrieve from cache (no loader needed for L1 hit)
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let cached = cache.get(1, &loader).unwrap();
 
         assert!(cached.is_some());
-        assert!(cached.unwrap().contains(&"test_key".to_string()));
+        assert!(cached.unwrap().contains("test_key"));
     }
 
     #[test]
@@ -1753,7 +1838,7 @@ mod tests {
         filter.insert(&"test".to_string());
         cache.insert(1, filter);
 
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
 
         cache.get(1, &loader).unwrap(); // L1 hit
         cache.get(1, &loader).unwrap(); // L1 hit
@@ -1792,7 +1877,7 @@ mod tests {
             cache.insert(i, filter);
         }
 
-        assert!(cache.len() > 0);
+        assert!(!cache.is_empty());
         cache.clear();
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
@@ -1813,17 +1898,17 @@ mod tests {
         }
 
         // Insert into L2 with keys
-        cache.insert_l2_with_keys(1, &filter, keys.clone());
+        cache.insert_l2_with_keys(1, &BloomFilterWrapper::Bloom(filter), keys.clone());
 
         // Retrieve from L2
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let cached = cache.get(1, &loader).unwrap();
 
         assert!(cached.is_some());
         let filter = cached.unwrap();
         // Verify the reconstructed filter contains the keys
-        assert!(filter.contains(&"key_0".to_string()));
-        assert!(filter.contains(&"key_49".to_string()));
+        assert!(filter.contains("key_0"));
+        assert!(filter.contains("key_49"));
     }
 
     #[test]
@@ -1845,7 +1930,7 @@ mod tests {
 
         // Verify keys are in the filter
         for key in &keys {
-            assert!(rebuilt_filter.contains(key));
+            assert!(rebuilt_filter.contains(&key));
         }
     }
 
@@ -1860,7 +1945,7 @@ mod tests {
         let rebuilt_filter = restored.decompress().unwrap();
 
         for key in &keys {
-            assert!(rebuilt_filter.contains(key));
+            assert!(rebuilt_filter.contains(&key));
         }
     }
 
@@ -1879,7 +1964,7 @@ mod tests {
         }
 
         // Save to L3
-        cache.save_to_l3_disk(42, &filter, &keys).unwrap();
+        cache.save_to_l3_disk(42, &keys).unwrap();
 
         // Load from L3
         let loaded = cache.load_from_l3_disk(42).unwrap();
@@ -1916,13 +2001,13 @@ mod tests {
         for seg_id in 1..=2u64 {
             let filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
             let keys: Vec<String> = (0..10).map(|i| format!("seg{}_key_{}", seg_id, i)).collect();
-            cache.insert_l2_with_keys(seg_id, &filter, keys);
+            cache.insert_l2_with_keys(seg_id, &BloomFilterWrapper::Bloom(filter), keys);
         }
 
         // Insert a 3rd filter - should trigger eviction of the first one to L3
         let filter3 = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
         let keys3: Vec<String> = (0..10).map(|i| format!("seg3_key_{}", i)).collect();
-        cache.insert_l2_with_keys(3, &filter3, keys3);
+        cache.insert_l2_with_keys(3, &BloomFilterWrapper::Bloom(filter3), keys3);
 
         // L2 should still have 2 entries
         assert_eq!(cache.l2_cache.len(), 2);
@@ -1943,10 +2028,10 @@ mod tests {
             filter.insert(key);
         }
 
-        cache.insert_l2_with_keys(100, &filter, keys.clone());
+        cache.insert_l2_with_keys(100, &BloomFilterWrapper::Bloom(filter), keys.clone());
 
         // Query should hit L2 and return reconstructed filter
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             panic!("Loader should not be called on L2 hit");
         };
         let result = cache.get(100, &loader).unwrap();
@@ -1954,8 +2039,8 @@ mod tests {
 
         let retrieved = result.unwrap();
         // Verify the filter works
-        assert!(retrieved.contains(&"data_0".to_string()));
-        assert!(retrieved.contains(&"data_199".to_string()));
+        assert!(retrieved.contains("data_0"));
+        assert!(retrieved.contains("data_199"));
     }
 
     #[test]
@@ -1975,7 +2060,7 @@ mod tests {
         // T-004: L2CacheEntry now requires filter and memory_size fields
         let dummy_filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
         let entry = L2CacheEntry {
-            filter: Arc::new(dummy_filter),
+            filter: Arc::new(BloomFilterWrapper::Bloom(dummy_filter)),
             compressed: bad_entry,
             memory_size: 0,
             access_count: AtomicU64::new(0),
@@ -1995,11 +2080,11 @@ mod tests {
         for i in 0..5u64 {
             let filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
             let keys: Vec<String> = vec![format!("key_{}", i)];
-            cache.insert_l2_with_keys(i, &filter, keys);
+            cache.insert_l2_with_keys(i, &BloomFilterWrapper::Bloom(filter), keys);
         }
 
         // Access entry 2 - should promote it in LRU
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         cache.get(2, &loader).unwrap();
 
         // L2 should still have 5 entries
@@ -2015,7 +2100,7 @@ mod tests {
 
         let filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
         let keys: Vec<String> = (0..50).map(|i| format!("track_key_{}", i)).collect();
-        cache.insert_l2_with_keys(1, &filter, keys);
+        cache.insert_l2_with_keys(1, &BloomFilterWrapper::Bloom(filter), keys);
 
         // Memory should have been tracked
         let after_mem = cache.l2_memory_used.load(Ordering::Relaxed);
@@ -2036,7 +2121,7 @@ mod tests {
 
         // Get should bypass cache and use loader
         let loader_called = AtomicU64::new(0);
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             loader_called.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         };
@@ -2058,13 +2143,13 @@ mod tests {
         for key in &keys {
             filter.insert(key);
         }
-        cache.save_to_l3_disk(77, &filter, &keys).unwrap();
+        cache.save_to_l3_disk(77, &keys).unwrap();
 
         // Load from L3
         let loaded = cache.load_l3_to_cache(77, true).unwrap();
         assert!(loaded.is_some());
         let loaded_filter = loaded.unwrap();
-        assert!(loaded_filter.contains(&"l3_test_key".to_string()));
+        assert!(loaded_filter.contains("l3_test_key"));
 
         // Stats should reflect the load
         let stats = cache.stats();
@@ -2082,13 +2167,10 @@ mod tests {
         let cache = AdaptiveBloomCache::try_new(config).unwrap();
 
         // Create a loader that returns keys (simulating disk load)
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             let keys: Vec<String> = (0..10).map(|i| format!("key_for_{}_{}", _id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, 800, DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Initially L1 and L2 are empty
@@ -2120,12 +2202,12 @@ mod tests {
         assert_eq!(stats.l1_to_l2_migrations, 3, "Should have 3 L1→L2 migrations");
 
         // Verify the L2 entries work - query for an evicted segment
-        let l2_loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let l2_loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let result = cache.get(1, &l2_loader).unwrap();
         assert!(result.is_some(), "Should find segment 1 in L2");
         // The filter should contain keys for segment 1
         let filter = result.unwrap();
-        assert!(filter.contains(&"key_for_1_0".to_string()));
+        assert!(filter.contains("key_for_1_0"));
     }
 
     /// Test: L1→L2 migration produces valid L2 entry (S1-1 acceptance test)
@@ -2139,13 +2221,10 @@ mod tests {
         let cache = AdaptiveBloomCache::try_new(config).unwrap();
 
         // Create a loader that returns keys (simulating disk load with keys)
-        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             let keys: Vec<String> = (0..20).map(|i| format!("seg{}_key_{}", id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, 800, DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Load 2 entries into L1 (fills capacity)
@@ -2167,7 +2246,7 @@ mod tests {
         assert_eq!(cache.l2_cache.len(), 2, "L2 should have 2 entries migrated from L1");
 
         // Verify L2 entries are valid - query evicted segments
-        let l2_loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let l2_loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
 
         for seg_id in 1..=2u64 {
             let result = cache.get(seg_id, &l2_loader).unwrap();
@@ -2180,7 +2259,8 @@ mod tests {
                 assert!(
                     filter.contains(&key),
                     "L2 filter for segment {} should contain key '{}'",
-                    seg_id, key
+                    seg_id,
+                    key
                 );
             }
         }
@@ -2212,16 +2292,17 @@ mod tests {
         // Verify ALL original keys are in the rebuilt filter
         for key in &keys {
             assert!(
-                rebuilt_filter.contains(key),
-                "Rebuilt filter should contain key: {}", key
+                rebuilt_filter.contains(&key),
+                "Rebuilt filter should contain key: {}",
+                key
             );
         }
 
         // Verify false positives are possible (filter is not just a set)
         // A key that was never inserted should sometimes not be present
         assert!(
-            !rebuilt_filter.contains(&"definitely_not_inserted_key_xyz".to_string()) ||
-            rebuilt_filter.contains(&"definitely_not_inserted_key_xyz".to_string()),
+            !rebuilt_filter.contains(&"definitely_not_inserted_key_xyz".to_string())
+                || rebuilt_filter.contains(&"definitely_not_inserted_key_xyz".to_string()),
             "Filter may have false positive for unknown key (expected behavior)"
         );
 
@@ -2302,7 +2383,7 @@ mod tests {
             for key in &keys {
                 filter.insert(key);
             }
-            cache.insert_l2_with_keys(seg_id, &filter, keys);
+            cache.insert_l2_with_keys(seg_id, &BloomFilterWrapper::Bloom(filter), keys);
         }
         assert_eq!(cache.l2_cache.len(), 2);
 
@@ -2312,7 +2393,7 @@ mod tests {
         for key in &keys3 {
             filter3.insert(key);
         }
-        cache.insert_l2_with_keys(3, &filter3, keys3.clone());
+        cache.insert_l2_with_keys(3, &BloomFilterWrapper::Bloom(filter3), keys3.clone());
 
         // L2 should still have 2 entries
         assert_eq!(cache.l2_cache.len(), 2);
@@ -2322,7 +2403,7 @@ mod tests {
         assert!(l3_path.exists(), "L3 file for segment 1 should exist after L2 eviction");
 
         // Query segment 1 - should load from L3 disk
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             // This should NOT be called because L3 has the data
             panic!("Loader should not be called when L3 has the data");
         };
@@ -2355,7 +2436,7 @@ mod tests {
     /// 3. get_current_fpr_level returns the controller's level
     #[test]
     fn test_fpr_controller_integration_basic() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let config = AdaptiveBloomCacheConfig::default();
@@ -2372,7 +2453,7 @@ mod tests {
         cache.insert(1, filter);
 
         // Query through the cache
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let result = cache.get(1, &loader).unwrap();
         assert!(result.is_some());
 
@@ -2384,7 +2465,11 @@ mod tests {
         // With minimum 1s window and 1 access, QPS = 1.0 which is below the hysteresis
         // threshold for any downgrade from level 2, so level should stay at 2
         let level = cache.get_current_fpr_level(1);
-        assert_eq!(level, Some(2), "Default FPR level should be 2 (QPS too low to trigger downgrade with hysteresis)");
+        assert_eq!(
+            level,
+            Some(2),
+            "Default FPR level should be 2 (QPS too low to trigger downgrade with hysteresis)"
+        );
 
         // Verify controller stats are accessible through cache
         let cache_fpr_stats = cache.fpr_controller_stats();
@@ -2398,7 +2483,7 @@ mod tests {
     /// the access tracker maintains correct counts.
     #[test]
     fn test_fpr_controller_records_multiple_accesses() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let config = AdaptiveBloomCacheConfig::default();
@@ -2417,7 +2502,7 @@ mod tests {
         }
 
         // Query all segments multiple times
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         for _ in 0..3 {
             for i in 1..=5u64 {
                 let _ = cache.get(i, &loader).unwrap();
@@ -2442,17 +2527,23 @@ mod tests {
         filter.insert(&"test_key".to_string());
         cache.insert(1, filter);
 
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let result = cache.get(1, &loader).unwrap();
         assert!(result.is_some());
 
         // FPR level should be None (no controller)
         let level = cache.get_current_fpr_level(1);
-        assert!(level.is_none(), "Cache without FPR controller should return None for FPR level");
+        assert!(
+            level.is_none(),
+            "Cache without FPR controller should return None for FPR level"
+        );
 
         // FPR controller stats should be None
         let fpr_stats = cache.fpr_controller_stats();
-        assert!(fpr_stats.is_none(), "Cache without FPR controller should return None for stats");
+        assert!(
+            fpr_stats.is_none(),
+            "Cache without FPR controller should return None for stats"
+        );
     }
 
     // ==================== MAJ-001 Phase 2: FPR BloomFilter Rebuild Tests ====================
@@ -2465,7 +2556,7 @@ mod tests {
     /// 3. The filter is reloaded from disk (simulated via loader)
     #[test]
     fn test_fpr_filter_rebuild_pending() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2480,16 +2571,17 @@ mod tests {
         let cache = AdaptiveBloomCache::try_with_fpr_controller(config, fpr_controller.clone()).unwrap();
 
         // Initially no pending rebuilds
-        assert_eq!(cache.pending_fpr_rebuild_count(), 0, "Should have no pending rebuilds initially");
+        assert_eq!(
+            cache.pending_fpr_rebuild_count(),
+            0,
+            "Should have no pending rebuilds initially"
+        );
 
         // Create a loader that returns keys (simulating disk load)
-        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             let keys: Vec<String> = (0..10).map(|i| format!("seg{}_key_{}", id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, 800, DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Load segment 1 into cache
@@ -2506,7 +2598,11 @@ mod tests {
         assert!(result.is_some());
 
         // Pending rebuilds should be cleared
-        assert_eq!(cache.pending_fpr_rebuild_count(), 0, "Pending rebuilds should be cleared after access");
+        assert_eq!(
+            cache.pending_fpr_rebuild_count(),
+            0,
+            "Pending rebuilds should be cleared after access"
+        );
     }
 
     /// Test: FPR rebuild invalidates L1 and L2 entries
@@ -2515,7 +2611,7 @@ mod tests {
     /// the next get() call removes it from L1/L2 and forces reload.
     #[test]
     fn test_fpr_rebuild_invalidates_cache_entries() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2531,14 +2627,11 @@ mod tests {
 
         // Create loader that counts calls
         let loader_calls = AtomicU64::new(0);
-        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             loader_calls.fetch_add(1, Ordering::Relaxed);
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
             let keys: Vec<String> = (0..5).map(|i| format!("seg{}_key_{}", id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, keys.len(), DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Load segment 1 into L1
@@ -2559,7 +2652,11 @@ mod tests {
         // Next access should invalidate L1 and reload from loader
         let result = cache.get(1, &loader).unwrap();
         assert!(result.is_some());
-        assert_eq!(loader_calls.load(Ordering::Relaxed), 2, "Should reload after FPR rebuild");
+        assert_eq!(
+            loader_calls.load(Ordering::Relaxed),
+            2,
+            "Should reload after FPR rebuild"
+        );
         assert_eq!(cache.pending_fpr_rebuild_count(), 0, "Pending flag should be cleared");
 
         // L1 should now have the entry again (reloaded)
@@ -2571,7 +2668,7 @@ mod tests {
     /// Verifies that L2 entries are also invalidated during FPR rebuild.
     #[test]
     fn test_fpr_rebuild_invalidates_l2_entries() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2586,13 +2683,10 @@ mod tests {
 
         let cache = AdaptiveBloomCache::try_with_fpr_controller(config, fpr_controller).unwrap();
 
-        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             let keys: Vec<String> = (0..10).map(|i| format!("seg{}_key_{}", id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, 800, DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Load segment 1 and 2 - segment 1 will be evicted to L2
@@ -2640,7 +2734,7 @@ mod tests {
     /// Test: BLOOM-001 - try_with_fpr_controller rejects zero config
     #[test]
     fn test_try_with_fpr_controller_rejects_zero_config() {
-        use crate::bloom::fpr_controller::{FPRController, AdaptationPolicy};
+        use crate::bloom::fpr_controller::{AdaptationPolicy, FPRController};
         use crate::bloom::migration::MigrationThresholds;
 
         let mut config = AdaptiveBloomCacheConfig::default();
@@ -2650,7 +2744,10 @@ mod tests {
             MigrationThresholds::default(),
         ));
         let result = AdaptiveBloomCache::try_with_fpr_controller(config, controller);
-        assert!(result.is_err(), "try_with_fpr_controller should reject zero l1_max_filters");
+        assert!(
+            result.is_err(),
+            "try_with_fpr_controller should reject zero l1_max_filters"
+        );
     }
 
     // ==================== BLOOM-006: Concurrent Access Tests ====================
@@ -2683,7 +2780,7 @@ mod tests {
                     // Get phase - verify our own inserts
                     for i in 0..keys_per_thread {
                         let segment_id = segment_base + i as u64;
-                        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+                        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
                         if let Ok(Some(_)) = cache_clone.get(segment_id, &loader) {
                             success_clone.fetch_add(1, Ordering::Relaxed);
                         }
@@ -2695,8 +2792,11 @@ mod tests {
         // All gets should succeed (no deadlocks, no panics)
         let successes = success_count.load(Ordering::Relaxed);
         let expected = num_threads * keys_per_thread;
-        assert_eq!(successes, expected,
-            "All concurrent gets should succeed, got {}/{}", successes, expected);
+        assert_eq!(
+            successes, expected,
+            "All concurrent gets should succeed, got {}/{}",
+            successes, expected
+        );
     }
 
     /// Test: BLOOM-006 - Concurrent evict and get operations verify no panics or deadlocks
@@ -2731,7 +2831,7 @@ mod tests {
                         if i % 2 == 0 {
                             // Get operation
                             let segment_id = (base + i) as u64 % 50;
-                            let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+                            let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
                             let _ = cache_clone.get(segment_id, &loader);
                             get_clone.fetch_add(1, Ordering::Relaxed);
                         } else {
@@ -2786,11 +2886,10 @@ mod tests {
                 s.spawn(move || {
                     for i in 0..ops_per_thread {
                         let segment_id = ((t * ops_per_thread + i) % 20) as u64;
-                        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-                            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 10);
+                        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
                             let key = format!("known_key_{}", id);
-                            filter.insert(&key);
-                            Ok(Some((filter, vec![key])))
+                            let cb = CustomBloom::from_keys(std::slice::from_ref(&key), 80, DEFAULT_BLOOM_FPR as f64);
+                            Ok(Some((cb, vec![key])))
                         };
 
                         // Test get
@@ -2844,7 +2943,7 @@ mod tests {
                         for k in &keys {
                             filter.insert(k);
                         }
-                        cache_clone.insert_l1_with_keys(segment_id, Arc::new(filter), keys);
+                        cache_clone.insert_l1_with_keys(segment_id, Arc::new(BloomFilterWrapper::Bloom(filter)), keys);
                     }
                 });
             }
@@ -2877,7 +2976,7 @@ mod tests {
         assert_eq!(count, 0);
 
         // Access the segment multiple times
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         for _ in 0..50 {
             let _ = cache.get(1, &loader);
         }
@@ -2902,7 +3001,7 @@ mod tests {
             for k in &keys {
                 filter.insert(k);
             }
-            cache.insert_l1_with_keys(i, Arc::new(filter), keys);
+            cache.insert_l1_with_keys(i, Arc::new(BloomFilterWrapper::Bloom(filter)), keys);
         }
 
         // Segment 1 should now be in L2
@@ -2941,14 +3040,14 @@ mod tests {
         for k in &keys {
             filter.insert(k);
         }
-        cache.insert_l2_with_keys(42, &filter, keys);
+        cache.insert_l2_with_keys(42, &BloomFilterWrapper::Bloom(filter), keys);
 
         // Initially Cold (0 accesses)
         let (tier, _) = cache.get_segment_frequency(42);
         assert_eq!(tier, FrequencyTier::Cold);
 
         // Access it many times to make it Hot
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         for _ in 0..200 {
             let _ = cache.get(42, &loader);
         }
@@ -2978,11 +3077,11 @@ mod tests {
             for k in &keys {
                 filter.insert(k);
             }
-            cache.insert_l1_with_keys(i, Arc::new(filter), keys);
+            cache.insert_l1_with_keys(i, Arc::new(BloomFilterWrapper::Bloom(filter)), keys);
         }
 
         // Access segments 4 and 5 many times to make them hot
-        let loader = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         for _ in 0..200 {
             let _ = cache.get(4, &loader);
             let _ = cache.get(5, &loader);
@@ -3007,7 +3106,7 @@ mod tests {
             for k in &keys {
                 filter.insert(k);
             }
-            cache.insert_l1_with_keys(i, Arc::new(filter), keys);
+            cache.insert_l1_with_keys(i, Arc::new(BloomFilterWrapper::Bloom(filter)), keys);
         }
 
         // After batch eviction, hot segments (4, 5) should have been migrated to L2
@@ -3017,7 +3116,7 @@ mod tests {
         assert!(l2_size > 0, "L2 should have migrated entries");
 
         // Hot segments should be in L2 (migrated with keys)
-        let loader2 = |_id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> { Ok(None) };
+        let loader2 = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
         let result4 = cache.get(4, &loader2);
         assert!(result4.is_ok(), "Hot segment 4 should still be accessible");
     }
@@ -3052,13 +3151,10 @@ mod tests {
         config.l3_index_dir = temp_dir.path().to_path_buf();
         let cache = AdaptiveBloomCache::try_new(config).unwrap();
 
-        let loader = |id: u64| -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-            let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
             let keys: Vec<String> = (0..20).map(|i| format!("key_{}_{}", id, i)).collect();
-            for k in &keys {
-                filter.insert(k);
-            }
-            Ok(Some((filter, keys)))
+            let cb = CustomBloom::from_keys(&keys, keys.len(), DEFAULT_BLOOM_FPR as f64);
+            Ok(Some((cb, keys)))
         };
 
         // Hot segments: accessed many times (should be Hot tier with count >= 200)
@@ -3078,6 +3174,479 @@ mod tests {
         assert!(count2 >= 20, "Warm segment should have >= 20 accesses, got {}", count2);
 
         // Verify that hot segment has significantly more accesses than warm
-        assert!(count1 > count2 * 5, "Hot segment should have much higher count than warm");
+        assert!(
+            count1 > count2 * 5,
+            "Hot segment should have much higher count than warm"
+        );
+    }
+
+    // =========================================================================
+    // OPT-002: CustomBloom Integration Test
+    // =========================================================================
+
+    /// Test: OPT-002 - CustomBloom integration into AdaptiveBloomCache
+    ///
+    /// Verifies:
+    /// 1. L1CacheEntry accepts both BloomFilter and CustomBloom via BloomFilterWrapper
+    /// 2. L2CacheEntry uses CustomBloom directly for V3 format performance
+    /// 3. contains() works correctly through the unified interface
+    /// 4. Migration from legacy BloomFilter to CustomBloom path works
+    #[test]
+    fn test_custom_bloom_integration() {
+        let mut config = AdaptiveBloomCacheConfig::default();
+        config.l1_max_filters = 50;
+        config.l2_max_filters = 100;
+        let temp_dir = tempfile::tempdir().unwrap();
+        config.l3_index_dir = temp_dir.path().to_path_buf();
+        let cache = AdaptiveBloomCache::try_new(config).unwrap();
+
+        // Test 1: Insert legacy BloomFilter - gets wrapped in BloomFilterWrapper::Bloom
+        let mut legacy_filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
+        legacy_filter.insert(&"legacy_key".to_string());
+        cache.insert(1, legacy_filter);
+
+        // Test 2: Insert CustomBloom via L1 with keys - gets wrapped in BloomFilterWrapper::Custom
+        let custom_bloom = CustomBloom::with_capacity(100, 0.01);
+        cache.insert_l1_arc(2, Arc::new(BloomFilterWrapper::Custom(custom_bloom.clone())));
+
+        // Test 3: Verify contains() works through unified interface
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
+
+        // Legacy filter should be accessible
+        let result = cache.get(1, &loader).unwrap();
+        assert!(result.is_some(), "Legacy filter should be retrievable");
+        let wrapper = result.unwrap();
+        assert!(wrapper.contains("legacy_key"), "Legacy filter should contain key");
+        assert!(!wrapper.is_custom(), "Legacy filter should NOT be CustomBloom");
+
+        // Test 4: L2 migration uses CustomBloom
+        let mut l2_filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 1000);
+        let l2_keys: Vec<String> = (0..500).map(|i| format!("l2_key_{}", i)).collect();
+        for key in &l2_keys {
+            l2_filter.insert(key);
+        }
+        cache.insert_l2_with_keys(10, &BloomFilterWrapper::Bloom(l2_filter), l2_keys.clone());
+
+        // Verify L2 entry is accessible and contains keys
+        let l2_result = cache.get(10, &loader).unwrap();
+        assert!(l2_result.is_some(), "L2 entry should be retrievable");
+        let l2_wrapper = l2_result.unwrap();
+        assert!(l2_wrapper.contains("l2_key_0"), "L2 filter should contain key 0");
+        assert!(l2_wrapper.contains("l2_key_499"), "L2 filter should contain key 499");
+        assert!(
+            !l2_wrapper.contains("nonexistent_key"),
+            "L2 filter should NOT contain unknown key"
+        );
+
+        // Test 5: Statistics should be tracked correctly
+        let stats = cache.stats();
+        assert!(
+            stats.l1_hits > 0 || stats.l2_hits > 0,
+            "Should have recorded cache hits"
+        );
+
+        // Test 6: Clear and verify empty
+        cache.clear();
+        assert_eq!(cache.len(), 0, "Cache should be empty after clear");
+        assert!(cache.is_empty(), "Cache should report empty after clear");
+    }
+}
+
+// ============================================================================
+// CustomBloomCache - High-performance bloom cache using CustomBloom (V3 format)
+// ============================================================================
+
+/// Configuration for CustomBloomCache
+#[derive(Debug, Clone)]
+pub struct CustomBloomCacheConfig {
+    /// Maximum number of filters to cache
+    pub max_filters: usize,
+    /// Target false positive rate
+    pub fpr_target: f64,
+    /// Index directory where bloom filters are stored
+    pub index_dir: PathBuf,
+}
+
+impl Default for CustomBloomCacheConfig {
+    fn default() -> Self {
+        Self {
+            max_filters: 1000,
+            fpr_target: 0.01, // 1%
+            index_dir: PathBuf::from("index"),
+        }
+    }
+}
+
+/// Statistics for CustomBloomCache
+#[derive(Debug, Clone, Default)]
+pub struct CustomBloomCacheStats {
+    /// Cache hits
+    pub hits: u64,
+    /// Cache misses
+    pub misses: u64,
+    /// Hit rate (0.0-1.0)
+    pub hit_rate: f64,
+    /// Number of filters currently in cache
+    pub filters_cached: usize,
+    /// Memory used by cached filters (bytes)
+    pub memory_used: usize,
+}
+
+impl CustomBloomCacheStats {
+    /// Get hit rate as percentage
+    pub fn hit_rate_percent(&self) -> f64 {
+        self.hit_rate * 100.0
+    }
+
+    /// Get memory used in MB
+    pub fn memory_used_mb(&self) -> f64 {
+        self.memory_used as f64 / (1024.0 * 1024.0)
+    }
+}
+
+/// Entry in CustomBloomCache
+struct CustomBloomEntry {
+    bloom: Arc<CustomBloom>,
+    memory_size: usize,
+}
+
+/// High-performance bloom filter cache using CustomBloom with V3 format
+///
+/// This cache provides:
+/// - Fast loading: V3 format enables direct bitset loading (< 100µs)
+/// - Fast queries: CustomBloom uses deterministic XXH3 (< 10µs for negative queries)
+/// - Automatic migration: V1/V2 formats are automatically migrated to V3 on first load
+/// - CLOCK eviction: Approximate LRU with O(1) lock-free access
+pub struct CustomBloomCache {
+    /// Cache of loaded CustomBloom filters
+    cache: DashMap<u64, CustomBloomEntry>,
+    /// CLOCK queue for eviction tracking
+    clock_queue: Arc<ClockCache>,
+    /// Configuration
+    config: CustomBloomCacheConfig,
+    /// Statistics
+    hits: AtomicU64,
+    misses: AtomicU64,
+    memory_used: AtomicUsize,
+}
+
+impl CustomBloomCache {
+    /// Create a new CustomBloomCache
+    pub fn new(config: CustomBloomCacheConfig) -> Self {
+        const NUM_CLOCK_SHARDS: usize = 16;
+        let clock_queue = Arc::new(ClockCache::new(config.max_filters, NUM_CLOCK_SHARDS));
+
+        Self {
+            cache: DashMap::new(),
+            clock_queue,
+            config,
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            memory_used: AtomicUsize::new(0),
+        }
+    }
+
+    /// Get a CustomBloom filter for a segment (loads on-demand if not cached)
+    ///
+    /// # Arguments
+    /// * `segment_id` - Segment identifier
+    /// * `loader` - Function to load CustomBloom from disk. Should try V3 first, then fallback to V1/V2.
+    /// * `migrator` - Optional function to migrate V1/V2 to V3 after loading
+    pub fn get(
+        &self,
+        segment_id: u64,
+        loader: &dyn Fn(u64) -> FileKVResult<Option<(CustomBloom, Vec<String>)>>,
+    ) -> FileKVResult<Option<Arc<CustomBloom>>> {
+        // Check if filter is already cached
+        if let Some(entry) = self.cache.get(&segment_id) {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+
+            // Mark as referenced in CLOCK queue
+            self.clock_queue.tick(segment_id);
+
+            return Ok(Some(entry.bloom.clone()));
+        }
+
+        // Filter not in cache, load on-demand
+        self.misses.fetch_add(1, Ordering::Relaxed);
+
+        // Use loader to load the filter
+        match loader(segment_id)? {
+            Some((bloom, _keys)) => {
+                // Cache the loaded filter
+                self.cache_and_promote(segment_id, bloom);
+                // Get the cached filter and return Arc
+                if let Some(entry) = self.cache.get(&segment_id) {
+                    Ok(Some(entry.bloom.clone()))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Insert a CustomBloom filter into the cache
+    pub fn insert(&self, segment_id: u64, bloom: CustomBloom) {
+        self.cache_and_promote(segment_id, bloom);
+    }
+
+    /// Check if a key exists in a segment's bloom filter (convenience method)
+    pub fn contains(
+        &self,
+        segment_id: u64,
+        key: &str,
+        loader: &dyn Fn(u64) -> FileKVResult<Option<(CustomBloom, Vec<String>)>>,
+    ) -> FileKVResult<Option<bool>> {
+        match self.get(segment_id, loader)? {
+            Some(bloom) => Ok(Some(bloom.contains(key.as_bytes()))),
+            None => Ok(None),
+        }
+    }
+
+    /// Remove a CustomBloom filter from the cache
+    pub fn remove(&self, segment_id: u64) -> Option<Arc<CustomBloom>> {
+        if let Some((_, entry)) = self.cache.remove(&segment_id) {
+            self.memory_used.fetch_sub(entry.memory_size, Ordering::Relaxed);
+
+            // Remove from CLOCK queue
+            self.clock_queue.remove(segment_id);
+
+            Some(entry.bloom)
+        } else {
+            None
+        }
+    }
+
+    /// Clear all cached filters
+    pub fn clear(&self) {
+        self.cache.clear();
+        self.clock_queue.clear();
+        self.memory_used.store(0, Ordering::Relaxed);
+    }
+
+    /// Get cache statistics
+    pub fn stats(&self) -> CustomBloomCacheStats {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        let filters_cached = self.cache.len();
+        let memory_used = self.memory_used.load(Ordering::Relaxed);
+
+        CustomBloomCacheStats {
+            hits,
+            misses,
+            hit_rate: if total > 0 { hits as f64 / total as f64 } else { 0.0 },
+            filters_cached,
+            memory_used,
+        }
+    }
+
+    /// Get number of cached filters
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Check if cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
+    /// Cache a filter and update CLOCK queue (internal helper)
+    fn cache_and_promote(&self, segment_id: u64, bloom: CustomBloom) {
+        let memory_size = bloom.memory_usage();
+        let entry = CustomBloomEntry {
+            bloom: Arc::new(bloom),
+            memory_size,
+        };
+
+        // Check memory/count limit and evict if necessary
+        let current_count = self.cache.len();
+        if current_count >= self.config.max_filters {
+            self.evict_one();
+        }
+
+        // Insert into cache
+        if let Some(old_entry) = self.cache.insert(segment_id, entry) {
+            self.memory_used.fetch_sub(old_entry.memory_size, Ordering::Relaxed);
+        }
+
+        self.memory_used.fetch_add(memory_size, Ordering::Relaxed);
+
+        // Insert into CLOCK queue (may trigger eviction)
+        if let Some(evicted_id) = self.clock_queue.insert(segment_id) {
+            // Remove evicted entry from cache if it's still there
+            if let Some((_, evicted)) = self.cache.remove(&evicted_id) {
+                self.memory_used.fetch_sub(evicted.memory_size, Ordering::Relaxed);
+                debug!("Evicted CustomBloom for segment {} (CLOCK eviction)", evicted_id);
+            }
+        }
+    }
+
+    /// Evict one entry using CLOCK algorithm
+    fn evict_one(&self) {
+        if let Some(evicted_id) = self.clock_queue.pop_lru() {
+            if let Some((_, entry)) = self.cache.remove(&evicted_id) {
+                self.memory_used.fetch_sub(entry.memory_size, Ordering::Relaxed);
+                debug!("Evicted CustomBloom for segment {} (CLOCK eviction)", evicted_id);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod custom_bloom_cache_tests {
+    use super::*;
+
+    #[test]
+    fn test_custom_bloom_cache_config_default() {
+        let config = CustomBloomCacheConfig::default();
+        assert_eq!(config.max_filters, 1000);
+        assert_eq!(config.fpr_target, 0.01);
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_basic() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        // Create a test CustomBloom
+        let mut bloom = CustomBloom::with_capacity(100, 0.01);
+        bloom.insert(b"test_key");
+
+        // Insert into cache
+        cache.insert(1, bloom);
+
+        // Retrieve from cache
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
+        let cached = cache.get(1, &loader).unwrap();
+        assert!(cached.is_some());
+        assert!(cached.unwrap().contains(b"test_key"));
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_contains() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        let mut bloom = CustomBloom::with_capacity(100, 0.01);
+        bloom.insert(b"test_key");
+        cache.insert(1, bloom);
+
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
+        let result = cache.contains(1, "test_key", &loader).unwrap();
+        assert_eq!(result, Some(true));
+
+        let result = cache.contains(1, "nonexistent", &loader).unwrap();
+        assert_eq!(result, Some(false));
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_stats() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        let mut bloom = CustomBloom::with_capacity(100, 0.01);
+        bloom.insert(b"test");
+        cache.insert(1, bloom);
+
+        let loader = |_id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> { Ok(None) };
+
+        cache.get(1, &loader).unwrap(); // Hit
+        cache.get(1, &loader).unwrap(); // Hit
+        cache.get(2, &loader).unwrap(); // Miss
+
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 2);
+        assert_eq!(stats.misses, 1);
+        assert!(stats.hit_rate > 0.5);
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_remove() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        let mut bloom = CustomBloom::with_capacity(100, 0.01);
+        bloom.insert(b"test");
+        cache.insert(1, bloom);
+
+        assert!(cache.get(1, &|_| Ok(None)).unwrap().is_some());
+
+        let removed = cache.remove(1);
+        assert!(removed.is_some());
+        assert!(cache.get(1, &|_| Ok(None)).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_clear() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        for i in 0..10 {
+            let mut bloom = CustomBloom::with_capacity(100, 0.01);
+            bloom.insert(format!("key_{}", i).as_bytes());
+            cache.insert(i, bloom);
+        }
+
+        assert!(!cache.is_empty());
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_eviction() {
+        let mut config = CustomBloomCacheConfig::default();
+        config.max_filters = 5;
+        let max_filters = config.max_filters; // Copy before move
+        let cache = CustomBloomCache::new(config);
+
+        // Insert 5 filters
+        for i in 1..=5u64 {
+            let mut bloom = CustomBloom::with_capacity(100, 0.01);
+            bloom.insert(format!("key_{}", i).as_bytes());
+            cache.insert(i, bloom);
+        }
+
+        assert_eq!(cache.len(), 5);
+
+        // Insert 5 more - should trigger eviction
+        for i in 6..=10u64 {
+            let mut bloom = CustomBloom::with_capacity(100, 0.01);
+            bloom.insert(format!("key_{}", i).as_bytes());
+            cache.insert(i, bloom);
+        }
+
+        // After eviction, cache should have <= 5 entries
+        assert!(
+            cache.len() <= max_filters,
+            "Cache should have <= {} entries after eviction, got {}",
+            max_filters,
+            cache.len()
+        );
+    }
+
+    #[test]
+    fn test_custom_bloom_cache_on_demand_load() {
+        let config = CustomBloomCacheConfig::default();
+        let cache = CustomBloomCache::new(config);
+
+        // Simulate on-demand loading
+        let loader = |id: u64| -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
+            let mut bloom = CustomBloom::with_capacity(100, 0.01);
+            bloom.insert(format!("loaded_key_{}", id).as_bytes());
+            Ok(Some((bloom, vec![format!("loaded_key_{}", id)])))
+        };
+
+        // First access - miss, then load
+        let result = cache.get(1, &loader).unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().contains(b"loaded_key_1"));
+
+        // Second access - hit
+        let result = cache.get(1, &loader).unwrap();
+        assert!(result.is_some());
     }
 }

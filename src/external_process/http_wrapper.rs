@@ -17,21 +17,16 @@
 //! - JSON request/response handling
 
 use crate::external_process::metadata::{
-    ExternalToolMetadata,
-    ExternalToolType,
-    HttpConfig,
-    AuthConfig,
+    schema_helpers, AuthConfig, ExternalToolMetadata, ExternalToolType, HttpConfig, RiskLevel,
     ToolExecutionResult,
-    RiskLevel,
-    schema_helpers,
 };
-use crate::external_process::wrapper::{ExternalTool, validation};
+use crate::external_process::wrapper::{validation, ExternalTool};
 use crate::tool_matrix::matrix::ToolDefinition;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::Value;
 use std::time::Instant;
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use tracing::{debug, warn, info};
+use tracing::{debug, info, warn};
 
 /// HTTP wrapper for remote HTTP services/REST APIs
 ///
@@ -89,7 +84,7 @@ impl HTTPWrapper {
             ExternalToolType::Http { .. } => {}
             _ => panic!("HTTPWrapper requires ExternalToolType::Http"),
         }
-        
+
         Self {
             metadata,
             client: reqwest::Client::new(),
@@ -106,11 +101,8 @@ impl HTTPWrapper {
             .timeout(std::time::Duration::from_millis(timeout_ms))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        
-        Self {
-            metadata,
-            client,
-        }
+
+        Self { metadata, client }
     }
 
     /// Get the HTTP configuration
@@ -171,14 +163,14 @@ impl HTTPWrapper {
     /// * `Result<String>` - Complete URL
     fn build_url(&self, input: &serde_json::Map<String, Value>) -> Result<String> {
         let config = self.config();
-        
+
         // Substitute path variables
         let path = self.substitute_path(&config.path_template, input);
-        
+
         // Combine base URL and path
         let base_url = config.base_url.trim_end_matches('/');
         let path = path.trim_start_matches('/');
-        
+
         Ok(format!("{}/{}", base_url, path))
     }
 
@@ -189,7 +181,10 @@ impl HTTPWrapper {
     ///
     /// # Returns
     /// * `Result<reqwest::header::HeaderMap>` - Header map
-    async fn build_headers(&self, input: &serde_json::Map<String, Value>) -> Result<reqwest::header::HeaderMap> {
+    async fn build_headers(
+        &self,
+        input: &serde_json::Map<String, Value>,
+    ) -> Result<reqwest::header::HeaderMap> {
         let config = self.config();
         let mut headers = reqwest::header::HeaderMap::new();
 
@@ -214,7 +209,10 @@ impl HTTPWrapper {
                         reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))?,
                     );
                 }
-                AuthConfig::ApiKey { header_name, key_env } => {
+                AuthConfig::ApiKey {
+                    header_name,
+                    key_env,
+                } => {
                     let key = std::env::var(key_env)
                         .with_context(|| format!("Environment variable {} not set", key_env))?;
                     headers.insert(
@@ -222,11 +220,16 @@ impl HTTPWrapper {
                         reqwest::header::HeaderValue::from_str(&key)?,
                     );
                 }
-                AuthConfig::Basic { username_env, password_env } => {
-                    let username = std::env::var(username_env)
-                        .with_context(|| format!("Environment variable {} not set", username_env))?;
-                    let password = std::env::var(password_env)
-                        .with_context(|| format!("Environment variable {} not set", password_env))?;
+                AuthConfig::Basic {
+                    username_env,
+                    password_env,
+                } => {
+                    let username = std::env::var(username_env).with_context(|| {
+                        format!("Environment variable {} not set", username_env)
+                    })?;
+                    let password = std::env::var(password_env).with_context(|| {
+                        format!("Environment variable {} not set", password_env)
+                    })?;
 
                     let credentials = BASE64.encode(format!("{}:{}", username, password));
                     headers.insert(
@@ -234,16 +237,24 @@ impl HTTPWrapper {
                         reqwest::header::HeaderValue::from_str(&format!("Basic {}", credentials))?,
                     );
                 }
-                AuthConfig::OAuth2 { client_id_env, client_secret_env, token_url, scopes } => {
+                AuthConfig::OAuth2 {
+                    client_id_env,
+                    client_secret_env,
+                    token_url,
+                    scopes,
+                } => {
                     // OAuth 2.0 client credentials flow
-                    let client_id = std::env::var(client_id_env)
-                        .with_context(|| format!("Environment variable {} not set", client_id_env))?;
-                    let client_secret = std::env::var(client_secret_env)
-                        .with_context(|| format!("Environment variable {} not set", client_secret_env))?;
-                    
+                    let client_id = std::env::var(client_id_env).with_context(|| {
+                        format!("Environment variable {} not set", client_id_env)
+                    })?;
+                    let client_secret = std::env::var(client_secret_env).with_context(|| {
+                        format!("Environment variable {} not set", client_secret_env)
+                    })?;
+
                     // Request access token
                     let client = reqwest::Client::new();
-                    let mut params: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                    let mut params: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
                     params.insert("grant_type".to_string(), "client_credentials".to_string());
                     params.insert("client_id".to_string(), client_id.clone());
                     params.insert("client_secret".to_string(), client_secret.clone());
@@ -251,27 +262,34 @@ impl HTTPWrapper {
                     if !scopes.is_empty() {
                         params.insert("scope".to_string(), scopes.join(" "));
                     }
-                    
-                    let response = client.post(token_url)
+
+                    let response = client
+                        .post(token_url)
                         .form(&params)
                         .send()
                         .await
                         .context("OAuth 2.0 token request failed")?;
-                    
+
                     if !response.status().is_success() {
                         bail!("OAuth 2.0 token request failed: {}", response.status());
                     }
-                    
-                    let token_response: Value = response.json().await
+
+                    let token_response: Value = response
+                        .json()
+                        .await
                         .context("Failed to parse OAuth 2.0 token response")?;
-                    
-                    let access_token = token_response.get("access_token")
+
+                    let access_token = token_response
+                        .get("access_token")
                         .and_then(|v| v.as_str())
                         .context("OAuth 2.0 response missing access_token")?;
-                    
+
                     headers.insert(
                         reqwest::header::AUTHORIZATION,
-                        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", access_token))?,
+                        reqwest::header::HeaderValue::from_str(&format!(
+                            "Bearer {}",
+                            access_token
+                        ))?,
                     );
                 }
             }
@@ -295,7 +313,8 @@ impl HTTPWrapper {
             "POST" | "PUT" | "PATCH" => {
                 // Extract body fields from input (exclude path variables)
                 // Simple approach: collect all {{var}} patterns
-                let mut path_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut path_vars: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
                 let mut chars = config.path_template.chars().peekable();
                 while let Some(c) = chars.next() {
                     if c == '{' && chars.peek() == Some(&'{') {
@@ -316,14 +335,14 @@ impl HTTPWrapper {
                         }
                     }
                 }
-                
+
                 // Filter out path variables from input
                 let body: serde_json::Map<String, Value> = input
                     .iter()
                     .filter(|(k, _)| !path_vars.contains(k.as_str()))
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                
+
                 if !body.is_empty() {
                     Some(Value::Object(body))
                 } else {
@@ -347,15 +366,16 @@ impl HTTPWrapper {
         request: reqwest::RequestBuilder,
         timeout_ms: u64,
     ) -> Result<(u16, String)> {
-        let response = tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            request.send()
-        )
-        .await
-        .context("HTTP request timed out")??;
+        let response =
+            tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), request.send())
+                .await
+                .context("HTTP request timed out")??;
 
         let status = response.status().as_u16();
-        let body = response.text().await.context("Failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
 
         Ok((status, body))
     }
@@ -379,8 +399,7 @@ impl ExternalTool for HTTPWrapper {
         }
 
         // Get input as object
-        let input_obj = input.as_object()
-            .context("Input must be a JSON object")?;
+        let input_obj = input.as_object().context("Input must be a JSON object")?;
 
         let config = self.config();
 
@@ -408,14 +427,17 @@ impl ExternalTool for HTTPWrapper {
 
         match execution_result {
             Ok((status, body)) => {
-                debug!("HTTP request completed in {}ms - Status: {}", elapsed, status);
+                debug!(
+                    "HTTP request completed in {}ms - Status: {}",
+                    elapsed, status
+                );
 
                 // Try to parse response as JSON
                 let output = serde_json::from_str::<Value>(&body)
                     .unwrap_or_else(|_| Value::String(body.clone()));
 
                 let success = (200..300).contains(&status);
-                
+
                 if success {
                     Ok(ToolExecutionResult::success(output, elapsed))
                 } else {
@@ -439,7 +461,7 @@ impl ExternalTool for HTTPWrapper {
     }
 
     fn to_tool_definition(&self) -> ToolDefinition {
-        use crate::tool_matrix::matrix::{ServiceMetadata, ServiceCategory};
+        use crate::tool_matrix::matrix::{ServiceCategory, ServiceMetadata};
 
         let risk_level_str = match self.metadata.risk_level {
             RiskLevel::Low => "safe",
@@ -490,7 +512,11 @@ pub struct HTTPWrapperBuilder {
 
 impl HTTPWrapperBuilder {
     /// Create a new builder
-    pub fn new(name: impl Into<String>, base_url: impl Into<String>, method: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        method: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             description: String::new(),
@@ -611,7 +637,8 @@ pub mod openapi_parser {
         let mut wrappers = Vec::new();
 
         // Get OpenAPI version
-        let openapi_version = openapi_spec.get("openapi")
+        let openapi_version = openapi_spec
+            .get("openapi")
             .or_else(|| openapi_spec.get("swagger"))
             .and_then(|v| v.as_str())
             .context("Invalid OpenAPI spec: missing version")?;
@@ -619,14 +646,18 @@ pub mod openapi_parser {
         debug!("Parsing OpenAPI spec version: {}", openapi_version);
 
         // Get base URL
-        let servers = openapi_spec.get("servers")
+        let servers = openapi_spec
+            .get("servers")
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.get("url"))
             .and_then(|v| v.as_str());
 
         let host = openapi_spec.get("host").and_then(|v| v.as_str());
-        let base_path = openapi_spec.get("basePath").and_then(|v| v.as_str()).unwrap_or("/");
+        let base_path = openapi_spec
+            .get("basePath")
+            .and_then(|v| v.as_str())
+            .unwrap_or("/");
         let schemes = openapi_spec.get("schemes").and_then(|v| v.as_array());
 
         let base_url = if let Some(server_url) = servers {
@@ -642,39 +673,44 @@ pub mod openapi_parser {
         };
 
         // Get paths
-        let paths = openapi_spec.get("paths")
+        let paths = openapi_spec
+            .get("paths")
             .and_then(|v| v.as_object())
             .context("Invalid OpenAPI spec: missing paths")?;
 
         // Get components/schemas for reference resolution
-        let schemas = openapi_spec.get("components")
+        let schemas = openapi_spec
+            .get("components")
             .and_then(|v| v.get("schemas"))
             .and_then(|v| v.as_object());
 
         // Process each path
         for (path, path_item) in paths {
-            let path_item_obj = path_item.as_object()
-                .context("Invalid path item")?;
+            let path_item_obj = path_item.as_object().context("Invalid path item")?;
 
             for (method, operation) in path_item_obj {
                 // Skip non-HTTP methods
-                if !["get", "post", "put", "delete", "patch", "head", "options"].contains(&method.as_str()) {
+                if !["get", "post", "put", "delete", "patch", "head", "options"]
+                    .contains(&method.as_str())
+                {
                     continue;
                 }
 
-                let operation_obj = operation.as_object()
-                    .context("Invalid operation")?;
+                let operation_obj = operation.as_object().context("Invalid operation")?;
 
                 // Extract operation details
-                let operation_id = operation_obj.get("operationId")
+                let operation_id = operation_obj
+                    .get("operationId")
                     .and_then(|v| v.as_str())
                     .unwrap_or_else(|| &path[1..]);
 
-                let summary = operation_obj.get("summary")
+                let summary = operation_obj
+                    .get("summary")
                     .and_then(|v| v.as_str())
                     .unwrap_or(operation_id);
 
-                let description = operation_obj.get("description")
+                let description = operation_obj
+                    .get("description")
                     .and_then(|v| v.as_str())
                     .unwrap_or(summary);
 
@@ -700,7 +736,10 @@ pub mod openapi_parser {
             }
         }
 
-        info!("Generated {} HTTP wrappers from OpenAPI spec", wrappers.len());
+        info!(
+            "Generated {} HTTP wrappers from OpenAPI spec",
+            wrappers.len()
+        );
         Ok(wrappers)
     }
 
@@ -716,23 +755,30 @@ pub mod openapi_parser {
         if let Some(parameters) = operation.get("parameters").and_then(|v| v.as_array()) {
             for param in parameters {
                 let param_obj = param.as_object().context("Invalid parameter")?;
-                
-                let name = param_obj.get("name")
+
+                let name = param_obj
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .context("Parameter missing name")?;
-                
-                let description = param_obj.get("description")
+
+                let description = param_obj
+                    .get("description")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Parameter");
-                
-                let required_param = param_obj.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
-                
+
+                let required_param = param_obj
+                    .get("required")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
                 // Get parameter schema
-                let param_schema = param_obj.get("schema").cloned()
+                let param_schema = param_obj
+                    .get("schema")
+                    .cloned()
                     .unwrap_or_else(|| schema_helpers::string_param(description));
-                
+
                 properties.insert(name.to_string(), param_schema);
-                
+
                 if required_param {
                     required.push(name.to_string());
                 }
@@ -746,7 +792,7 @@ pub mod openapi_parser {
                     if let Some(schema) = json_content.get("schema") {
                         // Resolve schema reference if needed
                         let resolved_schema = resolve_schema_reference(schema, schemas);
-                        
+
                         if let Some(obj) = resolved_schema.as_object() {
                             if let Some(props) = obj.get("properties") {
                                 if let Some(props_obj) = props.as_object() {
@@ -755,7 +801,7 @@ pub mod openapi_parser {
                                     }
                                 }
                             }
-                            
+
                             if let Some(req) = obj.get("required") {
                                 if let Some(req_arr) = req.as_array() {
                                     for r in req_arr {
@@ -782,14 +828,14 @@ pub mod openapi_parser {
         if let Some(ref_str) = schema.get("$ref").and_then(|v| v.as_str()) {
             // Extract schema name from reference
             let schema_name = ref_str.split('/').next_back().unwrap_or("");
-            
+
             if let Some(schemas_map) = schemas {
                 if let Some(resolved) = schemas_map.get(schema_name) {
                     return resolved.clone();
                 }
             }
         }
-        
+
         schema.clone()
     }
 
@@ -825,8 +871,8 @@ pub mod openapi_parser {
     #[cfg(feature = "yaml")]
     pub fn parse_openapi_yaml(yaml_content: &str, created_by: &str) -> Result<Vec<HTTPWrapper>> {
         // Parse YAML to Value
-        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml_content)
-            .context("Failed to parse YAML content")?;
+        let yaml_value: serde_yaml::Value =
+            serde_yaml::from_str(yaml_content).context("Failed to parse YAML content")?;
 
         // Convert YAML Value to JSON Value
         let json_value: Value = serde_json::from_str(&serde_json::to_string(&yaml_value)?)
@@ -851,13 +897,11 @@ pub mod openapi_parser {
         use std::fs;
 
         let path = file_path.as_ref();
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {:?}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read file: {:?}", path))?;
 
         // Auto-detect format based on extension
-        let extension = path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match extension.to_lowercase().as_str() {
             "yaml" | "yml" => {
@@ -920,9 +964,10 @@ mod tests {
             .path("/users/{{user_id}}")
             .build();
 
-        let input = serde_json::Map::from_iter(vec![
-            ("user_id".to_string(), Value::String("123".to_string())),
-        ]);
+        let input = serde_json::Map::from_iter(vec![(
+            "user_id".to_string(),
+            Value::String("123".to_string()),
+        )]);
 
         let url = wrapper.build_url(&input).unwrap();
         assert_eq!(url, "https://api.example.com/users/123");
@@ -932,9 +977,9 @@ mod tests {
     async fn test_http_wrapper_validate_input() {
         let wrapper = HTTPWrapperBuilder::new("test", "https://api.example.com", "GET")
             .path("/users/{{user_id}}")
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("user_id", "User ID", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "user_id", "User ID", true,
+            )]))
             .build();
 
         // Valid input
@@ -950,13 +995,17 @@ mod tests {
     async fn test_http_wrapper_execute_mock() {
         // This test would require a mock HTTP server
         // For now, we test that the wrapper is created correctly
-        let wrapper = HTTPWrapperBuilder::new("jsonplaceholder", "https://jsonplaceholder.typicode.com", "GET")
-            .path("/posts/{{id}}")
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("id", "Post ID", true),
-            ]))
-            .domain("http_client")
-            .build();
+        let wrapper = HTTPWrapperBuilder::new(
+            "jsonplaceholder",
+            "https://jsonplaceholder.typicode.com",
+            "GET",
+        )
+        .path("/posts/{{id}}")
+        .input_schema(schema_helpers::create_string_params_schema(vec![(
+            "id", "Post ID", true,
+        )]))
+        .domain("http_client")
+        .build();
 
         // Execute against real API (for integration testing)
         let input = json!({"id": "1"});
@@ -1015,8 +1064,11 @@ mod tests {
 
         let wrappers = openapi_parser::parse_openapi(&openapi_spec, "test").unwrap();
         assert_eq!(wrappers.len(), 2);
-        
-        let get_wrapper = wrappers.iter().find(|w| w.name() == "get_getUsers").unwrap();
+
+        let get_wrapper = wrappers
+            .iter()
+            .find(|w| w.name() == "get_getUsers")
+            .unwrap();
         assert_eq!(get_wrapper.description(), "Get all users");
     }
 }

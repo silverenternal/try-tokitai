@@ -8,14 +8,12 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
-use crate::tool_matrix::matrix::{
-    SkillsFile, ToolGuide, UseCase, SkillExample,
-};
+use crate::tool_matrix::matrix::{SkillExample, SkillsFile, ToolGuide, UseCase};
 
 /// Skills 文件管理器
 pub struct SkillsManager {
@@ -99,9 +97,7 @@ impl SkillsManager {
 
     /// 保存 Skills 文件
     pub fn save_skills_file(&self, skills: &SkillsFile) -> Result<PathBuf> {
-        let file_path = self
-            .skills_dir
-            .join(format!("{}.json", skills.toolbox_id));
+        let file_path = self.skills_dir.join(format!("{}.json", skills.toolbox_id));
 
         // 确保目录存在
         if let Some(parent) = file_path.parent() {
@@ -137,14 +133,10 @@ impl SkillsManager {
     }
 
     /// 添加工具指南到 Skills 文件
-    pub fn add_tool_guide(
-        &self,
-        toolbox_id: &str,
-        guide: ToolGuide,
-    ) -> Result<()> {
+    pub fn add_tool_guide(&self, toolbox_id: &str, guide: ToolGuide) -> Result<()> {
         // 查找现有的 Skills 文件
         let mut cache = self.cache.write();
-        
+
         if let Some(pos) = cache.iter().position(|s| s.toolbox_id == toolbox_id) {
             cache[pos].add_tool_guide(guide);
             let skills = cache[pos].clone();
@@ -159,7 +151,7 @@ impl SkillsManager {
     /// 添加使用场景到 Skills 文件
     pub fn add_use_case(&self, toolbox_id: &str, use_case: UseCase) -> Result<()> {
         let mut cache = self.cache.write();
-        
+
         if let Some(pos) = cache.iter().position(|s| s.toolbox_id == toolbox_id) {
             cache[pos].add_use_case(use_case);
             let skills = cache[pos].clone();
@@ -174,7 +166,7 @@ impl SkillsManager {
     /// 添加示例到 Skills 文件
     pub fn add_example(&self, toolbox_id: &str, example: SkillExample) -> Result<()> {
         let mut cache = self.cache.write();
-        
+
         if let Some(pos) = cache.iter().position(|s| s.toolbox_id == toolbox_id) {
             cache[pos].add_example(example);
             let skills = cache[pos].clone();
@@ -203,7 +195,7 @@ impl SkillsManager {
     /// 生成 AI 可读的 Skills 提示词（合并所有 Skills）
     pub fn generate_skills_prompt(&self) -> Result<String> {
         let cache = self.cache.read();
-        
+
         if cache.is_empty() {
             return Ok("".to_string());
         }
@@ -299,12 +291,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = SkillsManager::with_path(temp_dir.path()).unwrap();
 
-        let skills = SkillsFile::new(
-            "test_box",
-            "Test Skills",
-            "Introduction",
-            "1.0.0",
-        );
+        let skills = SkillsFile::new("test_box", "Test Skills", "Introduction", "1.0.0");
 
         manager.save_skills_file(&skills).unwrap();
         manager.load_all().unwrap();

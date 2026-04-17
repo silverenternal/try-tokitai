@@ -96,7 +96,7 @@ pub trait WriteEngineAPI: Send + Sync {
     fn flush_memtable(&self) -> anyhow::Result<()>;
 
     /// Get reference to WAL manager (for recovery)
-    fn wal_ref(&self) -> Option<&Mutex<crate::core::wal::WalManager>>;
+    fn wal_ref(&self) -> Option<&Arc<Mutex<crate::core::wal::WalManager>>>;
 
     /// Get write operation statistics
     fn get_stats(&self) -> WriteStats;
@@ -127,7 +127,7 @@ pub trait CompactionEngineAPI: Send + Sync {
     fn get_stats(&self) -> CompactionStats;
 
     /// Get reference to internal CompactionManager (for advanced usage)
-    fn compaction_manager(&self) -> &Mutex<crate::compaction::CompactionManager>;
+    fn compaction_manager(&self) -> &Arc<crate::compaction::CompactionManager>;
 }
 
 // ============================================================================
@@ -153,7 +153,7 @@ pub trait LifecycleManagerAPI: Send + Sync {
     /// WAL recovery - replay entries from write-ahead log
     ///
     /// Returns the number of entries replayed.
-    fn recover_from_wal(&self, wal: &Mutex<crate::core::wal::WalManager>) -> anyhow::Result<usize>;
+    fn recover_from_wal(&self, wal: &Arc<Mutex<crate::core::wal::WalManager>>) -> anyhow::Result<usize>;
 
     /// Rebuild bloom filters for all segments
     ///

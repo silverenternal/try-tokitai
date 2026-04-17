@@ -2,8 +2,8 @@
 //!
 //! 按可恢复性分类，支持 AI 决策重试策略
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use serde::{Serialize, Deserialize};
 
 /// 错误可恢复性分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,11 +91,7 @@ impl DataToolError {
     }
 
     /// 创建资源超限错误
-    pub fn resource_exceeded(
-        resource_type: impl Into<String>,
-        current: usize,
-        max: usize,
-    ) -> Self {
+    pub fn resource_exceeded(resource_type: impl Into<String>, current: usize, max: usize) -> Self {
         Self::ResourceExceeded {
             resource_type: resource_type.into(),
             current,

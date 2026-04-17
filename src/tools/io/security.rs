@@ -2,11 +2,11 @@
 //!
 //! 防止路径遍历攻击、符号链接攻击，确保 AI 只能访问授权目录
 
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use crate::tools::io::error::{IoResult, IoToolError};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use crate::tools::io::error::{IoToolError, IoResult};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// 路径验证结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,9 @@ impl PathValidationResult {
             Err(IoToolError::PathValidation {
                 message: self.error.unwrap_or_else(|| "未知错误".to_string()),
                 path: path.to_string(),
-                suggestion: self.suggestion.unwrap_or_else(|| "请检查路径是否正确".to_string()),
+                suggestion: self
+                    .suggestion
+                    .unwrap_or_else(|| "请检查路径是否正确".to_string()),
             })
         }
     }
@@ -51,7 +53,7 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         // 默认允许项目根目录和 sandbox 目录
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        
+
         #[cfg(test)]
         {
             // 测试模式：允许所有路径
@@ -61,13 +63,13 @@ impl Default for SandboxConfig {
                     current_dir.join("sandbox"),
                     current_dir.join("downloads"),
                     current_dir.join("target"),
-                    PathBuf::from("/"),  // 测试模式允许所有路径
+                    PathBuf::from("/"), // 测试模式允许所有路径
                 ],
                 allow_symlinks: true,
                 max_depth: 100,
             }
         }
-        
+
         #[cfg(not(test))]
         {
             Self {
@@ -103,7 +105,7 @@ impl SecurePathResolver {
             config: SandboxConfig {
                 allowed_roots: vec![
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                    PathBuf::from("/"),  // 测试模式允许所有路径
+                    PathBuf::from("/"), // 测试模式允许所有路径
                 ],
                 allow_symlinks: true,
                 max_depth: 100,
@@ -118,7 +120,7 @@ impl SecurePathResolver {
     }
 
     /// 验证并解析路径
-    /// 
+    ///
     /// 执行以下检查：
     /// 1. 路径规范化（解析 .. 和符号链接）
     /// 2. 检查是否在允许的根目录内
@@ -160,7 +162,7 @@ impl SecurePathResolver {
                 } else {
                     p
                 }
-            },
+            }
             Err(e) => {
                 // 如果文件不存在，尝试解析父目录
                 if let Some(parent) = path_obj.parent() {
@@ -174,7 +176,9 @@ impl SecurePathResolver {
                                         is_valid: false,
                                         canonical_path: None,
                                         error: Some(format!("无效的路径组件：{}", e)),
-                                        suggestion: Some("请检查路径中的目录名和文件名是否正确".to_string()),
+                                        suggestion: Some(
+                                            "请检查路径中的目录名和文件名是否正确".to_string(),
+                                        ),
                                     };
                                 }
                             }
@@ -230,7 +234,10 @@ impl SecurePathResolver {
             return PathValidationResult {
                 is_valid: false,
                 canonical_path: Some(canonical.to_string_lossy().to_string()),
-                error: Some(format!("路径深度超限 ({} > {})", depth, self.config.max_depth)),
+                error: Some(format!(
+                    "路径深度超限 ({} > {})",
+                    depth, self.config.max_depth
+                )),
                 suggestion: Some("请使用更浅的目录结构".to_string()),
             };
         }
@@ -338,7 +345,7 @@ pub fn get_global_resolver() -> &'static RwLock<SecurePathResolver> {
                     current_dir.join("target"),
                     current_dir.join("target").join("test_tmp"),
                     PathBuf::from("/tmp"),
-                    PathBuf::from("/"),  // 测试模式允许所有路径
+                    PathBuf::from("/"), // 测试模式允许所有路径
                 ],
                 allow_symlinks: true,
                 max_depth: 100,
@@ -382,8 +389,8 @@ pub fn validate_path_or_error(path: &str) -> IoResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_valid_path() {
@@ -498,7 +505,8 @@ mod tests {
         fs::write(&test_file, "hello").unwrap();
 
         let validation = resolver.resolve(&test_file.to_string_lossy());
-        let result: Result<String, crate::tools::io::error::IoToolError> = validation.into_result(&test_file.to_string_lossy());
+        let result: Result<String, crate::tools::io::error::IoToolError> =
+            validation.into_result(&test_file.to_string_lossy());
         assert!(result.is_ok());
     }
 
@@ -541,7 +549,7 @@ mod tests {
         };
         // 使用独立的解析器而不是全局的，避免与其他测试冲突
         let resolver = SecurePathResolver::with_config(config.clone());
-        
+
         // 将 resolver 包装在 Arc 中以便在线程间共享
         use std::sync::Arc;
         let resolver = Arc::new(resolver);
@@ -550,9 +558,7 @@ mod tests {
         for i in 0..10 {
             let path = format!("{}/file_{}.txt", tmpdir.path().display(), i);
             let resolver_clone = Arc::clone(&resolver);
-            let handle = thread::spawn(move || {
-                resolver_clone.resolve(&path).is_valid
-            });
+            let handle = thread::spawn(move || resolver_clone.resolve(&path).is_valid);
             handles.push(handle);
         }
 

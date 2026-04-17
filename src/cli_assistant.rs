@@ -20,22 +20,23 @@
 //! - ❌ 不自主发起 Git 操作
 
 use anyhow::{Context, Result};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use serde_json::{json, Value};
 use std::io::{self, Write};
 use tracing::{info, warn};
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-};
 
-use crate::assistant_common::{AssistantConfig, ToolManager, register_all_builtin_tools};
-use crate::orchestrator::Orchestrator;
+use crate::assistant_common::{register_all_builtin_tools, AssistantConfig, ToolManager};
+use crate::config::Config;
 use crate::integration::IntegratedModules;
 use crate::integration::IntegratedModulesConfig;
+use crate::llm::{LLMManager, ModelCommandHandler, ProviderInitializer};
+use crate::orchestrator::Orchestrator;
 use crate::path_resolver;
-use crate::tools::{FileOperations, SystemTools, CodeTools, SearchTools, DownloadTools, GitOperations, JsonFormatTools};
 use crate::tools::HttpClientTools;
-use crate::llm::{LLMManager, ProviderInitializer, ModelCommandHandler};
-use crate::config::Config;
+use crate::tools::{
+    CodeTools, DownloadTools, FileOperations, GitOperations, JsonFormatTools, SearchTools,
+    SystemTools,
+};
 use std::sync::Arc;
 
 /// CLI AI 助手 - 面向用户的交互式助手
@@ -95,8 +96,9 @@ impl CliAssistant {
                 let mut manager = LLMManager::new();
                 if let Ok(api_url) = std::env::var("AI_API_URL") {
                     let api_key = std::env::var("AI_API_KEY").ok();
-                    let model = std::env::var("AI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
-                    
+                    let model =
+                        std::env::var("AI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
+
                     let provider = Arc::new(crate::llm::providers::OpenAIProvider::with_base_url(
                         api_key.unwrap_or_default(),
                         api_url,
@@ -241,11 +243,9 @@ impl CliAssistant {
         let tools = self.get_tool_definitions();
 
         // 从环境变量读取最新配置（支持运行时切换供应商）
-        let api_url = std::env::var("AI_API_URL")
-            .unwrap_or_else(|_| self.config.api_url.clone());
+        let api_url = std::env::var("AI_API_URL").unwrap_or_else(|_| self.config.api_url.clone());
         let api_key = std::env::var("AI_API_KEY").ok();
-        let model = std::env::var("AI_MODEL")
-            .unwrap_or_else(|_| self.config.model.clone());
+        let model = std::env::var("AI_MODEL").unwrap_or_else(|_| self.config.model.clone());
 
         // 构建请求体（Ollama / OpenAI 兼容格式，支持工具调用）
         let request_body = json!({
@@ -268,10 +268,7 @@ impl CliAssistant {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
 
-        let response = req
-            .json(&request_body)
-            .send()
-            .context("发送请求失败")?;
+        let response = req.json(&request_body).send().context("发送请求失败")?;
 
         let status = response.status();
         info!("📡 响应状态码：{}", status);
@@ -281,21 +278,28 @@ impl CliAssistant {
 
         // 检查是否是错误响应
         if !status.is_success() {
-            return Err(anyhow::anyhow!("API 返回错误 ({}): {}", status, response_text));
+            return Err(anyhow::anyhow!(
+                "API 返回错误 ({}): {}",
+                status,
+                response_text
+            ));
         }
 
-        let response_json: Value = serde_json::from_str(&response_text)
-            .context("解析响应失败")?;
+        let response_json: Value = serde_json::from_str(&response_text).context("解析响应失败")?;
 
         // 处理响应
-        let choices_opt = response_json.get("choices").and_then(|c: &Value| c.as_array());
+        let choices_opt = response_json
+            .get("choices")
+            .and_then(|c: &Value| c.as_array());
         if let Some(choices) = choices_opt {
             let first_opt = choices.first();
             if let Some(first) = first_opt {
                 let message_opt = first.get("message");
                 if let Some(message) = message_opt {
                     // 检查是否有工具调用（必须是非空数组）
-                    let tool_calls_opt = message.get("tool_calls").and_then(|tc: &Value| tc.as_array());
+                    let tool_calls_opt = message
+                        .get("tool_calls")
+                        .and_then(|tc: &Value| tc.as_array());
                     if let Some(tool_calls) = tool_calls_opt {
                         if !tool_calls.is_empty() {
                             return self.handle_tool_calls(tool_calls, messages);
@@ -307,7 +311,9 @@ impl CliAssistant {
                     if let Some(content) = content_opt {
                         if content.is_empty() {
                             warn!("⚠️  AI 返回空内容，完整响应：{:?}", message);
-                            return Ok("⚠️  AI 返回空响应，可能是 API 服务异常或模型输出问题".to_string());
+                            return Ok(
+                                "⚠️  AI 返回空响应，可能是 API 服务异常或模型输出问题".to_string()
+                            );
                         }
                         return Ok(content.to_string());
                     } else {
@@ -337,8 +343,7 @@ impl CliAssistant {
                 .and_then(|a| a.as_str())
                 .unwrap_or("{}");
 
-            let args: Value = serde_json::from_str(arguments)
-                .unwrap_or_else(|_| json!({}));
+            let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
 
             println!("🔧 执行工具：{}", name);
 
@@ -418,7 +423,10 @@ impl CliAssistant {
             if input.starts_with('/') {
                 if input == "/toolbox" {
                     let stats = self.get_toolbox_stats();
-                    println!("\n工具箱状态：\n{}", serde_json::to_string_pretty(&stats).unwrap_or_default());
+                    println!(
+                        "\n工具箱状态：\n{}",
+                        serde_json::to_string_pretty(&stats).unwrap_or_default()
+                    );
                     println!();
                     continue;
                 }
@@ -550,7 +558,12 @@ fn read_line_interactive(stdout: &mut io::Stdout, prompt: &str) -> Result<String
             .unwrap_or(s.len())
     }
 
-    fn redraw_line(stdout: &mut io::Stdout, prompt: &str, buffer: &str, cursor_char_pos: usize) -> std::io::Result<()> {
+    fn redraw_line(
+        stdout: &mut io::Stdout,
+        prompt: &str,
+        buffer: &str,
+        cursor_char_pos: usize,
+    ) -> std::io::Result<()> {
         print!("\r\x1b[2K");
         print!("{}", prompt);
         print!("{}", buffer);

@@ -9,33 +9,32 @@
 //! - Existing code using `FileKV::rebuild_bloom_filters()` will continue to work
 //! - The legacy `impl FileKV` methods are now thin wrappers around `BloomManager`
 
-pub mod manager;
-pub mod filter_cache;
 pub mod adaptive;
 pub mod compressed;
-pub mod migration;
-pub mod fpr_controller;
 pub mod custom_bloom;
+pub mod filter_cache;
+pub mod fpr_controller;
+pub mod manager;
+pub mod migration;
 
 // Re-export main types
-pub use manager::{BloomManager, BloomConfig, BloomSegmentProvider};
-pub use manager::{save_bloom_filter_atomic, load_bloom_filter, bloom_filter_exists};
-pub use manager::{save_bloom_filter_v3, load_bloom_filter_v3, migrate_to_v3};
-pub use filter_cache::{BloomFilterCache, BloomFilterCacheConfig, BloomFilterCacheStats};
 pub use adaptive::{AdaptiveBloomCache, AdaptiveBloomCacheConfig, AdaptiveBloomCacheStats, CacheLayer};
+pub use adaptive::{BloomFilterWrapper, CustomBloomCache, CustomBloomCacheConfig, CustomBloomCacheStats};
 pub use compressed::CompressedBloom;
-pub use migration::{MigrationController, MigrationThresholds, FrequencyTier, classify_by_frequency};
-pub use fpr_controller::{FPRController, FPRControllerStats, AdaptationPolicy, FPRLevel, FPRAdjustedBloom};
 pub use custom_bloom::{CustomBloom, CUSTOM_BLOOM_MAGIC, CUSTOM_BLOOM_VERSION};
+pub use filter_cache::{BloomFilterCache, BloomFilterCacheConfig, BloomFilterCacheStats, FilterWrapper};
+pub use fpr_controller::{AdaptationPolicy, FPRAdjustedBloom, FPRController, FPRControllerStats, FPRLevel};
+pub use manager::{bloom_filter_exists, load_bloom_filter, save_bloom_filter_atomic};
+pub use manager::{load_bloom_filter_v3, load_custom_bloom_with_migration, migrate_to_v3, save_bloom_filter_v3};
+pub use manager::{save_custom_bloom_v3, BloomConfig, BloomManager, BloomSegmentProvider};
+pub use migration::{classify_by_frequency, FrequencyTier, MigrationController, MigrationThresholds};
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
-use tracing::debug;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 
-use crate::{FileKV, SegmentFile, BLOOM_MAGIC, BLOOM_VERSION, DEFAULT_BLOOM_FPR};
+use crate::{FileKV, SegmentFile, DEFAULT_BLOOM_FPR};
 use ::bloom::BloomFilter;
-use ::bloom::ASMS;
 
 /// Result type for bloom operations
 pub type Result<T> = std::result::Result<T, FatalError>;
@@ -57,26 +56,24 @@ impl FileKV {
     /// it uses the keys already collected in memory during the compaction merge.
     /// This avoids the deadlock issue where rebuild_bloom_filters() acquires a read lock
     /// while being called from execute_compaction_inner() which holds a write lock.
-    pub fn rebuild_bloom_filter_for_segment(
-        &self,
-        segment_id: u64,
-        keys: &BTreeMap<String, Vec<u8>>,
-    ) -> Result<()> {
-        tracing::debug!("Building bloom filter for segment {} using {} keys from memory", segment_id, keys.len());
+    pub fn rebuild_bloom_filter_for_segment(&self, segment_id: u64, keys: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+        tracing::debug!(
+            "Building bloom filter for segment {} using {} keys from memory",
+            segment_id,
+            keys.len()
+        );
 
-        let mut bloom = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, keys.len().max(10000) as u32);
         let key_strings: Vec<String> = keys.keys().cloned().collect();
 
-        for key in &key_strings {
-            bloom.insert(key);
-        }
+        let custom_bloom = CustomBloom::from_keys(&key_strings, key_strings.len(), DEFAULT_BLOOM_FPR as f64);
 
-        if let Err(e) = self.save_bloom_filter_atomic(segment_id, &bloom, &key_strings) {
+        if let Err(e) = self.save_custom_bloom_v3(segment_id, &custom_bloom) {
             tracing::error!("Failed to save bloom filter for segment {}: {}", segment_id, e);
             return Err(FatalError::Corruption(format!("Failed to save bloom filter: {}", e)));
         }
 
-        self.bloom_filter_cache_ref().insert(segment_id, bloom);
+        self.bloom_filter_cache_ref()
+            .insert(segment_id, filter_cache::FilterWrapper::Custom(custom_bloom));
         tracing::debug!("Bloom filter built and cached for segment {}", segment_id);
         Ok(())
     }
@@ -97,15 +94,21 @@ impl FileKV {
         let mut skipped_count = 0;
 
         for (seg_id, _) in segments_guard.iter() {
-            match self.load_bloom_filter(*seg_id) {
-                Ok(Some((bloom, _keys))) => {
-                    self.bloom_filter_cache_ref().insert(*seg_id, bloom);
+            // Try loading V3 CustomBloom first (preferred path)
+            match self.load_custom_bloom_v3(*seg_id) {
+                Ok(Some(custom_bloom)) => {
+                    self.bloom_filter_cache_ref()
+                        .insert(*seg_id, filter_cache::FilterWrapper::Custom(custom_bloom));
                     loaded_count += 1;
                     continue;
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    tracing::warn!("Bloom filter file for segment {} corrupted: {}. Will rebuild.", seg_id, e);
+                    tracing::warn!(
+                        "Bloom filter file for segment {} corrupted: {}. Will rebuild.",
+                        seg_id,
+                        e
+                    );
                 }
             }
 
@@ -113,27 +116,32 @@ impl FileKV {
 
             if let Some(segment) = segments_guard.get(seg_id) {
                 if let Err(e) = self.validate_segment_integrity(segment) {
-                    tracing::error!("Segment {} failed integrity check, skipping bloom rebuild: {}", seg_id, e);
+                    tracing::error!(
+                        "Segment {} failed integrity check, skipping bloom rebuild: {}",
+                        seg_id,
+                        e
+                    );
                     skipped_count += 1;
                     continue;
                 }
 
-                let mut bloom = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 10000);
                 let mut keys = Vec::new();
 
                 segment.iterate_entries(|key, _value, _deleted| {
-                    bloom.insert(&key);
                     keys.push(key.to_string());
                     Ok(())
                 })?;
 
-                if let Err(e) = self.save_bloom_filter_atomic(*seg_id, &bloom, &keys) {
+                let custom_bloom = CustomBloom::from_keys(&keys, keys.len(), DEFAULT_BLOOM_FPR as f64);
+
+                if let Err(e) = self.save_custom_bloom_v3(*seg_id, &custom_bloom) {
                     tracing::error!("Failed to save bloom filter for segment {}: {}", seg_id, e);
                     skipped_count += 1;
                     continue;
                 }
 
-                self.bloom_filter_cache_ref().insert(*seg_id, bloom);
+                self.bloom_filter_cache_ref()
+                    .insert(*seg_id, filter_cache::FilterWrapper::Custom(custom_bloom));
                 rebuilt_count += 1;
             } else {
                 tracing::warn!("Segment {} not found in segments map", seg_id);
@@ -143,7 +151,9 @@ impl FileKV {
 
         tracing::info!(
             "Bloom filter rebuild complete: loaded={}, rebuilt={}, skipped={}",
-            loaded_count, rebuilt_count, skipped_count
+            loaded_count,
+            rebuilt_count,
+            skipped_count
         );
         Ok(rebuilt_count)
     }
@@ -153,23 +163,33 @@ impl FileKV {
         const SEGMENT_MAGIC: u32 = 0x54435347; // "TCSG" = Tokitai Context SeGment
         const SEGMENT_VERSION: u32 = 1;
 
-        let mut file = File::open(&segment.path)
-            .map_err(FatalError::Io)?;
+        let mut file = File::open(&segment.path).map_err(FatalError::Io)?;
 
         let mut header = [0u8; 8];
-        file.read_exact(&mut header)
-            .map_err(FatalError::Io)?;
+        file.read_exact(&mut header).map_err(FatalError::Io)?;
 
-        let magic = u32::from_le_bytes(header[0..4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid magic bytes: {}", e)))?);
+        let magic = u32::from_le_bytes(
+            header[0..4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid magic bytes: {}", e)))?,
+        );
         if magic != SEGMENT_MAGIC {
-            return Err(FatalError::Corruption(format!("Invalid segment magic: expected {:08X}, got {:08X}",
-                         SEGMENT_MAGIC, magic)));
+            return Err(FatalError::Corruption(format!(
+                "Invalid segment magic: expected {:08X}, got {:08X}",
+                SEGMENT_MAGIC, magic
+            )));
         }
 
-        let version = u32::from_le_bytes(header[4..8].try_into().map_err(|e| FatalError::Corruption(format!("Invalid version bytes: {}", e)))?);
+        let version = u32::from_le_bytes(
+            header[4..8]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid version bytes: {}", e)))?,
+        );
         if version != SEGMENT_VERSION {
-            return Err(FatalError::Corruption(format!("Unsupported segment version: expected {}, got {}",
-                         SEGMENT_VERSION, version)));
+            return Err(FatalError::Corruption(format!(
+                "Unsupported segment version: expected {}, got {}",
+                SEGMENT_VERSION, version
+            )));
         }
 
         let mut verified_entries = 0;
@@ -194,7 +214,10 @@ impl FileKV {
                     let stored_checksum = u32::from_le_bytes(checksum_buf);
 
                     if stored_checksum == 0 {
-                        return Err(FatalError::Corruption(format!("Entry {} has invalid checksum (0)", verified_entries)));
+                        return Err(FatalError::Corruption(format!(
+                            "Entry {} has invalid checksum (0)",
+                            verified_entries
+                        )));
                     }
 
                     verified_entries += 1;
@@ -219,47 +242,25 @@ impl FileKV {
     ///
     /// P0-008 FIX: Prevents corruption from crashes during write
     /// POL-003: V3 format stores bit vector directly, eliminating rebuild overhead.
-    /// Format: [magic 4B][version 4B][num_bits 4B][num_hashes 4B][bitvec_len 4B][bitvec_bytes...]
-    pub(super) fn save_bloom_filter_atomic(&self, segment_id: u64, bloom: &BloomFilter, keys: &[String]) -> Result<()> {
-        let _ = keys; // unused in v3, but kept for API compatibility
-        
-        let bloom_path = self.config.index_dir.join(format!("bloom_{:06}.bin", segment_id));
-        let temp_path = self.config.index_dir.join(format!("bloom_{:06}.tmp", segment_id));
+    /// Converts to CustomBloom from keys for V3 persistence.
+    pub(super) fn save_bloom_filter_atomic(
+        &self,
+        segment_id: u64,
+        _bloom: &BloomFilter,
+        keys: &[String],
+    ) -> Result<()> {
+        // Convert BloomFilter to CustomBloom via key reconstruction
+        let custom_bloom = CustomBloom::from_keys(keys, keys.len(), DEFAULT_BLOOM_FPR as f64);
+        save_custom_bloom_v3(&self.config.index_dir, segment_id, &custom_bloom)
+    }
 
-        let mut file = BufWriter::new(
-            File::create(&temp_path)
-                .map_err(FatalError::Io)?
-        );
+    /// Save CustomBloom directly in V3 format (uses deterministic XXH3 hashing)
+    pub(super) fn save_custom_bloom_v3(&self, segment_id: u64, custom_bloom: &CustomBloom) -> Result<()> {
+        save_custom_bloom_v3(&self.config.index_dir, segment_id, custom_bloom)
+    }
 
-        file.write_all(&BLOOM_MAGIC.to_le_bytes())?;
-        file.write_all(&BLOOM_VERSION.to_le_bytes())?;
-
-        // Write bloom filter metadata
-        let num_bits = bloom.num_bits() as u32;
-        let num_hashes = bloom.num_hashes();
-        file.write_all(&num_bits.to_le_bytes())?;
-        file.write_all(&num_hashes.to_le_bytes())?;
-
-        // POL-003: Write bit vector directly
-        let bitvec_bytes = bloom.to_bytes();
-        let bitvec_len = bitvec_bytes.len() as u32;
-        file.write_all(&bitvec_len.to_le_bytes())?;
-        file.write_all(&bitvec_bytes)?;
-
-        file.flush()?;
-        file.get_ref().sync_all()
-            .map_err(FatalError::Io)?;
-        drop(file);
-
-        fs::rename(&temp_path, &bloom_path)
-            .map_err(FatalError::Io)?;
-
-        if let Ok(dir) = File::open(&self.config.index_dir) {
-            let _ = dir.sync_all();
-        }
-
-        debug!("Atomically saved bloom filter v3 with {} bits, {} hashes, {} byte bitvec for segment {} to {:?}",
-                             num_bits, num_hashes, bitvec_len, segment_id, bloom_path);
-        Ok(())
+    /// Load CustomBloom from V3 format (fast, direct bitset load)
+    pub(super) fn load_custom_bloom_v3(&self, segment_id: u64) -> Result<Option<CustomBloom>> {
+        load_custom_bloom_with_migration(&self.config.index_dir, segment_id)
     }
 }

@@ -35,25 +35,27 @@
 //! is dropped, the flag is set and the thread is joined with a timeout.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use tracing::{debug, info, warn};
 
-pub mod budget;
 pub mod block_cache;
-pub mod warmup;
+pub mod budget;
+pub mod l2_cache;
 pub mod prefetch;
 mod rebalance;
+pub mod warmup;
 
-pub use budget::{CacheBudget, SubBudget, CacheUsageReport};
-pub use block_cache::{BlockCache, BlockCacheConfig, CacheStats, BlockCacheAsPrefetchCache};
-pub use warmup::{CacheWarmer, CacheWarmingConfig, CacheWarmingStats, WarmingStrategy};
-pub use prefetch::{SequentialPrefetcher, SequentialPrefetcherConfig, SequentialPrefetcherStats, PrefetchCache};
+pub use block_cache::{BlockCache, BlockCacheAsPrefetchCache, BlockCacheConfig, CacheStats};
+pub use budget::{CacheBudget, CacheUsageReport, SubBudget};
+pub use l2_cache::{L2CacheConfig, L2CacheManager, L2CacheStats};
+pub use prefetch::{PrefetchCache, SequentialPrefetcher, SequentialPrefetcherConfig, SequentialPrefetcherStats};
 pub use rebalance::{RebalanceConfig, RebalanceDecision, RebalanceStats};
+pub use warmup::{CacheWarmer, CacheWarmingConfig, CacheWarmingStats, WarmingStrategy};
 
 use crate::bloom::filter_cache::{BloomFilterCache, BloomFilterCacheConfig};
 
@@ -75,6 +77,10 @@ pub struct UnifiedCacheConfig {
     /// Directory where bloom filter files are stored.
     /// CACHE-004 FIX: Previously hardcoded to "./bloom", now configurable.
     pub bloom_index_dir: PathBuf,
+    /// OPT-007: L2 cache configuration (optional)
+    pub l2_cache_config: Option<L2CacheConfig>,
+    /// OPT-007: Enable multi-level cache (default: true)
+    pub enable_multi_level_cache: bool,
 }
 
 impl Default for UnifiedCacheConfig {
@@ -86,6 +92,8 @@ impl Default for UnifiedCacheConfig {
             block_cache_config: None,
             bloom_cache_config: None,
             bloom_index_dir: PathBuf::from("bloom"),
+            l2_cache_config: None,
+            enable_multi_level_cache: true,
         }
     }
 }
@@ -97,6 +105,8 @@ pub struct UnifiedCacheManager {
     budget: Mutex<CacheBudget>,
     block_cache: Arc<BlockCache>,
     bloom_cache: Arc<BloomFilterCache>,
+    /// OPT-007: L2 cache (optional, for multi-level caching)
+    l2_cache: Option<Arc<L2CacheManager>>,
     /// Rebalance configuration (if background thread is enabled)
     rebalance_config: Option<RebalanceConfig>,
     /// Shutdown flag for the rebalance thread
@@ -125,7 +135,10 @@ impl UnifiedCacheManager {
     ///
     /// # Errors
     /// Returns an error string if the thread fails to spawn.
-    pub fn try_new_with_rebalance(config: UnifiedCacheConfig, rebalance_config: RebalanceConfig) -> Result<Self, String> {
+    pub fn try_new_with_rebalance(
+        config: UnifiedCacheConfig,
+        rebalance_config: RebalanceConfig,
+    ) -> Result<Self, String> {
         let mut manager = Self::new_inner(config, Some(rebalance_config));
         manager.spawn_rebalance_thread();
         Ok(manager)
@@ -150,16 +163,36 @@ impl UnifiedCacheManager {
             (block_max / 1024) as usize
         };
 
+        // OPT-007: Create L2 cache if enabled
+        let l2_cache = if config.enable_multi_level_cache {
+            let l2_config = config.l2_cache_config.clone().unwrap_or_default();
+            match L2CacheManager::new(l2_config) {
+                Ok(cache) => Some(Arc::new(cache)),
+                Err(e) => {
+                    tracing::warn!("Failed to create L2 cache, disabling multi-level cache: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let enable_multi_level_cache = config.enable_multi_level_cache && l2_cache.is_some();
+
         let block_cache = if let Some(mut bc) = config.block_cache_config {
             bc.max_items = block_max_items;
             bc.max_memory_bytes = block_max;
-            Arc::new(BlockCache::new(bc))
+            Arc::new(BlockCache::new_with_l2(bc, l2_cache.clone(), enable_multi_level_cache))
         } else {
-            Arc::new(BlockCache::new(BlockCacheConfig {
-                max_items: block_max_items,
-                max_memory_bytes: block_max,
-                frequency_aware: false,
-            }))
+            Arc::new(BlockCache::new_with_l2(
+                BlockCacheConfig {
+                    max_items: block_max_items,
+                    max_memory_bytes: block_max,
+                    frequency_aware: false,
+                },
+                l2_cache.clone(),
+                enable_multi_level_cache,
+            ))
         };
 
         // Create BloomCache constrained by budget
@@ -179,6 +212,7 @@ impl UnifiedCacheManager {
             budget: Mutex::new(budget),
             block_cache,
             bloom_cache,
+            l2_cache,
             rebalance_config,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             rebalance_thread: Mutex::new(None),
@@ -198,7 +232,11 @@ impl UnifiedCacheManager {
         // thread will exit when the flag is set.
         let self_ptr: usize = self as *const UnifiedCacheManager as usize;
 
-        let interval = self.rebalance_config.as_ref().map(|c| c.interval).unwrap_or(Duration::from_secs(30));
+        let interval = self
+            .rebalance_config
+            .as_ref()
+            .map(|c| c.interval)
+            .unwrap_or(Duration::from_secs(30));
 
         let handle = thread::Builder::new()
             .name("cache-rebalance".to_string())
@@ -318,47 +356,12 @@ impl UnifiedCacheManager {
             }
         }
 
-        // Update budget tracking
-        {
-            let budget = self.budget.lock();
-            for decision in &decisions {
-                match decision {
-                    RebalanceDecision::ShrinkBlock(bytes) | RebalanceDecision::GrowBlock(bytes) => {
-                        // BlockCache budget is informational; update for reporting
-                        let current = budget.block_cache.max_budget();
-                        if *bytes > 0 {
-                            let new_budget = if matches!(decision, RebalanceDecision::GrowBlock(_)) {
-                                current.saturating_add(*bytes)
-                            } else {
-                                current.saturating_sub(*bytes)
-                            };
-                            // Note: SubBudget.max is private, we track via report only
-                            let _ = new_budget;
-                        }
-                    }
-                    RebalanceDecision::ShrinkBloom(bytes) | RebalanceDecision::GrowBloom(bytes) => {
-                        let current = budget.bloom_filter.max_budget();
-                        if *bytes > 0 {
-                            let new_budget = if matches!(decision, RebalanceDecision::GrowBloom(_)) {
-                                current.saturating_add(*bytes)
-                            } else {
-                                current.saturating_sub(*bytes)
-                            };
-                            let _ = new_budget;
-                        }
-                    }
-                }
-            }
-        }
+        // Rebalance decisions are recorded in RebalanceStats below for reporting.
+        // Budget tracking (SubBudget.max) is private and updated internally by each cache;
+        // no manual budget adjustment needed here.
 
         // Build stats and store for retrieval
-        let stats = RebalanceStats::completed(
-            block_hit_rate,
-            bloom_hit_rate,
-            block_memory,
-            bloom_memory,
-            decisions,
-        );
+        let stats = RebalanceStats::completed(block_hit_rate, bloom_hit_rate, block_memory, bloom_memory, decisions);
 
         #[cfg(feature = "metrics")]
         {
@@ -388,8 +391,7 @@ impl UnifiedCacheManager {
         let evicted_kb = evicted as f64 / 1024.0;
         info!(
             "BlockCache: shrunk by {:.1}KB target, actually freed {:.1}KB (real shard removal)",
-            bytes_kb,
-            evicted_kb
+            bytes_kb, evicted_kb
         );
     }
 
@@ -403,10 +405,7 @@ impl UnifiedCacheManager {
         self.block_cache.grow_to(target);
 
         let bytes_kb = bytes as f64 / 1024.0;
-        info!(
-            "BlockCache: grew by {:.1}KB target (new shards added)",
-            bytes_kb
-        );
+        info!("BlockCache: grew by {:.1}KB target (new shards added)", bytes_kb);
     }
 
     /// Shrink BloomFilterCache by evicting LRU entries until memory usage
@@ -420,24 +419,22 @@ impl UnifiedCacheManager {
         let bytes_kb = bytes as f64 / 1024.0;
         info!(
             "BloomFilterCache: shrunk by {:.1}KB target, evicted {} entries (actual LRU eviction)",
-            bytes_kb,
-            evicted
+            bytes_kb, evicted
         );
     }
 
     /// Grow BloomFilterCache by increasing its dynamic max memory limit.
     /// This allows more Bloom filters to be cached before eviction kicks in.
     fn apply_bloom_grow(&self, bytes: u64) {
-        let current_max = self.bloom_cache.grow_max_memory(
-            self.bloom_cache.stats().memory_used.saturating_add(bytes as usize)
-        );
+        let current_max = self
+            .bloom_cache
+            .grow_max_memory(self.bloom_cache.stats().memory_used.saturating_add(bytes as usize));
 
         let bytes_kb = bytes as f64 / 1024.0;
         let prev_kb = current_max as f64 / 1024.0;
         info!(
             "BloomFilterCache: grew by {:.1}KB, previous max: {:.1}KB (advisory - allows more filters to cache)",
-            bytes_kb,
-            prev_kb
+            bytes_kb, prev_kb
         );
     }
 
@@ -454,6 +451,16 @@ impl UnifiedCacheManager {
     /// Get the bloom cache
     pub fn bloom_cache(&self) -> &Arc<BloomFilterCache> {
         &self.bloom_cache
+    }
+
+    /// OPT-007: Get the L2 cache (if enabled)
+    pub fn l2_cache(&self) -> Option<&Arc<L2CacheManager>> {
+        self.l2_cache.as_ref()
+    }
+
+    /// OPT-007: Get L2 cache statistics
+    pub fn l2_cache_stats(&self) -> Option<L2CacheStats> {
+        self.l2_cache.as_ref().map(|l2| l2.stats())
     }
 
     /// Get a budget tracking report (informational - shows current cache memory usage)
@@ -508,6 +515,7 @@ impl Drop for UnifiedCacheManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bloom::FilterWrapper;
     use bloom::ASMS;
     use rebalance::RebalanceStatus;
 
@@ -518,9 +526,8 @@ mod tests {
             max_total_memory_bytes: 10 * 1024 * 1024, // 10MB
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: std::path::PathBuf::from("test_bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -534,7 +541,8 @@ mod tests {
         assert!(
             (block_max as f64 - expected_block_max).abs() < 1024.0,
             "BlockCache max should be ~60% of total: got {}, expected {}",
-            block_max, expected_block_max
+            block_max,
+            expected_block_max
         );
 
         // BloomCache should get 25% of budget
@@ -543,7 +551,8 @@ mod tests {
         assert!(
             (bloom_max as f64 - expected_bloom_max).abs() < 1024.0,
             "BloomCache max should be ~25% of total: got {}, expected {}",
-            bloom_max, expected_bloom_max
+            bloom_max,
+            expected_bloom_max
         );
 
         // Verify caches are accessible (memory_usage returns u64, always >= 0)
@@ -562,9 +571,8 @@ mod tests {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -583,17 +591,16 @@ mod tests {
     /// Test: CACHE-005 - bloom_cache() accessor returns valid cache
     #[test]
     fn test_bloom_cache_accessor_valid() {
-        use bloom::ASMS;
         use crate::core::error::FileKVResult;
+        use bloom::ASMS;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let config = UnifiedCacheConfig {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -603,15 +610,15 @@ mod tests {
         let segment_id: u64 = 1;
         let mut filter = bloom::BloomFilter::with_rate(0.01, 100);
         filter.insert(&"test_key".to_string());
-        bloom_cache.insert(segment_id, filter);
+        bloom_cache.insert(segment_id, FilterWrapper::Bloom(filter));
 
         // Verify get returns the filter (use a loader that returns None)
-        let loader = |_id: u64| -> FileKVResult<Option<bloom::BloomFilter>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<FilterWrapper>> { Ok(None) };
         let result = bloom_cache.get(segment_id, &loader);
         assert!(result.is_ok(), "Get should succeed");
         let retrieved = result.unwrap();
         assert!(retrieved.is_some(), "Should retrieve inserted bloom filter");
-        assert!(retrieved.unwrap().contains(&"test_key".to_string()), "Filter should contain key");
+        assert!(retrieved.unwrap().contains("test_key"), "Filter should contain key");
     }
 
     /// Test: CACHE-005 - usage_report returns reasonable defaults for empty caches
@@ -622,9 +629,8 @@ mod tests {
             max_total_memory_bytes: 32 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -657,9 +663,8 @@ mod tests {
             block_cache_ratio: 0.70, // 70%
             bloom_cache_ratio: 0.50, // 50% - total = 1.20 > 1.0
             // Remaining ratios are informational, not strictly enforced
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         // Should still create successfully (ratios are informational, not strictly enforced)
@@ -685,9 +690,8 @@ mod tests {
             max_total_memory_bytes: 1024, // Very small budget (1KB)
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -716,9 +720,8 @@ mod tests {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let rebalance_config = RebalanceConfig {
@@ -730,8 +733,14 @@ mod tests {
             .expect("Should create manager with rebalance thread");
 
         // Verify thread was spawned
-        assert!(manager.rebalance_thread.lock().is_some(), "Rebalance thread should be present");
-        assert!(!manager.shutdown_flag.load(Ordering::Relaxed), "Shutdown flag should be false initially");
+        assert!(
+            manager.rebalance_thread.lock().is_some(),
+            "Rebalance thread should be present"
+        );
+        assert!(
+            !manager.shutdown_flag.load(Ordering::Relaxed),
+            "Shutdown flag should be false initially"
+        );
 
         // Drop should trigger graceful shutdown (no panic, no hang)
         drop(manager);
@@ -746,9 +755,8 @@ mod tests {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
@@ -766,9 +774,8 @@ mod tests {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let rebalance_config = RebalanceConfig {
@@ -797,9 +804,8 @@ mod tests {
             max_total_memory_bytes: 64 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         // Use a very long interval so thread barely runs during test
@@ -829,10 +835,10 @@ mod tests {
         let bloom_cache = manager.bloom_cache();
         let mut filter = bloom::BloomFilter::with_rate(0.01, 100);
         filter.insert(&"hot_key".to_string());
-        bloom_cache.insert(5, filter);
+        bloom_cache.insert(5, FilterWrapper::Bloom(filter));
 
         // Generate some hits
-        let loader = |_id: u64| -> crate::core::error::FileKVResult<Option<bloom::BloomFilter>> { Ok(None) };
+        let loader = |_id: u64| -> crate::core::error::FileKVResult<Option<FilterWrapper>> { Ok(None) };
         for _ in 0..3 {
             let _ = bloom_cache.get(5, &loader);
         }
@@ -858,15 +864,17 @@ mod tests {
             max_total_memory_bytes: 32 * 1024 * 1024,
             block_cache_ratio: 0.60,
             bloom_cache_ratio: 0.25,
-            block_cache_config: None,
-            bloom_cache_config: None,
             bloom_index_dir: temp_dir.path().join("bloom"),
+            ..Default::default()
         };
 
         let manager = UnifiedCacheManager::new(config);
 
         // No rebalance thread should be present
-        assert!(manager.rebalance_thread.lock().is_none(), "No rebalance thread expected");
+        assert!(
+            manager.rebalance_thread.lock().is_none(),
+            "No rebalance thread expected"
+        );
 
         // Rebalance should return disabled stats
         let stats = manager.rebalance_once();

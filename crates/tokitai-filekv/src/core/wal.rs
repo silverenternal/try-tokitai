@@ -74,7 +74,7 @@ impl WalEntry {
                 buf.extend_from_slice(&0u16.to_le_bytes()); // session_len = 0
                 buf.extend_from_slice(&0u16.to_le_bytes()); // hash_len = 0
                 buf.extend_from_slice(&0u16.to_le_bytes()); // layer_len = 0
-                // Encode batch entries in payload area below
+                                                            // Encode batch entries in payload area below
                 let mut batch_payload = Vec::with_capacity(256);
                 batch_payload.extend_from_slice(&(entries.len() as u16).to_le_bytes());
                 for entry in entries {
@@ -121,12 +121,16 @@ impl WalEntry {
 
         // sequence_number: u64 LE
         let mut seq_bytes = [0u8; 8];
-        cursor.read_exact(&mut seq_bytes).map_err(|e| FatalError::Corruption(format!("Failed to read sequence: {}", e)))?;
+        cursor
+            .read_exact(&mut seq_bytes)
+            .map_err(|e| FatalError::Corruption(format!("Failed to read sequence: {}", e)))?;
         let sequence_number = u64::from_le_bytes(seq_bytes);
 
         // operation_type: u8
         let mut op_byte = [0u8; 1];
-        cursor.read_exact(&mut op_byte).map_err(|e| FatalError::Corruption(format!("Failed to read op: {}", e)))?;
+        cursor
+            .read_exact(&mut op_byte)
+            .map_err(|e| FatalError::Corruption(format!("Failed to read op: {}", e)))?;
         let op_type = op_byte[0];
 
         // session: u16 len + bytes
@@ -140,12 +144,16 @@ impl WalEntry {
 
         // payload: u32 len + bytes
         let mut payload_len_bytes = [0u8; 4];
-        cursor.read_exact(&mut payload_len_bytes).map_err(|e| FatalError::Corruption(format!("Failed to read payload len: {}", e)))?;
+        cursor
+            .read_exact(&mut payload_len_bytes)
+            .map_err(|e| FatalError::Corruption(format!("Failed to read payload len: {}", e)))?;
         let payload_len = u32::from_le_bytes(payload_len_bytes) as usize;
 
         let payload = if payload_len > 0 {
             let mut payload = vec![0u8; payload_len];
-            cursor.read_exact(&mut payload).map_err(|e| FatalError::Corruption(format!("Failed to read payload: {}", e)))?;
+            cursor
+                .read_exact(&mut payload)
+                .map_err(|e| FatalError::Corruption(format!("Failed to read payload: {}", e)))?;
             Some(payload)
         } else {
             None
@@ -154,9 +162,16 @@ impl WalEntry {
         // checksum: u32 LE (verify)
         let checksum_pos = cursor.position() as usize;
         if checksum_pos + 4 > data.len() {
-            return Err(FatalError::Corruption("Truncated checksum in binary WAL entry".to_string()));
+            return Err(FatalError::Corruption(
+                "Truncated checksum in binary WAL entry".to_string(),
+            ));
         }
-        let stored_checksum = u32::from_le_bytes([data[checksum_pos], data[checksum_pos + 1], data[checksum_pos + 2], data[checksum_pos + 3]]);
+        let stored_checksum = u32::from_le_bytes([
+            data[checksum_pos],
+            data[checksum_pos + 1],
+            data[checksum_pos + 2],
+            data[checksum_pos + 3],
+        ]);
         let computed_checksum = crc32c::crc32c(&data[..checksum_pos]);
         if stored_checksum != computed_checksum {
             return Err(FatalError::Corruption(format!(
@@ -172,9 +187,7 @@ impl WalEntry {
                 }
                 WalOperation::Add { session, hash, layer }
             }
-            OP_DELETE => {
-                WalOperation::Delete { session, hash }
-            }
+            OP_DELETE => WalOperation::Delete { session, hash },
             OP_BATCH_ADD => {
                 // Decode batch entries from payload
                 let entries = if let Some(ref payload) = payload {
@@ -185,7 +198,10 @@ impl WalEntry {
                 WalOperation::BatchAdd { entries }
             }
             _ => {
-                return Err(FatalError::Corruption(format!("Unknown WAL operation type: {}", op_type)));
+                return Err(FatalError::Corruption(format!(
+                    "Unknown WAL operation type: {}",
+                    op_type
+                )));
             }
         };
 
@@ -214,13 +230,17 @@ fn write_string_u16(buf: &mut Vec<u8>, s: &str) {
 /// T-001: Helper to read a string with u16 LE length prefix
 fn read_string_u16(cursor: &mut std::io::Cursor<&[u8]>) -> Result<String> {
     let mut len_bytes = [0u8; 2];
-    cursor.read_exact(&mut len_bytes).map_err(|e| FatalError::Corruption(format!("Failed to read string length: {}", e)))?;
+    cursor
+        .read_exact(&mut len_bytes)
+        .map_err(|e| FatalError::Corruption(format!("Failed to read string length: {}", e)))?;
     let len = u16::from_le_bytes(len_bytes) as usize;
     if len == 0 {
         return Ok(String::new());
     }
     let mut buf = vec![0u8; len];
-    cursor.read_exact(&mut buf).map_err(|e| FatalError::Corruption(format!("Failed to read string: {}", e)))?;
+    cursor
+        .read_exact(&mut buf)
+        .map_err(|e| FatalError::Corruption(format!("Failed to read string: {}", e)))?;
     String::from_utf8(buf).map_err(|e| FatalError::Corruption(format!("Invalid UTF-8 in WAL entry: {}", e)))
 }
 
@@ -249,7 +269,8 @@ fn decode_batch_entries(data: &[u8]) -> Result<Vec<BatchEntry>> {
         if offset + 4 > data.len() {
             return Err(FatalError::Corruption("Truncated batch entry value length".to_string()));
         }
-        let value_len = u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]) as usize;
+        let value_len =
+            u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]) as usize;
         offset += 4;
         if offset + value_len > data.len() {
             return Err(FatalError::Corruption("Truncated batch entry value".to_string()));
@@ -328,8 +349,12 @@ fn load_wal_entries_binary(file_data: &[u8]) -> Result<Vec<WalEntry>> {
 
         if offset + record_len > file_data.len() {
             // Partial write or truncated record - stop here
-            eprintln!("Warning: Truncated binary WAL record at offset {} (expected {} bytes, got {})",
-                offset - 4, record_len, file_data.len() - offset + 4);
+            eprintln!(
+                "Warning: Truncated binary WAL record at offset {} (expected {} bytes, got {})",
+                offset - 4,
+                record_len,
+                file_data.len() - offset + 4
+            );
             break;
         }
 
@@ -361,25 +386,18 @@ fn validate_wal_integrity_json(file_data: &[u8], path: &std::path::Path) -> Resu
 
         if let Err(e) = serde_json::from_str::<WalEntry>(&line) {
             corrupted_count += 1;
-            tracing::warn!(
-                "WAL line {} is corrupted: {} (file: {})",
-                line_num,
-                e,
-                path.display()
-            );
+            tracing::warn!("WAL line {} is corrupted: {} (file: {})", line_num, e, path.display());
         }
     }
 
     if corrupted_count > 0 {
-        return Err(FatalError::WalCorrupted(
-            format!(
-                "{} corrupted entries found in WAL file {} ({}/{} lines valid)",
-                corrupted_count,
-                path.display(),
-                line_num.saturating_sub(corrupted_count),
-                line_num
-            )
-        ));
+        return Err(FatalError::WalCorrupted(format!(
+            "{} corrupted entries found in WAL file {} ({}/{} lines valid)",
+            corrupted_count,
+            path.display(),
+            line_num.saturating_sub(corrupted_count),
+            line_num
+        )));
     }
 
     Ok(())
@@ -426,15 +444,13 @@ fn validate_wal_integrity_binary(file_data: &[u8], path: &std::path::Path) -> Re
     }
 
     if corrupted_count > 0 {
-        return Err(FatalError::WalCorrupted(
-            format!(
-                "{} corrupted entries found in WAL file {} ({}/{} records valid)",
-                corrupted_count,
-                path.display(),
-                record_count,
-                record_count + corrupted_count
-            )
-        ));
+        return Err(FatalError::WalCorrupted(format!(
+            "{} corrupted entries found in WAL file {} ({}/{} records valid)",
+            corrupted_count,
+            path.display(),
+            record_count,
+            record_count + corrupted_count
+        )));
     }
 
     Ok(())
@@ -455,7 +471,11 @@ pub enum DurabilityLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WalOperation {
     /// Add operation
-    Add { session: String, hash: String, layer: String },
+    Add {
+        session: String,
+        hash: String,
+        layer: String,
+    },
     /// Delete operation
     Delete { session: String, hash: String },
     /// Batch add operation (atomic)
@@ -476,29 +496,16 @@ pub struct BatchEntry {
 pub struct WalManager {
     fs: Arc<dyn FileKVFileSystem>,
     wal_dir: std::path::PathBuf,
-    /// Maximum WAL file size (used for rotation logic)
-    #[allow(dead_code)]
-    max_size_bytes: u64,
-    /// Maximum number of WAL files to keep (used for rotation logic)
-    #[allow(dead_code)]
-    max_files: usize,
     entries: Vec<WalEntry>,
     current_wal_path: std::path::PathBuf,
     current_wal_file: Option<Box<dyn FileKVFile>>,
     /// WAL sequence number for ordering (used for recovery)
-    #[allow(dead_code)]
     wal_sequence: u64,
     /// CFG-002: WAL sync mode for controlling durability vs performance
     sync_mode: crate::WalSyncMode,
     /// OPT-001: Internal write buffer to reduce syscall overhead
     /// Buffered data that hasn't been flushed to disk yet
     write_buffer: Vec<u8>,
-    /// OPT-001: Counter for batch sync - kept for future use
-    #[allow(dead_code)]
-    batch_sync_counter: u64,
-    /// OPT-001: Configurable batch sync interval (kept for future use)
-    #[allow(dead_code)]
-    batch_sync_interval: u64,
     /// T-006: Last time we performed a fsync (for timed sync in Batch mode)
     last_sync_time: Instant,
     /// T-006: Sync interval in milliseconds for Batch mode (default 10ms)
@@ -511,7 +518,14 @@ impl WalManager {
         wal_dir: P,
         _enable_wal: bool,
     ) -> Result<Self> {
-        Self::new_with_config(fs, wal_dir, _enable_wal, 64 * 1024 * 1024, 10, crate::WalSyncMode::default())
+        Self::new_with_config(
+            fs,
+            wal_dir,
+            _enable_wal,
+            64 * 1024 * 1024,
+            10,
+            crate::WalSyncMode::default(),
+        )
     }
 
     pub fn new_with_config<P: AsRef<std::path::Path>>(
@@ -529,21 +543,21 @@ impl WalManager {
             max_size_bytes,
             max_files,
             sync_mode,
-            64,    // default batch_sync_interval
-            10,    // default sync_interval_ms
+            64, // default batch_sync_interval
+            10, // default sync_interval_ms
         )
     }
 
-    /// Create WalManager with full configuration including batch sync interval
+    /// Create WalManager with full configuration
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_full_config<P: AsRef<std::path::Path>>(
         fs: Arc<dyn FileKVFileSystem>,
         wal_dir: P,
         _enable_wal: bool,
-        max_size_bytes: u64,
-        max_files: usize,
+        _max_size_bytes: u64,
+        _max_files: usize,
         sync_mode: crate::WalSyncMode,
-        batch_sync_interval: u64,
+        _batch_sync_interval: u64,
         sync_interval_ms: u64,
     ) -> Result<Self> {
         let wal_dir = wal_dir.as_ref().to_path_buf();
@@ -592,16 +606,12 @@ impl WalManager {
         Ok(Self {
             fs,
             wal_dir,
-            max_size_bytes,
-            max_files,
             entries,
             current_wal_path,
             current_wal_file: None,
             wal_sequence,
             sync_mode,
             write_buffer: Vec::with_capacity(64 * 1024), // 64KB initial buffer
-            batch_sync_counter: 0,
-            batch_sync_interval,
             last_sync_time: Instant::now(),
             sync_interval_ms,
         })
@@ -620,11 +630,7 @@ impl WalManager {
     }
 
     /// PERF-005 FIX: payload is now `Vec<u8>` for binary format, avoiding base64 overhead
-    pub fn log_with_payload(
-        &mut self,
-        op: WalOperation,
-        payload: Vec<u8>,
-    ) -> Result<DurabilityLevel> {
+    pub fn log_with_payload(&mut self, op: WalOperation, payload: Vec<u8>) -> Result<DurabilityLevel> {
         let entry = WalEntry {
             sequence_number: self.wal_sequence,
             operation: op,
@@ -659,7 +665,8 @@ impl WalManager {
         self.write_buffer.extend_from_slice(&binary_data);
 
         // OPT-001: Flush buffer to file when it reaches threshold
-        if self.write_buffer.len() >= 32 * 1024 { // 32KB threshold
+        if self.write_buffer.len() >= 32 * 1024 {
+            // 32KB threshold
             self.flush_buffer_to_file()?;
         }
 
@@ -761,10 +768,9 @@ impl WalManager {
         // Remove old WAL files (keep only the latest)
         for path in self.fs.read_dir(&self.wal_dir)? {
             if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with("wal_") && name.ends_with(".log")
-                    && path != self.current_wal_path {
-                        let _ = self.fs.remove_file(&path);
-                    }
+                if name.starts_with("wal_") && name.ends_with(".log") && path != self.current_wal_path {
+                    let _ = self.fs.remove_file(&path);
+                }
             }
         }
 
@@ -911,7 +917,9 @@ impl<'a> WalBatchWriter<'a> {
             hash: format!("{:016X}", hash),
             layer: "segment".to_string(),
         };
-        let durability = self.wal_guard.log_with_payload(op, payload)
+        let durability = self
+            .wal_guard
+            .log_with_payload(op, payload)
             .map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))?;
         self.operations_count += 1;
         Ok(durability)
@@ -925,7 +933,9 @@ impl<'a> WalBatchWriter<'a> {
             session: key.to_string(),
             hash: String::new(),
         };
-        self.wal_guard.log(op).map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))
+        self.wal_guard
+            .log(op)
+            .map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))
     }
 
     /// Get the number of operations logged
@@ -956,7 +966,8 @@ pub fn log_wal_add(wal: &Mutex<WalManager>, key: &str, value: &[u8]) -> Result<D
         hash: format!("{:016X}", hash),
         layer: "segment".to_string(),
     };
-    wal_guard.log_with_payload(op, payload)
+    wal_guard
+        .log_with_payload(op, payload)
         .map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))
 }
 
@@ -969,14 +980,16 @@ pub fn log_wal_delete(wal: &Mutex<WalManager>, key: &str) -> Result<DurabilityLe
         session: key.to_string(),
         hash: String::new(),
     };
-    wal_guard.log(op).map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))
+    wal_guard
+        .log(op)
+        .map_err(|e| FatalError::Corruption(format!("WAL operation failed: {}", e)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::io::memfs::MemFs;
+    use std::sync::Arc;
 
     fn create_test_wal_manager() -> WalManager {
         let fs: Arc<dyn FileKVFileSystem> = Arc::new(MemFs::new());
@@ -1005,42 +1018,54 @@ mod tests {
         // Sequence numbers start from wal_sequence initial value (which is 1 for new WAL)
         let start_seq = entries[0].sequence_number;
         for (idx, entry) in entries.iter().enumerate() {
-            assert_eq!(entry.sequence_number, start_seq + idx as u64,
-                "Entry {} should have sequence_number {}", idx, start_seq + idx as u64);
+            assert_eq!(
+                entry.sequence_number,
+                start_seq + idx as u64,
+                "Entry {} should have sequence_number {}",
+                idx,
+                start_seq + idx as u64
+            );
         }
     }
 
     #[test]
     fn test_wal_entry_validation_continuity_valid() {
         // Create valid entries with continuous sequence numbers
-        let entries: Vec<WalEntry> = (0..5).map(|i| WalEntry {
-            sequence_number: i,
-            operation: WalOperation::Add {
-                session: format!("key_{}", i),
-                hash: format!("hash_{}", i),
-                layer: "segment".to_string(),
-            },
-            payload: None,
-        }).collect();
+        let entries: Vec<WalEntry> = (0..5)
+            .map(|i| WalEntry {
+                sequence_number: i,
+                operation: WalOperation::Add {
+                    session: format!("key_{}", i),
+                    hash: format!("hash_{}", i),
+                    layer: "segment".to_string(),
+                },
+                payload: None,
+            })
+            .collect();
 
         // Validate sequence continuity
         let (valid_entries, warnings) = validate_wal_sequence_continuity_for_test(&entries);
         assert_eq!(valid_entries.len(), 5, "All entries should be valid");
-        assert!(warnings.is_empty(), "No warnings should be generated for valid sequence");
+        assert!(
+            warnings.is_empty(),
+            "No warnings should be generated for valid sequence"
+        );
     }
 
     #[test]
     fn test_wal_entry_validation_continuity_gap() {
         // Create entries with a gap in sequence numbers
-        let mut entries: Vec<WalEntry> = (0..3).map(|i| WalEntry {
-            sequence_number: i,
-            operation: WalOperation::Add {
-                session: format!("key_{}", i),
-                hash: format!("hash_{}", i),
-                layer: "segment".to_string(),
-            },
-            payload: None,
-        }).collect();
+        let mut entries: Vec<WalEntry> = (0..3)
+            .map(|i| WalEntry {
+                sequence_number: i,
+                operation: WalOperation::Add {
+                    session: format!("key_{}", i),
+                    hash: format!("hash_{}", i),
+                    layer: "segment".to_string(),
+                },
+                payload: None,
+            })
+            .collect();
 
         // Add entry with sequence gap (skip 3, 4)
         entries.push(WalEntry {
@@ -1062,15 +1087,17 @@ mod tests {
     #[test]
     fn test_wal_entry_validation_duplicate_sequence() {
         // Create entries with duplicate sequence numbers
-        let mut entries: Vec<WalEntry> = (0..3).map(|i| WalEntry {
-            sequence_number: i,
-            operation: WalOperation::Add {
-                session: format!("key_{}", i),
-                hash: format!("hash_{}", i),
-                layer: "segment".to_string(),
-            },
-            payload: None,
-        }).collect();
+        let mut entries: Vec<WalEntry> = (0..3)
+            .map(|i| WalEntry {
+                sequence_number: i,
+                operation: WalOperation::Add {
+                    session: format!("key_{}", i),
+                    hash: format!("hash_{}", i),
+                    layer: "segment".to_string(),
+                },
+                payload: None,
+            })
+            .collect();
 
         // Add entry with duplicate sequence number
         entries.push(WalEntry {
@@ -1153,9 +1180,7 @@ mod tests {
     }
 
     /// Test helper that replicates the validation logic from lifecycle.rs
-    fn validate_wal_sequence_continuity_for_test(
-        entries: &[WalEntry],
-    ) -> (Vec<WalEntry>, Vec<String>) {
+    fn validate_wal_sequence_continuity_for_test(entries: &[WalEntry]) -> (Vec<WalEntry>, Vec<String>) {
         let mut valid_entries = Vec::with_capacity(entries.len());
         let mut warnings = Vec::new();
         let mut expected_seq: Option<u64> = None;
@@ -1366,9 +1391,12 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
 
         // Binary should be significantly smaller (at least 20% smaller)
-        assert!(binary.len() < json.len(),
+        assert!(
+            binary.len() < json.len(),
             "Binary ({} bytes) should be smaller than JSON ({} bytes)",
-            binary.len(), json.len());
+            binary.len(),
+            json.len()
+        );
     }
 
     #[test]

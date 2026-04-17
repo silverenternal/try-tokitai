@@ -11,23 +11,22 @@
 //! cargo bench --bench hybrid_gap_detector_bench
 //! ```
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::path::PathBuf;
 use std::time::Duration;
 
 // 导入被测试模块
+use ai_assistant::autonomy::gap_detector::{GapEvidence, GapType, TaskExecutionRecord, ToolGap};
 use ai_assistant::autonomy::hybrid_gap_detector::{
-    HybridGapDetector, StatisticalEvidence, CausalEvidence, GapImpact, CacheEntry,
+    CacheEntry, CausalEvidence, GapImpact, HybridGapDetector, StatisticalEvidence,
 };
-use ai_assistant::autonomy::gap_detector::{TaskExecutionRecord, ToolGap, GapType, GapEvidence};
 
 /// 基准测试：统计证据置信度计算
 fn bench_statistical_confidence_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("statistical_confidence");
-    
-    let detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_bench_test")
-    ).unwrap();
+
+    let detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_bench_test")).unwrap();
 
     // 测试不同失败率场景
     for failure_rate in [0.1, 0.3, 0.5, 0.7, 0.9].iter() {
@@ -43,20 +42,18 @@ fn bench_statistical_confidence_calculation(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("failure_rate_{:.1}", failure_rate)),
             &stat_evidence,
             |b, evidence| {
-                b.iter(|| {
-                    black_box(detector.calculate_statistical_confidence(black_box(evidence)))
-                })
+                b.iter(|| black_box(detector.calculate_statistical_confidence(black_box(evidence))))
             },
         );
     }
-    
+
     group.finish();
 }
 
 /// 基准测试：融合置信度计算
 fn bench_hybrid_confidence_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("hybrid_confidence");
-    
+
     // 测试不同权重配置
     let test_cases = vec![
         (0.4, 0.6, "default_weights"),
@@ -71,7 +68,12 @@ fn bench_hybrid_confidence_calculation(c: &mut Criterion) {
 
         group.bench_with_input(
             BenchmarkId::from_parameter(name),
-            &(stat_weight, causal_weight, stat_confidence, causal_confidence),
+            &(
+                stat_weight,
+                causal_weight,
+                stat_confidence,
+                causal_confidence,
+            ),
             |b, inputs| {
                 b.iter(|| {
                     let (stat_w, causal_w, stat_c, causal_c) = black_box(inputs);
@@ -81,17 +83,16 @@ fn bench_hybrid_confidence_calculation(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
 /// 基准测试：缓存插入性能
 fn bench_cache_insertion(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_insertion");
-    
-    let mut detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_cache_bench")
-    ).unwrap();
+
+    let mut detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_cache_bench")).unwrap();
 
     group.bench_function("cache_insert_single", |b| {
         b.iter(|| {
@@ -99,7 +100,7 @@ fn bench_cache_insertion(c: &mut Criterion) {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            
+
             detector.cache.insert(
                 black_box(format!("test_key_{}", black_box(1))),
                 black_box(CacheEntry {
@@ -121,24 +122,23 @@ fn bench_cache_insertion(c: &mut Criterion) {
             );
         })
     });
-    
+
     group.finish();
 }
 
 /// 基准测试：缓存查找性能
 fn bench_cache_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_lookup");
-    
-    let mut detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_lookup_bench")
-    ).unwrap();
+
+    let mut detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_lookup_bench")).unwrap();
 
     // 预填充缓存
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     for i in 0..100 {
         detector.cache.insert(
             format!("key_{}", i),
@@ -175,17 +175,16 @@ fn bench_cache_lookup(c: &mut Criterion) {
             black_box(detector.cache.get(key))
         })
     });
-    
+
     group.finish();
 }
 
 /// 基准测试：任务记录性能
 fn bench_task_recording(c: &mut Criterion) {
     let mut group = c.benchmark_group("task_recording");
-    
-    let mut detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_record_bench")
-    ).unwrap();
+
+    let mut detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_record_bench")).unwrap();
 
     let task_record = TaskExecutionRecord {
         task_id: "bench_task".to_string(),
@@ -198,21 +197,19 @@ fn bench_task_recording(c: &mut Criterion) {
     };
 
     group.bench_function("record_single_task", |b| {
-        b.iter(|| {
-            detector.record_task(black_box(task_record.clone()))
-        })
+        b.iter(|| detector.record_task(black_box(task_record.clone())))
     });
-    
+
     group.finish();
 }
 
 /// 基准测试：优先级计算
 fn bench_priority_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("priority_calculation");
-    
-    let detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_priority_bench")
-    ).unwrap();
+
+    let detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_priority_bench"))
+            .unwrap();
 
     let test_cases = vec![
         (5, 0.3, "low_priority_low_confidence"),
@@ -233,17 +230,17 @@ fn bench_priority_calculation(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
 /// 基准测试：统计证据提取
 fn bench_statistical_evidence_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("evidence_extraction");
-    
-    let detector = HybridGapDetector::new_statistical_only(
-        PathBuf::from("/tmp/hybrid_evidence_bench")
-    ).unwrap();
+
+    let detector =
+        HybridGapDetector::new_statistical_only(PathBuf::from("/tmp/hybrid_evidence_bench"))
+            .unwrap();
 
     // 创建测试缺口
     let gap = ToolGap {
@@ -253,24 +250,20 @@ fn bench_statistical_evidence_extraction(c: &mut Criterion) {
         suggested_tool_name: Some("test_tool".to_string()),
         suggested_capabilities: vec!["capability1".to_string()],
         priority: 7,
-        evidence: vec![
-            GapEvidence {
-                evidence_type: "statistical".to_string(),
-                description: "高失败率".to_string(),
-                confidence: 0.8,
-                related_task_ids: vec!["task1".to_string(), "task2".to_string()],
-                occurrence_count: 5,
-            },
-        ],
+        evidence: vec![GapEvidence {
+            evidence_type: "statistical".to_string(),
+            description: "高失败率".to_string(),
+            confidence: 0.8,
+            related_task_ids: vec!["task1".to_string(), "task2".to_string()],
+            occurrence_count: 5,
+        }],
         impact_scope: "test scope".to_string(),
     };
 
     group.bench_function("extract_statistical_evidence", |b| {
-        b.iter(|| {
-            black_box(detector.extract_statistical_evidence(black_box(&gap)))
-        })
+        b.iter(|| black_box(detector.extract_statistical_evidence(black_box(&gap))))
     });
-    
+
     group.finish();
 }
 
@@ -284,7 +277,7 @@ criterion_group!(
         .measurement_time(Duration::from_secs(10))
         .warm_up_time(Duration::from_secs(3))
         .sample_size(100);
-    targets = 
+    targets =
         bench_statistical_confidence_calculation,
         bench_hybrid_confidence_calculation,
         bench_cache_insertion,

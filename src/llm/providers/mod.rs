@@ -2,8 +2,8 @@
 //!
 //! This module contains concrete implementations for each LLM provider.
 
-use super::{LLMProvider, ProviderType, ChatRequest, ChatResponse, StreamChunk, Message, Usage};
-use anyhow::{Result, Context, bail};
+use super::{ChatRequest, ChatResponse, LLMProvider, Message, ProviderType, StreamChunk, Usage};
+use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -60,7 +60,8 @@ impl LLMProvider for OpenAIProvider {
             stream: Some(false),
         };
 
-        let response: OpenAIResponse = self.client
+        let response: OpenAIResponse = self
+            .client
             .post(&self.api_url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -74,7 +75,9 @@ impl LLMProvider for OpenAIProvider {
             .await
             .context("Failed to parse OpenAI response")?;
 
-        let choice = response.choices.first()
+        let choice = response
+            .choices
+            .first()
             .context("No choices in OpenAI response")?;
 
         Ok(ChatResponse {
@@ -111,7 +114,7 @@ impl LLMProvider for OpenAIProvider {
                 .post(&self.api_url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")
-                .json(&payload)
+                .json(&payload),
         )?;
 
         let stream = async_stream::stream! {
@@ -191,7 +194,8 @@ impl LLMProvider for GeminiProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         // Convert messages to Gemini format
         let gemini_request = GeminiRequest {
-            contents: request.messages
+            contents: request
+                .messages
                 .into_iter()
                 .filter(|m| m.role != "system") // Gemini doesn't support system messages directly
                 .map(|m| GeminiContent {
@@ -212,7 +216,8 @@ impl LLMProvider for GeminiProvider {
             request.model, self.api_key
         );
 
-        let response: GeminiResponse = self.client
+        let response: GeminiResponse = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&gemini_request)
@@ -225,7 +230,8 @@ impl LLMProvider for GeminiProvider {
             .await
             .context("Failed to parse Gemini response")?;
 
-        let content = response.candidates
+        let content = response
+            .candidates
             .first()
             .and_then(|c| c.content.parts.first())
             .map(|p| p.text.clone())
@@ -235,7 +241,10 @@ impl LLMProvider for GeminiProvider {
             content,
             model: request.model,
             usage: None, // Gemini doesn't provide token usage in all cases
-            finish_reason: response.candidates.first().and_then(|c| c.finish_reason.clone()),
+            finish_reason: response
+                .candidates
+                .first()
+                .and_then(|c| c.finish_reason.clone()),
         })
     }
 
@@ -294,16 +303,23 @@ impl LLMProvider for AnthropicProvider {
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         // Separate system message from conversation
-        let system_message = request.messages
+        let system_message = request
+            .messages
             .iter()
             .find(|m| m.role == "system")
             .map(|m| m.content.clone());
 
-        let messages: Vec<AnthropicMessage> = request.messages
+        let messages: Vec<AnthropicMessage> = request
+            .messages
             .into_iter()
             .filter(|m| m.role != "system")
             .map(|m| AnthropicMessage {
-                role: if m.role == "user" { "user" } else { "assistant" }.to_string(),
+                role: if m.role == "user" {
+                    "user"
+                } else {
+                    "assistant"
+                }
+                .to_string(),
                 content: vec![AnthropicContent::Text { text: m.content }],
             })
             .collect();
@@ -319,7 +335,8 @@ impl LLMProvider for AnthropicProvider {
             stream: false,
         };
 
-        let response: AnthropicResponse = self.client
+        let response: AnthropicResponse = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -334,7 +351,8 @@ impl LLMProvider for AnthropicProvider {
             .await
             .context("Failed to parse Anthropic response")?;
 
-        let content = response.content
+        let content = response
+            .content
             .first()
             .and_then(|c| match c {
                 AnthropicContent::Text { text } => Some(text.clone()),
@@ -410,7 +428,8 @@ impl LLMProvider for ZhipuProvider {
             stream: Some(false),
         };
 
-        let response: OpenAIResponse = self.client
+        let response: OpenAIResponse = self
+            .client
             .post("https://open.bigmodel.cn/api/paas/v4/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -424,7 +443,9 @@ impl LLMProvider for ZhipuProvider {
             .await
             .context("Failed to parse Zhipu response")?;
 
-        let choice = response.choices.first()
+        let choice = response
+            .choices
+            .first()
             .context("No choices in Zhipu response")?;
 
         Ok(ChatResponse {
@@ -494,7 +515,8 @@ impl LLMProvider for MoonshotProvider {
             stream: Some(false),
         };
 
-        let response: OpenAIResponse = self.client
+        let response: OpenAIResponse = self
+            .client
             .post("https://api.moonshot.cn/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -508,7 +530,9 @@ impl LLMProvider for MoonshotProvider {
             .await
             .context("Failed to parse Moonshot response")?;
 
-        let choice = response.choices.first()
+        let choice = response
+            .choices
+            .first()
             .context("No choices in Moonshot response")?;
 
         Ok(ChatResponse {

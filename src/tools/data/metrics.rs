@@ -4,10 +4,10 @@
 
 #![allow(dead_code)]
 
-use serde::{Serialize, Deserialize};
-use std::sync::Arc;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// 数据工具监控指标
@@ -134,12 +134,7 @@ impl MetricsCollector {
     }
 
     /// 记录失败调用
-    pub fn record_failure(
-        &self,
-        operation: DataToolOperation,
-        duration_ms: u64,
-        error: &str,
-    ) {
+    pub fn record_failure(&self, operation: DataToolOperation, duration_ms: u64, error: &str) {
         // 更新操作指标
         {
             let mut metrics = self.metrics.write();
@@ -225,7 +220,8 @@ impl CallTimer {
     /// 记录失败
     pub fn failure(self, error: &str) {
         let duration_ms = self.start_time.elapsed().as_millis() as u64;
-        self.collector.record_failure(self.operation, duration_ms, error);
+        self.collector
+            .record_failure(self.operation, duration_ms, error);
     }
 }
 
@@ -253,7 +249,9 @@ mod tests {
         // 记录失败调用
         collector.record_failure(DataToolOperation::FormatJson, 5, "test error");
 
-        let metrics = collector.get_metrics(DataToolOperation::FormatJson).unwrap();
+        let metrics = collector
+            .get_metrics(DataToolOperation::FormatJson)
+            .unwrap();
         assert_eq!(metrics.total_calls, 3);
         assert_eq!(metrics.successful_calls, 2);
         assert_eq!(metrics.failed_calls, 1);
@@ -275,7 +273,9 @@ mod tests {
             timer.failure("test error");
         }
 
-        let metrics = collector.get_metrics(DataToolOperation::MinifyJson).unwrap();
+        let metrics = collector
+            .get_metrics(DataToolOperation::MinifyJson)
+            .unwrap();
         assert_eq!(metrics.total_calls, 2);
         assert_eq!(metrics.successful_calls, 1);
         assert_eq!(metrics.failed_calls, 1);

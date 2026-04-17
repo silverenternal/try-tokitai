@@ -28,9 +28,7 @@ fn test_checkpoint_creation_basic() {
     kv.flush_memtable().expect("flush failed");
 
     // Create checkpoint
-    let checkpoint_id = kv
-        .create_full_checkpoint(None)
-        .expect("create_checkpoint failed");
+    let checkpoint_id = kv.create_full_checkpoint(None).expect("create_checkpoint failed");
 
     assert!(!checkpoint_id.is_empty(), "Checkpoint ID should not be empty");
 
@@ -66,7 +64,7 @@ fn test_checkpoint_recovery_after_crash() {
         for i in 0..20 {
             let key = format!("data_{}", i);
             let expected = format!("checkpoint_value_{}", i);
-            let val = kv2.get(&key).expect(&format!("get failed for {}", key));
+            let val = kv2.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
             assert_eq!(
                 val.as_deref(),
                 Some(expected.as_bytes()),
@@ -115,7 +113,7 @@ fn test_multiple_checkpoints() {
         for i in 0..5 {
             let key = format!("round{}_key{}", round, i);
             let expected = format!("round{}_value{}", round, i);
-            let val = kv.get(&key).expect(&format!("get failed for {}", key));
+            let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
             assert_eq!(
                 val.as_deref(),
                 Some(expected.as_bytes()),

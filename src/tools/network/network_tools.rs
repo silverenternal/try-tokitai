@@ -74,7 +74,8 @@ impl NetworkTools {
                 "主机名过长 ({} > {} 字符)",
                 host.len(),
                 MAX_HOST_LENGTH
-            )).into());
+            ))
+            .into());
         }
         Ok(())
     }
@@ -83,9 +84,10 @@ impl NetworkTools {
     fn is_safe_target(&self, host: &str) -> NetworkResult<()> {
         // 允许 localhost 用于本地测试
         if self.config.allow_localhost_scan
-            && (host == "localhost" || host == "127.0.0.1" || host == "::1") {
-                return Ok(());
-            }
+            && (host == "localhost" || host == "127.0.0.1" || host == "::1")
+        {
+            return Ok(());
+        }
 
         // 尝试解析 IP 地址并使用统一的 SSRF 检查
         if let Ok(ip_addr) = host.parse::<std::net::IpAddr>() {
@@ -330,11 +332,7 @@ impl NetworkTools {
     /// # 返回
     /// 返回路由追踪结果
     #[tool(default_max_hops = "null")]
-    pub fn trace_route(
-        &self,
-        host: String,
-        max_hops: Option<u32>,
-    ) -> NetworkResult<String> {
+    pub fn trace_route(&self, host: String, max_hops: Option<u32>) -> NetworkResult<String> {
         self.validate_host(&host)?;
         self.is_safe_target(&host)?;
 
@@ -390,8 +388,9 @@ impl NetworkTools {
         }
 
         Err(NetworkToolError::DnsResolution(
-            "无法从任何服务获取公网 IP (所有服务均不可用)".to_string()
-        ).into())
+            "无法从任何服务获取公网 IP (所有服务均不可用)".to_string(),
+        )
+        .into())
     }
 
     /// 检查 UDP 端口
@@ -418,8 +417,9 @@ impl NetworkTools {
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(5).min(30));
 
         // 创建 UDP socket
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| NetworkToolError::PermissionDenied(format!("创建 UDP socket 失败：{}", e)))?;
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| {
+            NetworkToolError::PermissionDenied(format!("创建 UDP socket 失败：{}", e))
+        })?;
 
         socket
             .set_read_timeout(Some(timeout))
@@ -433,25 +433,23 @@ impl NetworkTools {
             .ok_or_else(|| NetworkToolError::InvalidHostname("无法解析主机地址".to_string()))?;
 
         // 发送探测包
-        let payload_bytes = payload
-            .as_ref()
-            .map(|s| s.as_bytes())
-            .unwrap_or(&[0u8; 1]);
+        let payload_bytes = payload.as_ref().map(|s| s.as_bytes()).unwrap_or(&[0u8; 1]);
 
         let send_result = socket.send_to(payload_bytes, addr);
 
         match send_result {
             Ok(_) => {
-                socket.connect(addr)
+                socket
+                    .connect(addr)
                     .map_err(|e| NetworkToolError::ConnectionRefused {
                         host: host.clone(),
                         port,
                     })?;
 
                 let mut buf = [0u8; 1024];
-                socket
-                    .set_nonblocking(false)
-                    .map_err(|e| NetworkToolError::PermissionDenied(format!("设置非阻塞失败：{}", e)))?;
+                socket.set_nonblocking(false).map_err(|e| {
+                    NetworkToolError::PermissionDenied(format!("设置非阻塞失败：{}", e))
+                })?;
 
                 match socket.recv(&mut buf) {
                     Ok(len) => Ok(format!(
@@ -478,7 +476,9 @@ impl NetworkTools {
                     )),
                 }
             }
-            Err(e) => Err(NetworkToolError::PermissionDenied(format!("发送探测包失败：{}", e)).into()),
+            Err(e) => {
+                Err(NetworkToolError::PermissionDenied(format!("发送探测包失败：{}", e)).into())
+            }
         }
     }
 }
@@ -514,10 +514,7 @@ fn get_local_ip_addresses() -> Result<Vec<String>, String> {
 
     // 尝试使用 get_if_addrs crate（如果可用）
     // 这里使用简单的回退方案
-    if let Ok(output) = std::process::Command::new("hostname")
-        .arg("-I")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("hostname").arg("-I").output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for ip in stdout.split_whitespace() {
             addresses.push(ip.to_string());

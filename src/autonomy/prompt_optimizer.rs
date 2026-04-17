@@ -19,10 +19,10 @@
 
 #![allow(dead_code)]
 
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::collections::HashMap;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// 工具优化建议类型
@@ -220,7 +220,8 @@ pub struct OptimizationValidator {
 }
 
 /// 验证函数类型别名
-pub type ValidatorFn = Box<dyn Fn(&OptimizationSuggestion, &HashMap<String, ToolMetrics>) -> bool + Send + Sync>;
+pub type ValidatorFn =
+    Box<dyn Fn(&OptimizationSuggestion, &HashMap<String, ToolMetrics>) -> bool + Send + Sync>;
 
 /// 优化规则
 pub struct OptimizationRule {
@@ -249,9 +250,10 @@ impl OptimizationValidator {
                 validator: Box::new(|suggestion, metrics| {
                     if suggestion.optimization_type == OptimizationType::Deprecate {
                         // 检查工具使用率是否确实很低
-                        suggestion.affected_tools.iter().all(|tool| {
-                            metrics.get(tool).is_none_or(|m| m.total_calls < 10)
-                        })
+                        suggestion
+                            .affected_tools
+                            .iter()
+                            .all(|tool| metrics.get(tool).is_none_or(|m| m.total_calls < 10))
                     } else {
                         true
                     }
@@ -275,7 +277,11 @@ impl OptimizationValidator {
     }
 
     /// 验证优化建议
-    pub fn validate(&self, suggestion: &OptimizationSuggestion, metrics: &HashMap<String, ToolMetrics>) -> Result<bool> {
+    pub fn validate(
+        &self,
+        suggestion: &OptimizationSuggestion,
+        metrics: &HashMap<String, ToolMetrics>,
+    ) -> Result<bool> {
         for rule in &self.rules {
             if !(rule.validator)(suggestion, metrics) {
                 anyhow::bail!("违反规则：{}", rule.description);
@@ -332,14 +338,15 @@ impl PromptOptimizer {
 
         // 2. LLM 推理
         let schema = self.get_response_schema();
-        let response_text = self.llm_client
+        let response_text = self
+            .llm_client
             .chat_with_schema(&prompt, &schema)
             .await
             .context("LLM 推理失败")?;
 
         // 3. 解析响应
-        let response: OptimizerResponse = serde_json::from_str(&response_text)
-            .context("解析 LLM 响应失败")?;
+        let response: OptimizerResponse =
+            serde_json::from_str(&response_text).context("解析 LLM 响应失败")?;
 
         // 4. 验证建议
         let mut validated_suggestions = Vec::new();
@@ -362,7 +369,9 @@ impl PromptOptimizer {
     /// 构建优化器 Prompt
     fn build_optimizer_prompt(&self) -> String {
         // 格式化工具统计
-        let tool_stats_str = self.tool_metrics.values()
+        let tool_stats_str = self
+            .tool_metrics
+            .values()
             .map(|m| self.format_tool_metrics(m))
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -371,7 +380,8 @@ impl PromptOptimizer {
         let history_str = if self.history.is_empty() {
             "暂无历史决策示例".to_string()
         } else {
-            self.history.iter()
+            self.history
+                .iter()
                 .take(3)
                 .map(|h| self.format_history_decision(h))
                 .collect::<Vec<_>>()
@@ -460,8 +470,8 @@ impl PromptOptimizer {
         let reliability_score = self.calculate_reliability_score(metrics);
         let necessity_score = self.calculate_necessity_score(metrics);
 
-        let health_score = (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3)
-            .clamp(0.0, 1.0);
+        let health_score =
+            (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3).clamp(0.0, 1.0);
 
         let mut issues = Vec::new();
 
@@ -547,7 +557,9 @@ mod tests {
 
     impl MockLLMClient {
         fn new(response: &str) -> Self {
-            Self { response: response.to_string() }
+            Self {
+                response: response.to_string(),
+            }
         }
     }
 
@@ -557,7 +569,11 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        async fn chat_with_schema(&self, _prompt: &str, _schema: &serde_json::Value) -> Result<String> {
+        async fn chat_with_schema(
+            &self,
+            _prompt: &str,
+            _schema: &serde_json::Value,
+        ) -> Result<String> {
             Ok(self.response.clone())
         }
     }

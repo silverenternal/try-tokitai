@@ -311,11 +311,8 @@ mod tests {
         assert_eq!(append.mode, EditMode::Append);
         assert!(append.search.is_none());
 
-        let replace = EditFileParams::replace(
-            "/path".to_string(),
-            "old".to_string(),
-            "new".to_string(),
-        );
+        let replace =
+            EditFileParams::replace("/path".to_string(), "old".to_string(), "new".to_string());
         assert_eq!(replace.mode, EditMode::Replace);
         assert_eq!(replace.search, Some("old".to_string()));
     }

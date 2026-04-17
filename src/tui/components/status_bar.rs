@@ -1,13 +1,13 @@
 //! 状态栏组件
-//! 
+//!
 //! 显示模型信息、token 使用量、工具调用统计等
 
 use ratatui::{
-    Frame,
     layout::Rect,
-    style::{Style, Color},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 
 /// 状态信息
@@ -57,18 +57,19 @@ impl StatusBar {
                 state.avg_latency_ms as i64
             )
         };
-        
+
         let status_color = if state.error.is_some() {
             Color::Red
         } else {
             Color::Green
         };
-        
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled(status_text, Style::default().fg(status_color))
-        ]))
+
+        let paragraph = Paragraph::new(Line::from(vec![Span::styled(
+            status_text,
+            Style::default().fg(status_color),
+        )]))
         .block(Block::default().borders(Borders::ALL).title("状态"));
-        
+
         frame.render_widget(paragraph, area);
     }
 }
@@ -76,7 +77,7 @@ impl StatusBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_status_bar_state_default() {
         let state = StatusBarState::default();

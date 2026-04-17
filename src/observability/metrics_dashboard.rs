@@ -9,11 +9,11 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::VecDeque;
-use anyhow::Result;
 
 /// 时间序列数据点
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ impl MetricsDashboard {
     pub fn new<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
         let data_dir = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir)?;
-        
+
         Ok(Self {
             data_dir,
             latency: LatencyMetrics {
@@ -133,17 +133,30 @@ impl MetricsDashboard {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if let Some(value) = input_to_first_token_ms {
-            self.latency.input_to_first_token.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.latency
+                .input_to_first_token
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
         if let Some(value) = tool_call_latency_ms {
-            self.latency.tool_call_latency.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.latency.tool_call_latency.push_back(TimeSeriesPoint {
+                timestamp: now,
+                value,
+            });
         }
         if let Some(value) = iteration_cycle_time_s {
-            self.latency.iteration_cycle_time.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.latency
+                .iteration_cycle_time
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
-        
+
         self.trim_data_points();
     }
 
@@ -158,17 +171,32 @@ impl MetricsDashboard {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if let Some(value) = requests_per_minute {
-            self.throughput.requests_per_minute.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.throughput
+                .requests_per_minute
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
         if let Some(value) = tools_per_request {
-            self.throughput.tools_per_request.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.throughput
+                .tools_per_request
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
         if let Some(value) = iterations_per_hour {
-            self.throughput.iterations_per_hour.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.throughput
+                .iterations_per_hour
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
-        
+
         self.trim_data_points();
     }
 
@@ -183,17 +211,32 @@ impl MetricsDashboard {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if let Some(value) = task_completion_rate {
-            self.quality.task_completion_rate.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.quality
+                .task_completion_rate
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
         if let Some(value) = iteration_success_rate {
-            self.quality.iteration_success_rate.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.quality
+                .iteration_success_rate
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
         if let Some(value) = user_satisfaction {
-            self.quality.user_satisfaction_score.push_back(TimeSeriesPoint { timestamp: now, value });
+            self.quality
+                .user_satisfaction_score
+                .push_back(TimeSeriesPoint {
+                    timestamp: now,
+                    value,
+                });
         }
-        
+
         self.trim_data_points();
     }
 
@@ -270,10 +313,10 @@ impl MetricsDashboard {
                 .unwrap()
                 .as_secs(),
         };
-        
+
         let json = serde_json::to_string_pretty(&data)?;
         std::fs::write(file_path, json)?;
-        
+
         Ok(())
     }
 
@@ -377,45 +420,149 @@ impl RealtimeStats {
     /// 渲染为 TUI 仪表盘字符串
     pub fn render_dashboard(&self) -> String {
         use std::fmt::Write;
-        
+
         let mut output = String::new();
-        
-        writeln!(output, "╔══════════════════════════════════════════════════════════╗").unwrap();
-        writeln!(output, "║              性能指标仪表盘                              ║").unwrap();
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
-        
+
+        writeln!(
+            output,
+            "╔══════════════════════════════════════════════════════════╗"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║              性能指标仪表盘                              ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+
         // 延迟指标
-        writeln!(output, "║ 【延迟指标】                                              ║").unwrap();
-        writeln!(output, "║   平均请求延迟：{:>8.2} ms                               ║", self.avg_request_latency).unwrap();
-        writeln!(output, "║   最大请求延迟：{:>8.2} ms                               ║", self.max_request_latency).unwrap();
-        writeln!(output, "║   最小请求延迟：{:>8.2} ms                               ║", self.min_request_latency).unwrap();
-        writeln!(output, "║   工具调用延迟：{:>8.2} ms                               ║", self.avg_tool_call_latency).unwrap();
-        
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
-        
+        writeln!(
+            output,
+            "║ 【延迟指标】                                              ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   平均请求延迟：{:>8.2} ms                               ║",
+            self.avg_request_latency
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   最大请求延迟：{:>8.2} ms                               ║",
+            self.max_request_latency
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   最小请求延迟：{:>8.2} ms                               ║",
+            self.min_request_latency
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   工具调用延迟：{:>8.2} ms                               ║",
+            self.avg_tool_call_latency
+        )
+        .unwrap();
+
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+
         // 吞吐量指标
-        writeln!(output, "║ 【吞吐量指标】                                            ║").unwrap();
-        writeln!(output, "║   请求/分钟：  {:>8.2}                                   ║", self.requests_per_minute).unwrap();
-        writeln!(output, "║   工具/请求：  {:>8.2}                                   ║", self.tools_per_request).unwrap();
-        writeln!(output, "║   迭代周期：   {:>8.2} s                                 ║", self.avg_iteration_cycle_time).unwrap();
-        
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
-        
+        writeln!(
+            output,
+            "║ 【吞吐量指标】                                            ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   请求/分钟：  {:>8.2}                                   ║",
+            self.requests_per_minute
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   工具/请求：  {:>8.2}                                   ║",
+            self.tools_per_request
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   迭代周期：   {:>8.2} s                                 ║",
+            self.avg_iteration_cycle_time
+        )
+        .unwrap();
+
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+
         // 质量指标
-        writeln!(output, "║ 【质量指标】                                              ║").unwrap();
-        writeln!(output, "║   任务完成率： {:>8.2} %                                 ║", self.task_completion_rate * 100.0).unwrap();
-        writeln!(output, "║   用户满意度： {:>8.2} / 5.0                             ║", self.avg_satisfaction).unwrap();
-        
-        writeln!(output, "╠══════════════════════════════════════════════════════════╣").unwrap();
-        
+        writeln!(
+            output,
+            "║ 【质量指标】                                              ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   任务完成率： {:>8.2} %                                 ║",
+            self.task_completion_rate * 100.0
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   用户满意度： {:>8.2} / 5.0                             ║",
+            self.avg_satisfaction
+        )
+        .unwrap();
+
+        writeln!(
+            output,
+            "╠══════════════════════════════════════════════════════════╣"
+        )
+        .unwrap();
+
         // 总计
-        writeln!(output, "║ 【总计】                                                  ║").unwrap();
-        writeln!(output, "║   总请求数：   {:>10}                                    ║", self.total_requests).unwrap();
-        writeln!(output, "║   总工具调用： {:>10}                                    ║", self.total_tool_calls).unwrap();
-        writeln!(output, "║   运行时间：   {:>10} s                                  ║", self.uptime_secs).unwrap();
-        
-        writeln!(output, "╚══════════════════════════════════════════════════════════╝").unwrap();
-        
+        writeln!(
+            output,
+            "║ 【总计】                                                  ║"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   总请求数：   {:>10}                                    ║",
+            self.total_requests
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   总工具调用： {:>10}                                    ║",
+            self.total_tool_calls
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "║   运行时间：   {:>10} s                                  ║",
+            self.uptime_secs
+        )
+        .unwrap();
+
+        writeln!(
+            output,
+            "╚══════════════════════════════════════════════════════════╝"
+        )
+        .unwrap();
+
         output
     }
 }
@@ -462,9 +609,9 @@ mod tests {
             total_tool_calls: 520,
             uptime_secs: 600,
         };
-        
+
         let dashboard = stats.render_dashboard();
-        
+
         assert!(dashboard.contains("性能指标仪表盘"));
         assert!(dashboard.contains("150.5"));
         assert!(dashboard.contains("85.00")); // 85% 完成率
@@ -475,7 +622,7 @@ mod tests {
     #[test]
     fn test_realtime_stats_default() {
         let stats = RealtimeStats::default();
-        
+
         assert_eq!(stats.total_requests, 0);
         assert_eq!(stats.uptime_secs, 0);
         assert_eq!(stats.avg_satisfaction, 0.0);

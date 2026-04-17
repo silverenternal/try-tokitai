@@ -13,9 +13,9 @@
 //! 3. On each `next()` call, pop the smallest key, advance that iterator, push back
 //! 4. Duplicate keys are deduplicated (latest value wins based on segment order)
 
+use bytes::Bytes;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use bytes::Bytes;
 
 /// Trait for key-value iterators that can be merged
 pub trait KVIterator: Send {
@@ -75,20 +75,6 @@ impl<I: KVIterator> Ord for HeapItem<I> {
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
-    }
-}
-
-impl<I: KVIterator> HeapItem<I> {
-    /// Advance to the next item
-    #[allow(dead_code)]
-    fn advance(&mut self) {
-        self.current = self.iterator.next();
-    }
-
-    /// Check if this item has a current value
-    #[allow(dead_code)]
-    fn has_current(&self) -> bool {
-        self.current.is_some()
     }
 }
 
@@ -366,15 +352,9 @@ mod tests {
     #[test]
     fn test_merge_duplicates_removed_stats() {
         // 3 iterators all with key "x" - should remove 2 duplicates
-        let iter1 = VecKVIterator::new(vec![
-            ("x".to_string(), Bytes::from("v1")),
-        ]);
-        let iter2 = VecKVIterator::new(vec![
-            ("x".to_string(), Bytes::from("v2")),
-        ]);
-        let iter3 = VecKVIterator::new(vec![
-            ("x".to_string(), Bytes::from("v3")),
-        ]);
+        let iter1 = VecKVIterator::new(vec![("x".to_string(), Bytes::from("v1"))]);
+        let iter2 = VecKVIterator::new(vec![("x".to_string(), Bytes::from("v2"))]);
+        let iter3 = VecKVIterator::new(vec![("x".to_string(), Bytes::from("v3"))]);
 
         let mut merge_iter = MergeIterator::new(vec![iter1, iter2, iter3]);
         let result: Vec<_> = merge_iter.by_ref().collect();
@@ -415,20 +395,15 @@ mod tests {
     #[test]
     fn test_merge_many_iterators() {
         let iters: Vec<VecKVIterator> = (0..10)
-            .map(|i| {
-                VecKVIterator::new(vec![(
-                    format!("key_{}", i),
-                    Bytes::from(format!("value_{}", i)),
-                )])
-            })
+            .map(|i| VecKVIterator::new(vec![(format!("key_{}", i), Bytes::from(format!("value_{}", i)))]))
             .collect();
 
         let merge_iter = MergeIterator::new(iters);
         let result: Vec<_> = merge_iter.collect();
 
         assert_eq!(result.len(), 10);
-        for i in 0..10 {
-            assert_eq!(result[i].0, format!("key_{}", i));
+        for (i, entry) in result.iter().enumerate() {
+            assert_eq!(entry.0, format!("key_{}", i));
         }
     }
 }

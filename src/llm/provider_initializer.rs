@@ -3,15 +3,14 @@
 //! Loads and initializes LLM providers from config file and environment variables.
 
 use super::{
-    LLMManager, LLMProvider, ProviderType,
     providers::{
-        OpenAIProvider, GeminiProvider, AnthropicProvider, 
-        ZhipuProvider, MoonshotProvider,
+        AnthropicProvider, GeminiProvider, MoonshotProvider, OpenAIProvider, ZhipuProvider,
     },
+    LLMManager, LLMProvider, ProviderType,
 };
 use crate::config::{Config, ProviderConfig as ConfigProviderConfig};
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Provider initializer - loads providers from multiple sources
@@ -33,7 +32,10 @@ impl ProviderInitializer {
         for (provider_name, provider_config) in &self.config.ai.providers {
             match self.create_provider(provider_name, provider_config) {
                 Ok(provider) => {
-                    info!("✅ 加载提供商：{} ({})", provider_name, provider_config.api_url);
+                    info!(
+                        "✅ 加载提供商：{} ({})",
+                        provider_name, provider_config.api_url
+                    );
                     manager.register_provider(provider);
                 }
                 Err(e) => {
@@ -71,12 +73,13 @@ impl ProviderInitializer {
         config: &ConfigProviderConfig,
     ) -> Result<Arc<dyn LLMProvider>> {
         // Get API key from config or environment
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| self.get_api_key_from_env(name));
 
-        let api_key = api_key.ok_or_else(|| {
-            anyhow::anyhow!("API Key not configured for provider {}", name)
-        })?;
+        let api_key = api_key
+            .ok_or_else(|| anyhow::anyhow!("API Key not configured for provider {}", name))?;
 
         let provider: Arc<dyn LLMProvider> = match name.to_lowercase().as_str() {
             "openai" => Arc::new(OpenAIProvider::with_base_url(
@@ -123,35 +126,19 @@ impl ProviderInitializer {
     fn create_provider_from_env(&self) -> Option<Arc<dyn LLMProvider>> {
         let api_url = std::env::var("AI_API_URL").ok()?;
         let api_key = std::env::var("AI_API_KEY").ok();
-        let model = std::env::var("AI_MODEL")
-            .unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
+        let model = std::env::var("AI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
 
         // Detect provider type from URL
         let provider: Arc<dyn LLMProvider> = if api_url.contains("openai.com") {
-            Arc::new(OpenAIProvider::new(
-                api_key?,
-                Some(model),
-            ))
+            Arc::new(OpenAIProvider::new(api_key?, Some(model)))
         } else if api_url.contains("googleapis.com") || api_url.contains("generativelanguage") {
-            Arc::new(GeminiProvider::new(
-                api_key?,
-                Some(model),
-            ))
+            Arc::new(GeminiProvider::new(api_key?, Some(model)))
         } else if api_url.contains("anthropic.com") {
-            Arc::new(AnthropicProvider::new(
-                api_key?,
-                Some(model),
-            ))
+            Arc::new(AnthropicProvider::new(api_key?, Some(model)))
         } else if api_url.contains("bigmodel.cn") {
-            Arc::new(ZhipuProvider::new(
-                api_key?,
-                Some(model),
-            ))
+            Arc::new(ZhipuProvider::new(api_key?, Some(model)))
         } else if api_url.contains("moonshot.cn") {
-            Arc::new(MoonshotProvider::new(
-                api_key?,
-                Some(model),
-            ))
+            Arc::new(MoonshotProvider::new(api_key?, Some(model)))
         } else if api_url.contains("ollama") {
             Arc::new(OpenAIProvider::with_base_url(
                 api_key.unwrap_or_default(),

@@ -11,8 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// 审查错误类型
@@ -191,7 +191,8 @@ impl ReviewReport {
             return;
         }
 
-        let weighted_score: f32 = self.dimensions
+        let weighted_score: f32 = self
+            .dimensions
             .iter()
             .map(|d| d.score as f32 * d.weight)
             .sum();
@@ -201,7 +202,14 @@ impl ReviewReport {
     }
 
     /// 添加维度
-    pub fn add_dimension(&mut self, name: String, weight: f32, score: u8, checks: Vec<CheckItem>, comments: Option<String>) {
+    pub fn add_dimension(
+        &mut self,
+        name: String,
+        weight: f32,
+        score: u8,
+        checks: Vec<CheckItem>,
+        comments: Option<String>,
+    ) {
         self.dimensions.push(ReviewDimension {
             name,
             weight,
@@ -212,7 +220,14 @@ impl ReviewReport {
     }
 
     /// 添加问题
-    pub fn add_issue(&mut self, description: String, severity: IssueSeverity, file_path: Option<String>, line: Option<usize>, suggestion: Option<String>) {
+    pub fn add_issue(
+        &mut self,
+        description: String,
+        severity: IssueSeverity,
+        file_path: Option<String>,
+        line: Option<usize>,
+        suggestion: Option<String>,
+    ) {
         self.issues.push(ReviewIssue {
             description,
             severity,
@@ -235,7 +250,7 @@ impl ReviewerAgent {
     /// 创建新的审查 Agent
     pub fn new(storage_dir: PathBuf) -> Result<Self, ReviewerError> {
         fs::create_dir_all(&storage_dir)?;
-        
+
         let mut agent = Self {
             storage_dir,
             reviews: vec![],
@@ -247,7 +262,11 @@ impl ReviewerAgent {
     }
 
     /// 审查代码文件
-    pub fn review_file(&mut self, file_path: &Path, content: &str) -> Result<&ReviewReport, ReviewerError> {
+    pub fn review_file(
+        &mut self,
+        file_path: &Path,
+        content: &str,
+    ) -> Result<&ReviewReport, ReviewerError> {
         let mut report = ReviewReport::new(file_path.to_string_lossy().to_string());
 
         // 辅助函数：计算维度得分（避免溢出）
@@ -365,18 +384,14 @@ impl ReviewerAgent {
             },
             CheckItem {
                 description: "模块化良好".to_string(),
-                passed: content.contains("mod ") || content.contains("pub struct") || content.contains("pub trait"),
+                passed: content.contains("mod ")
+                    || content.contains("pub struct")
+                    || content.contains("pub trait"),
                 details: None,
             },
         ];
         let design_score = calc_score(&design_checks);
-        report.add_dimension(
-            "设计".to_string(),
-            0.1,
-            design_score,
-            design_checks,
-            None,
-        );
+        report.add_dimension("设计".to_string(), 0.1, design_score, design_checks, None);
 
         // 计算总体得分
         report.calculate_score();
@@ -384,8 +399,7 @@ impl ReviewerAgent {
         // 生成总结
         report.summary = format!(
             "代码审查完成，总体得分：{} ({})",
-            report.overall_score,
-            report.grade
+            report.overall_score, report.grade
         );
 
         // 生成改进建议
@@ -470,7 +484,10 @@ mod tests {
 
         assert!(report.overall_score > 0);
         assert!(report.overall_score <= 100);
-        assert!(matches!(report.grade, ReviewGrade::A | ReviewGrade::B | ReviewGrade::C | ReviewGrade::D | ReviewGrade::F));
+        assert!(matches!(
+            report.grade,
+            ReviewGrade::A | ReviewGrade::B | ReviewGrade::C | ReviewGrade::D | ReviewGrade::F
+        ));
     }
 
     #[test]

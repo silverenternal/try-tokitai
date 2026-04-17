@@ -105,17 +105,22 @@ fn test_filekv_put_batch() {
 
     let kv = FileKV::open(config).expect("Failed to open FileKV");
 
-    let entries: Vec<(&str, &[u8])> = vec![
-        ("key1", b"value1"),
-        ("key2", b"value2"),
-        ("key3", b"value3"),
-    ];
+    let entries: Vec<(&str, &[u8])> = vec![("key1", b"value1"), ("key2", b"value2"), ("key3", b"value3")];
 
     kv.put_batch(&entries).expect("Failed to put_batch");
 
-    assert_eq!(kv.get("key1").expect("Failed to get key1").as_ref().map(|b| b.as_ref()), Some(b"value1".as_ref()));
-    assert_eq!(kv.get("key2").expect("Failed to get key2").as_ref().map(|b| b.as_ref()), Some(b"value2".as_ref()));
-    assert_eq!(kv.get("key3").expect("Failed to get key3").as_ref().map(|b| b.as_ref()), Some(b"value3".as_ref()));
+    assert_eq!(
+        kv.get("key1").expect("Failed to get key1").as_ref().map(|b| b.as_ref()),
+        Some(b"value1".as_ref())
+    );
+    assert_eq!(
+        kv.get("key2").expect("Failed to get key2").as_ref().map(|b| b.as_ref()),
+        Some(b"value2".as_ref())
+    );
+    assert_eq!(
+        kv.get("key3").expect("Failed to get key3").as_ref().map(|b| b.as_ref()),
+        Some(b"value3".as_ref())
+    );
 }
 
 /// TEST-001: Compaction core test - verifies segment compaction preserves data integrity
@@ -136,16 +141,20 @@ fn test_filekv_compaction() {
             check_interval: 100,
             max_segment_size_bytes: 256 * 1024 * 1024,
             target_segment_size_bytes: 128 * 1024 * 1024,
-            async_compaction_enabled: false, // Disabled for tests
+            async_compaction_enabled: false,   // Disabled for tests
             leveled_compaction_enabled: false, // Disabled for tests (use size-tiered)
             level_size_multiplier: 10,
             max_level: 3,
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: false, // Disabled for tests (sequential)
             streaming_compaction_enabled: true,
-            write_amplification_threshold: 3.0, // OPT-003: Default WA threshold
-            max_background_compaction_threads: 1, // Disabled for tests
+            write_amplification_threshold: 3.0,        // OPT-003: Default WA threshold
+            max_background_compaction_threads: 1,      // Disabled for tests
             l0_size_bytes_threshold: 64 * 1024 * 1024, // OPT-003: Default L0 size trigger
+            // OPT-006: STCS for L0 defaults
+            l0_compaction_strategy: crate::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         ..Default::default()
     };
@@ -156,7 +165,8 @@ fn test_filekv_compaction() {
     for i in 0..5 {
         let key = format!("key_{}", i);
         let value = format!("value_{}", i);
-        kv.put(&key, value.as_bytes()).expect(&format!("Failed to put key_{}", i));
+        kv.put(&key, value.as_bytes())
+            .unwrap_or_else(|_| panic!("Failed to put key_{}", i));
 
         // Force flush to create a new segment each time
         kv.flush_memtable().expect("Failed to flush memtable");
@@ -166,7 +176,11 @@ fn test_filekv_compaction() {
     let segments_before = kv.segments().load();
     let segment_count_before = segments_before.len();
 
-    assert!(segment_count_before >= 3, "Should have at least 3 segments before compaction, got {}", segment_count_before);
+    assert!(
+        segment_count_before >= 3,
+        "Should have at least 3 segments before compaction, got {}",
+        segment_count_before
+    );
 
     // Manually trigger compaction
     let _stats = kv.run_compaction().expect("Failed to run compaction");
@@ -174,7 +188,7 @@ fn test_filekv_compaction() {
     // Verify all keys are still accessible after compaction
     for i in 0..5 {
         let key = format!("key_{}", i);
-        let value = kv.get(&key).expect(&format!("Failed to get key_{}", i));
+        let value = kv.get(&key).unwrap_or_else(|_| panic!("Failed to get key_{}", i));
         assert!(value.is_some(), "Key {} should exist after compaction", key);
         let expected = format!("value_{}", i);
         assert_eq!(value.as_ref().map(|b| b.as_ref()), Some(expected.as_bytes()));
@@ -206,9 +220,13 @@ fn test_filekv_parallel_compaction() {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: true, // Enabled for this test
             streaming_compaction_enabled: true,
-            write_amplification_threshold: 3.0, // OPT-003: Default WA threshold
-            max_background_compaction_threads: 1, // Disabled for tests
+            write_amplification_threshold: 3.0,        // OPT-003: Default WA threshold
+            max_background_compaction_threads: 1,      // Disabled for tests
             l0_size_bytes_threshold: 64 * 1024 * 1024, // OPT-003: Default L0 size trigger
+            // OPT-006: STCS for L0 defaults
+            l0_compaction_strategy: crate::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         ..Default::default()
     };
@@ -221,14 +239,19 @@ fn test_filekv_parallel_compaction() {
         for i in 0..5 {
             let key = format!("key_{}", i);
             let value = format!("value_batch{}_{}", batch, i);
-            kv.put(&key, value.as_bytes()).expect(&format!("Failed to put key batch={}, i={}", batch, i));
+            kv.put(&key, value.as_bytes())
+                .unwrap_or_else(|_| panic!("Failed to put key batch={}, i={}", batch, i));
         }
         kv.flush_memtable().expect("Failed to flush memtable");
     }
 
     // Verify we have at least 3 segments
     let segments_before = kv.segments().load().len();
-    assert!(segments_before >= 3, "Should have at least 3 segments, got {}", segments_before);
+    assert!(
+        segments_before >= 3,
+        "Should have at least 3 segments, got {}",
+        segments_before
+    );
 
     // Trigger parallel compaction
     let stats = kv.run_compaction().expect("Failed to run compaction");
@@ -237,7 +260,7 @@ fn test_filekv_parallel_compaction() {
     // Verify all keys have the latest value (from last batch)
     for i in 0..5 {
         let key = format!("key_{}", i);
-        let value = kv.get(&key).expect(&format!("Failed to get key_{}", i));
+        let value = kv.get(&key).unwrap_or_else(|_| panic!("Failed to get key_{}", i));
         let expected = format!("value_batch2_{}", i);
         assert_eq!(
             value.as_ref().map(|b| b.as_ref()),
@@ -249,9 +272,11 @@ fn test_filekv_parallel_compaction() {
 
     // Verify segment count decreased
     let segments_after = kv.segments().load().len();
-    assert!(segments_after < segments_before,
+    assert!(
+        segments_after < segments_before,
         "Should have fewer segments after compaction: {} < {}",
-        segments_after, segments_before
+        segments_after,
+        segments_before
     );
 }
 
@@ -268,21 +293,25 @@ fn test_bloom_migration_controller_integration() {
     let kv = FileKV::open(config).expect("Failed to open FileKV");
 
     // Put some data and flush
-    for i in 0..50 {  // Reduced from 100
+    for i in 0..50 {
+        // Reduced from 100
         kv.put(&format!("key_{:03}", i), format!("value_{}", i).as_bytes())
             .expect("Failed to put key");
     }
     kv.flush_memtable().expect("Failed to flush memtable");
 
     // Do some reads to trigger migration controller
-    for i in 0..5 {  // Reduced from 10
+    for i in 0..5 {
+        // Reduced from 10
         let _ = kv.get(&format!("key_{:03}", i)).expect("Failed to get key");
     }
 
     // Check migration stats - should have tracked some segment accesses
     let migration_stats = kv.get_bloom_migration_stats();
-    assert!(migration_stats.tracked_segments > 0,
-        "Should have tracked some segment accesses");
+    assert!(
+        migration_stats.tracked_segments > 0,
+        "Should have tracked some segment accesses"
+    );
 
     println!(
         "Bloom migration stats: tracked_segments={}, pending={}, upgrades={}, downgrades={}, completed={}",
@@ -323,9 +352,13 @@ fn test_background_compaction_actually_works() {
             l0_file_count_threshold: 3,
             parallel_compaction_enabled: false,
             streaming_compaction_enabled: true,
-            write_amplification_threshold: 3.0, // OPT-003: Default WA threshold
-            max_background_compaction_threads: 2, // Use 2 threads for this test
+            write_amplification_threshold: 3.0,        // OPT-003: Default WA threshold
+            max_background_compaction_threads: 2,      // Use 2 threads for this test
             l0_size_bytes_threshold: 64 * 1024 * 1024, // OPT-003: Default L0 size trigger
+            // OPT-006: STCS for L0 defaults
+            l0_compaction_strategy: crate::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         ..Default::default()
     };
@@ -333,18 +366,20 @@ fn test_background_compaction_actually_works() {
     let kv = Arc::new(FileKV::open(config).expect("Failed to open FileKV"));
 
     // Start background compaction thread
-    kv.start_background_compaction().expect("Failed to start background compaction");
+    kv.start_background_compaction()
+        .expect("Failed to start background compaction");
 
     // Write and flush multiple times to create multiple segments
     for i in 0..5 {
         let key = format!("key_{}", i);
         let value = format!("value_{}", i);
-        kv.put(&key, value.as_bytes()).expect(&format!("Failed to put key_{}", i));
+        kv.put(&key, value.as_bytes())
+            .unwrap_or_else(|_| panic!("Failed to put key_{}", i));
         kv.flush_memtable().expect("Failed to flush memtable");
     }
 
     // Wait a moment for compaction to potentially trigger
-    thread::sleep(Duration::from_millis(100));  // Reduced from 500ms
+    thread::sleep(Duration::from_millis(100)); // Reduced from 500ms
 
     // Get initial segment count
     let segments_initial = kv.segments().load().len();
@@ -353,10 +388,12 @@ fn test_background_compaction_actually_works() {
     if segments_initial >= 3 {
         // Request compaction through the compaction engine
         // This should go through the async channel
-        kv.compaction_engine.maybe_run_compaction().expect("Failed to trigger compaction");
+        kv.compaction_engine
+            .maybe_run_compaction()
+            .expect("Failed to trigger compaction");
 
         // Wait for background compaction to complete
-        thread::sleep(Duration::from_millis(200));  // Reduced from 1000ms
+        thread::sleep(Duration::from_millis(200)); // Reduced from 1000ms
     }
 
     // Get final segment count
@@ -365,14 +402,14 @@ fn test_background_compaction_actually_works() {
     // Verify all keys are still accessible
     for i in 0..5 {
         let key = format!("key_{}", i);
-        let value = kv.get(&key).expect(&format!("Failed to get key_{}", i));
+        let value = kv.get(&key).unwrap_or_else(|_| panic!("Failed to get key_{}", i));
         assert!(value.is_some(), "Key {} should exist", key);
         let expected = format!("value_{}", i);
         assert_eq!(value.as_ref().map(|b| b.as_ref()), Some(expected.as_bytes()));
     }
 
     // Verify compaction stats were updated (this proves compaction actually ran)
-    let compaction_stats = kv.compaction_engine.compaction_manager().lock().stats();
+    let compaction_stats = kv.compaction_engine.compaction_manager().stats();
     // Either segments were merged via background compaction, or we at least requested it
     // The key assertion is that data is still accessible after compaction
 
@@ -385,7 +422,7 @@ fn test_background_compaction_actually_works() {
     drop(kv);
 
     // Give thread time to exit
-    thread::sleep(Duration::from_millis(50));  // Reduced from 100ms
+    thread::sleep(Duration::from_millis(50)); // Reduced from 100ms
 }
 
 /// GAP-M5: Verify UnifiedCacheManager is instantiated in production
@@ -480,8 +517,16 @@ fn test_metrics_auto_recorded_in_production() {
 
     // Verify that basic stats are updated (indirect verification of metrics recording)
     let stats = kv.get_stats();
-    assert!(stats.write_count >= 2, "Write count should be >= 2, got {}", stats.write_count);
-    assert!(stats.read_count >= 2, "Read count should be >= 2, got {}", stats.read_count);
+    assert!(
+        stats.write_count >= 2,
+        "Write count should be >= 2, got {}",
+        stats.write_count
+    );
+    assert!(
+        stats.read_count >= 2,
+        "Read count should be >= 2, got {}",
+        stats.read_count
+    );
 }
 
 // T-003: Test global key index integration in write path
@@ -517,7 +562,12 @@ fn test_global_index_keys_indexed_after_flush() {
 
     // Verify global index has the keys
     let idx_stats = kv.get_global_index_stats();
-    assert!(idx_stats.total_keys >= 3, "Global index should have at least 3 keys after flush, got {}", idx_stats.total_keys);
+    let total_keys = idx_stats.total_keys.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        total_keys >= 3,
+        "Global index should have at least 3 keys after flush, got {}",
+        total_keys
+    );
 
     // Verify keys can be retrieved via global index (indirectly via get)
     let val1 = kv.get("alpha").expect("Get should succeed");
@@ -554,18 +604,20 @@ fn test_global_index_remove_after_delete() {
 
     // Verify key exists in global index
     let idx_stats_before = kv.get_global_index_stats();
-    assert!(idx_stats_before.total_keys >= 1, "Global index should have at least 1 key");
+    let before_keys = idx_stats_before.total_keys.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(before_keys >= 1, "Global index should have at least 1 key");
 
     // Delete the key
     kv.delete("to_delete").expect("Delete should succeed");
 
     // Verify key is removed from global index
     let idx_stats_after = kv.get_global_index_stats();
+    let after_keys = idx_stats_after.total_keys.load(std::sync::atomic::Ordering::Relaxed);
     assert!(
-        idx_stats_after.total_keys < idx_stats_before.total_keys,
+        after_keys < before_keys,
         "Global index key count should decrease after delete: before={}, after={}",
-        idx_stats_before.total_keys,
-        idx_stats_after.total_keys
+        before_keys,
+        after_keys
     );
 }
 
@@ -606,14 +658,25 @@ fn test_global_index_updated_after_compaction() {
 
     // Verify both keys exist before compaction
     let idx_stats_before = kv.get_global_index_stats();
-    assert!(idx_stats_before.total_keys >= 2, "Global index should have at least 2 keys before compaction");
+    let before_keys = idx_stats_before.total_keys.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        before_keys >= 2,
+        "Global index should have at least 2 keys before compaction"
+    );
 
     let seg_count_before = kv.segments().load().len();
-    assert!(seg_count_before >= 2, "Should have at least 2 segments before compaction");
+    assert!(
+        seg_count_before >= 2,
+        "Should have at least 2 segments before compaction"
+    );
 
     // Run compaction
     let compaction_result = kv.run_compaction();
-    assert!(compaction_result.is_ok(), "Compaction should succeed: {:?}", compaction_result.err());
+    assert!(
+        compaction_result.is_ok(),
+        "Compaction should succeed: {:?}",
+        compaction_result.err()
+    );
 
     // Verify keys still accessible after compaction
     let val_a = kv.get("key_a").expect("Get should succeed after compaction");
@@ -624,10 +687,11 @@ fn test_global_index_updated_after_compaction() {
 
     // Verify global index still has the keys
     let idx_stats_after = kv.get_global_index_stats();
+    let after_keys = idx_stats_after.total_keys.load(std::sync::atomic::Ordering::Relaxed);
     assert!(
-        idx_stats_after.total_keys >= 2,
+        after_keys >= 2,
         "Global index should still have at least 2 keys after compaction, got {}",
-        idx_stats_after.total_keys
+        after_keys
     );
 
     // Verify segment count decreased (compaction merged segments)

@@ -3,9 +3,8 @@
 //! 测试声明式工作流的完整执行流程
 
 use ai_assistant::{
-    Workflow, WorkflowEngine, Stage, Step, StepStatus, StageStatus, WorkflowStatus,
-    DeclarativeWorkflow, DeclarativeWorkflowStep, RetryConfig,
-    ErrorHandler, ErrorStrategy, AgentRole,
+    AgentRole, DeclarativeWorkflow, DeclarativeWorkflowStep, ErrorHandler, ErrorStrategy,
+    RetryConfig, Stage, StageStatus, Step, StepStatus, Workflow, WorkflowEngine, WorkflowStatus,
 };
 use serde_json::json;
 
@@ -55,10 +54,13 @@ fn test_basic_workflow_execution() {
     let result = engine.execute();
 
     assert!(result.is_ok(), "工作流执行失败：{:?}", result.err());
-    
+
     let workflow_result = result.unwrap();
     assert_eq!(workflow_result.status, WorkflowStatus::Completed);
-    assert!(workflow_result.steps_completed > 0, "应该至少执行了一个步骤");
+    assert!(
+        workflow_result.steps_completed > 0,
+        "应该至少执行了一个步骤"
+    );
 }
 
 /// 测试工作流变量传递
@@ -79,10 +81,7 @@ fn test_workflow_variables() {
         workflow.get_variable("project_name"),
         Some(&"test-project".to_string())
     );
-    assert_eq!(
-        workflow.get_variable("version"),
-        Some(&"1.0.0".to_string())
-    );
+    assert_eq!(workflow.get_variable("version"), Some(&"1.0.0".to_string()));
     assert_eq!(workflow.get_variable("nonexistent"), None);
 }
 
@@ -154,9 +153,8 @@ fn test_workflow_timeout_config() {
     workflow.add_stage(stage1);
 
     // 设置超时
-    let engine = WorkflowEngine::new(workflow)
-        .with_timeout(300); // 5 分钟超时
-    
+    let engine = WorkflowEngine::new(workflow).with_timeout(300); // 5 分钟超时
+
     // 验证超时已设置（通过编译检查）
     drop(engine);
 }
@@ -178,7 +176,10 @@ fn test_workflow_error_handling_config() {
         max_errors: Some(3),
     };
     assert_eq!(handler_fallback.strategy, ErrorStrategy::Fallback);
-    assert_eq!(handler_fallback.fallback_tool, Some("backup_tool".to_string()));
+    assert_eq!(
+        handler_fallback.fallback_tool,
+        Some("backup_tool".to_string())
+    );
     assert_eq!(handler_fallback.max_errors, Some(3));
 }
 

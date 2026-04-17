@@ -6,12 +6,10 @@
 //! - Stats tracking overhead
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-use tokitai_filekv::{
-    FeatureFlagController, FeatureFlag, FeatureStateChange,
-};
+use tokitai_filekv::{FeatureFlag, FeatureFlagController, FeatureStateChange};
 
 /// Benchmark feature check latency
 fn bench_feature_check(c: &mut Criterion) {

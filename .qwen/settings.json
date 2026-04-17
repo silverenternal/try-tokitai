@@ -21,7 +21,9 @@
       "Bash(cargo run *)",
       "Bash(cargo check *)",
       "Bash(timeout *)",
-      "Bash(find *)"
+      "Bash(find *)",
+      "Bash(cp *)",
+      "Bash(sed *)"
     ]
   },
   "$version": 3

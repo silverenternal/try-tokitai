@@ -2,15 +2,13 @@
 //!
 //! 提供多个 JSON 对象合并功能
 
-use tokitai::tool;
-use serde_json::Value;
-use std::sync::Arc;
 use crate::tools::data::config::DataToolConfig;
 use crate::tools::data::error::DataToolError;
-use crate::tools::data::validator::{
-    JsonLengthValidator, MergeCountValidator, Validator,
-};
-use crate::tools::data::metrics::{MetricsCollector, DataToolOperation};
+use crate::tools::data::metrics::{DataToolOperation, MetricsCollector};
+use crate::tools::data::validator::{JsonLengthValidator, MergeCountValidator, Validator};
+use serde_json::Value;
+use std::sync::Arc;
+use tokitai::tool;
 
 /// JSON 合并工具集
 #[derive(Debug)]
@@ -32,7 +30,8 @@ impl JsonMergeTools {
     }
 
     fn validate_length(&self, json_string: &str) -> Result<(), Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())
     }
 
@@ -43,7 +42,10 @@ impl JsonMergeTools {
     }
 
     fn _merge_json(&self, json_strings: &[String]) -> Result<Value, Value> {
-        MergeCountValidator { count: json_strings.len() }.validate(&self.config)?;
+        MergeCountValidator {
+            count: json_strings.len(),
+        }
+        .validate(&self.config)?;
         let mut merged = Value::Object(serde_json::Map::new());
         for json_string in json_strings {
             let parsed = self.parse_json(json_string)?;
@@ -58,10 +60,16 @@ impl JsonMergeTools {
         Ok(merged)
     }
 
-    fn _merge_json_with_defaults(&self, json_strings: &[String], defaults: &str) -> Result<Value, Value> {
+    fn _merge_json_with_defaults(
+        &self,
+        json_strings: &[String],
+        defaults: &str,
+    ) -> Result<Value, Value> {
         let default_value = self.parse_json(defaults)?;
         let mut result = self._merge_json(json_strings)?;
-        if let (Value::Object(result_obj), Value::Object(default_obj)) = (&mut result, default_value) {
+        if let (Value::Object(result_obj), Value::Object(default_obj)) =
+            (&mut result, default_value)
+        {
             for (key, value) in default_obj {
                 if !result_obj.contains_key(&key) {
                     result_obj.insert(key, value);
@@ -98,7 +106,11 @@ impl JsonMergeTools {
         description = "合并 JSON 对象，使用默认值填充缺失的键",
         example = "合并：[{\"name\": \"Alice\"}] 默认值：{\"age\": 0}"
     )]
-    pub fn merge_json_with_defaults(&self, json_strings: Vec<String>, defaults: String) -> Result<Value, Value> {
+    pub fn merge_json_with_defaults(
+        &self,
+        json_strings: Vec<String>,
+        defaults: String,
+    ) -> Result<Value, Value> {
         let _timer = self.metrics.start_call(DataToolOperation::MergeJson);
         match self._merge_json_with_defaults(&json_strings, &defaults) {
             Ok(result) => {

@@ -16,17 +16,19 @@
 //! - 统一工具调度接口
 //! - 支持工具使用统计和追踪
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::tool_matrix::dependency_analyzer::{
+    AIDependencyAnalyzer, LLMClient as DependencyLLMClient, SmartToolRecommender,
+};
 use crate::tool_matrix::registry::ToolRegistry;
-use crate::tool_matrix::dependency_analyzer::{AIDependencyAnalyzer, LLMClient as DependencyLLMClient, SmartToolRecommender};
 
 /// 执行错误类型
 #[derive(Error, Debug)]
@@ -112,12 +114,18 @@ impl ExecutionRecord {
 
     /// 获取完成的步骤数
     pub fn completed_steps(&self) -> usize {
-        self.step_results.iter().filter(|r| r.status == ExecutionStatus::Completed).count()
+        self.step_results
+            .iter()
+            .filter(|r| r.status == ExecutionStatus::Completed)
+            .count()
     }
 
     /// 获取失败的步骤数
     pub fn failed_steps(&self) -> usize {
-        self.step_results.iter().filter(|r| r.status == ExecutionStatus::Failed).count()
+        self.step_results
+            .iter()
+            .filter(|r| r.status == ExecutionStatus::Failed)
+            .count()
     }
 
     /// 获取进度百分比
@@ -143,7 +151,10 @@ pub struct ExecutorAgent {
 
 impl ExecutorAgent {
     /// 创建新的执行 Agent
-    pub fn new(storage_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, ExecutorError> {
+    pub fn new(
+        storage_dir: PathBuf,
+        tool_registry: Arc<RwLock<ToolRegistry>>,
+    ) -> Result<Self, ExecutorError> {
         fs::create_dir_all(&storage_dir)?;
 
         let mut agent = Self {
@@ -185,7 +196,10 @@ impl ExecutorAgent {
     }
 
     /// 创建不带工具注册表的执行 Agent（用于测试）
-    pub fn with_registry(storage_dir: PathBuf, tool_registry: Arc<RwLock<ToolRegistry>>) -> Result<Self, ExecutorError> {
+    pub fn with_registry(
+        storage_dir: PathBuf,
+        tool_registry: Arc<RwLock<ToolRegistry>>,
+    ) -> Result<Self, ExecutorError> {
         Self::new(storage_dir, tool_registry)
     }
 
@@ -197,7 +211,11 @@ impl ExecutorAgent {
     }
 
     /// 记录步骤开始
-    pub fn record_step_start(&mut self, record_id: &str, step_id: String) -> Result<(), ExecutorError> {
+    pub fn record_step_start(
+        &mut self,
+        record_id: &str,
+        step_id: String,
+    ) -> Result<(), ExecutorError> {
         if let Some(record) = self.records.iter_mut().find(|r| r.id == record_id) {
             record.status = ExecutionStatus::Running;
             record.add_step_result(StepExecutionResult {
@@ -214,9 +232,19 @@ impl ExecutorAgent {
     }
 
     /// 记录步骤完成
-    pub fn record_step_complete(&mut self, record_id: &str, step_id: String, output: String, duration_secs: u64) -> Result<(), ExecutorError> {
+    pub fn record_step_complete(
+        &mut self,
+        record_id: &str,
+        step_id: String,
+        output: String,
+        duration_secs: u64,
+    ) -> Result<(), ExecutorError> {
         if let Some(record) = self.records.iter_mut().find(|r| r.id == record_id) {
-            if let Some(result) = record.step_results.iter_mut().find(|r| r.step_id == step_id) {
+            if let Some(result) = record
+                .step_results
+                .iter_mut()
+                .find(|r| r.step_id == step_id)
+            {
                 result.status = ExecutionStatus::Completed;
                 result.output = Some(output);
                 result.duration_secs = Some(duration_secs);
@@ -227,9 +255,18 @@ impl ExecutorAgent {
     }
 
     /// 记录步骤失败
-    pub fn record_step_failed(&mut self, record_id: &str, step_id: String, error: String) -> Result<(), ExecutorError> {
+    pub fn record_step_failed(
+        &mut self,
+        record_id: &str,
+        step_id: String,
+        error: String,
+    ) -> Result<(), ExecutorError> {
         if let Some(record) = self.records.iter_mut().find(|r| r.id == record_id) {
-            if let Some(result) = record.step_results.iter_mut().find(|r| r.step_id == step_id) {
+            if let Some(result) = record
+                .step_results
+                .iter_mut()
+                .find(|r| r.step_id == step_id)
+            {
                 result.status = ExecutionStatus::Failed;
                 result.error = Some(error);
             }
@@ -239,7 +276,11 @@ impl ExecutorAgent {
     }
 
     /// 完成执行
-    pub fn complete_execution(&mut self, record_id: &str, summary: String) -> Result<(), ExecutorError> {
+    pub fn complete_execution(
+        &mut self,
+        record_id: &str,
+        summary: String,
+    ) -> Result<(), ExecutorError> {
         if let Some(record) = self.records.iter_mut().find(|r| r.id == record_id) {
             record.status = ExecutionStatus::Completed;
             record.ended_at = Some(chrono::Utc::now().timestamp());
@@ -291,14 +332,15 @@ impl ExecutorAgent {
     /// 调用工具（通过工具矩阵）
     pub fn call_tool(&self, tool_name: &str, args: &Value) -> Result<String, ExecutorError> {
         let registry = self.tool_registry.read();
-        
+
         // 检查工具是否存在
         if !registry.tool_exists(tool_name) {
             return Err(ExecutorError::ToolNotFound(tool_name.to_string()));
         }
 
         // 获取工具定义
-        let tool_def = registry.get_tool(tool_name)
+        let tool_def = registry
+            .get_tool(tool_name)
             .ok_or_else(|| ExecutorError::ToolNotFound(tool_name.to_string()))?;
 
         tracing::info!("调用工具：{}，参数：{}", tool_name, args);
@@ -306,7 +348,7 @@ impl ExecutorAgent {
         // 注意：实际工具调用需要访问 AiAssistant 中的工具实例
         // 这里提供一个统一的调用接口，实际执行由上层协调
         // 使用 tokitai 的工具调用机制需要进一步集成
-        
+
         Ok(format!("[工具调用] {}({})", tool_name, args))
     }
 
@@ -333,12 +375,17 @@ impl ExecutorAgent {
                 // 如果成功，推荐下一步可能需要的工具
                 if let Some(recommender) = &self.tool_recommender {
                     let rt = tokio::runtime::Handle::current();
-                    let recommendations: Vec<crate::tool_matrix::dependency_analyzer::ToolRecommendation> = rt.block_on(async {
-                        recommender.recommend_next(&tool_name, 3).await
-                    });
+                    let recommendations: Vec<
+                        crate::tool_matrix::dependency_analyzer::ToolRecommendation,
+                    > = rt.block_on(async { recommender.recommend_next(&tool_name, 3).await });
                     if !recommendations.is_empty() {
-                        tracing::info!("推荐后续工具：{:?}", 
-                            recommendations.iter().map(|r| &r.tool_name).collect::<Vec<_>>());
+                        tracing::info!(
+                            "推荐后续工具：{:?}",
+                            recommendations
+                                .iter()
+                                .map(|r| &r.tool_name)
+                                .collect::<Vec<_>>()
+                        );
                     }
                 }
 
@@ -355,12 +402,19 @@ impl ExecutorAgent {
     }
 
     /// 推荐后续工具（基于依赖图）
-    pub fn recommend_next_tools(&self, current_tool: &str, max_recommendations: usize) -> Vec<String> {
+    pub fn recommend_next_tools(
+        &self,
+        current_tool: &str,
+        max_recommendations: usize,
+    ) -> Vec<String> {
         if let Some(recommender) = &self.tool_recommender {
             let rt = tokio::runtime::Handle::current();
-            let recommendations: Vec<crate::tool_matrix::dependency_analyzer::ToolRecommendation> = rt.block_on(async {
-                recommender.recommend_next(current_tool, max_recommendations).await
-            });
+            let recommendations: Vec<crate::tool_matrix::dependency_analyzer::ToolRecommendation> =
+                rt.block_on(async {
+                    recommender
+                        .recommend_next(current_tool, max_recommendations)
+                        .await
+                });
             recommendations.into_iter().map(|r| r.tool_name).collect()
         } else {
             // 如果没有智能推荐器，返回空列表

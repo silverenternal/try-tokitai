@@ -11,12 +11,12 @@
 
 #![allow(dead_code)]
 
-use crate::tool_matrix::matrix::{ToolDefinition, ToolBox};
+use crate::tool_matrix::matrix::{ToolBox, ToolDefinition};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // 工具箱分配结果
@@ -148,10 +148,7 @@ pub struct AIToolboxClassifier<T: LLMClient> {
 
 impl<T: LLMClient> AIToolboxClassifier<T> {
     /// 创建新的分类器
-    pub fn new(
-        llm_client: Arc<T>,
-        toolboxes: Arc<RwLock<HashMap<String, ToolBox>>>,
-    ) -> Self {
+    pub fn new(llm_client: Arc<T>, toolboxes: Arc<RwLock<HashMap<String, ToolBox>>>) -> Self {
         Self {
             llm_client,
             toolboxes,
@@ -164,7 +161,7 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
         // 获取现有工具箱摘要（parking_lot RwLock 是同步的）
         let toolboxes = self.toolboxes.read();
         let toolbox_summaries = self.get_toolbox_summaries(&toolboxes).await?;
-        drop(toolboxes);  // 释放锁
+        drop(toolboxes); // 释放锁
 
         // 构建 AI 提示词
         let prompt = self.build_classification_prompt(tool, &toolbox_summaries);
@@ -173,8 +170,8 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
         let response = self.llm_client.chat(&prompt).await?;
 
         // 解析 AI 响应
-        let assignment: ToolboxAssignment = serde_json::from_str(&response)
-            .map_err(|e| format!("解析 AI 响应失败：{}", e))?;
+        let assignment: ToolboxAssignment =
+            serde_json::from_str(&response).map_err(|e| format!("解析 AI 响应失败：{}", e))?;
 
         // 如果 AI 建议创建新工具箱，自动执行
         if matches!(assignment.action, ToolboxAction::CreateNew) {
@@ -185,9 +182,7 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
 
         info!(
             "工具分类完成：{} -> {:?} (置信度：{:.2})",
-            tool.name,
-            assignment.action,
-            assignment.confidence
+            tool.name, assignment.action, assignment.confidence
         );
 
         Ok(assignment)
@@ -270,8 +265,14 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
         }
 
         // 2. AI 生成摘要
-        let tools = toolbox.get_all_tools().into_iter().cloned().collect::<Vec<_>>();
-        let summary = self.generate_toolbox_summary(&toolbox.id, &toolbox.name, &tools).await?;
+        let tools = toolbox
+            .get_all_tools()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let summary = self
+            .generate_toolbox_summary(&toolbox.id, &toolbox.name, &tools)
+            .await?;
 
         // 3. 写入缓存（parking_lot RwLock 是同步的）
         {
@@ -325,8 +326,8 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
         );
 
         let response = self.llm_client.chat(&prompt).await?;
-        let mut summary: ToolboxSummary = serde_json::from_str(&response)
-            .map_err(|e| format!("解析工具箱摘要失败：{}", e))?;
+        let mut summary: ToolboxSummary =
+            serde_json::from_str(&response).map_err(|e| format!("解析工具箱摘要失败：{}", e))?;
 
         // 确保 toolbox_id 和 name 正确
         summary.toolbox_id = toolbox_id.to_string();
@@ -349,11 +350,7 @@ impl<T: LLMClient> AIToolboxClassifier<T> {
         }
 
         // 创建新工具箱
-        let mut toolbox = ToolBox::new(
-            &toolbox_id,
-            &new_tb.name,
-            &new_tb.description,
-        );
+        let mut toolbox = ToolBox::new(&toolbox_id, &new_tb.name, &new_tb.description);
         toolbox.tags = vec!["ai_created".to_string()];
 
         toolboxes.insert(toolbox_id.clone(), toolbox);
@@ -395,7 +392,11 @@ impl DefaultLLMClient {
     }
 
     /// 创建带自定义模型的客户端
-    pub fn with_model(api_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn with_model(
+        api_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             api_url: api_url.into(),
             api_key: api_key.into(),
@@ -422,7 +423,8 @@ impl LLMClient for DefaultLLMClient {
         });
 
         // 发送请求
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(&self.api_url)
             .json(&request_body)
             .header("Content-Type", "application/json");
@@ -479,7 +481,8 @@ mod tests {
                 "toolbox_id": "file_ops",
                 "confidence": 0.9,
                 "reason": "这是一个文件操作工具"
-            }"#.to_string())
+            }"#
+            .to_string())
         }
     }
 

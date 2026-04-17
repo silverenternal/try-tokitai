@@ -37,24 +37,22 @@
 
 #![allow(dead_code)]
 
+use crate::autonomy::prompt_gap_detector::LLMClient;
 use crate::autonomy::{
-    gap_detector::{TaskExecutionRecord, ToolGap, GapType},
-    hybrid_gap_detector::{HybridGapDetector, HybridConfig, HybridToolGap},
-    tool_optimizer::{ToolOptimizer, ToolMetrics},
+    gap_detector::{GapType, TaskExecutionRecord, ToolGap},
+    hybrid_gap_detector::{HybridConfig, HybridGapDetector, HybridToolGap},
     system_reflector::SystemReflector,
-    tool_creator::{ToolCreator, ToolCreationRequest, ParameterDef},
+    tool_creator::{ParameterDef, ToolCreationRequest, ToolCreator},
+    tool_optimizer::{ToolMetrics, ToolOptimizer},
 };
 use crate::external_process::{
-    ExternalToolDiscovery,
-    ExternalToolRegistry,
-    metadata::ExternalToolMetadata,
+    metadata::ExternalToolMetadata, ExternalToolDiscovery, ExternalToolRegistry,
 };
-use crate::autonomy::prompt_gap_detector::LLMClient;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 
 /// 自进化循环报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,11 +156,10 @@ impl SelfImprovementLoop {
         let creator = ToolCreator::new(&project_root)?;
 
         // 创建外部工具发现器和注册表
-        let external_tool_discovery = ExternalToolDiscovery::new()
-            .with_created_by("self_improvement_loop");
-        let external_tool_registry = ExternalToolRegistry::with_storage_dir(
-            data_dir.join("external_tools")
-        )?;
+        let external_tool_discovery =
+            ExternalToolDiscovery::new().with_created_by("self_improvement_loop");
+        let external_tool_registry =
+            ExternalToolRegistry::with_storage_dir(data_dir.join("external_tools"))?;
 
         Ok(Self {
             project_root,
@@ -203,11 +200,10 @@ impl SelfImprovementLoop {
         let creator = ToolCreator::new(&project_root)?;
 
         // 创建外部工具发现器和注册表
-        let external_tool_discovery = ExternalToolDiscovery::new()
-            .with_created_by("self_improvement_loop");
-        let external_tool_registry = ExternalToolRegistry::with_storage_dir(
-            data_dir.join("external_tools")
-        )?;
+        let external_tool_discovery =
+            ExternalToolDiscovery::new().with_created_by("self_improvement_loop");
+        let external_tool_registry =
+            ExternalToolRegistry::with_storage_dir(data_dir.join("external_tools"))?;
 
         Ok(Self {
             project_root,
@@ -324,10 +320,18 @@ impl SelfImprovementLoop {
                                     let tool_name_clone = tool_name.clone();
                                     created_tools.push(tool_name.clone());
                                     registered_tools.push(tool_name_clone);
-                                    tracing::info!("Created external tool wrapper for gap {}: {}", gap.id, tool_name);
+                                    tracing::info!(
+                                        "Created external tool wrapper for gap {}: {}",
+                                        gap.id,
+                                        tool_name
+                                    );
                                 }
                                 Err(e) => {
-                                    tracing::warn!("Failed to wrap external tool for gap {}: {}", gap.id, e);
+                                    tracing::warn!(
+                                        "Failed to wrap external tool for gap {}: {}",
+                                        gap.id,
+                                        e
+                                    );
                                     // 回退到创建 Rust 工具
                                     match self.create_tool_from_hybrid_gap(gap) {
                                         Ok(name) => {
@@ -335,7 +339,11 @@ impl SelfImprovementLoop {
                                             registered_tools.push(name);
                                         }
                                         Err(e2) => {
-                                            tracing::warn!("Failed to create Rust tool for gap {}: {}", gap.id, e2);
+                                            tracing::warn!(
+                                                "Failed to create Rust tool for gap {}: {}",
+                                                gap.id,
+                                                e2
+                                            );
                                             if status == CycleStatus::Success {
                                                 status = CycleStatus::PartialSuccess;
                                             }
@@ -351,7 +359,11 @@ impl SelfImprovementLoop {
                                     registered_tools.push(tool_name);
                                 }
                                 Err(e) => {
-                                    tracing::warn!("Failed to create tool from gap {}: {}", gap.id, e);
+                                    tracing::warn!(
+                                        "Failed to create tool from gap {}: {}",
+                                        gap.id,
+                                        e
+                                    );
                                     if status == CycleStatus::Success {
                                         status = CycleStatus::PartialSuccess;
                                     }
@@ -452,16 +464,25 @@ impl SelfImprovementLoop {
     fn infer_domain_from_gap(&self, gap: &ToolGap) -> String {
         // 根据缺口描述关键词推断领域
         let desc_lower = gap.description.to_lowercase();
-        
+
         if desc_lower.contains("文件") || desc_lower.contains("file") {
             "file_ops".to_string()
-        } else if desc_lower.contains("网络") || desc_lower.contains("network") || desc_lower.contains("http") {
+        } else if desc_lower.contains("网络")
+            || desc_lower.contains("network")
+            || desc_lower.contains("http")
+        {
             "network_ops".to_string()
-        } else if desc_lower.contains("系统") || desc_lower.contains("system") || desc_lower.contains("进程") {
+        } else if desc_lower.contains("系统")
+            || desc_lower.contains("system")
+            || desc_lower.contains("进程")
+        {
             "system_ops".to_string()
         } else if desc_lower.contains("代码") || desc_lower.contains("code") {
             "code_ops".to_string()
-        } else if desc_lower.contains("数据") || desc_lower.contains("data") || desc_lower.contains("json") {
+        } else if desc_lower.contains("数据")
+            || desc_lower.contains("data")
+            || desc_lower.contains("json")
+        {
             "data_ops".to_string()
         } else {
             "general".to_string()
@@ -538,13 +559,22 @@ impl SelfImprovementLoop {
 
         if desc_lower.contains("文件") || desc_lower.contains("file") {
             "file_ops".to_string()
-        } else if desc_lower.contains("网络") || desc_lower.contains("network") || desc_lower.contains("http") {
+        } else if desc_lower.contains("网络")
+            || desc_lower.contains("network")
+            || desc_lower.contains("http")
+        {
             "network_ops".to_string()
-        } else if desc_lower.contains("系统") || desc_lower.contains("system") || desc_lower.contains("进程") {
+        } else if desc_lower.contains("系统")
+            || desc_lower.contains("system")
+            || desc_lower.contains("进程")
+        {
             "system_ops".to_string()
         } else if desc_lower.contains("代码") || desc_lower.contains("code") {
             "code_ops".to_string()
-        } else if desc_lower.contains("数据") || desc_lower.contains("data") || desc_lower.contains("json") {
+        } else if desc_lower.contains("数据")
+            || desc_lower.contains("data")
+            || desc_lower.contains("json")
+        {
             "data_ops".to_string()
         } else {
             "general".to_string()
@@ -552,7 +582,10 @@ impl SelfImprovementLoop {
     }
 
     /// 决策工具创建策略（混合缺口版本）
-    fn decide_tool_creation_strategy_from_hybrid(&self, gap: &HybridToolGap) -> ToolCreationStrategy {
+    fn decide_tool_creation_strategy_from_hybrid(
+        &self,
+        gap: &HybridToolGap,
+    ) -> ToolCreationStrategy {
         let desc_lower = gap.description.to_lowercase();
 
         // 检查是否有匹配的现有 CLI 工具
@@ -576,14 +609,17 @@ impl SelfImprovementLoop {
             || desc_lower.contains("concurrent");
 
         // 如果有因果证据，考虑其影响
-        let has_strong_causal_evidence = gap.causal_evidence.as_ref()
+        let has_strong_causal_evidence = gap
+            .causal_evidence
+            .as_ref()
             .map(|c| c.llm_confidence > 0.8)
             .unwrap_or(false);
 
         // 决策树
         if requires_high_perf && is_complex {
             ToolCreationStrategy::RustTool
-        } else if has_matching_cli || is_rapid_proto || (has_strong_causal_evidence && !is_complex) {
+        } else if has_matching_cli || is_rapid_proto || (has_strong_causal_evidence && !is_complex)
+        {
             // 有匹配 CLI、快速原型需求、或强因果证据但任务不复杂，优先封装外部工具
             ToolCreationStrategy::ExternalTool
         } else {
@@ -597,7 +633,11 @@ impl SelfImprovementLoop {
 
         // 尝试找到匹配的 CLI 工具
         let cli_tools = vec![
-            ("git", "version_control", vec!["git", "version control", "commit", "branch"]),
+            (
+                "git",
+                "version_control",
+                vec!["git", "version control", "commit", "branch"],
+            ),
             ("docker", "container", vec!["docker", "container", "image"]),
             ("curl", "network", vec!["curl", "http request", "api"]),
             ("grep", "text_processing", vec!["grep", "search text"]),
@@ -634,10 +674,9 @@ impl SelfImprovementLoop {
         domain: &str,
         gap: &HybridToolGap,
     ) -> Result<ExternalToolMetadata> {
-        use crate::external_process::metadata::{ProcessConfig, ExternalToolType, RiskLevel};
+        use crate::external_process::metadata::{ExternalToolType, ProcessConfig, RiskLevel};
 
-        let config = ProcessConfig::new(cli)
-            .with_timeout(30000);
+        let config = ProcessConfig::new(cli).with_timeout(30000);
 
         let input_schema = serde_json::json!({
             "type": "object",
@@ -821,27 +860,27 @@ impl SelfImprovementLoop {
     /// Decide whether to create a Rust tool or wrap an external tool
     fn decide_tool_creation_strategy(&self, gap: &ToolGap) -> ToolCreationStrategy {
         let desc_lower = gap.description.to_lowercase();
-        
+
         // Check if there's an existing CLI tool that matches the gap
         let has_matching_cli = self.check_existing_cli(&desc_lower);
-        
+
         // Check if rapid prototyping is needed (keywords indicating simple tasks)
-        let is_rapid_proto = desc_lower.contains("script") 
-            || desc_lower.contains("quick") 
+        let is_rapid_proto = desc_lower.contains("script")
+            || desc_lower.contains("quick")
             || desc_lower.contains("prototype")
             || desc_lower.contains("temporary");
-        
+
         // Check if high performance is required
         let requires_high_perf = desc_lower.contains("high performance")
             || desc_lower.contains("low latency")
             || desc_lower.contains("real-time");
-        
+
         // Check if the task is complex (requires Rust)
         let is_complex = desc_lower.contains("complex")
             || desc_lower.contains("algorithm")
             || desc_lower.contains("optimization")
             || desc_lower.contains("concurrent");
-        
+
         // Decision tree
         if requires_high_perf && is_complex {
             ToolCreationStrategy::RustTool
@@ -851,21 +890,27 @@ impl SelfImprovementLoop {
             ToolCreationStrategy::RustTool
         }
     }
-    
+
     /// Check if there's an existing CLI tool that matches the gap description
     fn check_existing_cli(&self, description: &str) -> bool {
         // Common CLI tools that might match gap descriptions
         let cli_keywords = vec![
-            ("git", vec!["git", "version control", "commit", "branch", "merge"]),
+            (
+                "git",
+                vec!["git", "version control", "commit", "branch", "merge"],
+            ),
             ("docker", vec!["docker", "container", "image", "compose"]),
-            ("npm", vec!["npm", "node package", "yarn", "install package"]),
+            (
+                "npm",
+                vec!["npm", "node package", "yarn", "install package"],
+            ),
             ("cargo", vec!["cargo", "rust package", "rust build"]),
             ("curl", vec!["curl", "http request", "api call"]),
             ("grep", vec!["grep", "search text", "pattern search"]),
             ("jq", vec!["jq", "json parse", "json query"]),
             ("find", vec!["find", "search file", "locate file"]),
         ];
-        
+
         for (cli, keywords) in cli_keywords {
             for keyword in keywords {
                 if description.contains(keyword) {
@@ -876,7 +921,7 @@ impl SelfImprovementLoop {
                 }
             }
         }
-        
+
         false
     }
 }
@@ -897,7 +942,7 @@ mod tests {
     fn test_record_task() {
         let temp_dir = TempDir::new().unwrap();
         let evolution = SelfImprovementLoop::new(temp_dir.path()).unwrap();
-        
+
         let record = TaskExecutionRecord {
             task_id: "test_1".to_string(),
             task_description: "Test".to_string(),
@@ -907,9 +952,9 @@ mod tests {
             failure_reason: Some("Test failure".to_string()),
             user_satisfaction: Some(1),
         };
-        
+
         evolution.record_task(record);
-        
+
         // 验证任务被记录（简化测试）
         let _detector = evolution.get_gap_detector();
     }
@@ -939,14 +984,14 @@ mod tests {
     #[test]
     fn test_end_to_end_evolution_cycle() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // 创建配置（启用自动创建工具）
         let mut config = EvolutionConfig::default();
         config.auto_create_tools = false; // 测试中不实际创建工具
         config.tool_creation_priority_threshold = 5;
-        
+
         let evolution = SelfImprovementLoop::with_config(temp_dir.path(), config).unwrap();
-        
+
         // 1. 记录多个失败任务（模拟需要批量文件处理工具的场景）
         for i in 0..10 {
             let record = TaskExecutionRecord {
@@ -955,12 +1000,14 @@ mod tests {
                 success: false,
                 used_tools: vec!["read_file".to_string(), "write_file".to_string()],
                 execution_time_ms: 500 + i * 100,
-                failure_reason: Some("No efficient way to process multiple files at once".to_string()),
+                failure_reason: Some(
+                    "No efficient way to process multiple files at once".to_string(),
+                ),
                 user_satisfaction: Some(2),
             };
             evolution.record_task(record);
         }
-        
+
         // 记录一些成功任务作为对比
         for i in 0..5 {
             let record = TaskExecutionRecord {
@@ -974,20 +1021,20 @@ mod tests {
             };
             evolution.record_task(record);
         }
-        
+
         // 2. 运行进化循环
         let report = evolution.run_evolution_cycle().unwrap();
-        
+
         // 3. 验证结果
         assert!(report.detected_gaps_count > 0, "应该检测到至少一个工具缺口");
         assert_eq!(report.status, CycleStatus::Success);
-        
+
         println!("=== 自进化闭环端到端测试 ===");
         println!("检测到的缺口数量：{}", report.detected_gaps_count);
         println!("优化建议数量：{}", report.optimization_suggestions_count);
         println!("系统健康评分：{:.2}", report.system_health_score);
         println!("循环耗时：{}ms", report.cycle_duration_ms);
-        
+
         // 验证缺口检测器中有数据
         let detector = evolution.get_gap_detector();
         let gaps = futures::executor::block_on(async {
@@ -1002,7 +1049,7 @@ mod tests {
     fn test_hybrid_gap_detection_from_failures() {
         let temp_dir = TempDir::new().unwrap();
         let evolution = SelfImprovementLoop::new(temp_dir.path()).unwrap();
-        
+
         // 记录具有相同失败原因的任务
         let failure_reason = "Missing batch processing capability";
         for i in 0..5 {
@@ -1017,7 +1064,7 @@ mod tests {
             };
             evolution.record_task(record);
         }
-        
+
         // 运行检测
         let gaps = {
             let detector = evolution.gap_detector.clone();
@@ -1026,10 +1073,10 @@ mod tests {
                 d.detect_gaps().await
             })
         };
-        
+
         // 验证检测到了缺口
         assert!(!gaps.is_empty(), "应该检测到工具缺口");
-        
+
         // 验证统计证据
         for gap in &gaps {
             assert!(gap.statistical_evidence.failure_rate > 0.0);

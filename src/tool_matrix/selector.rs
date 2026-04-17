@@ -141,7 +141,10 @@ impl ToolSelector {
                     if selected_tools.len() >= max_tools {
                         break;
                     }
-                    if !selected_tools.iter().any(|t: &ToolDefinition| t.name == tool.name) {
+                    if !selected_tools
+                        .iter()
+                        .any(|t: &ToolDefinition| t.name == tool.name)
+                    {
                         selected_tools.push(tool);
                     }
                 }
@@ -342,11 +345,12 @@ mod tests {
         // 创建工具箱并注册工具
         let mut file_box = ToolBox::new("file_ops", "File Operations", "File tools");
         file_box.add_tool(ToolDefinition::new("read_file", "Read a file", "{}").with_tag("io"));
-        file_box.add_tool(ToolDefinition::new("write_file", "Write a file", "{}").with_tag("write"));
+        file_box
+            .add_tool(ToolDefinition::new("write_file", "Write a file", "{}").with_tag("write"));
 
         // 将工具箱注册到 registry
         registry.create_toolbox(file_box.clone()).unwrap();
-        
+
         // 直接将工具注册到 registry
         let tools = vec![
             ToolDefinition::new("read_file", "Read a file", "{}").with_tag("io"),

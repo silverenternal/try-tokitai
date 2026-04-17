@@ -250,7 +250,12 @@ impl TracingRecorder {
     }
 
     /// 开始子 Span
-    pub fn start_child_span(&mut self, parent: &TraceContext, span_type: SpanType, name: String) -> TraceContext {
+    pub fn start_child_span(
+        &mut self,
+        parent: &TraceContext,
+        span_type: SpanType,
+        name: String,
+    ) -> TraceContext {
         let span = TraceSpan::new(parent.trace_id.clone(), span_type, name)
             .with_parent(parent.span_id.clone());
         let span_id = span.span_id.clone();
@@ -318,7 +323,8 @@ impl TracingRecorder {
 
     /// 获取追踪摘要
     pub fn get_trace_summary(&self, trace_id: &str) -> Option<TraceSummary> {
-        let spans: Vec<&TraceSpan> = self.completed_spans
+        let spans: Vec<&TraceSpan> = self
+            .completed_spans
             .iter()
             .filter(|s| s.trace_id == trace_id)
             .collect();
@@ -327,11 +333,10 @@ impl TracingRecorder {
             return None;
         }
 
-        let total_duration: i64 = spans.iter()
-            .filter_map(|s| s.duration_ms)
-            .sum();
+        let total_duration: i64 = spans.iter().filter_map(|s| s.duration_ms).sum();
 
-        let error_count = spans.iter()
+        let error_count = spans
+            .iter()
             .filter(|s| s.status == SpanStatus::Error)
             .count();
 
@@ -354,7 +359,7 @@ impl TracingRecorder {
         let file_path = self.storage_dir.join(format!("trace_{}.jsonl", date));
 
         let json = serde_json::to_string(span)?;
-        
+
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -386,9 +391,13 @@ impl TracingRecorder {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with("trace_") && name.ends_with(".jsonl") {
                     // 从文件名解析日期
-                    if let Some(date_str) = name.strip_prefix("trace_").and_then(|s| s.strip_suffix(".jsonl")) {
+                    if let Some(date_str) = name
+                        .strip_prefix("trace_")
+                        .and_then(|s| s.strip_suffix(".jsonl"))
+                    {
                         if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                            let timestamp = date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+                            let timestamp =
+                                date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
                             if timestamp < cutoff {
                                 fs::remove_file(&path)?;
                                 deleted += 1;
@@ -425,22 +434,23 @@ mod tests {
 
         // 开始追踪
         let trace_ctx = recorder.start_trace(SpanType::UserRequest, "用户请求".to_string());
-        
+
         // 开始子 Span
-        let child_ctx = recorder.start_child_span(&trace_ctx, SpanType::ToolExecution, "工具执行".to_string());
-        
+        let child_ctx =
+            recorder.start_child_span(&trace_ctx, SpanType::ToolExecution, "工具执行".to_string());
+
         // 添加事件
         recorder.add_event(&child_ctx, TraceEvent::new("工具调用开始".to_string()));
-        
+
         // 结束子 Span
         recorder.end_span(&child_ctx);
-        
+
         // 结束追踪
         recorder.end_span(&trace_ctx);
 
         // 验证
         assert_eq!(recorder.completed_span_count(), 2);
-        
+
         let summary = recorder.get_trace_summary(&trace_ctx.trace_id).unwrap();
         assert_eq!(summary.span_count, 2);
     }

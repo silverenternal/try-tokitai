@@ -2,7 +2,7 @@
 //!
 //! 提供统一的路径验证逻辑，消除重复代码
 
-use crate::tools::io::error::{IoToolError, IoResult};
+use crate::tools::io::error::{IoResult, IoToolError};
 use crate::tools::io::security::SecurePathResolver;
 use std::path::Path;
 
@@ -127,8 +127,8 @@ pub fn ensure_path_not_exists(path: &Path) -> IoResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_ensure_file_exists() {

@@ -23,10 +23,10 @@
 
 #![allow(dead_code)]
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use anyhow::{Context, Result};
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 /// 智能体角色定义
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -171,7 +171,9 @@ pub struct EvolutionState {
 
 /// 智能体角色 Prompt 定义
 pub const AGENT_ROLE_PROMPTS: &[(&str, &str)] = &[
-    ("Creator", r#"
+    (
+        "Creator",
+        r#"
 你是工具创建者（Creator）。你的目标是发现新工具机会，扩展工具库能力。
 
 你的特点：
@@ -184,8 +186,11 @@ pub const AGENT_ROLE_PROMPTS: &[(&str, &str)] = &[
 1. 有哪些明显的工具缺口？
 2. 创建什么新工具可以显著提升效率？
 3. 新工具与现有工具的关系是什么？
-"#),
-    ("Optimizer", r#"
+"#,
+    ),
+    (
+        "Optimizer",
+        r#"
 你是工具优化者（Optimizer）。你的目标是改进现有工具。
 
 你的特点：
@@ -197,8 +202,11 @@ pub const AGENT_ROLE_PROMPTS: &[(&str, &str)] = &[
 1. 哪些工具可以通过改进获得显著提升？
 2. 工具的失败原因是什么？如何修复？
 3. 工具的功能是否可以扩展？
-"#),
-    ("Eliminator", r#"
+"#,
+    ),
+    (
+        "Eliminator",
+        r#"
 你是工具淘汰者（Eliminator）。你的目标是移除冗余工具，保持工具库精简。
 
 你的特点：
@@ -210,8 +218,11 @@ pub const AGENT_ROLE_PROMPTS: &[(&str, &str)] = &[
 1. 哪些工具是冗余的？
 2. 哪些工具使用率极低，应该废弃？
 3. 如何简化接口，降低用户认知负担？
-"#),
-    ("Planner", r#"
+"#,
+    ),
+    (
+        "Planner",
+        r#"
 你是系统规划者（Planner）。你的目标是整体工具库健康。
 
 你的特点：
@@ -223,7 +234,8 @@ pub const AGENT_ROLE_PROMPTS: &[(&str, &str)] = &[
 1. 各智能体的论据质量如何？
 2. 什么决策最有利于系统长期健康？
 3. 如何在创新与稳定之间取得平衡？
-"#),
+"#,
+    ),
 ];
 
 /// 协商协议 Prompt 模板
@@ -343,10 +355,7 @@ impl MultiAgentNegotiator {
 
     /// 从配置创建
     pub fn with_config(llm_client: Arc<dyn LLMClient>, config: NegotiatorConfig) -> Self {
-        Self {
-            llm_client,
-            config,
-        }
+        Self { llm_client, config }
     }
 
     /// 执行协商
@@ -360,14 +369,15 @@ impl MultiAgentNegotiator {
         let schema = self.get_negotiation_schema();
 
         // LLM 推理
-        let response_text = self.llm_client
+        let response_text = self
+            .llm_client
             .chat_with_schema(&prompt, &schema)
             .await
             .context("LLM 推理失败")?;
 
         // 解析响应
-        let response: NegotiationResponse = serde_json::from_str(&response_text)
-            .context("解析协商响应失败")?;
+        let response: NegotiationResponse =
+            serde_json::from_str(&response_text).context("解析协商响应失败")?;
 
         // 验证决策
         self.validate_decision(&response)?;
@@ -433,7 +443,10 @@ impl MultiAgentNegotiator {
 
         NEGOTIATION_PROMPT
             .replace("{tool_count}", &state.tool_count.to_string())
-            .replace("{success_rate}", &format!("{:.1}", state.success_rate * 100.0))
+            .replace(
+                "{success_rate}",
+                &format!("{:.1}", state.success_rate * 100.0),
+            )
             .replace("{underused_tools}", &underused)
             .replace("{high_failure_tools}", &high_failure)
             .replace("{detected_gaps}", &gaps)
@@ -527,7 +540,10 @@ impl MultiAgentNegotiator {
     fn log_negotiation_history(&self, response: &NegotiationResponse) {
         debug!("=== Round 1: 提案 ===");
         for proposal in &response.round1_proposals {
-            debug!("[{}] {}: {}", proposal.agent, proposal.proposal, proposal.rationale);
+            debug!(
+                "[{}] {}: {}",
+                proposal.agent, proposal.proposal, proposal.rationale
+            );
         }
 
         debug!("\n=== Round 2: 评论 ===");
@@ -549,7 +565,11 @@ impl MultiAgentNegotiator {
             debug!(
                 "[{}] {} - {}",
                 vote.agent,
-                if vote.approve { "✅ 同意" } else { "❌ 反对" },
+                if vote.approve {
+                    "✅ 同意"
+                } else {
+                    "❌ 反对"
+                },
                 vote.reason
             );
         }
@@ -559,7 +579,9 @@ impl MultiAgentNegotiator {
     fn format_action(&self, action: &EvolutionAction) -> String {
         match action {
             EvolutionAction::CreateTool { tool_name, .. } => format!("创建工具：{}", tool_name),
-            EvolutionAction::MergeTools { new_tool_name, .. } => format!("合并工具：{}", new_tool_name),
+            EvolutionAction::MergeTools { new_tool_name, .. } => {
+                format!("合并工具：{}", new_tool_name)
+            }
             EvolutionAction::DeprecateTool { tool_name, .. } => format!("废弃工具：{}", tool_name),
             EvolutionAction::ImproveTool { tool_name, .. } => format!("改进工具：{}", tool_name),
             EvolutionAction::MaintainStatusQuo => "保持现状".to_string(),
@@ -578,7 +600,11 @@ impl MultiAgentNegotiator {
                 return Ok(decision);
             }
 
-            warn!("第{}次重试仍未达成共识，通过率{:.1}%", i + 1, decision.approval_rate * 100.0);
+            warn!(
+                "第{}次重试仍未达成共识，通过率{:.1}%",
+                i + 1,
+                decision.approval_rate * 100.0
+            );
         }
 
         anyhow::bail!("经过{}次重试仍未达成共识", self.config.max_retries);
@@ -608,7 +634,9 @@ mod tests {
 
     impl MockLLMClient {
         fn new(response: &str) -> Self {
-            Self { response: response.to_string() }
+            Self {
+                response: response.to_string(),
+            }
         }
     }
 
@@ -618,7 +646,11 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        async fn chat_with_schema(&self, _prompt: &str, _schema: &serde_json::Value) -> Result<String> {
+        async fn chat_with_schema(
+            &self,
+            _prompt: &str,
+            _schema: &serde_json::Value,
+        ) -> Result<String> {
             Ok(self.response.clone())
         }
     }
@@ -650,10 +682,14 @@ mod tests {
     fn test_agent_roles() {
         assert_eq!(AGENT_ROLE_PROMPTS.len(), 4);
 
-        let creator_prompt = AGENT_ROLE_PROMPTS.iter().find(|(role, _)| *role == "Creator");
+        let creator_prompt = AGENT_ROLE_PROMPTS
+            .iter()
+            .find(|(role, _)| *role == "Creator");
         assert!(creator_prompt.is_some());
 
-        let eliminator_prompt = AGENT_ROLE_PROMPTS.iter().find(|(role, _)| *role == "Eliminator");
+        let eliminator_prompt = AGENT_ROLE_PROMPTS
+            .iter()
+            .find(|(role, _)| *role == "Eliminator");
         assert!(eliminator_prompt.is_some());
     }
 
@@ -666,7 +702,10 @@ mod tests {
             tool_name: "test_tool".to_string(),
             functionality: "test".to_string(),
         };
-        assert_eq!(negotiator.format_action(&create_action), "创建工具：test_tool");
+        assert_eq!(
+            negotiator.format_action(&create_action),
+            "创建工具：test_tool"
+        );
 
         let maintain_action = EvolutionAction::MaintainStatusQuo;
         assert_eq!(negotiator.format_action(&maintain_action), "保持现状");

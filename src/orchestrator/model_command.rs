@@ -27,7 +27,7 @@ impl ModelCommandHandler {
     pub fn execute(&self, args: &[&str]) -> ModelCommandResult {
         if args.is_empty() {
             return ModelCommandResult::Error(
-                "Usage: /model <list|switch|benchmark|stats> [args]".to_string()
+                "Usage: /model <list|switch|benchmark|stats> [args]".to_string(),
             );
         }
 
@@ -40,10 +40,12 @@ impl ModelCommandHandler {
                     self.handle_switch(args[1])
                 }
             }
-            "benchmark" => ModelCommandResult::Success("Benchmark command - coming soon.\n".to_string()),
+            "benchmark" => {
+                ModelCommandResult::Success("Benchmark command - coming soon.\n".to_string())
+            }
             "stats" => self.handle_stats(),
             _ => ModelCommandResult::Error(
-                "Unknown command. Use: list, switch, benchmark, stats".to_string()
+                "Unknown command. Use: list, switch, benchmark, stats".to_string(),
             ),
         }
     }
@@ -52,7 +54,7 @@ impl ModelCommandHandler {
     fn handle_list(&self) -> ModelCommandResult {
         let manager = self.llm_manager.lock();
         let mut output = String::from("📋 Available Models:\n\n");
-        
+
         let providers = manager.list_providers();
 
         for provider_type in providers {
@@ -69,18 +71,16 @@ impl ModelCommandHandler {
     /// Handle /model switch
     fn handle_switch(&self, target: &str) -> ModelCommandResult {
         let mut manager = self.llm_manager.lock();
-        
+
         // Try to parse as provider type
         let provider_type = ProviderType::from_str(target);
-        
+
         if manager.has_provider(&provider_type) {
             match manager.set_current(provider_type.clone()) {
-                Ok(_) => {
-                    ModelCommandResult::Success(format!(
-                        "✅ Switched to provider: {}",
-                        provider_type
-                    ))
-                }
+                Ok(_) => ModelCommandResult::Success(format!(
+                    "✅ Switched to provider: {}",
+                    provider_type
+                )),
                 Err(e) => ModelCommandResult::Error(format!("Failed to switch: {}", e)),
             }
         } else {
@@ -93,7 +93,8 @@ impl ModelCommandHandler {
 
     /// Handle /model stats
     fn handle_stats(&self) -> ModelCommandResult {
-        let output = String::from("📊 Model Statistics:\n\n  Statistics tracking not yet implemented.\n");
+        let output =
+            String::from("📊 Model Statistics:\n\n  Statistics tracking not yet implemented.\n");
         ModelCommandResult::Success(output)
     }
 }

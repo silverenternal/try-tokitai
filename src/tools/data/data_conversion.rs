@@ -2,16 +2,14 @@
 //!
 //! 提供 JSON 到 CSV 等数据格式转换功能
 
-use tokitai::tool;
-use serde_json::Value;
-use std::sync::Arc;
-use std::collections::HashSet;
 use crate::tools::data::config::DataToolConfig;
 use crate::tools::data::error::DataToolError;
-use crate::tools::data::validator::{
-    JsonLengthValidator, ItemCountValidator, Validator,
-};
-use crate::tools::data::metrics::{MetricsCollector, DataToolOperation};
+use crate::tools::data::metrics::{DataToolOperation, MetricsCollector};
+use crate::tools::data::validator::{ItemCountValidator, JsonLengthValidator, Validator};
+use serde_json::Value;
+use std::collections::HashSet;
+use std::sync::Arc;
+use tokitai::tool;
 
 /// 数据格式转换工具集
 #[derive(Debug)]
@@ -43,7 +41,8 @@ impl DataConversionTools {
     }
 
     fn parse_json_array(&self, json_string: &str) -> Result<Vec<Value>, Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
         let parsed: Value = serde_json::from_str(json_string)
             .map_err(|e| DataToolError::json_parse(e.to_string()).to_value())?;
@@ -75,7 +74,8 @@ impl DataConversionTools {
         csv.push('\n');
         for item in &array {
             if let Value::Object(obj) = item {
-                let row: Vec<String> = all_keys.iter()
+                let row: Vec<String> = all_keys
+                    .iter()
                     .map(|key| {
                         obj.get(key)
                             .map(Self::value_to_csv_field)

@@ -17,12 +17,12 @@
 //! - 通过共享工作区通信
 //! - 纯文件存储状态
 
-pub mod planner;
-pub mod executor;
-pub mod reviewer;
 pub mod coordinator;
+pub mod executor;
+pub mod planner;
+pub mod reviewer;
 
-pub use planner::PlannerAgent;
-pub use executor::ExecutorAgent;
-pub use reviewer::ReviewerAgent;
 pub use coordinator::AgentCoordinator;
+pub use executor::ExecutorAgent;
+pub use planner::PlannerAgent;
+pub use reviewer::ReviewerAgent;

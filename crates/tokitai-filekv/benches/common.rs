@@ -6,18 +6,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tempfile::TempDir;
 use criterion::Criterion;
-use tokitai_filekv::{
-    AggressiveConfig, AuditLogConfig, FileKV, FileKVConfig, MemTableConfig,
-};
+use tempfile::TempDir;
 use tokitai_filekv::cache::block_cache::BlockCacheConfig;
 use tokitai_filekv::compaction::CompactionConfig;
-use tokitai_filekv::core::types::BlockCompressionConfig;
 use tokitai_filekv::io::StdFs;
-use tokitai_filekv::DictionaryCompressionConfig;
+use tokitai_filekv::{AggressiveConfig, AuditLogConfig, FileKV, FileKVConfig, MemTableConfig};
 
 /// Default benchmark timeout to prevent hangs
+#[allow(dead_code)]
 pub const DEFAULT_BENCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Quick benchmark configuration (fast setup, minimal overhead)
@@ -25,9 +22,7 @@ pub fn quick_bench_config(temp_dir: &TempDir) -> FileKVConfig {
     FileKVConfig {
         memtable: MemTableConfig {
             flush_threshold_bytes: 64 * 1024, // 64KB for quick flushes
-            max_entries: 100_000,
-            max_memory_bytes: 64 * 1024 * 1024,
-            shards: num_cpus::get() * 2, // POL-007: DashMap 分片数量
+            ..Default::default()
         },
         segment_dir: temp_dir.path().join("segments"),
         enable_wal: false,
@@ -40,51 +35,25 @@ pub fn quick_bench_config(temp_dir: &TempDir) -> FileKVConfig {
         },
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 100,
-        block_size: 8192,
-        block_compression: BlockCompressionConfig::default(),
         compaction: CompactionConfig {
             min_segments: 4,
             auto_compact: false,
-            check_interval: 100,
-            max_segment_size_bytes: 16 * 1024 * 1024,
-            target_segment_size_bytes: 8 * 1024 * 1024,
-            async_compaction_enabled: false,
-            leveled_compaction_enabled: true,
-            level_size_multiplier: 10,
-            max_level: 3,
-            l0_file_count_threshold: 4,
-            parallel_compaction_enabled: true,
-            streaming_compaction_enabled: true,
+            ..Default::default()
         },
-        segment_preallocate_size: 16 * 1024 * 1024,
-        wal_max_size_bytes: 100 * 1024 * 1024,
-        wal_max_files: 5,
-        cache_warming_enabled: false,
-        compression: DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 4,
-        async_io_max_queue_depth: 1024,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         audit_log: AuditLogConfig {
             log_dir: temp_dir.path().join("audit_logs"),
             enabled: false,
-            rotation_interval_hours: 24,
-            retention_days: 30,
+            ..Default::default()
         },
         aggressive: AggressiveConfig::performance(),
-        enable_adaptive_bloom_cache: true,
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: Arc::new(StdFs),
+        ..Default::default()
     }
 }
 
 /// WAL-enabled benchmark configuration
+#[allow(dead_code)]
 pub fn wal_bench_config(temp_dir: &TempDir) -> FileKVConfig {
     let mut config = quick_bench_config(temp_dir);
     config.enable_wal = true;
@@ -93,6 +62,7 @@ pub fn wal_bench_config(temp_dir: &TempDir) -> FileKVConfig {
 
 /// Create a fresh FileKV instance for benchmarks
 /// Setup should be called OUTSIDE of b.iter() for accurate measurements
+#[allow(dead_code)]
 pub fn setup_kv(config: FileKVConfig) -> (TempDir, FileKV) {
     let temp_dir = TempDir::new().unwrap();
 
@@ -113,6 +83,7 @@ pub fn setup_kv(config: FileKVConfig) -> (TempDir, FileKV) {
 }
 
 /// Pre-populate FileKV with test data
+#[allow(dead_code)]
 pub fn populate_kv(kv: &FileKV, count: usize) {
     for i in 0..count {
         let key = format!("key_{:08}", i);
@@ -122,11 +93,13 @@ pub fn populate_kv(kv: &FileKV, count: usize) {
 }
 
 /// Flush memtable and ensure data is on disk
+#[allow(dead_code)]
 pub fn flush_kv(kv: &FileKV) {
     kv.flush_memtable().unwrap();
 }
 
 /// Warm up the block cache by reading all keys
+#[allow(dead_code)]
 pub fn warm_cache(kv: &FileKV, count: usize) {
     for i in 0..count {
         let key = format!("key_{:08}", i);
@@ -136,6 +109,7 @@ pub fn warm_cache(kv: &FileKV, count: usize) {
 
 /// Criterion default fast configuration for benchmarks
 /// Uses small sample sizes and short warm-up to keep total runtime under 5 minutes
+#[allow(dead_code)]
 pub fn fast_criterion_config() -> Criterion {
     Criterion::default()
         .warm_up_time(Duration::from_secs(1))
@@ -146,6 +120,7 @@ pub fn fast_criterion_config() -> Criterion {
 }
 
 /// Generate a key for benchmarking
+#[allow(dead_code)]
 #[inline]
 pub fn bench_key(index: usize) -> String {
     format!("key_{:08}", index)
@@ -158,16 +133,19 @@ pub fn bench_value(size: usize) -> Vec<u8> {
 }
 
 /// Small value (64 bytes)
+#[allow(dead_code)]
 pub fn small_value() -> Vec<u8> {
     bench_value(64)
 }
 
 /// Medium value (1KB)
+#[allow(dead_code)]
 pub fn medium_value() -> Vec<u8> {
     bench_value(1024)
 }
 
 /// Large value (4KB)
+#[allow(dead_code)]
 pub fn large_value() -> Vec<u8> {
     bench_value(4096)
 }

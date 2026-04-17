@@ -30,6 +30,10 @@ fn main() -> anyhow::Result<()> {
             flush_threshold_bytes: 32 * 1024 * 1024,
             max_entries: 500_000,
             max_memory_bytes: 128 * 1024 * 1024,
+            shards: 32,
+            enable_async_flush: false,
+            max_immutable_memtables: 1,
+            immutable_flush_threshold_bytes: 32 * 1024 * 1024,
         },
         segment_dir,
         enable_wal: true,
@@ -38,6 +42,7 @@ fn main() -> anyhow::Result<()> {
         cache: tokitai_filekv::cache::block_cache::BlockCacheConfig {
             max_items: 100_000,
             max_memory_bytes: 256 * 1024 * 1024,
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
@@ -55,6 +60,12 @@ fn main() -> anyhow::Result<()> {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: false,
             streaming_compaction_enabled: true,
+            write_amplification_threshold: 3.0,
+            max_background_compaction_threads: 1,
+            l0_size_bytes_threshold: 64 * 1024 * 1024,
+            l0_compaction_strategy: tokitai_filekv::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         segment_preallocate_size: 64 * 1024 * 1024,
         block_size: 8192,
@@ -80,8 +91,14 @@ fn main() -> anyhow::Result<()> {
         enable_adaptive_bloom_cache: true,
         enable_zone_map_pruning: true,
         enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: std::sync::Arc::new(tokitai_filekv::io::StdFs),
+        enable_multi_level_cache: true,
+        l2_cache_max_bytes: 4 * 1024 * 1024 * 1024,
+        l2_to_l1_threshold: 5,
+        enable_wal_channel: false,
+        wal_channel_interval_ms: 2,
+        wal_channel_max_entries: 1000,
+        wal_channel_capacity: 10_000,
     };
 
     let kv = tokitai_filekv::FileKV::open(config)?;
@@ -162,9 +179,18 @@ fn main() -> anyhow::Result<()> {
 
     println!("\n  Write Statistics:");
     println!("    Total writes: {}", stats.write_count);
-    println!("    User bytes written: {:.2} KB", stats.user_bytes_written as f64 / 1024.0);
-    println!("    Total bytes written (all layers): {:.2} KB", stats.total_bytes_written_all as f64 / 1024.0);
-    println!("    Write amplification factor: {:.2}x", stats.write_amplification_factor);
+    println!(
+        "    User bytes written: {:.2} KB",
+        stats.user_bytes_written as f64 / 1024.0
+    );
+    println!(
+        "    Total bytes written (all layers): {:.2} KB",
+        stats.total_bytes_written_all as f64 / 1024.0
+    );
+    println!(
+        "    Write amplification factor: {:.2}x",
+        stats.write_amplification_factor
+    );
 
     println!("\n  Read Statistics:");
     println!("    Total reads: {}", stats.read_count);
@@ -172,8 +198,14 @@ fn main() -> anyhow::Result<()> {
     println!("    Read amplification factor: {:.2}x", stats.read_amplification_factor);
 
     println!("\n  Space Statistics:");
-    println!("    Total size on disk: {:.2} KB", stats.total_size_bytes as f64 / 1024.0);
-    println!("    Space amplification factor: {:.2}x", stats.space_amplification_factor);
+    println!(
+        "    Total size on disk: {:.2} KB",
+        stats.total_size_bytes as f64 / 1024.0
+    );
+    println!(
+        "    Space amplification factor: {:.2}x",
+        stats.space_amplification_factor
+    );
 
     println!("\n  Cache Statistics:");
     println!("    Cache hits: {}", stats.cache_hits);

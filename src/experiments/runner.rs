@@ -7,12 +7,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use crate::experiments::{
-    ExperimentConfig, ExperimentGroup, TaskExecutionRecord, ToolCallRecord,
-    EvolutionCycleRecord, ReflectionRecord, GapRecord, EvolutionMetrics,
-    GroupSummary,
-};
 use crate::autonomy::hybrid_gap_detector::HybridGapDetector;
+use crate::experiments::{
+    EvolutionCycleRecord, EvolutionMetrics, ExperimentConfig, ExperimentGroup, GapRecord,
+    GroupSummary, ReflectionRecord, TaskExecutionRecord, ToolCallRecord,
+};
 
 /// Experiment runner for executing benchmark tasks
 pub struct ExperimentRunner {
@@ -34,16 +33,16 @@ impl ExperimentRunner {
     /// Create a new experiment runner
     pub fn new(config: ExperimentConfig, group: ExperimentGroup) -> Result<Self> {
         let project_path = config.project_path.clone();
-        
+
         // Initialize gap detector for evolution groups
         let gap_detector = if group.has_evolution() {
             let data_dir = project_path.join(".tokitai").join("evolution");
             std::fs::create_dir_all(&data_dir)
                 .with_context(|| "Failed to create evolution data directory")?;
-            
+
             // Use statistical-only detector for experiments (no LLM calls)
             let detector = HybridGapDetector::new_statistical_only(data_dir)?;
-            
+
             Some(Arc::new(Mutex::new(detector)))
         } else {
             None
@@ -62,9 +61,7 @@ impl ExperimentRunner {
     /// Get the log directory for this experiment
     pub fn log_dir(&self) -> PathBuf {
         let experiments_dir = self.project_path.join("experiments");
-        experiments_dir
-            .join("logs")
-            .join(self.group.log_dir_name())
+        experiments_dir.join("logs").join(self.group.log_dir_name())
     }
 
     /// Ensure log directory exists
@@ -84,9 +81,9 @@ impl ExperimentRunner {
         description: &str,
     ) -> Result<TaskExecutionRecord> {
         use std::time::Instant;
-        
+
         let start_time = Instant::now();
-        
+
         // Create task record
         let mut record = TaskExecutionRecord::new(
             task_id.to_string(),
@@ -119,12 +116,10 @@ impl ExperimentRunner {
             if self.group.has_evolution() {
                 let mut detector = detector.lock().await;
                 // Record task execution for gap analysis
-                detector.record_task_execution(
-                    &record.task_id,
-                    record.success,
-                    record.total_tool_calls,
-                ).await;
-                
+                detector
+                    .record_task_execution(&record.task_id, record.success, record.total_tool_calls)
+                    .await;
+
                 // Update gap statistics in record
                 let stats = detector.get_current_stats();
                 record.gaps_detected = stats.gaps_detected;
@@ -140,40 +135,43 @@ impl ExperimentRunner {
     async fn execute_task(&self, description: &str) -> Result<(Vec<ToolCallRecord>, u8)> {
         // TODO: Integrate with actual task execution system
         // For now, return a mock result
-        
+
         // In real implementation:
         // 1. Parse task description
         // 2. Plan tool usage (with/without CoT based on group)
         // 3. Execute tools (with/without multi-agent negotiation)
         // 4. Self-correct if needed (with/without self-fix loop)
         // 5. Record all tool calls
-        
-        let tool_calls = vec![
-            ToolCallRecord {
-                tool: "mock_tool".to_string(),
-                args: serde_json::json!({"description": description}),
-                result: "success".to_string(),
-                execution_time_ms: Some(100),
-            }
-        ];
+
+        let tool_calls = vec![ToolCallRecord {
+            tool: "mock_tool".to_string(),
+            args: serde_json::json!({"description": description}),
+            result: "success".to_string(),
+            execution_time_ms: Some(100),
+        }];
 
         Ok((tool_calls, 4))
     }
 
     /// Run an evolution cycle (for evolution groups)
-    pub async fn run_evolution_cycle(&self, cycle_num: u32) -> Result<Option<EvolutionCycleRecord>> {
+    pub async fn run_evolution_cycle(
+        &self,
+        cycle_num: u32,
+    ) -> Result<Option<EvolutionCycleRecord>> {
         if !self.group.has_evolution() {
             return Ok(None);
         }
 
-        let gap_detector = self.gap_detector.as_ref()
+        let gap_detector = self
+            .gap_detector
+            .as_ref()
             .context("Gap detector not initialized")?;
 
         let mut detector = gap_detector.lock().await;
-        
+
         // Detect gaps
         let gaps = detector.detect_gaps().await;
-        
+
         // Collect metrics
         let metrics = detector.get_metrics();
         let stats = detector.get_current_stats();
@@ -187,12 +185,16 @@ impl ExperimentRunner {
                 systemic_issues: vec!["Sample issue".to_string()],
                 strategic_recommendations: vec!["Sample recommendation".to_string()],
             },
-            gaps_detected: gaps.into_iter().take(5).map(|g| GapRecord {
-                gap_type: format!("{:?}", g.gap_type),
-                description: g.description,
-                suggested_name: g.suggested_tool_name,
-                priority: g.priority,
-            }).collect(),
+            gaps_detected: gaps
+                .into_iter()
+                .take(5)
+                .map(|g| GapRecord {
+                    gap_type: format!("{:?}", g.gap_type),
+                    description: g.description,
+                    suggested_name: g.suggested_tool_name,
+                    priority: g.priority,
+                })
+                .collect(),
             actions_taken: vec![],
             metrics: EvolutionMetrics {
                 api_calls: metrics.api_calls,
@@ -217,7 +219,10 @@ impl ExperimentRunner {
     }
 
     /// Run all benchmark tasks
-    pub async fn run_benchmark(&self, tasks: &[crate::experiments::benchmark_tasks::BenchmarkTask]) -> Result<GroupSummary> {
+    pub async fn run_benchmark(
+        &self,
+        tasks: &[crate::experiments::benchmark_tasks::BenchmarkTask],
+    ) -> Result<GroupSummary> {
         info!("Starting benchmark for group: {:?}", self.group);
         info!("Loading {} tasks", tasks.len());
 
@@ -225,16 +230,18 @@ impl ExperimentRunner {
         for task in tasks {
             task_num += 1;
             info!("[{}/{}] Running task: {}", task_num, tasks.len(), task.id);
-            
-            let record = self.run_task(
-                &task.id,
-                &task.category,
-                &task.difficulty,
-                &task.description,
-            ).await?;
-            
+
+            let record = self
+                .run_task(
+                    &task.id,
+                    &task.category,
+                    &task.difficulty,
+                    &task.description,
+                )
+                .await?;
+
             self.record_task(record).await;
-            
+
             // Run evolution cycle every 5 tasks
             if task_num % 5 == 0 && self.group.has_evolution() {
                 let cycle_num = task_num / 5;
@@ -249,10 +256,7 @@ impl ExperimentRunner {
 
         // Generate summary
         let records = self.records.lock().await;
-        let summary = GroupSummary::from_records(
-            self.group.description(),
-            &records,
-        );
+        let summary = GroupSummary::from_records(self.group.description(), &records);
 
         info!("Benchmark completed for group: {:?}", self.group);
         info!("  Tasks completed: {}", summary.total_tasks);
@@ -270,13 +274,14 @@ impl ExperimentRunner {
         // Save task execution logs
         let records = self.records.lock().await;
         let task_log_file = log_dir.join(format!("task_logs_{}.jsonl", timestamp));
-        
-        let mut file = tokio::fs::File::create(&task_log_file).await
+
+        let mut file = tokio::fs::File::create(&task_log_file)
+            .await
             .with_context(|| format!("Failed to create task log file: {:?}", task_log_file))?;
 
         for record in records.iter() {
-            let line = serde_json::to_string(record)
-                .with_context(|| "Failed to serialize task record")?;
+            let line =
+                serde_json::to_string(record).with_context(|| "Failed to serialize task record")?;
             tokio::io::AsyncWriteExt::write_all(&mut file, line.as_bytes()).await?;
             tokio::io::AsyncWriteExt::write_all(&mut file, b"\n").await?;
         }
@@ -288,8 +293,11 @@ impl ExperimentRunner {
             let evo_records = self.evolution_records.lock().await;
             let evo_log_file = log_dir.join(format!("evolution_logs_{}.jsonl", timestamp));
 
-            let mut file = tokio::fs::File::create(&evo_log_file).await
-                .with_context(|| format!("Failed to create evolution log file: {:?}", evo_log_file))?;
+            let mut file = tokio::fs::File::create(&evo_log_file)
+                .await
+                .with_context(|| {
+                    format!("Failed to create evolution log file: {:?}", evo_log_file)
+                })?;
 
             for record in evo_records.iter() {
                 let line = serde_json::to_string(record)

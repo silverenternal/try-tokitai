@@ -5,7 +5,7 @@
 use mockall::automock;
 
 /// LLM Client 的 Mock Trait
-/// 
+///
 /// 注意：此 Trait 仅用于测试，不关心 auto traits 如 `Send`
 #[allow(async_fn_in_trait)]
 #[automock]
@@ -36,30 +36,30 @@ impl MockLLMResponseBuilder {
             latency_ms: 0,
         }
     }
-    
+
     /// 设置响应状态码
     pub fn with_status(mut self, status: u16) -> Self {
         self.status = status;
         self
     }
-    
+
     /// 设置响应内容
     pub fn with_content(mut self, content: &str) -> Self {
         self.content = content.to_string();
         self
     }
-    
+
     /// 设置模拟延迟（毫秒）
     pub fn with_latency(mut self, latency_ms: u64) -> Self {
         self.latency_ms = latency_ms;
         self
     }
-    
+
     /// 构建成功响应
     pub fn build_success(content: &str) -> String {
         content.to_string()
     }
-    
+
     /// 构建错误响应
     pub fn build_error(error_code: u16, message: &str) -> anyhow::Error {
         anyhow::anyhow!("API Error {}: {}", error_code, message)
@@ -88,7 +88,7 @@ pub mod responses {
             ]
         }"#
     }
-    
+
     /// 创建代码生成响应
     pub fn code_generation() -> &'static str {
         r#"```rust
@@ -97,7 +97,7 @@ pub fn example_function(x: i32) -> i32 {
 }
 ```"#
     }
-    
+
     /// 创建错误修复响应
     pub fn error_fix() -> &'static str {
         r#"```rust
@@ -111,7 +111,7 @@ pub fn safe_divide(a: f64, b: f64) -> Option<f64> {
 }
 ```"#
     }
-    
+
     /// 创建测试生成响应
     pub fn test_generation() -> &'static str {
         r#"```rust
@@ -131,7 +131,7 @@ mod tests {
 /// 创建 Mock 工具调用响应
 pub mod tool_responses {
     use serde_json::json;
-    
+
     /// 文件读取成功响应
     pub fn file_read_success(path: &str, content: &str) -> serde_json::Value {
         json!({
@@ -141,7 +141,7 @@ pub mod tool_responses {
             "size": content.len()
         })
     }
-    
+
     /// 文件写入成功响应
     pub fn file_write_success(path: &str) -> serde_json::Value {
         json!({
@@ -150,7 +150,7 @@ pub mod tool_responses {
             "bytes_written": true
         })
     }
-    
+
     /// Git 操作成功响应
     pub fn git_success(operation: &str, output: &str) -> serde_json::Value {
         json!({
@@ -159,7 +159,7 @@ pub mod tool_responses {
             "output": output
         })
     }
-    
+
     /// 网络请求成功响应
     pub fn http_success(status: u16, body: &str) -> serde_json::Value {
         json!({
@@ -168,7 +168,7 @@ pub mod tool_responses {
             "body": body
         })
     }
-    
+
     /// 错误响应
     pub fn error(message: &str, code: &str) -> serde_json::Value {
         json!({

@@ -16,11 +16,11 @@
 //! # Integration
 //! Used by FileKV::scan() to optimize range queries
 
-use tracing::debug;
 use thiserror::Error;
+use tracing::debug;
 
-use crate::core::error::{FatalError, ExpectedError};
-use super::zone_map::{ZoneMapIndex, ZoneMapError, RangeQueryStats};
+use super::zone_map::{RangeQueryStats, ZoneMapError, ZoneMapIndex};
+use crate::core::error::{ExpectedError, FatalError};
 
 /// Result type for range query pruner operations
 pub type Result<T> = std::result::Result<T, FatalError>;
@@ -216,10 +216,7 @@ impl RangeQueryPruner {
 
     /// Calculate the length of the common prefix between two strings
     fn common_prefix_length(&self, a: &str, b: &str) -> usize {
-        a.chars()
-            .zip(b.chars())
-            .take_while(|(ca, cb)| ca == cb)
-            .count()
+        a.chars().zip(b.chars()).take_while(|(ca, cb)| ca == cb).count()
     }
 
     /// Find blocks to scan for a range query
@@ -231,12 +228,7 @@ impl RangeQueryPruner {
     ///
     /// # Returns
     /// Vector of block IDs to scan (non-pruned blocks)
-    pub fn find_blocks_to_scan(
-        &self,
-        zone_map: &ZoneMapIndex,
-        start_key: &str,
-        end_key: &str,
-    ) -> Vec<u64> {
+    pub fn find_blocks_to_scan(&self, zone_map: &ZoneMapIndex, start_key: &str, end_key: &str) -> Vec<u64> {
         let overlapping = zone_map.find_overlapping_blocks(start_key, end_key);
 
         let total = zone_map.block_count();
@@ -250,7 +242,11 @@ impl RangeQueryPruner {
             total,
             scanned,
             pruned,
-            if total > 0 { (pruned as f64 / total as f64) * 100.0 } else { 0.0 }
+            if total > 0 {
+                (pruned as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            }
         );
 
         // Record statistics
@@ -279,9 +275,7 @@ impl RangeQueryPruner {
     ) -> ExpectedResult<bool> {
         match zone_map.should_prune_block(block_id, start_key, end_key) {
             Ok(should_prune) => Ok(should_prune),
-            Err(ZoneMapError::BlockNotFound(id)) => {
-                Err(ExpectedError::SegmentNotFound(id).into())
-            }
+            Err(ZoneMapError::BlockNotFound(id)) => Err(ExpectedError::SegmentNotFound(id).into()),
             Err(e) => Err(FatalError::Corruption(format!("Zone map error: {}", e)).into()),
         }
     }
@@ -313,12 +307,6 @@ impl RangeQueryPruner {
 pub struct PrunedBlockIterator<'a> {
     /// Zone Map index
     zone_map: &'a ZoneMapIndex,
-    /// Query start key (stored for debugging/inspection)
-    #[allow(dead_code)]
-    start_key: &'a str,
-    /// Query end key (stored for debugging/inspection)
-    #[allow(dead_code)]
-    end_key: &'a str,
     /// Current position in iterator
     position: usize,
     /// Pre-computed list of overlapping block IDs
@@ -327,16 +315,10 @@ pub struct PrunedBlockIterator<'a> {
 
 impl<'a> PrunedBlockIterator<'a> {
     /// Create a new pruned block iterator
-    pub fn new(
-        zone_map: &'a ZoneMapIndex,
-        start_key: &'a str,
-        end_key: &'a str,
-    ) -> Self {
+    pub fn new(zone_map: &'a ZoneMapIndex, start_key: &'a str, end_key: &'a str) -> Self {
         let overlapping = zone_map.find_overlapping_blocks(start_key, end_key);
         Self {
             zone_map,
-            start_key,
-            end_key,
             position: 0,
             overlapping_blocks: overlapping,
         }

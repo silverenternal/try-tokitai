@@ -33,19 +33,22 @@
 //! - ❌ 不提供服务接口
 
 use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tracing::{info, warn};
 
-use crate::assistant_common::{AssistantConfig, ToolManager, register_all_builtin_tools};
+use crate::assistant_common::{register_all_builtin_tools, AssistantConfig, ToolManager};
 use crate::autonomy::{AgentCoordinator, GitWorkflow, GitWorkflowTools};
+use crate::integration::{IntegratedModules, IntegratedModulesConfig};
 use crate::tool_matrix::registry::ToolRegistry;
 use crate::tool_matrix::registry::ToolSource;
-use crate::integration::{IntegratedModules, IntegratedModulesConfig};
-use crate::tools::{FileOperations, SystemTools, CodeTools, SearchTools, DownloadTools, GitOperations, JsonFormatTools};
 use crate::tools::HttpClientTools;
+use crate::tools::{
+    CodeTools, DownloadTools, FileOperations, GitOperations, JsonFormatTools, SearchTools,
+    SystemTools,
+};
 
 /// 自主助手 - 项目自更新服务
 pub struct AutonomousAssistant {
@@ -94,19 +97,18 @@ impl AutonomousAssistant {
         register_all_builtin_tools(&tool_registry);
 
         // 创建 autonomy 工具箱
-        let _ = tool_registry.create_toolbox(
-            crate::tool_matrix::matrix::ToolBox::new("autonomy", "Autonomy Tools", "AI autonomous evolution tools")
-        );
+        let _ = tool_registry.create_toolbox(crate::tool_matrix::matrix::ToolBox::new(
+            "autonomy",
+            "Autonomy Tools",
+            "AI autonomous evolution tools",
+        ));
 
         // 注册 GitWorkflow 工具到 autonomy 工具箱
-        let git_workflow_tools = GitWorkflowTools::new(
-            project_root.clone(),
-            autonomy_dir.join("git")
-        ).map_err(|e| anyhow::anyhow!("创建 Git 工作流工具失败：{}", e))?;
-        let _ = tool_registry.register_from_provider_sync::<GitWorkflowTools>(
-            Some("autonomy"),
-            ToolSource::Builtin
-        );
+        let git_workflow_tools =
+            GitWorkflowTools::new(project_root.clone(), autonomy_dir.join("git"))
+                .map_err(|e| anyhow::anyhow!("创建 Git 工作流工具失败：{}", e))?;
+        let _ = tool_registry
+            .register_from_provider_sync::<GitWorkflowTools>(Some("autonomy"), ToolSource::Builtin);
 
         // 创建工具管理器
         let tool_manager = ToolManager::new(tool_registry.clone());
@@ -140,14 +142,13 @@ impl AutonomousAssistant {
         // 创建 Agent 协调器
         let coordinator = AgentCoordinator::new(
             autonomy_dir.clone(),
-            Arc::new(RwLock::new(tool_registry.clone()))
-        ).map_err(|e| anyhow::anyhow!("创建 Agent 协调器失败：{}", e))?;
+            Arc::new(RwLock::new(tool_registry.clone())),
+        )
+        .map_err(|e| anyhow::anyhow!("创建 Agent 协调器失败：{}", e))?;
 
         // 创建 Git 工作流
-        let git_workflow = GitWorkflow::new(
-            project_root.clone(),
-            autonomy_dir.join("git")
-        ).map_err(|e| anyhow::anyhow!("创建 Git 工作流失败：{}", e))?;
+        let git_workflow = GitWorkflow::new(project_root.clone(), autonomy_dir.join("git"))
+            .map_err(|e| anyhow::anyhow!("创建 Git 工作流失败：{}", e))?;
 
         Ok(Self {
             config,
@@ -273,8 +274,9 @@ impl AutonomousAssistant {
     fn execute_evolution_iteration(&self, goal: &str) -> Result<bool> {
         // 1. 开始迭代
         let mut coordinator = self.create_coordinator_for_iteration()?;
-        
-        coordinator.start_iteration(goal.to_string())
+
+        coordinator
+            .start_iteration(goal.to_string())
             .map_err(|e| anyhow::anyhow!("启动迭代失败：{}", e))?;
 
         // 2. AI 自主分析项目现状
@@ -320,10 +322,13 @@ impl AutonomousAssistant {
             analysis.push_str(&format!("项目文件：{}\n", files));
         }
 
-        if let Ok(todos) = self.call_tool("search_content", &json!({
-            "pattern": "TODO|FIXME|XXX|HACK",
-            "path": "src"
-        })) {
+        if let Ok(todos) = self.call_tool(
+            "search_content",
+            &json!({
+                "pattern": "TODO|FIXME|XXX|HACK",
+                "path": "src"
+            }),
+        ) {
             analysis.push_str(&format!("待改进项：{}\n", todos));
         }
 
@@ -340,7 +345,7 @@ impl AutonomousAssistant {
             json!({
                 "role": "user",
                 "content": format!("目标：{}\n\n项目现状：{}\n\n请制定一个具体的改进计划。", goal, analysis)
-            })
+            }),
         ];
 
         let plan = self.chat(messages)?;
@@ -365,7 +370,7 @@ impl AutonomousAssistant {
             json!({
                 "role": "user",
                 "content": format!("请执行以下改进计划：\n\n{}", plan)
-            })
+            }),
         ];
 
         // 执行多轮对话直到任务完成
@@ -376,7 +381,10 @@ impl AutonomousAssistant {
             let response = self.chat(messages)?;
             info!("AI 响应：{}", response);
 
-            if response.contains("完成") || response.contains("已完成") || iterations >= max_iterations - 1 {
+            if response.contains("完成")
+                || response.contains("已完成")
+                || iterations >= max_iterations - 1
+            {
                 break;
             }
 
@@ -389,9 +397,12 @@ impl AutonomousAssistant {
     /// 本地审查
     fn local_review(&self) -> Result<bool> {
         println!("      - 运行 cargo fmt...");
-        let fmt_result = self.call_tool("run_command", &json!({
-            "command": "cargo fmt --check"
-        }));
+        let fmt_result = self.call_tool(
+            "run_command",
+            &json!({
+                "command": "cargo fmt --check"
+            }),
+        );
 
         if fmt_result.is_err() {
             println!("      ❌ 代码格式检查失败");
@@ -399,18 +410,24 @@ impl AutonomousAssistant {
         }
 
         println!("      - 运行 cargo clippy...");
-        let clippy_result = self.call_tool("run_command", &json!({
-            "command": "cargo clippy -- -D warnings"
-        }));
+        let clippy_result = self.call_tool(
+            "run_command",
+            &json!({
+                "command": "cargo clippy -- -D warnings"
+            }),
+        );
 
         if clippy_result.is_err() {
             println!("      ⚠️  Clippy 发现警告");
         }
 
         println!("      - 运行 cargo test...");
-        let test_result = self.call_tool("run_command", &json!({
-            "command": "cargo test --quiet"
-        }));
+        let test_result = self.call_tool(
+            "run_command",
+            &json!({
+                "command": "cargo test --quiet"
+            }),
+        );
 
         if test_result.is_err() {
             println!("      ❌ 测试失败");
@@ -423,9 +440,12 @@ impl AutonomousAssistant {
 
     /// 回滚变更
     fn rollback_changes(&self) -> Result<()> {
-        self.call_tool("run_command", &json!({
-            "command": "git checkout -- ."
-        }))?;
+        self.call_tool(
+            "run_command",
+            &json!({
+                "command": "git checkout -- ."
+            }),
+        )?;
         Ok(())
     }
 
@@ -445,20 +465,29 @@ impl AutonomousAssistant {
 
         // 添加并提交
         println!("      - git add .");
-        self.call_tool("run_command", &json!({
-            "command": "git add ."
-        }))?;
+        self.call_tool(
+            "run_command",
+            &json!({
+                "command": "git add ."
+            }),
+        )?;
 
         println!("      - git commit -m '{}'", commit_message);
-        self.call_tool("run_command", &json!({
-            "command": &format!("git commit -m '{}'", commit_message)
-        }))?;
+        self.call_tool(
+            "run_command",
+            &json!({
+                "command": &format!("git commit -m '{}'", commit_message)
+            }),
+        )?;
 
         // 推送
         println!("      - git push");
-        self.call_tool("run_command", &json!({
-            "command": "git push"
-        }))?;
+        self.call_tool(
+            "run_command",
+            &json!({
+                "command": "git push"
+            }),
+        )?;
 
         Ok(true)
     }
@@ -475,7 +504,7 @@ type 包括：feat, fix, docs, refactor, test, chore"
             json!({
                 "role": "user",
                 "content": format!("请为以下变更生成提交消息：\n\n{}", diff)
-            })
+            }),
         ];
 
         let message = self.chat(messages)?;
@@ -492,11 +521,9 @@ type 包括：feat, fix, docs, refactor, test, chore"
     fn chat(&self, messages: &mut Vec<Value>) -> Result<String> {
         let tools = self.tool_manager.get_all_tools();
 
-        let api_url = std::env::var("AI_API_URL")
-            .unwrap_or_else(|_| self.config.api_url.clone());
+        let api_url = std::env::var("AI_API_URL").unwrap_or_else(|_| self.config.api_url.clone());
         let api_key = std::env::var("AI_API_KEY").ok();
-        let model = std::env::var("AI_MODEL")
-            .unwrap_or_else(|_| self.config.model.clone());
+        let model = std::env::var("AI_MODEL").unwrap_or_else(|_| self.config.model.clone());
 
         let request_body = json!({
             "model": model,
@@ -511,22 +538,25 @@ type 包括：feat, fix, docs, refactor, test, chore"
             req = req.header("Authorization", format!("Bearer {}", key));
         }
 
-        let response = req
-            .json(&request_body)
-            .send()
-            .context("发送请求失败")?;
+        let response = req.json(&request_body).send().context("发送请求失败")?;
 
         let status = response.status();
         let response_text = response.text().context("读取响应失败")?;
 
         if !status.is_success() {
-            return Err(anyhow::anyhow!("API 返回错误 ({}): {}", status, response_text));
+            return Err(anyhow::anyhow!(
+                "API 返回错误 ({}): {}",
+                status,
+                response_text
+            ));
         }
 
-        let response_json: Value = serde_json::from_str(&response_text)
-            .context("解析响应失败")?;
+        let response_json: Value = serde_json::from_str(&response_text).context("解析响应失败")?;
 
-        if let Some(choices) = response_json.get("choices").and_then(|c: &Value| c.as_array()) {
+        if let Some(choices) = response_json
+            .get("choices")
+            .and_then(|c: &Value| c.as_array())
+        {
             if let Some(first) = choices.first() {
                 if let Some(message) = first.get("message") {
                     if let Some(content) = message.get("content").and_then(|c: &Value| c.as_str()) {
@@ -545,7 +575,8 @@ type 包括：feat, fix, docs, refactor, test, chore"
     fn create_coordinator_for_iteration(&self) -> Result<AgentCoordinator> {
         AgentCoordinator::new(
             self.autonomy_dir.clone(),
-            Arc::new(RwLock::new(self.tool_manager.tool_registry.clone()))
-        ).map_err(|e| anyhow::anyhow!("创建协调器失败：{}", e))
+            Arc::new(RwLock::new(self.tool_manager.tool_registry.clone())),
+        )
+        .map_err(|e| anyhow::anyhow!("创建协调器失败：{}", e))
     }
 }

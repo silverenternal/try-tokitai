@@ -1,7 +1,7 @@
 //! Checkpoint Tests
 
-use std::collections::HashMap;
 use super::*;
+use std::collections::HashMap;
 use tempfile::TempDir;
 
 fn create_test_manager() -> (IncrementalCheckpointManager, TempDir) {
@@ -19,7 +19,9 @@ fn test_full_checkpoint_creation() {
     state.insert("key2".to_string(), b"value2".to_vec());
     state.insert("key3".to_string(), b"value3".to_vec());
 
-    let checkpoint_id = manager.create_full_checkpoint(&state, Some("Test full checkpoint")).unwrap();
+    let checkpoint_id = manager
+        .create_full_checkpoint(&state, Some("Test full checkpoint"))
+        .unwrap();
 
     assert!(checkpoint_id.starts_with("ckpt_"));
 
@@ -52,7 +54,9 @@ fn test_incremental_checkpoint_creation() {
         },
     ];
 
-    let checkpoint_id = manager.create_incremental_checkpoint(changes, Some("Test incremental")).unwrap();
+    let checkpoint_id = manager
+        .create_incremental_checkpoint(changes, Some("Test incremental"))
+        .unwrap();
 
     let checkpoint = manager.get_checkpoint(&checkpoint_id).unwrap();
     assert!(matches!(checkpoint.checkpoint_type, CheckpointType::Incremental { .. }));
@@ -150,13 +154,11 @@ fn test_checkpoint_chain_restore() {
     let _ = manager.create_full_checkpoint(&state, None).unwrap();
 
     // First incremental
-    let changes1 = vec![
-        CheckpointEntry::Put {
-            key: "b".to_string(),
-            value: b"2".to_vec(),
-            timestamp: 1000,
-        },
-    ];
+    let changes1 = vec![CheckpointEntry::Put {
+        key: "b".to_string(),
+        value: b"2".to_vec(),
+        timestamp: 1000,
+    }];
     let _ = manager.create_incremental_checkpoint(changes1, None).unwrap();
 
     // Second incremental
@@ -194,13 +196,11 @@ fn test_checkpoint_persistence() {
         state.insert("key1".to_string(), b"value1".to_vec());
         let _ = manager.create_full_checkpoint(&state, None).unwrap();
 
-        let changes = vec![
-            CheckpointEntry::Put {
-                key: "key2".to_string(),
-                value: b"value2".to_vec(),
-                timestamp: 1000,
-            },
-        ];
+        let changes = vec![CheckpointEntry::Put {
+            key: "key2".to_string(),
+            value: b"value2".to_vec(),
+            timestamp: 1000,
+        }];
         let _ = manager.create_incremental_checkpoint(changes, None).unwrap();
     }
 
@@ -219,13 +219,11 @@ fn test_checkpoint_stats() {
     state.insert("key1".to_string(), b"value1".to_vec());
     let _ = manager.create_full_checkpoint(&state, None).unwrap();
 
-    let changes = vec![
-        CheckpointEntry::Put {
-            key: "key2".to_string(),
-            value: b"value2".to_vec(),
-            timestamp: 1000,
-        },
-    ];
+    let changes = vec![CheckpointEntry::Put {
+        key: "key2".to_string(),
+        value: b"value2".to_vec(),
+        timestamp: 1000,
+    }];
     let _ = manager.create_incremental_checkpoint(changes, None).unwrap();
 
     let stats = manager.get_stats();
@@ -248,13 +246,11 @@ fn test_checkpoint_compaction() {
 
     // Create incremental checkpoints
     for i in 1..6 {
-        let changes = vec![
-            CheckpointEntry::Put {
-                key: format!("key{}", i),
-                value: format!("value{}", i).into_bytes(),
-                timestamp: i as u64 * 1000,
-            },
-        ];
+        let changes = vec![CheckpointEntry::Put {
+            key: format!("key{}", i),
+            value: format!("value{}", i).into_bytes(),
+            timestamp: i as u64 * 1000,
+        }];
         let _ = manager.create_incremental_checkpoint(changes, None).unwrap();
     }
 
@@ -296,26 +292,22 @@ fn test_checkpoint_chain_broken_middle_entry_recovery() {
         // Create full checkpoint
         let mut state: HashMap<String, Vec<u8>> = HashMap::new();
         state.insert("key1".to_string(), b"value1".to_vec());
-        let full_id = manager.create_full_checkpoint(&state, None).unwrap();
+        let _full_id = manager.create_full_checkpoint(&state, None).unwrap();
 
         // Create incremental checkpoint 1
-        let changes1 = vec![
-            CheckpointEntry::Put {
-                key: "key2".to_string(),
-                value: b"value2".to_vec(),
-                timestamp: 1000,
-            },
-        ];
+        let changes1 = vec![CheckpointEntry::Put {
+            key: "key2".to_string(),
+            value: b"value2".to_vec(),
+            timestamp: 1000,
+        }];
         let _incr1_id = manager.create_incremental_checkpoint(changes1, None).unwrap();
 
         // Create incremental checkpoint 2
-        let changes2 = vec![
-            CheckpointEntry::Put {
-                key: "key3".to_string(),
-                value: b"value3".to_vec(),
-                timestamp: 2000,
-            },
-        ];
+        let changes2 = vec![CheckpointEntry::Put {
+            key: "key3".to_string(),
+            value: b"value3".to_vec(),
+            timestamp: 2000,
+        }];
         let _incr2_id = manager.create_incremental_checkpoint(changes2, None).unwrap();
 
         assert_eq!(manager.list_checkpoints().len(), 3);
@@ -365,7 +357,8 @@ fn test_checkpoint_corrupted_metadata_returns_error() {
     }
 
     // Corrupt the checkpoint file with invalid JSON
-    let entries: Vec<_> = fs::read_dir(temp_dir.path()).unwrap()
+    let entries: Vec<_> = fs::read_dir(temp_dir.path())
+        .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "ckpt"))
         .collect();
@@ -383,7 +376,8 @@ fn test_checkpoint_corrupted_metadata_returns_error() {
         let err_msg = format!("{:?}", err);
         assert!(
             err_msg.contains("Corruption") || err_msg.contains("deserialize"),
-            "Error should indicate corruption or deserialization failure, got: {}", err_msg
+            "Error should indicate corruption or deserialization failure, got: {}",
+            err_msg
         );
     }
 }
@@ -405,30 +399,27 @@ fn test_checkpoint_chain_missing_intermediate_checkpoint() {
         manager.create_full_checkpoint(&state, None).unwrap();
 
         // Incremental 1
-        let changes1 = vec![
-            CheckpointEntry::Put {
-                key: "b".to_string(),
-                value: b"2".to_vec(),
-                timestamp: 1000,
-            },
-        ];
+        let changes1 = vec![CheckpointEntry::Put {
+            key: "b".to_string(),
+            value: b"2".to_vec(),
+            timestamp: 1000,
+        }];
         manager.create_incremental_checkpoint(changes1, None).unwrap();
 
         // Incremental 2
-        let changes2 = vec![
-            CheckpointEntry::Put {
-                key: "c".to_string(),
-                value: b"3".to_vec(),
-                timestamp: 2000,
-            },
-        ];
+        let changes2 = vec![CheckpointEntry::Put {
+            key: "c".to_string(),
+            value: b"3".to_vec(),
+            timestamp: 2000,
+        }];
         manager.create_incremental_checkpoint(changes2, None).unwrap();
 
         assert_eq!(manager.list_checkpoints().len(), 3);
     }
 
     // Delete the middle checkpoint file
-    let entries: Vec<_> = fs::read_dir(temp_dir.path()).unwrap()
+    let entries: Vec<_> = fs::read_dir(temp_dir.path())
+        .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "ckpt"))
         .map(|e| e.path())
@@ -466,38 +457,38 @@ fn test_auto_full_checkpoint_trigger() {
 
     // Create incremental checkpoints up to the interval
     for i in 0..2 {
-        let changes = vec![
-            CheckpointEntry::Put {
-                key: format!("key_{}", i),
-                value: format!("value_{}", i).into_bytes(),
-                timestamp: 1000 + i as u64,
-            },
-        ];
+        let changes = vec![CheckpointEntry::Put {
+            key: format!("key_{}", i),
+            value: format!("value_{}", i).into_bytes(),
+            timestamp: 1000 + i as u64,
+        }];
         let _ = manager.create_incremental_checkpoint(changes, None).unwrap();
     }
 
     // Now needs_full_checkpoint should return true
-    assert!(manager.needs_full_checkpoint(), "Should need full checkpoint after interval");
+    assert!(
+        manager.needs_full_checkpoint(),
+        "Should need full checkpoint after interval"
+    );
 
     // Test create_incremental_checkpoint_with_auto_full
-    let changes = vec![
-        CheckpointEntry::Put {
-            key: "key_trigger".to_string(),
-            value: b"trigger_value".to_vec(),
-            timestamp: 9999,
-        },
-    ];
+    let changes = vec![CheckpointEntry::Put {
+        key: "key_trigger".to_string(),
+        value: b"trigger_value".to_vec(),
+        timestamp: 9999,
+    }];
 
-    let result_id = manager.create_incremental_checkpoint_with_auto_full(
-        changes,
-        Some(&state),
-        Some("Test auto full trigger"),
-    ).unwrap();
+    let result_id = manager
+        .create_incremental_checkpoint_with_auto_full(changes, Some(&state), Some("Test auto full trigger"))
+        .unwrap();
 
     // Should have created a full checkpoint
     let result_checkpoint = manager.get_checkpoint(&result_id).unwrap();
-    assert!(matches!(result_checkpoint.checkpoint_type, CheckpointType::Full),
-            "Auto trigger should create full checkpoint, got: {:?}", result_checkpoint.checkpoint_type);
+    assert!(
+        matches!(result_checkpoint.checkpoint_type, CheckpointType::Full),
+        "Auto trigger should create full checkpoint, got: {:?}",
+        result_checkpoint.checkpoint_type
+    );
 }
 
 #[test]
@@ -513,38 +504,39 @@ fn test_auto_full_checkpoint_failure_handling() {
     let _ = manager.create_full_checkpoint(&state, None).unwrap();
 
     // Create one incremental to reach interval
-    let changes1 = vec![
-        CheckpointEntry::Put {
-            key: "key2".to_string(),
-            value: b"value2".to_vec(),
-            timestamp: 1000,
-        },
-    ];
+    let changes1 = vec![CheckpointEntry::Put {
+        key: "key2".to_string(),
+        value: b"value2".to_vec(),
+        timestamp: 1000,
+    }];
     let _ = manager.create_incremental_checkpoint(changes1, None).unwrap();
 
     // Should need full checkpoint now
     assert!(manager.needs_full_checkpoint());
 
     // Test with empty state - should still succeed with incremental
-    let changes2 = vec![
-        CheckpointEntry::Put {
-            key: "key3".to_string(),
-            value: b"value3".to_vec(),
-            timestamp: 2000,
-        },
-    ];
+    let changes2 = vec![CheckpointEntry::Put {
+        key: "key3".to_string(),
+        value: b"value3".to_vec(),
+        timestamp: 2000,
+    }];
 
     // Pass None for state - should log warning but still succeed
-    let result_id = manager.create_incremental_checkpoint_with_auto_full(
-        changes2.clone(),
-        None::<&HashMap<String, Vec<u8>>>,
-        Some("Test with no state"),
-    ).unwrap();
+    let result_id = manager
+        .create_incremental_checkpoint_with_auto_full(
+            changes2.clone(),
+            None::<&HashMap<String, Vec<u8>>>,
+            Some("Test with no state"),
+        )
+        .unwrap();
 
     // Should return the incremental checkpoint ID since no state was provided
     let result_checkpoint = manager.get_checkpoint(&result_id).unwrap();
     // It should be incremental since we didn't provide state
-    assert!(matches!(result_checkpoint.checkpoint_type, CheckpointType::Incremental { .. }));
+    assert!(matches!(
+        result_checkpoint.checkpoint_type,
+        CheckpointType::Incremental { .. }
+    ));
 }
 
 // =============================================================================
@@ -567,10 +559,9 @@ fn test_checkpoint_end_to_end_full_cycle() {
     initial_state.insert("key2".to_string(), b"value2".to_vec());
     initial_state.insert("key3".to_string(), b"value3".to_vec());
 
-    let checkpoint_id = manager.create_full_checkpoint(
-        &initial_state,
-        Some("Initial state checkpoint"),
-    ).expect("Failed to create checkpoint");
+    let checkpoint_id = manager
+        .create_full_checkpoint(&initial_state, Some("Initial state checkpoint"))
+        .expect("Failed to create checkpoint");
 
     // Step 2: 模拟 checkpoint 之后的新状态（包含新数据）
     let mut new_state = initial_state.clone();
@@ -578,7 +569,8 @@ fn test_checkpoint_end_to_end_full_cycle() {
     new_state.insert("key5".to_string(), b"value5".to_vec());
 
     // Step 3: 从 checkpoint 恢复
-    let restored_state = manager.restore(&checkpoint_id)
+    let restored_state = manager
+        .restore(&checkpoint_id)
         .expect("Failed to restore from checkpoint");
 
     // Step 4: 验证恢复的数据只包含 checkpoint 时刻的数据
@@ -586,8 +578,14 @@ fn test_checkpoint_end_to_end_full_cycle() {
     assert!(restored_state.contains_key("key1"), "key1 should be in restored state");
     assert!(restored_state.contains_key("key2"), "key2 should be in restored state");
     assert!(restored_state.contains_key("key3"), "key3 should be in restored state");
-    assert!(!restored_state.contains_key("key4"), "key4 should NOT be in restored state (written after checkpoint)");
-    assert!(!restored_state.contains_key("key5"), "key5 should NOT be in restored state (written after checkpoint)");
+    assert!(
+        !restored_state.contains_key("key4"),
+        "key4 should NOT be in restored state (written after checkpoint)"
+    );
+    assert!(
+        !restored_state.contains_key("key5"),
+        "key5 should NOT be in restored state (written after checkpoint)"
+    );
 
     // Step 5: 验证数据值正确性
     assert_eq!(restored_state.get("key1").unwrap(), b"value1");
@@ -610,38 +608,32 @@ fn test_checkpoint_with_incremental_chain() {
     base_state.insert("key1".to_string(), b"value1".to_vec());
     base_state.insert("key2".to_string(), b"value2".to_vec());
 
-    let full_ckpt_id = manager.create_full_checkpoint(
-        &base_state,
-        Some("Base full checkpoint"),
-    ).expect("Failed to create base checkpoint");
+    let full_ckpt_id = manager
+        .create_full_checkpoint(&base_state, Some("Base full checkpoint"))
+        .expect("Failed to create base checkpoint");
 
     // Step 2: 创建第一次增量 checkpoint（添加 key3）
-    let changes1 = vec![
-        CheckpointEntry::Put {
-            key: "key3".to_string(),
-            value: b"value3".to_vec(),
-            timestamp: 1000,
-        },
-    ];
-    let incr_ckpt_id_1 = manager.create_incremental_checkpoint(
-        changes1,
-        Some("First incremental"),
-    ).expect("Failed to create first incremental checkpoint");
+    let changes1 = vec![CheckpointEntry::Put {
+        key: "key3".to_string(),
+        value: b"value3".to_vec(),
+        timestamp: 1000,
+    }];
+    let incr_ckpt_id_1 = manager
+        .create_incremental_checkpoint(changes1, Some("First incremental"))
+        .expect("Failed to create first incremental checkpoint");
 
     // Step 3: 创建第二次增量 checkpoint（删除 key1）
-    let changes2 = vec![
-        CheckpointEntry::Delete {
-            key: "key1".to_string(),
-            timestamp: 2000,
-        },
-    ];
-    let _incr_ckpt_id_2 = manager.create_incremental_checkpoint(
-        changes2,
-        Some("Second incremental"),
-    ).expect("Failed to create second incremental checkpoint");
+    let changes2 = vec![CheckpointEntry::Delete {
+        key: "key1".to_string(),
+        timestamp: 2000,
+    }];
+    let _incr_ckpt_id_2 = manager
+        .create_incremental_checkpoint(changes2, Some("Second incremental"))
+        .expect("Failed to create second incremental checkpoint");
 
     // Step 4: 从全量 checkpoint 恢复
-    let restored_from_full = manager.restore(&full_ckpt_id)
+    let restored_from_full = manager
+        .restore(&full_ckpt_id)
         .expect("Failed to restore from full checkpoint");
 
     // 全量 checkpoint 只包含基础数据
@@ -650,7 +642,8 @@ fn test_checkpoint_with_incremental_chain() {
     assert!(restored_from_full.contains_key("key2"));
 
     // Step 5: 验证增量 checkpoint 存在
-    let incr_1 = manager.get_checkpoint(&incr_ckpt_id_1)
+    let incr_1 = manager
+        .get_checkpoint(&incr_ckpt_id_1)
         .expect("First incremental checkpoint should exist");
     assert!(matches!(incr_1.checkpoint_type, CheckpointType::Incremental { .. }));
     assert_eq!(incr_1.entries.len(), 1, "First incremental should have 1 entry");
@@ -673,65 +666,55 @@ fn test_checkpoint_auto_full_trigger() {
     base_state.insert("key1".to_string(), b"value1".to_vec());
 
     // 创建基础全量 checkpoint
-    let _base_id = manager.create_full_checkpoint(
-        &base_state,
-        Some("Base"),
-    ).expect("Failed to create base checkpoint");
+    let _base_id = manager
+        .create_full_checkpoint(&base_state, Some("Base"))
+        .expect("Failed to create base checkpoint");
 
     // 第 1 次增量
-    let changes1 = vec![
-        CheckpointEntry::Put {
-            key: "key2".to_string(),
-            value: b"value2".to_vec(),
-            timestamp: 1000,
-        },
-    ];
-    let result1 = manager.create_incremental_checkpoint_with_auto_full(
-        changes1,
-        Some(&base_state),
-        Some("Incremental 1"),
-    ).expect("Failed to create incremental 1");
+    let changes1 = vec![CheckpointEntry::Put {
+        key: "key2".to_string(),
+        value: b"value2".to_vec(),
+        timestamp: 1000,
+    }];
+    let result1 = manager
+        .create_incremental_checkpoint_with_auto_full(changes1, Some(&base_state), Some("Incremental 1"))
+        .expect("Failed to create incremental 1");
     let ckpt1 = manager.get_checkpoint(&result1).unwrap();
-    assert!(matches!(ckpt1.checkpoint_type, CheckpointType::Incremental { .. }),
-        "First should be incremental, got {:?}", ckpt1.checkpoint_type);
+    assert!(
+        matches!(ckpt1.checkpoint_type, CheckpointType::Incremental { .. }),
+        "First should be incremental, got {:?}",
+        ckpt1.checkpoint_type
+    );
 
     // 第 2 次增量
-    let changes2 = vec![
-        CheckpointEntry::Put {
-            key: "key3".to_string(),
-            value: b"value3".to_vec(),
-            timestamp: 2000,
-        },
-    ];
-    let result2 = manager.create_incremental_checkpoint_with_auto_full(
-        changes2,
-        Some(&base_state),
-        Some("Incremental 2"),
-    ).expect("Failed to create incremental 2");
-    let ckpt2 = manager.get_checkpoint(&result2).unwrap();
+    let changes2 = vec![CheckpointEntry::Put {
+        key: "key3".to_string(),
+        value: b"value3".to_vec(),
+        timestamp: 2000,
+    }];
+    let result2 = manager
+        .create_incremental_checkpoint_with_auto_full(changes2, Some(&base_state), Some("Incremental 2"))
+        .expect("Failed to create incremental 2");
+    let _ckpt2 = manager.get_checkpoint(&result2).unwrap();
     // 可能是 incremental 或 full（取决于实现细节）
     // 这里只验证 checkpoint 创建成功
 
     // 第 3 次 - 应该触发全量 checkpoint（或至少检查 needs_full_checkpoint 状态）
-    let changes3 = vec![
-        CheckpointEntry::Put {
-            key: "key4".to_string(),
-            value: b"value4".to_vec(),
-            timestamp: 3000,
-        },
-    ];
-    let result3 = manager.create_incremental_checkpoint_with_auto_full(
-        changes3,
-        Some(&base_state),
-        Some("Incremental 3"),
-    ).expect("Failed to create incremental 3");
-    let ckpt3 = manager.get_checkpoint(&result3).unwrap();
-    
+    let changes3 = vec![CheckpointEntry::Put {
+        key: "key4".to_string(),
+        value: b"value4".to_vec(),
+        timestamp: 3000,
+    }];
+    let result3 = manager
+        .create_incremental_checkpoint_with_auto_full(changes3, Some(&base_state), Some("Incremental 3"))
+        .expect("Failed to create incremental 3");
+    let _ckpt3 = manager.get_checkpoint(&result3).unwrap();
+
     // 验证至少有一个 full checkpoint（可能是 base 或自动触发的）
     // 使用公开 API list_checkpoints 来检查
     let all_checkpoints = manager.list_checkpoints();
-    let has_full = all_checkpoints.iter().any(|c| {
-        matches!(c.checkpoint_type, CheckpointType::Full)
-    });
+    let has_full = all_checkpoints
+        .iter()
+        .any(|c| matches!(c.checkpoint_type, CheckpointType::Full));
     assert!(has_full, "Should have at least one full checkpoint");
 }

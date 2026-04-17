@@ -10,9 +10,9 @@
 //! - 大小阈值（默认 64KB）
 //! - 强制 flush
 
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
-use parking_lot::Mutex;
 use tracing::debug;
 
 /// 写入缓冲配置
@@ -27,7 +27,7 @@ pub struct WriteBufferConfig {
 impl Default for WriteBufferConfig {
     fn default() -> Self {
         Self {
-            time_window_us: 100_000,    // 100 毫秒窗口（与文档一致）
+            time_window_us: 100_000,         // 100 毫秒窗口（与文档一致）
             size_threshold_bytes: 64 * 1024, // 64KB
         }
     }
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn test_write_buffer_size_threshold() {
         let config = WriteBufferConfig {
-            time_window_us: 1000000, // 1s - long enough
+            time_window_us: 1000000,   // 1s - long enough
             size_threshold_bytes: 100, // Small threshold for testing
         };
         let buffer = WriteBuffer::new(config);
@@ -247,13 +247,9 @@ mod tests {
 
         // Add several writes
         for i in 0..5 {
-            let result = buffer.add(
-                format!("key_{}", i),
-                format!("value_{}", i).into_bytes(),
-            );
-            if result.is_some() {
+            let result = buffer.add(format!("key_{}", i), format!("value_{}", i).into_bytes());
+            if let Some(batch) = result {
                 // Verify batch contains all pending writes
-                let batch = result.unwrap();
                 assert!(!batch.is_empty());
                 assert!(batch.len() <= 5);
                 return;

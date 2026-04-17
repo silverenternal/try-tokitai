@@ -43,133 +43,82 @@
 //! let result = selector.select_tools_by_query("read file", 5);
 //! ```
 
-pub mod matrix;
-pub mod registry;
-pub mod skills_manager;
-pub mod selector;
-pub mod tool_selector;
 pub mod ai_classifier;
+pub mod ai_tool_generator;
 pub mod dependency_analyzer;
 pub mod dispatcher;
-pub mod metadata_enhancer;
-pub mod rule_classifier;
-pub mod query_enhancer;
-pub mod tool_generator;
-pub mod trie_index;
 pub mod dynamic_registry;
+pub mod matrix;
+pub mod metadata_enhancer;
+pub mod query_enhancer;
+pub mod registry;
+pub mod rule_classifier;
+pub mod selector;
+pub mod skills_manager;
 pub mod tool_definition;
-pub mod ai_tool_generator;
+pub mod tool_generator;
+pub mod tool_selector;
+pub mod trie_index;
 
 // 注意：以下导出保留，供未来功能扩展使用
 #[allow(unused_imports)]
-pub use tool_selector::{
-    LightweightToolSelector,
-    ToolIndex,
-    ToolSearchResult,
-    SearchResultSource,
-    SelectorConfig,
-};
-#[allow(unused_imports)]
 pub use ai_classifier::{
-    AIToolboxClassifier,
-    LLMClient as AILLMClient,
-    ToolboxAssignment,
-    ToolboxAction,
-    NewToolbox,
-    ToolboxSummary,
-    DefaultLLMClient,
+    AIToolboxClassifier, DefaultLLMClient, LLMClient as AILLMClient, NewToolbox, ToolboxAction,
+    ToolboxAssignment, ToolboxSummary,
 };
 #[allow(unused_imports)]
 pub use dependency_analyzer::{
-    AIDependencyAnalyzer,
-    LLMClient as DependencyLLMClient,
-    DependencyAnalysis,
-    DependencyRelation,
-    ToolCombination,
-    ToolDependencyGraph,
-    ToolCallSequence,
-    SmartToolRecommender,
+    AIDependencyAnalyzer, DependencyAnalysis, DependencyRelation, LLMClient as DependencyLLMClient,
+    SmartToolRecommender, ToolCallSequence, ToolCombination, ToolDependencyGraph,
     ToolRecommendation,
 };
 #[allow(unused_imports)]
-pub use dispatcher::{
-    ToolDispatcher,
-    ToolExecutor,
-    DefaultToolExecutor,
-};
+pub use dispatcher::{DefaultToolExecutor, ToolDispatcher, ToolExecutor};
 #[allow(unused_imports)]
 pub use metadata_enhancer::MetadataEnhancer;
+#[allow(unused_imports)]
+pub use tool_selector::{
+    LightweightToolSelector, SearchResultSource, SelectorConfig, ToolIndex, ToolSearchResult,
+};
 
 // 新增模块导出
 #[allow(unused_imports)]
-pub use rule_classifier::{
-    RuleClassifier,
-    HierarchicalClassifier,
-    RuleMatchResult,
-    MatchType,
-    ToolboxRulesConfig,
-    ToolboxRule,
-    CacheStats,
+pub use query_enhancer::{
+    EnhancedQuery, IntentPattern, IntentPatternsConfig, IntentRecognition, QueryEnhancer,
+    SynonymsConfig,
 };
 #[allow(unused_imports)]
-pub use query_enhancer::{
-    QueryEnhancer,
-    EnhancedQuery,
-    IntentRecognition,
-    SynonymsConfig,
-    IntentPatternsConfig,
-    IntentPattern,
+pub use rule_classifier::{
+    CacheStats, HierarchicalClassifier, MatchType, RuleClassifier, RuleMatchResult, ToolboxRule,
+    ToolboxRulesConfig,
 };
 #[allow(unused_imports)]
 pub use tool_generator::{
-    ToolGenerator,
-    ToolTemplate,
-    ToolGenerationRequest,
-    ToolGenerationResult,
-    TemplateMetadata,
-    ParameterDefinition,
-    CodeTemplate,
-    TestTemplate,
+    CodeTemplate, ParameterDefinition, TemplateMetadata, TestTemplate, ToolGenerationRequest,
+    ToolGenerationResult, ToolGenerator, ToolTemplate,
 };
 
 // Trie 索引模块导出
 #[allow(unused_imports)]
 pub use trie_index::{
-    TrieIndex,
-    TrieIndexStats,
-    BKTree,
-    BKTreeStats,
-    HybridIndex,
-    HybridIndexStats,
+    BKTree, BKTreeStats, HybridIndex, HybridIndexStats, TrieIndex, TrieIndexStats,
 };
 
 // 动态注册表模块导出
 #[allow(unused_imports)]
 pub use dynamic_registry::{
-    DynamicToolRegistry,
-    DynamicToolMetadata,
-    DynamicRegistryStats,
-    DynamicToolBuilder,
+    DynamicRegistryStats, DynamicToolBuilder, DynamicToolMetadata, DynamicToolRegistry,
 };
 
 // TOML 工具定义模块导出
 #[allow(unused_imports)]
 pub use tool_definition::{
-    TomlToolDefinition,
-    TomlToolLoader,
-    ToolMetadata,
-    ParameterSpec,
-    Permissions,
-    RateLimit,
+    ParameterSpec, Permissions, RateLimit, TomlToolDefinition, TomlToolLoader, ToolMetadata,
     ValidationRule,
 };
 
 // AI 工具生成器模块导出
 #[allow(unused_imports)]
 pub use ai_tool_generator::{
-    AIToolGenerator,
-    AIToolGenerationRequest,
-    AIToolGenerationResult,
-    ToolCategory,
+    AIToolGenerationRequest, AIToolGenerationResult, AIToolGenerator, ToolCategory,
 };
-

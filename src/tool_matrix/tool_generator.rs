@@ -20,13 +20,13 @@
 //! - 自动化：自动生成测试和文档
 //! - tokitai 优先：使用宏生成工具代码骨架
 
+use anyhow::{Context as AnyhowContext, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tera::{Tera, Context};
+use tera::{Context, Tera};
 use tracing::{info, warn};
-use anyhow::{Result, Context as AnyhowContext};
 
 /// 工具模板配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +156,7 @@ impl ToolGenerator {
     /// 创建新的工具生成器
     pub fn new<P: AsRef<Path>>(template_dir: P) -> Result<Self> {
         let template_dir = template_dir.as_ref().to_path_buf();
-        
+
         // 初始化 Tera 模板引擎
         let tera = match Tera::new(&format!("{}/**/*.toml", template_dir.display())) {
             Ok(t) => t,
@@ -165,16 +165,16 @@ impl ToolGenerator {
                 Tera::default()
             }
         };
-        
+
         let mut generator = Self {
             tera,
             templates: HashMap::new(),
             template_dir,
         };
-        
+
         // 加载模板
         generator.load_templates()?;
-        
+
         Ok(generator)
     }
 
@@ -196,16 +196,20 @@ impl ToolGenerator {
             warn!("模板目录不存在：{:?}", self.template_dir);
             return Ok(());
         }
-        
+
         for entry in fs::read_dir(&self.template_dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                 match self.load_template(&path) {
                     Ok(template) => {
-                        info!("加载模板：{} ({})", template.template.name, template.template.id);
-                        self.templates.insert(template.template.id.clone(), template);
+                        info!(
+                            "加载模板：{} ({})",
+                            template.template.name, template.template.id
+                        );
+                        self.templates
+                            .insert(template.template.id.clone(), template);
                     }
                     Err(e) => {
                         warn!("加载模板失败 {:?}: {}", path, e);
@@ -213,55 +217,61 @@ impl ToolGenerator {
                 }
             }
         }
-        
+
         info!("共加载 {} 个工具模板", self.templates.len());
         Ok(())
     }
 
     /// 加载单个模板
     fn load_template(&self, path: &Path) -> Result<ToolTemplate> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("读取模板文件失败：{:?}", path))?;
-        
-        let template: ToolTemplate = toml::from_str(&content)
-            .with_context(|| format!("解析模板 TOML 失败：{:?}", path))?;
-        
+        let content =
+            fs::read_to_string(path).with_context(|| format!("读取模板文件失败：{:?}", path))?;
+
+        let template: ToolTemplate =
+            toml::from_str(&content).with_context(|| format!("解析模板 TOML 失败：{:?}", path))?;
+
         Ok(template)
     }
 
     /// 生成工具代码
     pub fn generate_tool(&self, request: ToolGenerationRequest) -> Result<ToolGenerationResult> {
         // 获取模板
-        let template = self.templates.get(&request.template_id)
+        let template = self
+            .templates
+            .get(&request.template_id)
             .ok_or_else(|| anyhow::anyhow!("模板不存在：{}", request.template_id))?;
-        
+
         // 构建渲染上下文
         let mut context = Context::new();
         context.insert("tool_name", &request.tool_name);
         context.insert("tool_description", &request.tool_description);
         context.insert("template_id", &request.template_id);
-        
+
         // 添加参数信息
         let param_names: Vec<&str> = request.parameters.keys().map(|s| s.as_str()).collect();
-        let param_types: Vec<String> = param_names.iter()
+        let param_types: Vec<String> = param_names
+            .iter()
             .filter_map(|name| request.parameters.get(*name).map(|_| "String".to_string()))
             .collect();
-        
+
         context.insert("param_names", &param_names.join(", "));
         context.insert("param_types", &param_types.join(", "));
-        
+
         // 添加特定参数
         for (key, value) in &request.parameters {
             context.insert(key, value);
             context.insert(format!("{}_param", key), &"{}");
         }
-        
+
         // 添加工具体逻辑占位符
-        context.insert("tool_body", &self.generate_tool_body(template, &request.parameters));
-        
+        context.insert(
+            "tool_body",
+            &self.generate_tool_body(template, &request.parameters),
+        );
+
         // 渲染代码模板
         let code = self.render_template(&template.code.template, &context)?;
-        
+
         // 渲染测试模板（如果需要）
         let tests = if request.generate_tests {
             let test_context = self.build_test_context(&request, template)?;
@@ -269,22 +279,22 @@ impl ToolGenerator {
         } else {
             None
         };
-        
+
         // 确保目标目录存在
         if let Some(parent) = request.target_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // 写入文件
         fs::write(&request.target_path, &code)?;
         info!("生成工具代码：{:?}", request.target_path);
-        
+
         // 写入测试文件（如果需要）
         let test_file_path = if request.generate_tests {
             if let Some(tests) = &tests {
-                let test_path = request.target_path.with_file_name(
-                    format!("test_{}.rs", request.tool_name)
-                );
+                let test_path = request
+                    .target_path
+                    .with_file_name(format!("test_{}.rs", request.tool_name));
                 if let Some(parent) = test_path.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -297,7 +307,7 @@ impl ToolGenerator {
         } else {
             None
         };
-        
+
         Ok(ToolGenerationResult {
             code,
             tests,
@@ -307,7 +317,11 @@ impl ToolGenerator {
     }
 
     /// 生成工具体逻辑（填充模板占位符）
-    fn generate_tool_body(&self, template: &ToolTemplate, parameters: &HashMap<String, String>) -> String {
+    fn generate_tool_body(
+        &self,
+        template: &ToolTemplate,
+        parameters: &HashMap<String, String>,
+    ) -> String {
         // 根据模板类别生成不同的工具逻辑
         match template.template.category.as_str() {
             "file_ops" => {
@@ -333,58 +347,63 @@ impl ToolGenerator {
 
     /// 生成文件操作工具逻辑
     fn generate_file_ops_body(&self, parameters: &HashMap<String, String>) -> String {
-        let operation = parameters.get("operation").map(|s| s.as_str()).unwrap_or("read");
+        let operation = parameters
+            .get("operation")
+            .map(|s| s.as_str())
+            .unwrap_or("read");
 
         match operation {
-            "read" => {
-                r#"let content = fs::read_to_string(&path).await?;
-    Ok(content)"#.to_string()
-            }
-            "write" => {
-                r#"fs::write(&path, &content).await?;
-    Ok(format!("Successfully wrote to {}", path))"#.to_string()
-            }
-            "copy" => {
-                r#"fs::copy(&path, &dest_path).await?;
-    Ok(format!("Copied {} to {}", path, dest_path))"#.to_string()
-            }
-            "delete" => {
-                r#"fs::remove_file(&path).await?;
-    Ok(format!("Deleted {}", path))"#.to_string()
-            }
-            "list" => {
-                r#"let entries = fs::read_dir(&path).await?;
+            "read" => r#"let content = fs::read_to_string(&path).await?;
+    Ok(content)"#
+                .to_string(),
+            "write" => r#"fs::write(&path, &content).await?;
+    Ok(format!("Successfully wrote to {}", path))"#
+                .to_string(),
+            "copy" => r#"fs::copy(&path, &dest_path).await?;
+    Ok(format!("Copied {} to {}", path, dest_path))"#
+                .to_string(),
+            "delete" => r#"fs::remove_file(&path).await?;
+    Ok(format!("Deleted {}", path))"#
+                .to_string(),
+            "list" => r#"let entries = fs::read_dir(&path).await?;
     let mut files = Vec::new();
     for entry in entries {
         let entry = entry?;
         files.push(entry.file_name().to_string_lossy().to_string());
     }
-    Ok(files.join("\n"))"#.to_string()
-            }
+    Ok(files.join("\n"))"#
+                .to_string(),
             _ => {
-                format!("unimplemented!(\"Operation '{}' not supported for file_ops\", operation)", operation)
+                format!(
+                    "unimplemented!(\"Operation '{}' not supported for file_ops\", operation)",
+                    operation
+                )
             }
         }
     }
 
     /// 生成网络操作工具逻辑
     fn generate_network_ops_body(&self, parameters: &HashMap<String, String>) -> String {
-        let method = parameters.get("method").map(|s| s.as_str()).unwrap_or("get");
-        
+        let method = parameters
+            .get("method")
+            .map(|s| s.as_str())
+            .unwrap_or("get");
+
         match method {
-            "get" => {
-                r#"let response = client.get(&url).send().await?;
-    Ok(response.text().await?)"#.to_string()
-            }
-            "post" => {
-                r#"let response = client.post(&url)
+            "get" => r#"let response = client.get(&url).send().await?;
+    Ok(response.text().await?)"#
+                .to_string(),
+            "post" => r#"let response = client.post(&url)
         .json(&body)
         .send()
         .await?;
-    Ok(response.text().await?)"#.to_string()
-            }
+    Ok(response.text().await?)"#
+                .to_string(),
             _ => {
-                format!("unimplemented!(\"HTTP method '{}' not supported\", method)", method)
+                format!(
+                    "unimplemented!(\"HTTP method '{}' not supported\", method)",
+                    method
+                )
             }
         }
     }
@@ -392,35 +411,46 @@ impl ToolGenerator {
     /// 生成分析操作工具逻辑
     fn generate_analysis_ops_body(&self, parameters: &HashMap<String, String>) -> String {
         r#"let lines = content.lines().count();
-    let result = lines;"#.to_string()
+    let result = lines;"#
+            .to_string()
     }
 
     /// 生成 CLI 操作工具逻辑
     fn generate_cli_ops_body(&self, parameters: &HashMap<String, String>) -> String {
         r#"let output = Command::new(&command).output()?;
-    let result = String::from_utf8_lossy(&output.stdout).to_string();"#.to_string()
+    let result = String::from_utf8_lossy(&output.stdout).to_string();"#
+            .to_string()
     }
 
     /// 生成数据操作工具逻辑
     fn generate_data_ops_body(&self, parameters: &HashMap<String, String>) -> String {
         r#"let value: Value = serde_json::from_str(&input)?;
-    let result = serde_json::to_string_pretty(&value)?;"#.to_string()
+    let result = serde_json::to_string_pretty(&value)?;"#
+            .to_string()
     }
 
     /// 构建测试上下文
-    fn build_test_context(&self, request: &ToolGenerationRequest, template: &ToolTemplate) -> Result<Context> {
+    fn build_test_context(
+        &self,
+        request: &ToolGenerationRequest,
+        template: &ToolTemplate,
+    ) -> Result<Context> {
         let mut context = Context::new();
         context.insert("tool_name", &request.tool_name);
-        
+
         // 生成测试输入
         let test_input = self.generate_test_input(template, &request.parameters);
         context.insert("test_input", &test_input);
-        
+
         Ok(context)
     }
 
     /// 生成测试输入
-    fn generate_test_input(&self, template: &ToolTemplate, parameters: &HashMap<String, String>) -> String {
+    fn generate_test_input(
+        &self,
+        template: &ToolTemplate,
+        parameters: &HashMap<String, String>,
+    ) -> String {
         // 根据模板类型生成合适的测试输入
         match template.template.category.as_str() {
             "file_ops" => "\"test_file.txt\"".to_string(),
@@ -439,8 +469,19 @@ impl ToolGenerator {
 
         // 替换 {{variable}} 格式的占位符
         // 注意：tera::Context 不支持直接迭代，这里使用预定义的关键字
-        let keys = vec!["tool_name", "tool_description", "template_id", "param_names", "param_types", "tool_body", "path_param", "url_param", "timeout_secs", "test_input"];
-        
+        let keys = vec![
+            "tool_name",
+            "tool_description",
+            "template_id",
+            "param_names",
+            "param_types",
+            "tool_body",
+            "path_param",
+            "url_param",
+            "timeout_secs",
+            "test_input",
+        ];
+
         for key in keys {
             let placeholder = format!("{{{{{}}}}}", key);
             if let Some(val) = context.get(key) {
@@ -465,20 +506,21 @@ impl ToolGenerator {
     /// 处理条件块
     fn process_conditionals(&self, template: &str, context: &Context) -> String {
         let mut result = template.to_string();
-        
+
         // 简单实现：检查条件是否存在
         let if_pattern = regex::Regex::new(r"\{\{#if\s+(\w+)\}\}(.*?)\{\{/if\}\}").unwrap();
-        
+
         for cap in if_pattern.captures_iter(template) {
             let var_name = &cap[1];
             let block_content = &cap[2];
-            
-            let has_var = context.get(var_name).is_some() || context.get(&format!("{}_param", var_name)).is_some();
-            
+
+            let has_var = context.get(var_name).is_some()
+                || context.get(&format!("{}_param", var_name)).is_some();
+
             let replacement = if has_var { block_content } else { "" };
             result = result.replace(&cap[0], replacement);
         }
-        
+
         result
     }
 
@@ -525,9 +567,7 @@ impl ToolGenerator {
         info!("使用 tokitai::tool 宏生成工具代码：{}", tool_name);
 
         // 生成结构体名称（驼峰式）
-        let struct_name = struct_name
-            .unwrap_or(tool_name)
-            .to_string();
+        let struct_name = struct_name.unwrap_or(tool_name).to_string();
 
         // 生成函数签名
         let fn_params = parameters
@@ -616,7 +656,8 @@ mod tests {{
         parameters: Vec<(String, String)>,
         output_path: &Path,
     ) -> Result<PathBuf> {
-        let code = Self::generate_with_tokitai_macro(tool_name, tool_description, parameters, None)?;
+        let code =
+            Self::generate_with_tokitai_macro(tool_name, tool_description, parameters, None)?;
 
         // 确保输出目录存在
         if let Some(parent) = output_path.parent() {
@@ -698,10 +739,12 @@ mod tests {
     fn test_tool_generator_creation() {
         let dir = tempdir().unwrap();
         let template_path = dir.path().join("file_tool.toml");
-        
+
         // 创建测试模板
         let mut template_file = fs::File::create(&template_path).unwrap();
-        writeln!(template_file, r#"
+        writeln!(
+            template_file,
+            r#"
 [template]
 id = "test_file_tool"
 name = "Test File Tool"
@@ -719,8 +762,10 @@ template = "pub fn {{tool_name}}() {{}}"
 [tests]
 language = "rust"
 template = '''#[tokio::test] async fn test_{{tool_name}}() {{}}'''
-"#).unwrap();
-        
+"#
+        )
+        .unwrap();
+
         let generator = ToolGenerator::new(dir.path()).unwrap();
         assert_eq!(generator.templates.len(), 1);
     }
@@ -790,7 +835,8 @@ notes = ""
             "Write content to file",
             parameters,
             Some("WriteFileTool"),
-        ).unwrap();
+        )
+        .unwrap();
 
         // 验证生成的代码包含必要元素
         assert!(code.contains("use tokitai::tool"));
@@ -828,7 +874,7 @@ notes = ""
         assert!(param_names.contains(&&"enabled".to_string()));
         assert!(param_names.contains(&&"tags".to_string()));
         assert!(param_names.contains(&&"metadata".to_string()));
-        
+
         // 验证类型映射
         let params_map: std::collections::HashMap<_, _> = params.into_iter().collect();
         assert_eq!(params_map.get("path"), Some(&"String".to_string()));
@@ -836,7 +882,10 @@ notes = ""
         assert_eq!(params_map.get("ratio"), Some(&"f64".to_string()));
         assert_eq!(params_map.get("enabled"), Some(&"bool".to_string()));
         assert_eq!(params_map.get("tags"), Some(&"Vec<String>".to_string()));
-        assert_eq!(params_map.get("metadata"), Some(&"serde_json::Value".to_string()));
+        assert_eq!(
+            params_map.get("metadata"),
+            Some(&"serde_json::Value".to_string())
+        );
     }
 
     #[test]
@@ -853,7 +902,8 @@ notes = ""
             "Fetch content from URL",
             parameters,
             &output_path,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(result_path.exists());
         let content = fs::read_to_string(&result_path).unwrap();

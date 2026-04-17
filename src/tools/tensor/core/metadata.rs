@@ -5,7 +5,7 @@
 //! 2. 支持工具发现：AI 可以通过元数据找到合适的操作
 //! 3. 结构化文档：操作描述、参数说明、示例
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// 操作类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,15 +123,13 @@ pub const ZEROS_META: OperationMetadata = OperationMetadata {
     description: "创建一个所有元素为零的张量",
     category: OperationCategory::Creation,
     documentation: "创建一个指定形状的张量，所有元素初始化为 0.0。常用于初始化掩码或占位符。",
-    parameters: &[
-        ParameterMetadata {
-            name: "shape",
-            param_type: "Vec<usize>",
-            description: "张量的形状，如 [2, 3] 表示 2 行 3 列",
-            required: true,
-            default: None,
-        },
-    ],
+    parameters: &[ParameterMetadata {
+        name: "shape",
+        param_type: "Vec<usize>",
+        description: "张量的形状，如 [2, 3] 表示 2 行 3 列",
+        required: true,
+        default: None,
+    }],
     returns: "Result<Tensor> - 创建的零张量",
     examples: &[
         Example {
@@ -143,12 +141,10 @@ pub const ZEROS_META: OperationMetadata = OperationMetadata {
             code: "let tensor = service.zeros(&[5])?;",
         },
     ],
-    common_errors: &[
-        CommonError {
-            error: "shape 包含 0 维度",
-            suggestion: "确保所有维度都大于 0，或使用 empty shape 创建标量",
-        },
-    ],
+    common_errors: &[CommonError {
+        error: "shape 包含 0 维度",
+        suggestion: "确保所有维度都大于 0，或使用 empty shape 创建标量",
+    }],
     related_operations: &["ones", "randn", "full"],
     is_inplace: false,
     supports_broadcasting: false,
@@ -161,22 +157,18 @@ pub const ONES_META: OperationMetadata = OperationMetadata {
     description: "创建一个所有元素为 1 的张量",
     category: OperationCategory::Creation,
     documentation: "创建一个指定形状的张量，所有元素初始化为 1.0。常用于初始化乘法单位元或掩码。",
-    parameters: &[
-        ParameterMetadata {
-            name: "shape",
-            param_type: "Vec<usize>",
-            description: "张量的形状",
-            required: true,
-            default: None,
-        },
-    ],
+    parameters: &[ParameterMetadata {
+        name: "shape",
+        param_type: "Vec<usize>",
+        description: "张量的形状",
+        required: true,
+        default: None,
+    }],
     returns: "Result<Tensor> - 创建的一张量",
-    examples: &[
-        Example {
-            description: "创建 2x2 的一张量",
-            code: "let tensor = service.ones(&[2, 2])?;",
-        },
-    ],
+    examples: &[Example {
+        description: "创建 2x2 的一张量",
+        code: "let tensor = service.ones(&[2, 2])?;",
+    }],
     common_errors: &[],
     related_operations: &["zeros", "randn", "full"],
     is_inplace: false,
@@ -217,12 +209,10 @@ pub const ADD_META: OperationMetadata = OperationMetadata {
             code: "let result = service.add(&tensor, &scalar)?;",
         },
     ],
-    common_errors: &[
-        CommonError {
-            error: "形状不匹配且无法广播",
-            suggestion: "检查两个张量的形状是否兼容，或使用 reshape 调整形状",
-        },
-    ],
+    common_errors: &[CommonError {
+        error: "形状不匹配且无法广播",
+        suggestion: "检查两个张量的形状是否兼容，或使用 reshape 调整形状",
+    }],
     related_operations: &["sub", "mul", "div", "add_scalar"],
     is_inplace: false,
     supports_broadcasting: true,
@@ -304,12 +294,10 @@ pub const SUM_META: OperationMetadata = OperationMetadata {
             code: "let result = service.sum(&tensor, &[0])?;",
         },
     ],
-    common_errors: &[
-        CommonError {
-            error: "维度索引越界",
-            suggestion: "确保所有维度索引在 [0, rank) 范围内",
-        },
-    ],
+    common_errors: &[CommonError {
+        error: "维度索引越界",
+        suggestion: "确保所有维度索引在 [0, rank) 范围内",
+    }],
     related_operations: &["mean", "max", "min", "prod"],
     is_inplace: false,
     supports_broadcasting: false,
@@ -349,12 +337,10 @@ pub const RESHAPE_META: OperationMetadata = OperationMetadata {
             code: "let result = service.reshape(&tensor, &[2, 2])?;",
         },
     ],
-    common_errors: &[
-        CommonError {
-            error: "元素数量不匹配",
-            suggestion: "确保新形状的元素总数与原张量相同",
-        },
-    ],
+    common_errors: &[CommonError {
+        error: "元素数量不匹配",
+        suggestion: "确保新形状的元素总数与原张量相同",
+    }],
     related_operations: &["view", "flatten", "squeeze", "unsqueeze"],
     is_inplace: false,
     supports_broadcasting: false,
@@ -367,28 +353,22 @@ pub const TRANSPOSE_META: OperationMetadata = OperationMetadata {
     description: "转置张量（交换行列）",
     category: OperationCategory::Broadcast,
     documentation: "对于 2D 张量，交换行和列。对于高维张量，可以指定要交换的维度。",
-    parameters: &[
-        ParameterMetadata {
-            name: "tensor",
-            param_type: "&Tensor",
-            description: "输入张量",
-            required: true,
-            default: None,
-        },
-    ],
+    parameters: &[ParameterMetadata {
+        name: "tensor",
+        param_type: "&Tensor",
+        description: "输入张量",
+        required: true,
+        default: None,
+    }],
     returns: "Result<Tensor> - 转置后的张量",
-    examples: &[
-        Example {
-            description: "2x3 转置为 3x2",
-            code: "let result = service.transpose(&tensor)?;",
-        },
-    ],
-    common_errors: &[
-        CommonError {
-            error: "仅支持 2D 张量",
-            suggestion: "对于高维张量，使用 permute 指定维度排列",
-        },
-    ],
+    examples: &[Example {
+        description: "2x3 转置为 3x2",
+        code: "let result = service.transpose(&tensor)?;",
+    }],
+    common_errors: &[CommonError {
+        error: "仅支持 2D 张量",
+        suggestion: "对于高维张量，使用 permute 指定维度排列",
+    }],
     related_operations: &["permute", "swap_axes", "t"],
     is_inplace: false,
     supports_broadcasting: false,

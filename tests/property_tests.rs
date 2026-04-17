@@ -7,8 +7,8 @@
 //! cargo test --test property_tests
 //! ```
 
-use proptest::prelude::*;
 use ai_assistant::context::MergeStrategy;
+use proptest::prelude::*;
 
 // ========== Merge Strategy 属性测试 ==========
 
@@ -27,10 +27,10 @@ proptest! {
     ) {
         // 序列化为字符串
         let serialized = format!("{}", strategy);
-        
+
         // 验证字符串不为空
         prop_assert!(!serialized.is_empty());
-        
+
         // 验证字符串包含策略名称
         prop_assert!(serialized.contains('_') || serialized.chars().all(|c| c.is_alphabetic()));
     }
@@ -48,7 +48,7 @@ proptest! {
     ) {
         let left = format!("{}{}{}", a, b, c);
         let right = format!("{}{}{}", a, b, c);
-        
+
         prop_assert_eq!(left, right);
     }
 
@@ -59,7 +59,7 @@ proptest! {
         b in "\\PC*"
     ) {
         let concat = format!("{}{}", a, b);
-        
+
         prop_assert!(concat.len() >= a.len());
         prop_assert!(concat.len() >= b.len());
         prop_assert_eq!(concat.len(), a.len() + b.len());
@@ -72,7 +72,7 @@ proptest! {
     ) {
         let left = format!("{}{}", "", s);
         let right = format!("{}{}", s, "");
-        
+
         prop_assert_eq!(left, s);
         prop_assert_eq!(right, s);
     }
@@ -108,7 +108,7 @@ proptest! {
     ) {
         let left = (a + b) + c;
         let right = a + (b + c);
-        
+
         prop_assert!((left - right).abs() < 1e-10);
     }
 
@@ -140,7 +140,7 @@ proptest! {
         let original_len = vec.len();
         vec.sort();
         vec.dedup();
-        
+
         prop_assert!(vec.len() <= original_len);
     }
 
@@ -152,7 +152,7 @@ proptest! {
         let original = vec.clone();
         vec.reverse();
         vec.reverse();
-        
+
         prop_assert_eq!(vec, original);
     }
 
@@ -162,7 +162,7 @@ proptest! {
         mut vec in prop::collection::vec(0..100i32, 1..50)
     ) {
         vec.sort();
-        
+
         for i in 1..vec.len() {
             prop_assert!(vec[i - 1] <= vec[i]);
         }
@@ -175,7 +175,7 @@ proptest! {
     ) {
         let original_len = vec.len();
         vec.sort();
-        
+
         prop_assert_eq!(vec.len(), original_len);
     }
 
@@ -186,7 +186,7 @@ proptest! {
     ) {
         let mut sorted = vec.clone();
         sorted.sort();
-        
+
         // 排序前后应该包含相同的元素（重排后相等）
         vec.sort();
         prop_assert_eq!(vec, sorted);
@@ -203,14 +203,14 @@ proptest! {
     ) {
         let mut map = std::collections::HashMap::new();
         let mut expected_len = 0;
-        
+
         for (key, value) in pairs {
             if !map.contains_key(&key) {
                 expected_len += 1;
             }
             map.insert(key, value);
         }
-        
+
         prop_assert_eq!(map.len(), expected_len);
     }
 
@@ -222,7 +222,7 @@ proptest! {
     ) {
         let mut map = std::collections::HashMap::new();
         map.insert(key, value);
-        
+
         prop_assert_eq!(map.get(&key), Some(&value));
     }
 
@@ -235,7 +235,7 @@ proptest! {
     ) {
         let mut map = std::collections::HashMap::new();
         map.insert(key1, value1);
-        
+
         if key1 != key2 {
             map.remove(&key2);
             prop_assert_eq!(map.get(&key2), None);
@@ -253,7 +253,7 @@ proptest! {
         b in 1_000_000.0..10_000_000.0f64
     ) {
         let result = a + b;
-        
+
         prop_assert!(result > 2_000_000.0);
         prop_assert!(result < 20_000_000.0);
         prop_assert!((result - (b + a)).abs() < 1e-5);
@@ -266,7 +266,7 @@ proptest! {
         b in 0.0001..0.001f64
     ) {
         let sum = a + b;
-        
+
         prop_assert!(sum > 0.0002);
         prop_assert!(sum < 0.002);
     }
@@ -278,7 +278,7 @@ proptest! {
         b in 1.0..1000.0f64
     ) {
         let sum = a + b;
-        
+
         // 结果应该在 a 和 b 之间
         prop_assert!(sum > a && sum < b);
     }
@@ -294,7 +294,7 @@ proptest! {
     ) {
         let reversed: String = s.chars().rev().collect();
         let double_reversed: String = reversed.chars().rev().collect();
-        
+
         prop_assert_eq!(double_reversed, s);
     }
 
@@ -315,7 +315,7 @@ proptest! {
     ) {
         let start = start.min(s.len());
         let end = end.min(s.len());
-        
+
         if start <= end {
             let slice = &s[start..end];
             prop_assert!(slice.len() <= end - start);
@@ -333,7 +333,7 @@ proptest! {
         multiplier in 1..100i32
     ) {
         let result = opt.map(|x| x * multiplier);
-        
+
         match (opt, result) {
             (None, None) => (),
             (Some(x), Some(y)) => prop_assert_eq!(y, x * multiplier),
@@ -348,7 +348,7 @@ proptest! {
         default in any::<i32>()
     ) {
         let result = opt.unwrap_or(default);
-        
+
         match opt {
             Some(x) => prop_assert_eq!(result, x),
             None => prop_assert_eq!(result, default),
@@ -375,7 +375,7 @@ proptest! {
     ) {
         let ok_result: Result<i32, i32> = Ok(value);
         let mapped = ok_result.map(|x| x * multiplier);
-        
+
         prop_assert_eq!(mapped.unwrap(), value * multiplier);
     }
 }

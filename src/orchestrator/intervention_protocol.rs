@@ -16,11 +16,11 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
-use anyhow::Result;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 检查点类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -183,7 +183,7 @@ impl InterventionProtocol {
     pub fn new<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
         let data_dir = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir)?;
-        
+
         let mut protocol = Self {
             data_dir,
             checkpoints: Vec::new(),
@@ -191,10 +191,10 @@ impl InterventionProtocol {
             config: ProtocolConfig::default(),
             notification_callback: None,
         };
-        
+
         // 加载已有数据
         protocol.load_state().ok();
-        
+
         Ok(protocol)
     }
 
@@ -211,17 +211,19 @@ impl InterventionProtocol {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
-        let timeout = request.timeout_seconds.unwrap_or(self.config.default_timeout_seconds);
+
+        let timeout = request
+            .timeout_seconds
+            .unwrap_or(self.config.default_timeout_seconds);
         let deadline = if self.config.timeout_enabled && timeout > 0 {
             now + timeout
         } else {
             0
         };
-        
+
         // 生成 ID
         let id = format!("ckpt_{}_{}", request.checkpoint_type.as_str(), now);
-        
+
         let checkpoint = Checkpoint {
             id: id.clone(),
             checkpoint_type: request.checkpoint_type,
@@ -234,27 +236,33 @@ impl InterventionProtocol {
             user_response: None,
             timeout_seconds: request.timeout_seconds,
         };
-        
+
         // 通知用户
         if let Some(ref callback) = self.notification_callback {
             callback(&checkpoint);
         }
-        
+
         self.checkpoints.push(checkpoint);
         self.save_state()?;
-        
+
         Ok(id)
     }
 
     /// 等待用户响应
-    pub fn wait_for_response(&self, checkpoint_id: &str, timeout_ms: u64) -> Result<InterventionResult> {
+    pub fn wait_for_response(
+        &self,
+        checkpoint_id: &str,
+        timeout_ms: u64,
+    ) -> Result<InterventionResult> {
         let start_time = std::time::Instant::now();
-        
+
         // 查找检查点
-        let checkpoint = self.checkpoints.iter()
+        let checkpoint = self
+            .checkpoints
+            .iter()
             .find(|c| c.id == checkpoint_id)
             .ok_or_else(|| anyhow::anyhow!("Checkpoint not found: {}", checkpoint_id))?;
-        
+
         // 检查是否已有响应
         if let Some(ref response) = checkpoint.user_response {
             return Ok(InterventionResult {
@@ -264,13 +272,13 @@ impl InterventionProtocol {
                 is_timeout: false,
             });
         }
-        
+
         // 检查是否超时
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if checkpoint.deadline_at > 0 && now > checkpoint.deadline_at {
             return Ok(InterventionResult {
                 checkpoint_id: checkpoint_id.to_string(),
@@ -279,11 +287,11 @@ impl InterventionProtocol {
                 is_timeout: true,
             });
         }
-        
+
         // 轮询等待（实际使用中应该用异步或事件通知）
         let poll_interval = std::time::Duration::from_millis(100);
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
-        
+
         while start_time.elapsed() < timeout_duration {
             // 重新加载状态
             let mut found_checkpoint = None;
@@ -293,7 +301,7 @@ impl InterventionProtocol {
                     break;
                 }
             }
-            
+
             if let Some(cp) = found_checkpoint {
                 if let Some(ref response) = cp.user_response {
                     return Ok(InterventionResult {
@@ -304,10 +312,10 @@ impl InterventionProtocol {
                     });
                 }
             }
-            
+
             std::thread::sleep(poll_interval);
         }
-        
+
         // 超时
         Ok(InterventionResult {
             checkpoint_id: checkpoint_id.to_string(),
@@ -318,12 +326,17 @@ impl InterventionProtocol {
     }
 
     /// 响应用户操作
-    pub fn respond(&mut self, checkpoint_id: &str, action: UserAction, comment: Option<String>) -> Result<()> {
+    pub fn respond(
+        &mut self,
+        checkpoint_id: &str,
+        action: UserAction,
+        comment: Option<String>,
+    ) -> Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         // 查找并更新检查点
         for checkpoint in &mut self.checkpoints {
             if checkpoint.id == checkpoint_id {
@@ -334,46 +347,50 @@ impl InterventionProtocol {
                     UserAction::Abort(_) => CheckpointStatus::Aborted,
                     UserAction::Pause => CheckpointStatus::Paused,
                 };
-                
+
                 checkpoint.status = status;
                 checkpoint.user_response = Some(UserResponse {
                     action,
                     responded_at: now,
                     comment,
                 });
-                
+
                 // 移动到历史
-                let completed = self.checkpoints.iter()
+                let completed = self
+                    .checkpoints
+                    .iter()
                     .position(|c| c.id == checkpoint_id)
                     .unwrap();
                 let completed_checkpoint = self.checkpoints.remove(completed);
                 self.history.push(completed_checkpoint);
-                
+
                 // 清理历史
-                if self.config.auto_cleanup_history 
-                    && self.history.len() > self.config.history_retention_count 
+                if self.config.auto_cleanup_history
+                    && self.history.len() > self.config.history_retention_count
                 {
                     self.history.remove(0);
                 }
-                
+
                 self.save_state()?;
                 return Ok(());
             }
         }
-        
+
         anyhow::bail!("Checkpoint not found: {}", checkpoint_id)
     }
 
     /// 获取待处理的检查点
     pub fn get_pending_checkpoints(&self) -> Vec<&Checkpoint> {
-        self.checkpoints.iter()
+        self.checkpoints
+            .iter()
             .filter(|cp| cp.status == CheckpointStatus::Pending)
             .collect()
     }
 
     /// 获取特定类型的检查点
     pub fn get_checkpoints_by_type(&self, checkpoint_type: CheckpointType) -> Vec<&Checkpoint> {
-        self.checkpoints.iter()
+        self.checkpoints
+            .iter()
             .filter(|cp| cp.checkpoint_type == checkpoint_type)
             .collect()
     }
@@ -398,29 +415,39 @@ impl InterventionProtocol {
 
     /// 获取统计信息
     pub fn get_stats(&self) -> InterventionStats {
-        let pending_count = self.checkpoints.iter()
+        let pending_count = self
+            .checkpoints
+            .iter()
             .filter(|cp| cp.status == CheckpointStatus::Pending)
             .count();
-        
-        let approved_count = self.history.iter()
+
+        let approved_count = self
+            .history
+            .iter()
             .filter(|cp| cp.status == CheckpointStatus::Approved)
             .count();
-        
-        let rejected_count = self.history.iter()
+
+        let rejected_count = self
+            .history
+            .iter()
             .filter(|cp| cp.status == CheckpointStatus::Rejected)
             .count();
-        
-        let aborted_count = self.history.iter()
+
+        let aborted_count = self
+            .history
+            .iter()
             .filter(|cp| cp.status == CheckpointStatus::Aborted)
             .count();
-        
+
         InterventionStats {
             pending_count,
             total_checkpoints: self.checkpoints.len() + self.history.len(),
             approved_count,
             rejected_count,
             aborted_count,
-            paused_count: self.history.iter()
+            paused_count: self
+                .history
+                .iter()
                 .filter(|cp| cp.status == CheckpointStatus::Paused)
                 .count(),
         }
@@ -436,7 +463,7 @@ impl InterventionProtocol {
                 .unwrap()
                 .as_secs(),
         };
-        
+
         let file_path = self.data_dir.join("intervention_state.json");
         let json = serde_json::to_string_pretty(&state)?;
         std::fs::write(file_path, json)?;
@@ -519,7 +546,7 @@ mod tests {
     fn test_create_checkpoint() {
         let temp_dir = TempDir::new().unwrap();
         let mut protocol = InterventionProtocol::new(temp_dir.path()).unwrap();
-        
+
         let request = InterventionRequest {
             checkpoint_type: CheckpointType::PlanReady,
             description: "Plan is ready for review".to_string(),
@@ -527,7 +554,7 @@ mod tests {
             payload: Some(serde_json::json!({"plan": "test"})),
             timeout_seconds: Some(60),
         };
-        
+
         let checkpoint_id = protocol.create_checkpoint(request).unwrap();
         assert!(checkpoint_id.starts_with("ckpt_"));
         assert!(protocol.needs_intervention());
@@ -537,7 +564,7 @@ mod tests {
     fn test_respond_to_checkpoint() {
         let temp_dir = TempDir::new().unwrap();
         let mut protocol = InterventionProtocol::new(temp_dir.path()).unwrap();
-        
+
         let request = InterventionRequest {
             checkpoint_type: CheckpointType::PlanReady,
             description: "Plan is ready".to_string(),
@@ -545,12 +572,18 @@ mod tests {
             payload: None,
             timeout_seconds: None,
         };
-        
+
         let checkpoint_id = protocol.create_checkpoint(request).unwrap();
 
         // 响应用户操作
-        protocol.respond(&checkpoint_id, UserAction::Approve, Some("Looks good!".to_string())).unwrap();
-        
+        protocol
+            .respond(
+                &checkpoint_id,
+                UserAction::Approve,
+                Some("Looks good!".to_string()),
+            )
+            .unwrap();
+
         let stats = protocol.get_stats();
         assert_eq!(stats.approved_count, 1);
         assert_eq!(stats.pending_count, 0);

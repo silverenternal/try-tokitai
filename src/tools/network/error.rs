@@ -130,10 +130,7 @@ pub enum HttpError {
     ConnectionFailed(String),
 
     #[error("HTTP 状态码错误：{status} - {message}")]
-    StatusCode {
-        status: u16,
-        message: String,
-    },
+    StatusCode { status: u16, message: String },
 
     #[error("重定向失败：{0}")]
     RedirectFailed(String),
@@ -142,24 +139,16 @@ pub enum HttpError {
     ResponseParseFailed(String),
 
     #[error("请求体过大：{size} bytes，最大允许 {max} bytes")]
-    RequestTooLarge {
-        size: usize,
-        max: usize,
-    },
+    RequestTooLarge { size: usize, max: usize },
 
     #[error("响应体过大：{size} bytes，最大允许 {max} bytes")]
-    ResponseTooLarge {
-        size: usize,
-        max: usize,
-    },
+    ResponseTooLarge { size: usize, max: usize },
 
     #[error("SSRF 防护拦截：{0}")]
     SsrfBlocked(String),
 
     #[error("{context}")]
-    WithContext {
-        context: String,
-    },
+    WithContext { context: String },
 }
 
 impl HttpError {
@@ -184,10 +173,7 @@ pub enum SearchError {
     Network(String),
 
     #[error("搜索 API 返回错误：{status} - {message}")]
-    ApiError {
-        status: u16,
-        message: String,
-    },
+    ApiError { status: u16, message: String },
 
     #[error("未找到搜索结果")]
     NoResults,
@@ -199,9 +185,7 @@ pub enum SearchError {
     UrlValidation(String),
 
     #[error("搜索引擎不可用：{engine}")]
-    EngineUnavailable {
-        engine: String,
-    },
+    EngineUnavailable { engine: String },
 
     #[error("解析搜索结果失败：{0}")]
     ParseFailed(String),
@@ -238,21 +222,13 @@ pub enum DownloadError {
     Io(String),
 
     #[error("文件过大：{size} MB，最大允许 {max} MB")]
-    FileTooLarge {
-        size: usize,
-        max: usize,
-    },
+    FileTooLarge { size: usize, max: usize },
 
     #[error("磁盘空间不足：需要 {needed} bytes，可用 {available} bytes")]
-    DiskSpaceInsufficient {
-        needed: u64,
-        available: u64,
-    },
+    DiskSpaceInsufficient { needed: u64, available: u64 },
 
     #[error("不支持的文件类型：{ext}")]
-    UnsupportedFileType {
-        ext: String,
-    },
+    UnsupportedFileType { ext: String },
 
     #[error("断点续传失败：{0}")]
     ResumeFailed(String),
@@ -289,24 +265,16 @@ pub enum NetworkToolError {
     InvalidHostname(String),
 
     #[error("端口无效：{port}，范围应为 1-65535")]
-    InvalidPort {
-        port: u16,
-    },
+    InvalidPort { port: u16 },
 
     #[error("IP 地址无效：{0}")]
     InvalidIp(String),
 
     #[error("连接超时：{host}:{port}")]
-    ConnectionTimeout {
-        host: String,
-        port: u16,
-    },
+    ConnectionTimeout { host: String, port: u16 },
 
     #[error("连接被拒绝：{host}:{port}")]
-    ConnectionRefused {
-        host: String,
-        port: u16,
-    },
+    ConnectionRefused { host: String, port: u16 },
 
     #[error("DNS 解析失败：{0}")]
     DnsResolution(String),
@@ -315,10 +283,7 @@ pub enum NetworkToolError {
     PermissionDenied(String),
 
     #[error("命令执行失败：{cmd} - {error}")]
-    CommandFailed {
-        cmd: String,
-        error: String,
-    },
+    CommandFailed { cmd: String, error: String },
 
     #[error("安全限制：{0}")]
     SecurityRestriction(String),
@@ -488,10 +453,7 @@ mod tests {
             status: 404,
             message: "Not Found".to_string(),
         };
-        assert_eq!(
-            format!("{}", err),
-            "HTTP 状态码错误：404 - Not Found"
-        );
+        assert_eq!(format!("{}", err), "HTTP 状态码错误：404 - Not Found");
 
         let err = SearchError::NoResults;
         assert_eq!(format!("{}", err), "未找到搜索结果");

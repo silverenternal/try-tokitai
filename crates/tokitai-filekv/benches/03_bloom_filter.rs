@@ -12,14 +12,10 @@ mod common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 
-use common::{
-    setup_kv, warm_cache, flush_kv,
-    quick_bench_config,
-    bench_key, bench_value,
-};
+use common::{bench_key, bench_value, flush_kv, quick_bench_config, setup_kv, warm_cache};
 
 // ============================================================================
 // Bloom Negative Lookup (key doesn't exist, bloom should reject quickly)
@@ -138,9 +134,10 @@ fn bench_bloom_multi_segment(c: &mut Criterion) {
 // Criterion main
 // ============================================================================
 
-criterion_group!(benches, 
-    bench_bloom_negative, 
-    bench_bloom_positive, 
+criterion_group!(
+    benches,
+    bench_bloom_negative,
+    bench_bloom_positive,
     bench_bloom_multi_segment
 );
 

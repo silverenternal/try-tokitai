@@ -10,10 +10,10 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use anyhow::Result;
 
 /// 工具优化建议类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +151,7 @@ impl ToolOptimizer {
     /// 创建新的优化器
     pub fn new(data_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
-        
+
         Ok(Self {
             data_dir,
             tool_metrics: HashMap::new(),
@@ -183,42 +183,43 @@ impl ToolOptimizer {
     /// 分析并生成优化建议
     pub fn analyze_and_optimize(&mut self) -> Vec<&OptimizationSuggestion> {
         self.suggestions.clear();
-        
+
         // 1. 计算工具健康度
         self.calculate_health_scores();
-        
+
         // 2. 检测低使用率工具
         self.detect_low_usage_tools();
-        
+
         // 3. 检测冗余工具
         self.detect_redundant_tools();
-        
+
         // 4. 检测需要改进的工具
         self.detect_tools_needing_improvement();
-        
+
         // 5. 检测工具拆分机会
         self.detect_split_opportunities();
-        
+
         // 按优先级排序
         self.suggestions.sort_by(|a, b| b.priority.cmp(&a.priority));
-        
+
         self.suggestions.iter().collect()
     }
 
     /// 计算工具健康度
     fn calculate_health_scores(&mut self) {
         self.health_scores.clear();
-        
+
         for (tool_name, metrics) in &self.tool_metrics {
             let usage_score = self.calculate_usage_score(metrics);
             let reliability_score = self.calculate_reliability_score(metrics);
             let necessity_score = self.calculate_necessity_score(metrics);
-            
-            let health_score = (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3)
-                .clamp(0.0, 1.0);
-            
+
+            let health_score =
+                (usage_score * 0.3 + reliability_score * 0.4 + necessity_score * 0.3)
+                    .clamp(0.0, 1.0);
+
             let mut issues = Vec::new();
-            
+
             if usage_score < 0.3 {
                 issues.push("使用率极低".to_string());
             }
@@ -228,15 +229,18 @@ impl ToolOptimizer {
             if necessity_score < 0.4 {
                 issues.push("必要性存疑".to_string());
             }
-            
-            self.health_scores.insert(tool_name.clone(), ToolHealth {
-                tool_name: tool_name.clone(),
-                health_score,
-                usage_score,
-                reliability_score,
-                necessity_score,
-                issues,
-            });
+
+            self.health_scores.insert(
+                tool_name.clone(),
+                ToolHealth {
+                    tool_name: tool_name.clone(),
+                    health_score,
+                    usage_score,
+                    reliability_score,
+                    necessity_score,
+                    issues,
+                },
+            );
         }
     }
 
@@ -245,14 +249,14 @@ impl ToolOptimizer {
         if metrics.total_calls == 0 {
             return 0.0;
         }
-        
+
         // 基于调用次数的对数评分
         let call_score = (metrics.total_calls as f32).ln() / 10.0;
         let call_score = call_score.min(1.0);
-        
+
         // 基于满意度的评分
         let satisfaction_score = metrics.avg_satisfaction / 5.0;
-        
+
         (call_score * 0.6 + satisfaction_score * 0.4).min(1.0)
     }
 
@@ -261,7 +265,7 @@ impl ToolOptimizer {
         if metrics.total_calls == 0 {
             return 0.5; // 无数据时取中间值
         }
-        
+
         let success_rate = metrics.success_count as f32 / metrics.total_calls as f32;
 
         // 执行时间评分（假设 1000ms 以内为优秀）
@@ -281,11 +285,11 @@ impl ToolOptimizer {
         // 基于依赖关系数量
         let dependency_count = metrics.dependencies.len();
         let dependency_score = (dependency_count as f32 / 5.0).min(1.0);
-        
+
         // 基于功能标签数量
         let tag_count = metrics.tags.len();
         let tag_score = (tag_count as f32 / 3.0).min(1.0);
-        
+
         (dependency_score * 0.5 + tag_score * 0.5).min(1.0)
     }
 
@@ -297,13 +301,16 @@ impl ToolOptimizer {
                     id: format!("opt_low_usage_{}", tool_name),
                     optimization_type: OptimizationType::Deprecate,
                     affected_tools: vec![tool_name.clone()],
-                    description: format!("工具{}使用率极低（{}次调用）", tool_name, metrics.total_calls),
+                    description: format!(
+                        "工具{}使用率极低（{}次调用）",
+                        tool_name, metrics.total_calls
+                    ),
                     rationale: "低使用率工具增加维护成本，建议考虑废弃或合并".to_string(),
                     expected_benefit: "减少代码复杂度，降低维护成本".to_string(),
                     priority: 4,
                     difficulty: 2,
                 };
-                
+
                 self.suggestions.push(suggestion);
             }
         }
@@ -313,48 +320,53 @@ impl ToolOptimizer {
     fn detect_redundant_tools(&mut self) {
         let tool_names: Vec<_> = self.tool_metrics.keys().cloned().collect();
         let mut processed_pairs: HashSet<(String, String)> = HashSet::new();
-        
+
         for i in 0..tool_names.len() {
             for j in (i + 1)..tool_names.len() {
                 let tool1 = &tool_names[i];
                 let tool2 = &tool_names[j];
-                
+
                 if processed_pairs.contains(&(tool1.clone(), tool2.clone())) {
                     continue;
                 }
-                
+
                 let similarity = self.calculate_tool_similarity(tool1, tool2);
-                
+
                 if similarity >= self.config.redundancy_similarity_threshold {
                     processed_pairs.insert((tool1.clone(), tool2.clone()));
-                    
+
                     // 决定保留哪个工具
                     let metrics1 = &self.tool_metrics[tool1];
                     let metrics2 = &self.tool_metrics[tool2];
-                    
+
                     let to_keep = if metrics1.total_calls >= metrics2.total_calls {
                         tool1.clone()
                     } else {
                         tool2.clone()
                     };
-                    
+
                     let to_deprecate = if to_keep == *tool1 {
                         tool2.clone()
                     } else {
                         tool1.clone()
                     };
-                    
+
                     let suggestion = OptimizationSuggestion {
                         id: format!("opt_redundant_{}_{}", tool1, tool2),
                         optimization_type: OptimizationType::Merge,
                         affected_tools: vec![tool1.clone(), tool2.clone()],
-                        description: format!("工具{}和{}功能冗余（相似度{:.0}%）", tool1, tool2, similarity * 100.0),
+                        description: format!(
+                            "工具{}和{}功能冗余（相似度{:.0}%）",
+                            tool1,
+                            tool2,
+                            similarity * 100.0
+                        ),
                         rationale: format!("建议保留{}，废弃{}", to_keep, to_deprecate),
                         expected_benefit: "消除冗余，简化代码结构".to_string(),
                         priority: 6,
                         difficulty: 3,
                     };
-                    
+
                     self.suggestions.push(suggestion);
                 }
             }
@@ -366,18 +378,22 @@ impl ToolOptimizer {
         for (tool_name, health) in &self.health_scores {
             if health.health_score < self.config.low_health_threshold {
                 let issues_str = health.issues.join(", ");
-                
+
                 let suggestion = OptimizationSuggestion {
                     id: format!("opt_improve_{}", tool_name),
                     optimization_type: OptimizationType::Improve,
                     affected_tools: vec![tool_name.clone()],
-                    description: format!("工具{}健康度低（{:.1}分）", tool_name, health.health_score * 100.0),
+                    description: format!(
+                        "工具{}健康度低（{:.1}分）",
+                        tool_name,
+                        health.health_score * 100.0
+                    ),
                     rationale: format!("存在问题：{}", issues_str),
                     expected_benefit: "提升工具质量和用户体验".to_string(),
                     priority: 7,
                     difficulty: 4,
                 };
-                
+
                 self.suggestions.push(suggestion);
             }
         }
@@ -392,13 +408,17 @@ impl ToolOptimizer {
                     id: format!("opt_split_{}", tool_name),
                     optimization_type: OptimizationType::Split,
                     affected_tools: vec![tool_name.clone()],
-                    description: format!("工具{}功能复杂（{}个标签），建议拆分", tool_name, metrics.tags.len()),
+                    description: format!(
+                        "工具{}功能复杂（{}个标签），建议拆分",
+                        tool_name,
+                        metrics.tags.len()
+                    ),
                     rationale: "复杂工具难以维护，拆分为专用工具可提升性能".to_string(),
                     expected_benefit: "提升性能和可维护性".to_string(),
                     priority: 5,
                     difficulty: 4,
                 };
-                
+
                 self.suggestions.push(suggestion);
             }
         }
@@ -408,16 +428,16 @@ impl ToolOptimizer {
     fn calculate_tool_similarity(&self, tool1: &str, tool2: &str) -> f32 {
         let metrics1 = &self.tool_metrics[tool1];
         let metrics2 = &self.tool_metrics[tool2];
-        
+
         // 名称相似度
         let name_sim = self.levenshtein_similarity(tool1, tool2);
-        
+
         // 标签相似度
         let tag_sim = self.jaccard_similarity(&metrics1.tags, &metrics2.tags);
-        
+
         // 依赖相似度
         let dep_sim = self.jaccard_similarity(&metrics1.dependencies, &metrics2.dependencies);
-        
+
         (name_sim * self.config.name_similarity_weight
             + tag_sim * self.config.functionality_similarity_weight
             + dep_sim * (1.0 - self.config.functionality_similarity_weight))
@@ -428,17 +448,17 @@ impl ToolOptimizer {
     fn levenshtein_similarity(&self, s1: &str, s2: &str) -> f32 {
         let s1_chars: Vec<char> = s1.chars().collect();
         let s2_chars: Vec<char> = s2.chars().collect();
-        
+
         let len1 = s1_chars.len();
         let len2 = s2_chars.len();
-        
+
         if len1 == 0 && len2 == 0 {
             return 1.0;
         }
-        
+
         let distance = self.levenshtein_distance(&s1_chars, &s2_chars);
         let max_len = len1.max(len2);
-        
+
         1.0 - (distance as f32 / max_len as f32)
     }
 
@@ -472,10 +492,10 @@ impl ToolOptimizer {
     fn jaccard_similarity(&self, set1: &[String], set2: &[String]) -> f32 {
         let set1: HashSet<_> = set1.iter().collect();
         let set2: HashSet<_> = set2.iter().collect();
-        
+
         let intersection = set1.intersection(&set2).count();
         let union = set1.union(&set2).count();
-        
+
         if union == 0 {
             1.0
         } else {
@@ -528,7 +548,7 @@ mod tests {
     fn test_health_score_calculation() {
         let temp_dir = TempDir::new().unwrap();
         let mut optimizer = ToolOptimizer::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         optimizer.update_metrics(ToolMetrics {
             tool_name: "test_tool".to_string(),
             total_calls: 100,
@@ -540,9 +560,9 @@ mod tests {
             tags: vec!["file".to_string(), "io".to_string()],
             dependencies: vec![],
         });
-        
+
         optimizer.calculate_health_scores();
-        
+
         let health = optimizer.health_scores.get("test_tool").unwrap();
         assert!(health.health_score > 0.5);
     }
@@ -551,7 +571,7 @@ mod tests {
     fn test_redundancy_detection() {
         let temp_dir = TempDir::new().unwrap();
         let mut optimizer = ToolOptimizer::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         // 添加两个相似工具
         optimizer.update_metrics(ToolMetrics {
             tool_name: "read_file".to_string(),
@@ -564,7 +584,7 @@ mod tests {
             tags: vec!["file".to_string(), "read".to_string()],
             dependencies: vec![],
         });
-        
+
         optimizer.update_metrics(ToolMetrics {
             tool_name: "file_read".to_string(),
             total_calls: 10,
@@ -576,7 +596,7 @@ mod tests {
             tags: vec!["file".to_string(), "read".to_string()],
             dependencies: vec![],
         });
-        
+
         let suggestions = optimizer.analyze_and_optimize();
         assert!(!suggestions.is_empty());
     }

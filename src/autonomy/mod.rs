@@ -53,21 +53,21 @@
 //! let decision = negotiator.negotiate(&evolution_state).await?;
 //! ```
 
-pub mod task_decomposer;
-pub mod iteration_tracker;
+pub mod agents;
+pub mod gap_detector;
 pub mod git_workflow;
 pub mod git_workflow_tools;
-pub mod agents;
+pub mod iteration_tracker;
 pub mod self_improvement_loop;
-pub mod gap_detector;
-pub mod tool_optimizer;
 pub mod system_reflector;
+pub mod task_decomposer;
 pub mod tool_creator;
+pub mod tool_optimizer;
 
 // Prompt Engineering 版本（论文计划落实）
+pub mod multi_agent_negotiator;
 pub mod prompt_gap_detector;
 pub mod prompt_optimizer;
-pub mod multi_agent_negotiator;
 
 // Prompt 模板热加载
 pub mod prompt_template_loader;
@@ -75,21 +75,27 @@ pub mod prompt_template_loader;
 // 混合检测器（融合统计与 Prompt Engineering）
 pub mod hybrid_gap_detector;
 
+pub use agents::AgentCoordinator;
 pub use git_workflow::GitWorkflow;
 pub use git_workflow_tools::GitWorkflowTools;
-pub use agents::AgentCoordinator;
 
 // 导出 Prompt Engineering 组件（供外部使用）
 #[allow(unused_imports)]
-pub use prompt_gap_detector::{PromptGapDetector, CausalAnalysisRequest, IdentifiedGap};
+pub use multi_agent_negotiator::{
+    EvolutionAction, EvolutionState, MultiAgentNegotiator, NegotiationDecision,
+};
 #[allow(unused_imports)]
-pub use prompt_optimizer::{PromptOptimizer, OptimizationSuggestion, ToolMetrics as OptimizerToolMetrics};
+pub use prompt_gap_detector::{CausalAnalysisRequest, IdentifiedGap, PromptGapDetector};
 #[allow(unused_imports)]
-pub use multi_agent_negotiator::{MultiAgentNegotiator, EvolutionState, EvolutionAction, NegotiationDecision};
+pub use prompt_optimizer::{
+    OptimizationSuggestion, PromptOptimizer, ToolMetrics as OptimizerToolMetrics,
+};
 
 // 导出混合检测器组件（供外部使用）
 #[allow(unused_imports)]
-pub use hybrid_gap_detector::{HybridGapDetector, HybridToolGap, HybridConfig, StatisticalEvidence, CausalEvidence};
+pub use hybrid_gap_detector::{
+    CausalEvidence, HybridConfig, HybridGapDetector, HybridToolGap, StatisticalEvidence,
+};
 
 // 导出 Prompt 模板加载器
 #[allow(unused_imports)]

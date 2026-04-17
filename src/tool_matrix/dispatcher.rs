@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
 /// 工具执行 trait（简化版，实际应该使用 tokitai 的 ToolExecutor）
 #[async_trait::async_trait]
@@ -189,9 +189,8 @@ mod tests {
         let dispatcher = ToolDispatcher::new(selector);
 
         // 注册执行器
-        let executor = DefaultToolExecutor::new(|name, args| {
-            Ok(json!({"tool": name, "args": args}))
-        });
+        let executor =
+            DefaultToolExecutor::new(|name, args| Ok(json!({"tool": name, "args": args})));
 
         let tools = vec![ToolDefinition::new("test_tool", "A test tool", r#"{}"#)
             .with_category(ServiceCategory::Utility)];

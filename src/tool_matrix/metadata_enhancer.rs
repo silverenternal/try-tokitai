@@ -24,7 +24,7 @@
 //! // 现在工具包含更丰富的元数据，可用于 AI 分类和搜索
 //! ```
 
-use crate::tool_matrix::matrix::{ToolDefinition, ServiceCategory};
+use crate::tool_matrix::matrix::{ServiceCategory, ToolDefinition};
 use std::collections::HashMap;
 
 /// 元数据增强器
@@ -160,14 +160,22 @@ impl MetadataEnhancer {
         }
 
         // 中等风险操作
-        if text.contains("write") || text.contains("modify") || text.contains("update") 
-            || text.contains("execute") || text.contains("run") {
+        if text.contains("write")
+            || text.contains("modify")
+            || text.contains("update")
+            || text.contains("execute")
+            || text.contains("run")
+        {
             return "moderate".to_string();
         }
 
         // 低风险操作
-        if text.contains("read") || text.contains("list") || text.contains("get") 
-            || text.contains("search") || text.contains("analyze") {
+        if text.contains("read")
+            || text.contains("list")
+            || text.contains("get")
+            || text.contains("search")
+            || text.contains("analyze")
+        {
             return "safe".to_string();
         }
 
@@ -184,7 +192,7 @@ mod tests {
     #[test]
     fn test_enhance_read_file() {
         let enhancer = MetadataEnhancer::new();
-        
+
         let tool = ToolDefinition::new("read_file", "Read file content from disk", r#"{}"#);
         let enhanced = enhancer.enhance(tool);
 
@@ -197,7 +205,7 @@ mod tests {
     #[test]
     fn test_enhance_http_request() {
         let enhancer = MetadataEnhancer::new();
-        
+
         let tool = ToolDefinition::new("http_request", "Send HTTP request to URL", r#"{}"#);
         let enhanced = enhancer.enhance(tool);
 

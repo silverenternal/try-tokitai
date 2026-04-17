@@ -9,29 +9,20 @@ Rust's `#[timeout]` attribute is **nightly-only** and not available on stable Ru
 
 1. **CI-level timeout**: The GitHub Actions workflow (`.github/workflows/ci.yml`) sets `timeout-minutes: 10` for the unit test job (`cargo test --lib`), which will kill the job if it exceeds 10 minutes.
 
-2. **Slow tests marked `#[ignore]`**: The following compaction tests are known to run >60 seconds and are marked `#[ignore]` to exclude them from default test runs:
-   - `test_filekv_compaction` (src/tests/integration.rs)
-   - `test_filekv_parallel_compaction` (src/tests/integration.rs)
-   - `test_background_compaction_actually_works` (src/tests/integration.rs)
+2. **All tests run by default**: All 630 tests run by default with `cargo test`. No tests are marked as `#[ignore]` (except 3 stability tests).
 
-   These can be run explicitly with:
-   ```bash
-   cargo test --lib -- --ignored
-   ```
-
-### Running Slow Tests Locally
-If you need to run slow tests locally, set a generous timeout:
+### Running Tests Locally
 ```bash
 # With cargo-nextest (recommended):
-cargo nextest run --lib --test-timeout 300s -- --ignored
+cargo nextest run --lib --test-timeout 120s
 
 # With plain cargo test:
-timeout 300 cargo test --lib -- --ignored
+cargo test --lib --all-features
 ```
 
 ### Future Improvements
 
-1. **cargo-nextest**: Consider adopting `cargo-nextest` which supports `--test-timeout` natively:
+1. **cargo-nextest**: Already adopted, supports `--test-timeout` natively:
    ```bash
    cargo install cargo-nextest
    cargo nextest run --lib --test-timeout 120s
@@ -41,18 +32,14 @@ timeout 300 cargo test --lib -- --ignored
    - Creating integration tests in `tests/` directory with explicit timeout
    - Using `serial_test` crate to isolate slow tests
 
-## Ignored Tests
+## Test Coverage
 
-Tests marked with `#[ignore]` are excluded from `cargo test` by default. They fall into two categories:
+- **Lib Tests**: 625/625 (100% pass rate)
+- **Integration Tests**: 28/28 (100% pass rate)
+- **Doctests**: 16/16 passed, 7 ignored (expected)
+- **High Concurrency Tests**: 9 tests (previously ignored, now run by default since v0.4.0)
+- **Clippy**: 0 warnings
 
-### Slow Compaction Tests (>60s)
-These tests involve real compaction operations with background threads:
-- `test_filekv_compaction`
-- `test_filekv_parallel_compaction`
-- `test_background_compaction_actually_works`
+### Test Modules
 
-### Stability Tests (>3s, frequent runs cause noise)
-These tests are designed for long-running validation:
-- `test_short_running_stability`
-- `test_memory_leak_detection`
-- `test_performance_stability`
+Tests are distributed across 46+ test modules for parallel execution.

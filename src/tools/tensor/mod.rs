@@ -148,17 +148,14 @@
 //! - `layer_norm` - LayerNorm 归一化
 //! - `linear` - 全连接层（线性变换）
 
-pub mod core;
 pub mod backend;
+pub mod core;
 pub mod service;
 
 // Re-export core types
-pub use core::{
-    Tensor, TensorData,
-    TensorError, TensorResult,
-};
+pub use core::{Tensor, TensorData, TensorError, TensorResult};
 
-pub use backend::{TensorBackend, NdArrayBackend};
+pub use backend::{NdArrayBackend, TensorBackend};
 
 pub use service::{TensorService, TensorTools};
 

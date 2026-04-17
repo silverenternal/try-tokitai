@@ -18,15 +18,17 @@
 //! - L4: LLM 分类 (~1.5s)
 
 use anyhow::Result;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
-use crate::tool_matrix::matrix::{ToolDefinition, ToolBox, ToolUsageStats, ServiceMetadata};
-use crate::tool_matrix::ai_classifier::{AIToolboxClassifier, DefaultLLMClient, ToolboxAction, ToolboxAssignment};
+use crate::tool_matrix::ai_classifier::{
+    AIToolboxClassifier, DefaultLLMClient, ToolboxAction, ToolboxAssignment,
+};
 use crate::tool_matrix::dependency_analyzer::{AIDependencyAnalyzer, ToolCallSequence};
+use crate::tool_matrix::matrix::{ServiceMetadata, ToolBox, ToolDefinition, ToolUsageStats};
 use crate::tool_matrix::rule_classifier::{HierarchicalClassifier, RuleClassifier};
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 /// 工具来源
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,9 +97,7 @@ impl ToolRegistry {
     }
 
     /// 创建带 AI 分类器的工具注册表
-    pub fn with_ai_classifier(
-        llm_client: Arc<DefaultLLMClient>,
-    ) -> Self {
+    pub fn with_ai_classifier(llm_client: Arc<DefaultLLMClient>) -> Self {
         let registry = Self::new();
         let classifier = Arc::new(AIToolboxClassifier::new(
             llm_client,
@@ -115,9 +115,7 @@ impl ToolRegistry {
     }
 
     /// 创建带 AI 依赖分析器的工具注册表
-    pub fn with_ai_dependency_analyzer(
-        llm_client: Arc<DefaultLLMClient>,
-    ) -> Self {
+    pub fn with_ai_dependency_analyzer(llm_client: Arc<DefaultLLMClient>) -> Self {
         let registry = Self::new();
         let analyzer = Arc::new(AIDependencyAnalyzer::new(llm_client));
         Self {
@@ -154,9 +152,7 @@ impl ToolRegistry {
     }
 
     /// 创建带分层分类器的工具注册表 (IMP-001)
-    pub fn with_hierarchical_classifier(
-        rule_classifier: RuleClassifier,
-    ) -> Self {
+    pub fn with_hierarchical_classifier(rule_classifier: RuleClassifier) -> Self {
         let registry = Self::new();
         let hierarchical = Arc::new(HierarchicalClassifier::new(rule_classifier));
         Self {
@@ -173,9 +169,7 @@ impl ToolRegistry {
     /// 创建带分层分类器的工具注册表（从工具标签自动构建）(IMP-001)
     ///
     /// 此方法会遍历所有已注册的工具，从它们的 tags 字段自动构建分类规则
-    pub fn with_auto_hierarchical_classifier(
-        tools: &[ToolDefinition],
-    ) -> Self {
+    pub fn with_auto_hierarchical_classifier(tools: &[ToolDefinition]) -> Self {
         // 从工具标签自动构建规则分类器
         let rule_classifier = RuleClassifier::from_tool_tags(tools);
         let registry = Self::new();
@@ -258,8 +252,10 @@ impl ToolRegistry {
             match hierarchical.classify(&tool_name) {
                 Some(match_result) => {
                     // L1/L2/L3 匹配成功
-                    debug!("分层分类器匹配：{} -> {} (置信度：{:.2})",
-                        tool_name, match_result.toolbox_id, match_result.confidence);
+                    debug!(
+                        "分层分类器匹配：{} -> {} (置信度：{:.2})",
+                        tool_name, match_result.toolbox_id, match_result.confidence
+                    );
                     Some(ToolboxAssignment {
                         action: ToolboxAction::AddToExisting,
                         toolbox_id: Some(match_result.toolbox_id),
@@ -308,9 +304,10 @@ impl ToolRegistry {
                 ToolboxAction::AddToExisting => assignment.toolbox_id.clone(),
                 ToolboxAction::CreateNew => {
                     // AI 建议创建新工具箱，已经在 classifier 中处理
-                    assignment.new_toolbox.as_ref().map(|tb| {
-                        tb.name.to_lowercase().replace(' ', "_")
-                    })
+                    assignment
+                        .new_toolbox
+                        .as_ref()
+                        .map(|tb| tb.name.to_lowercase().replace(' ', "_"))
                 }
             }
         } else {
@@ -323,7 +320,9 @@ impl ToolRegistry {
             toolbox_id: toolbox_id.clone(),
         };
 
-        self.tools.write().insert(tool_name.clone(), registered_tool);
+        self.tools
+            .write()
+            .insert(tool_name.clone(), registered_tool);
 
         // 添加到工具箱（如果 AI 指定了）
         if let Some(tb_id) = &toolbox_id {
@@ -343,8 +342,11 @@ impl ToolRegistry {
             let all_tools = self.get_all_tools();
             match analyzer.analyze_dependencies(&tool, &all_tools).await {
                 Ok(analysis) => {
-                    info!("AI 依赖分析完成：{}，发现 {} 个前置依赖", 
-                        tool.name, analysis.prerequisites.len());
+                    info!(
+                        "AI 依赖分析完成：{}，发现 {} 个前置依赖",
+                        tool.name,
+                        analysis.prerequisites.len()
+                    );
                 }
                 Err(e) => {
                     warn!("AI 依赖分析失败：{}", e);
@@ -376,7 +378,9 @@ impl ToolRegistry {
             toolbox_id: Some(toolbox_id.to_string()),
         };
 
-        self.tools.write().insert(tool_name.clone(), registered_tool);
+        self.tools
+            .write()
+            .insert(tool_name.clone(), registered_tool);
 
         // 添加到工具箱
         let mut toolboxes = self.toolboxes.write();
@@ -425,7 +429,9 @@ impl ToolRegistry {
                 toolbox_id: toolbox_id.map(|s| s.to_string()),
             };
 
-            self.tools.write().insert(tool_name.clone(), registered_tool);
+            self.tools
+                .write()
+                .insert(tool_name.clone(), registered_tool);
 
             // 如果指定了工具箱，添加到工具箱
             if let Some(box_id) = toolbox_id {
@@ -523,10 +529,7 @@ impl ToolRegistry {
 
     /// 获取工具定义
     pub fn get_tool(&self, name: &str) -> Option<ToolDefinition> {
-        self.tools
-            .read()
-            .get(name)
-            .map(|rt| rt.definition.clone())
+        self.tools.read().get(name).map(|rt| rt.definition.clone())
     }
 
     /// 获取所有工具
@@ -685,7 +688,7 @@ impl ToolRegistry {
     pub fn record_call_sequence(&self, sequence: ToolCallSequence) {
         let mut sequences = self.runtime_call_sequences.write();
         sequences.push(sequence);
-        
+
         // 保持最近 1000 条记录
         if sequences.len() > 1000 {
             sequences.remove(0);
@@ -703,7 +706,7 @@ impl ToolRegistry {
 
             // 使用 analyzer 学习
             let learned_count = sequences.len();
-            
+
             {
                 let _ = analyzer.learn_from_runtime_logs(&sequences).await;
             }
@@ -752,7 +755,10 @@ mod tests {
         let registry = ToolRegistry::new();
         let tool = ToolDefinition::new("test_tool", "A test tool", r#"{}"#);
 
-        assert!(registry.register_tool(tool.clone(), ToolSource::Builtin).await.is_ok());
+        assert!(registry
+            .register_tool(tool.clone(), ToolSource::Builtin)
+            .await
+            .is_ok());
         assert!(registry.tool_exists("test_tool"));
         assert_eq!(registry.tool_count(), 1);
     }
@@ -795,8 +801,14 @@ mod tests {
         let tool1 = ToolDefinition::new("tool1", "Tool 1", r#"{}"#).with_tag("utility");
         let tool2 = ToolDefinition::new("tool2", "Tool 2", r#"{}"#).with_tag("network");
 
-        registry.register_tool(tool1, ToolSource::Builtin).await.unwrap();
-        registry.register_tool(tool2, ToolSource::Builtin).await.unwrap();
+        registry
+            .register_tool(tool1, ToolSource::Builtin)
+            .await
+            .unwrap();
+        registry
+            .register_tool(tool2, ToolSource::Builtin)
+            .await
+            .unwrap();
 
         let utility_tools = registry.filter_by_tag("utility");
         assert_eq!(utility_tools.len(), 1);

@@ -35,6 +35,9 @@ tokitai = "0.4.0"
 tokitai-core = "0.4.0"
 tokitai-mcp-server = "0.4.0"
 
+# Context management (local crate)
+tokitai-context = { path = "crates/tokitai-context" }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -147,7 +150,9 @@ ignored = [
 
 # 排除独立测试目录
 [workspace]
+members = ["crates/tokitai-context"]
 exclude = ["test_tensor"]
+
 
 [[bench]]
 name = "core_benchmarks"

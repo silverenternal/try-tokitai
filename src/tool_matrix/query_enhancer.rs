@@ -98,15 +98,12 @@ impl QueryEnhancer {
     }
 
     /// 从文件加载同义词配置
-    pub fn load_synonyms<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> Result<(), String> {
-        let content = fs::read_to_string(path.as_ref())
-            .map_err(|e| format!("读取同义词文件失败：{}", e))?;
+    pub fn load_synonyms<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
+        let content =
+            fs::read_to_string(path.as_ref()).map_err(|e| format!("读取同义词文件失败：{}", e))?;
 
-        let config: SynonymsConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("解析同义词配置失败：{}", e))?;
+        let config: SynonymsConfig =
+            serde_json::from_str(&content).map_err(|e| format!("解析同义词配置失败：{}", e))?;
 
         // 构建反向索引：每个同义词 -> 主词
         let synonyms_count = config.synonyms.len();
@@ -130,15 +127,12 @@ impl QueryEnhancer {
     }
 
     /// 从文件加载意图模式配置
-    pub fn load_intent_patterns<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> Result<(), String> {
+    pub fn load_intent_patterns<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
         let content = fs::read_to_string(path.as_ref())
             .map_err(|e| format!("读取意图模式文件失败：{}", e))?;
 
-        let config: IntentPatternsConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("解析意图模式配置失败：{}", e))?;
+        let config: IntentPatternsConfig =
+            serde_json::from_str(&content).map_err(|e| format!("解析意图模式配置失败：{}", e))?;
 
         // 编译正则表达式
         let intents_count = config.intents.len();
@@ -148,8 +142,10 @@ impl QueryEnhancer {
                 match regex::Regex::new(pattern_str) {
                     Ok(regex) => compiled_patterns.push(regex),
                     Err(e) => {
-                        warn!("编译意图 {} 的正则表达式失败：{} - {}",
-                            intent_type, pattern_str, e);
+                        warn!(
+                            "编译意图 {} 的正则表达式失败：{} - {}",
+                            intent_type, pattern_str, e
+                        );
                     }
                 }
             }
@@ -164,30 +160,32 @@ impl QueryEnhancer {
     /// 从默认配置加载
     pub fn from_default_config() -> Result<Self, String> {
         let mut enhancer = Self::new();
-        
+
         // 加载默认同义词
         let synonyms_json = include_str!("../../config/tool_synonyms.json");
         let config: SynonymsConfig = serde_json::from_str(synonyms_json)
             .map_err(|e| format!("解析默认同义词配置失败：{}", e))?;
-        
+
         for (main_term, synonyms) in config.synonyms {
             for synonym in synonyms {
-                enhancer.synonym_map
+                enhancer
+                    .synonym_map
                     .entry(synonym.to_lowercase())
                     .or_default()
                     .push(main_term.clone());
             }
-            enhancer.synonym_map
+            enhancer
+                .synonym_map
                 .entry(main_term.to_lowercase())
                 .or_default()
                 .push(main_term.clone());
         }
-        
+
         // 加载默认意图模式
         let intents_json = include_str!("../../config/intent_patterns.json");
         let intent_config: IntentPatternsConfig = serde_json::from_str(intents_json)
             .map_err(|e| format!("解析默认意图配置失败：{}", e))?;
-        
+
         for (intent_type, pattern_config) in intent_config.intents {
             let mut compiled_patterns = Vec::new();
             for pattern_str in &pattern_config.patterns {
@@ -195,41 +193,44 @@ impl QueryEnhancer {
                     compiled_patterns.push(regex);
                 }
             }
-            enhancer.intent_patterns.insert(intent_type, compiled_patterns);
+            enhancer
+                .intent_patterns
+                .insert(intent_type, compiled_patterns);
         }
-        
+
         // 内置拼写纠错
         enhancer.spelling_corrections = Self::build_default_spelling_corrections();
-        
+
         // 内置工具别名
         enhancer.tool_aliases = Self::build_default_tool_aliases();
-        
+
         Ok(enhancer)
     }
 
     /// 增强查询
     pub fn enhance(&self, query: &str) -> EnhancedQuery {
         let original = query.to_string();
-        
+
         // 1. 拼写纠错
         let (corrected_query, corrected) = self.correct_spelling(query);
-        
+
         // 2. 意图识别
         let intent = self.recognize_intent(&corrected_query);
-        
+
         // 3. 同义词扩展
         let synonym_expansions = self.expand_synonyms(&corrected_query);
-        
+
         // 4. 标准化（去除疑问词等）
         let normalized = self.normalize_query(&corrected_query, intent.as_ref());
-        
+
         debug!(
             "查询增强：原始=\"{}\" -> 标准化=\"{}\", 意图={:?}, 扩展={} 个",
-            original, normalized,
+            original,
+            normalized,
             intent.as_ref().map(|i| &i.intent_type),
             synonym_expansions.len()
         );
-        
+
         EnhancedQuery {
             original,
             normalized,
@@ -242,24 +243,24 @@ impl QueryEnhancer {
     /// 拼写纠错
     fn correct_spelling(&self, query: &str) -> (String, bool) {
         let query_lower = query.to_lowercase();
-        
+
         // 检查常见拼写错误
         if let Some(correction) = self.spelling_corrections.get(&query_lower) {
             debug!("拼写纠错：{} -> {}", query_lower, correction);
             return (correction.clone(), true);
         }
-        
+
         // 检查子串拼写错误
         let mut corrected = query_lower.clone();
         let mut has_correction = false;
-        
+
         for (wrong, right) in &self.spelling_corrections {
             if corrected.contains(wrong) {
                 corrected = corrected.replace(wrong, right);
                 has_correction = true;
             }
         }
-        
+
         (corrected, has_correction)
     }
 
@@ -270,7 +271,13 @@ impl QueryEnhancer {
                 if let Some(captures) = pattern.captures(query) {
                     // 提取匹配内容
                     let extracted = if captures.len() > 1 {
-                        Some(captures.get(1).map(|m| m.as_str()).unwrap_or("").to_string())
+                        Some(
+                            captures
+                                .get(1)
+                                .map(|m| m.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        )
                     } else {
                         None
                     };
@@ -325,13 +332,14 @@ impl QueryEnhancer {
             static JIEBA: OnceLock<Jieba> = OnceLock::new();
             let jieba = JIEBA.get_or_init(Jieba::new);
 
-            return jieba.tokenize(query, jieba_rs::TokenizeMode::Search, false)
+            return jieba
+                .tokenize(query, jieba_rs::TokenizeMode::Search, false)
                 .iter()
                 .map(|t| t.word.to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
         }
-        
+
         // 纯英文查询使用简单分词
         query
             .split(|c: char| c.is_whitespace() || c == '_' || c == '-' || c == '/')
@@ -343,12 +351,21 @@ impl QueryEnhancer {
     /// 标准化查询（去除疑问词等）
     fn normalize_query(&self, query: &str, intent: Option<&IntentRecognition>) -> String {
         let mut normalized = query.to_string();
-        
+
         if let Some(intent_rec) = intent {
             match intent_rec.action.as_str() {
                 "remove_question_words" => {
                     // 去除疑问词
-                    let question_words = ["怎么", "如何", "怎样", "为什么", "什么", "哪个", "how to", "what is"];
+                    let question_words = [
+                        "怎么",
+                        "如何",
+                        "怎样",
+                        "为什么",
+                        "什么",
+                        "哪个",
+                        "how to",
+                        "what is",
+                    ];
                     for qw in question_words {
                         normalized = normalized.replace(qw, "");
                     }
@@ -362,14 +379,15 @@ impl QueryEnhancer {
                 _ => {}
             }
         }
-        
+
         // 清理多余空格
         normalized.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     /// 添加工具别名
     pub fn add_tool_alias(&mut self, alias: &str, tool_name: &str) {
-        self.tool_aliases.insert(alias.to_lowercase(), tool_name.to_string());
+        self.tool_aliases
+            .insert(alias.to_lowercase(), tool_name.to_string());
     }
 
     /// 解析工具别名
@@ -421,8 +439,14 @@ mod tests {
         let mut enhancer = QueryEnhancer::new();
 
         // 手动添加同义词
-        enhancer.synonym_map.insert("读取".to_lowercase(), vec!["read".to_string(), "读取".to_string()]);
-        enhancer.synonym_map.insert("文件".to_lowercase(), vec!["file".to_string(), "文件".to_string()]);
+        enhancer.synonym_map.insert(
+            "读取".to_lowercase(),
+            vec!["read".to_string(), "读取".to_string()],
+        );
+        enhancer.synonym_map.insert(
+            "文件".to_lowercase(),
+            vec!["file".to_string(), "文件".to_string()],
+        );
 
         let expansions = enhancer.expand_synonyms("读取文件");
         assert!(expansions.contains(&"read".to_string()));
@@ -432,9 +456,11 @@ mod tests {
     #[test]
     fn test_query_enhancer_spelling() {
         let mut enhancer = QueryEnhancer::new();
-        
+
         // 添加拼写纠错映射
-        enhancer.spelling_corrections.insert("read_fle".to_string(), "read_file".to_string());
+        enhancer
+            .spelling_corrections
+            .insert("read_fle".to_string(), "read_file".to_string());
 
         let (corrected, has_correction) = enhancer.correct_spelling("read_fle");
         assert!(has_correction);
@@ -447,7 +473,9 @@ mod tests {
 
         // 添加 how_to 意图模式
         let how_to_pattern = regex::Regex::new("怎么.*").unwrap();
-        enhancer.intent_patterns.insert("how_to".to_string(), vec![how_to_pattern]);
+        enhancer
+            .intent_patterns
+            .insert("how_to".to_string(), vec![how_to_pattern]);
 
         let intent = enhancer.recognize_intent("怎么读取文件");
         assert!(intent.is_some());

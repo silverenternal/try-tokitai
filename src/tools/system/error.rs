@@ -164,7 +164,8 @@ impl ToolError {
                 ToolError::ValidationError(_) => "ValidationError",
             },
             "message": self.to_string(),
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// 创建验证错误

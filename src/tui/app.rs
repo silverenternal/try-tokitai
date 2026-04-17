@@ -1,26 +1,23 @@
 //! TUI 应用主模块
-//! 
+//!
 //! 实现完整的终端用户界面
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::tui::layout::TuiLayout;
 use crate::tui::components::{
-    StatusBar, StatusBarState,
-    ToolListPanel, ToolListState, ToolItem,
-    ChatPanel, ChatState,
+    ChatPanel, ChatState, StatusBar, StatusBarState, ToolItem, ToolListPanel, ToolListState,
 };
+use crate::tui::layout::TuiLayout;
 
 /// TUI 应用状态
 pub struct TuiApp {
@@ -38,7 +35,7 @@ impl TuiApp {
     /// 创建新的 TUI 应用
     pub fn new() -> Self {
         let mut tool_list = ToolListState::new();
-        
+
         // 添加工具示例
         tool_list.add_tool(ToolItem {
             name: "read_file".to_string(),
@@ -55,13 +52,13 @@ impl TuiApp {
             description: "搜索代码".to_string(),
             category: "code".to_string(),
         });
-        
+
         let mut chat = ChatState::new();
         chat.add_message(
             "assistant".to_string(),
-            "👋 欢迎使用 Tokitai AI 助手！按 Ctrl+Q 退出，按 Ctrl+H 查看帮助。".to_string()
+            "👋 欢迎使用 Tokitai AI 助手！按 Ctrl+Q 退出，按 Ctrl+H 查看帮助。".to_string(),
         );
-        
+
         let status_bar = StatusBarState {
             model: "qwen3.5:397b".to_string(),
             provider: "Ollama".to_string(),
@@ -71,7 +68,7 @@ impl TuiApp {
             avg_latency_ms: 0.0,
             error: None,
         };
-        
+
         Self {
             running: true,
             tool_list,
@@ -79,13 +76,13 @@ impl TuiApp {
             status_bar,
         }
     }
-    
+
     /// 处理输入事件
     pub fn handle_event(&mut self, event: Event) {
         if let Event::Key(key) = event {
             if key.kind == KeyEventKind::Press {
                 let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-                
+
                 match key.code {
                     KeyCode::Char('q') if is_ctrl => {
                         self.running = false;
@@ -121,7 +118,7 @@ impl TuiApp {
             }
         }
     }
-    
+
     /// 显示帮助
     fn show_help(&self) {
         println!("╔════════════════════════════════════════════════════════╗");
@@ -135,23 +132,23 @@ impl TuiApp {
         println!("║  Ctrl+C  中断当前操作                                  ║");
         println!("╚════════════════════════════════════════════════════════╝");
     }
-    
+
     /// 渲染界面
     pub fn render(&self, frame: &mut ratatui::Frame) {
         let layout = TuiLayout::calculate(frame.size());
-        
+
         // 渲染工具列表
         ToolListPanel::render(frame, layout.tool_list_area, &self.tool_list);
-        
+
         // 渲染对话区域
         ChatPanel::render(frame, layout.chat_area, &self.chat);
-        
+
         // 渲染上下文区域（暂时显示选中工具详情）
         let context_block = ratatui::widgets::Block::default()
             .borders(ratatui::widgets::Borders::ALL)
             .title("工具详情");
         frame.render_widget(context_block, layout.context_area);
-        
+
         // 渲染状态栏
         StatusBar::render(frame, layout.status_bar_area, &self.status_bar);
     }
@@ -166,20 +163,20 @@ impl Default for TuiApp {
 /// 运行 TUI 应用
 pub fn run_tui() -> Result<()> {
     info!("启动 TUI 应用");
-    
+
     // 设置终端
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    
+
     // 创建应用
     let mut app = TuiApp::new();
-    
+
     // 主循环
     let res = run_app(&mut terminal, &mut app);
-    
+
     // 恢复终端
     disable_raw_mode()?;
     execute!(
@@ -188,12 +185,12 @@ pub fn run_tui() -> Result<()> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
-    
+
     if let Err(err) = res {
         error!("TUI 错误：{:?}", err);
         return Err(err);
     }
-    
+
     Ok(())
 }
 
@@ -204,12 +201,12 @@ fn run_app<B: ratatui::backend::Backend>(
 ) -> Result<()> {
     while app.running {
         terminal.draw(|frame| app.render(frame))?;
-        
+
         // 事件轮询
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-                
+
                 if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('c') && is_ctrl {
                     app.running = false;
                 } else {
@@ -218,14 +215,14 @@ fn run_app<B: ratatui::backend::Backend>(
             }
         }
     }
-    
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_app_creation() {
         let app = TuiApp::new();

@@ -10,13 +10,13 @@
 //! - 按可恢复性分类的错误类型
 
 pub mod config;
-pub mod error;
-pub mod validator;
-pub mod metrics;
-pub mod json_format;
-pub mod json_query;
-pub mod json_merge;
 pub mod data_conversion;
+pub mod error;
+pub mod json_format;
+pub mod json_merge;
+pub mod json_query;
+pub mod metrics;
+pub mod validator;
 
 // 重新导出错误类型
 // 注意：DataToolError 供内部使用，不直接导出
@@ -30,13 +30,13 @@ pub use config::DataToolConfig;
 pub use metrics::MetricsCollector;
 
 // 重新导出工具类
-pub use json_format::JsonFormatTools;
-pub use json_query::JsonQueryTools;
-pub use json_merge::JsonMergeTools;
 pub use data_conversion::DataConversionTools;
+pub use json_format::JsonFormatTools;
+pub use json_merge::JsonMergeTools;
+pub use json_query::JsonQueryTools;
 
 // 服务化架构导入
-use crate::tool_matrix::matrix::{ServiceLifecycle, ServiceHealth, ServiceStats};
+use crate::tool_matrix::matrix::{ServiceHealth, ServiceLifecycle, ServiceStats};
 
 /// 数据工具服务（统一入口）
 #[derive(Debug)]

@@ -14,12 +14,12 @@
 //! - **SizeBased**: Load entries within optimal size range for cache efficiency
 //! - **Hybrid**: Combination of all strategies with configurable weights
 
+use bytes::Bytes;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-use bytes::Bytes;
 
-use crate::core::error::FileKVResult;
 use crate::cache::block_cache::BlockCache;
+use crate::core::error::FileKVResult;
 use crate::core::segment::SegmentFile;
 
 /// Cache warming strategy configuration
@@ -53,8 +53,8 @@ impl Default for CacheWarmingConfig {
             enabled: true,
             max_entries: 1000,
             max_memory_bytes: 16 * 1024 * 1024, // 16MB
-            min_entry_size: 64,                  // Skip entries < 64 bytes
-            max_entry_size: 64 * 1024,           // Skip entries > 64KB
+            min_entry_size: 64,                 // Skip entries < 64 bytes
+            max_entry_size: 64 * 1024,          // Skip entries > 64KB
             strategy: WarmingStrategy::Hybrid,
             recent_entries_per_segment: 50,
             size_weight: 0.3,
@@ -186,7 +186,7 @@ impl CacheWarmer {
 
         // Collect candidates from all segments
         let mut candidates = Vec::new();
-        
+
         for (seg_idx, segment) in segments.iter().enumerate() {
             match self.scan_segment_for_candidates(segment, seg_idx, segments.len()) {
                 Ok(mut seg_candidates) => {
@@ -233,9 +233,7 @@ impl CacheWarmer {
             }
 
             // Skip entries outside size range
-            if candidate.value_len < self.config.min_entry_size
-                || candidate.value_len > self.config.max_entry_size
-            {
+            if candidate.value_len < self.config.min_entry_size || candidate.value_len > self.config.max_entry_size {
                 entries_skipped += 1;
                 continue;
             }
@@ -252,25 +250,26 @@ impl CacheWarmer {
                 Ok((key, value, _checksum)) => {
                     // Verify key matches candidate
                     if key != candidate.key {
-                        warn!("Key mismatch at offset {}: expected '{}', got '{}'",
-                             candidate.offset, candidate.key, key);
+                        warn!(
+                            "Key mismatch at offset {}: expected '{}', got '{}'",
+                            candidate.offset, candidate.key, key
+                        );
                         entries_skipped += 1;
                         continue;
                     }
 
                     // Load into cache
                     let value_bytes = Bytes::from(value);
-                    self.cache.put(
-                        candidate.segment_id,
-                        candidate.offset,
-                        value_bytes,
-                    );
+                    self.cache.put(candidate.segment_id, candidate.offset, value_bytes);
 
                     memory_used += candidate.value_len;
                     entries_loaded += 1;
                 }
                 Err(e) => {
-                    warn!("Failed to read entry at {}.{}: {}", candidate.segment_id, candidate.offset, e);
+                    warn!(
+                        "Failed to read entry at {}.{}: {}",
+                        candidate.segment_id, candidate.offset, e
+                    );
                     entries_skipped += 1;
                 }
             }
@@ -336,14 +335,10 @@ impl CacheWarmer {
                 Ok((key, value, _checksum)) => {
                     let value_len = value.len();
                     let key_len = key.len();
-                    
+
                     // Calculate score based on strategy
-                    let score = self.calculate_candidate_score(
-                        segment_index,
-                        total_segments,
-                        value_len,
-                        entries_scanned,
-                    );
+                    let score =
+                        self.calculate_candidate_score(segment_index, total_segments, value_len, entries_scanned);
 
                     candidates.push(WarmingCandidate {
                         segment_id: segment.id,
@@ -404,7 +399,7 @@ impl CacheWarmer {
                 };
 
                 let size_score = 1.0 / (1.0 + (value_len as f64 / 1024.0));
-                
+
                 let optimal_size = 1024.0;
                 let diff = (value_len as f64 - optimal_size).abs();
                 let density_score = 1.0 / (1.0 + diff / optimal_size);
@@ -453,7 +448,7 @@ impl CacheWarmer {
                     };
 
                     let size_score = 1.0 / (1.0 + (candidate.value_len as f64 / 1024.0));
-                    
+
                     let optimal_size = 1024.0;
                     let diff = (candidate.value_len as f64 - optimal_size).abs();
                     let density_score = 1.0 / (1.0 + diff / optimal_size);

@@ -5,12 +5,12 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use crate::prompt_engineering::renderer::PromptRenderer;
 use crate::prompt_engineering::template::PromptTemplate;
@@ -86,8 +86,11 @@ impl PromptTemplateManager {
         }
 
         // 从文件加载
-        let template_path = self.templates_dir.join("roles").join(format!("{}.json", role));
-        
+        let template_path = self
+            .templates_dir
+            .join("roles")
+            .join(format!("{}.json", role));
+
         if !template_path.exists() {
             anyhow::bail!("Template not found: {:?}", template_path);
         }
@@ -311,7 +314,10 @@ impl PromptTemplateManager {
 
     /// 检查模板是否存在
     pub fn template_exists(&self, role: &str) -> bool {
-        let template_path = self.templates_dir.join("roles").join(format!("{}.json", role));
+        let template_path = self
+            .templates_dir
+            .join("roles")
+            .join(format!("{}.json", role));
         template_path.exists()
     }
 

@@ -1,13 +1,13 @@
+use crate::tools::io::error::{IoResult, IoToolError};
+use crate::tools::io::security::SecurePathResolver;
+use crate::tools::io::utils::{ensure_file_exists, validate_single_path};
 use moka::sync::Cache;
-use std::time::Duration;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokitai::tool;
-use serde_json::{json, Value};
-use crate::tools::io::security::SecurePathResolver;
-use crate::tools::io::error::{IoToolError, IoResult};
-use crate::tools::io::utils::{validate_single_path, ensure_file_exists};
 
 /// 文件操作缓存层（LRU 缓存）
 ///
@@ -94,16 +94,21 @@ impl FileCache {
         }
 
         // 缓存未命中，从磁盘读取
-        let content = fs::read_to_string(path_obj)
-            .map_err(|e| IoToolError::IoError {
-                message: e.to_string(),
-                path: Some(canonical_path.clone()),
-                operation: "read_file".to_string(),
-                suggestion: "请检查文件权限或文件是否存在".to_string(),
-            })?;
+        let content = fs::read_to_string(path_obj).map_err(|e| IoToolError::IoError {
+            message: e.to_string(),
+            path: Some(canonical_path.clone()),
+            operation: "read_file".to_string(),
+            suggestion: "请检查文件权限或文件是否存在".to_string(),
+        })?;
 
         // 插入缓存
-        self.cache.insert(cache_key, CacheEntry { content: content.clone(), mtime });
+        self.cache.insert(
+            cache_key,
+            CacheEntry {
+                content: content.clone(),
+                mtime,
+            },
+        );
 
         Ok(content)
     }
@@ -136,7 +141,9 @@ impl FileCache {
         };
 
         let mut count = 0;
-        let keys: Vec<Arc<String>> = self.cache.iter()
+        let keys: Vec<Arc<String>> = self
+            .cache
+            .iter()
             .filter_map(|(k, _)| {
                 if k.starts_with(&canonical_path) {
                     Some(k)
@@ -170,18 +177,24 @@ impl FileCache {
     /// 第一次读取会从磁盘加载，后续读取会命中缓存（如果文件未修改）
     pub fn read_file(&self, path: String) -> Result<Value, Value> {
         let content = self.read_internal(&path)?;
-        Ok(IoToolError::success_response("read_file_cached", json!({
-            "path": path,
-            "content": content,
-            "cached": true
-        })))
+        Ok(IoToolError::success_response(
+            "read_file_cached",
+            json!({
+                "path": path,
+                "content": content,
+                "cached": true
+            }),
+        ))
     }
 
     /// 获取缓存统计信息
     ///
     /// 返回缓存大小、容量等信息
     pub fn get_cache_stats(&self) -> Result<Value, Value> {
-        Ok(IoToolError::success_response("get_cache_stats", self.get_stats()))
+        Ok(IoToolError::success_response(
+            "get_cache_stats",
+            self.get_stats(),
+        ))
     }
 
     /// 清除所有缓存
@@ -189,9 +202,12 @@ impl FileCache {
     /// 释放所有缓存的内存
     pub fn clear_cache(&self) -> Result<Value, Value> {
         self.clear();
-        Ok(IoToolError::success_response("clear_cache", json!({
-            "message": "缓存已清除"
-        })))
+        Ok(IoToolError::success_response(
+            "clear_cache",
+            json!({
+                "message": "缓存已清除"
+            }),
+        ))
     }
 
     /// 清除特定文件的缓存
@@ -199,10 +215,13 @@ impl FileCache {
     /// 只清除指定文件的缓存版本
     pub fn invalidate_cache(&self, path: String) -> Result<Value, Value> {
         let count = self.invalidate_path(&path);
-        Ok(IoToolError::success_response("invalidate_cache", json!({
-            "path": path,
-            "invalidated_count": count
-        })))
+        Ok(IoToolError::success_response(
+            "invalidate_cache",
+            json!({
+                "path": path,
+                "invalidated_count": count
+            }),
+        ))
     }
 
     /// 预热缓存（批量加载文件）
@@ -233,12 +252,15 @@ impl FileCache {
             }
         }
 
-        Ok(IoToolError::success_response("warm_up_cache", json!({
-            "total": paths.len(),
-            "cached": cached,
-            "failed": failed,
-            "details": results
-        })))
+        Ok(IoToolError::success_response(
+            "warm_up_cache",
+            json!({
+                "total": paths.len(),
+                "cached": cached,
+                "failed": failed,
+                "details": results
+            }),
+        ))
     }
 
     /// 清除所有缓存（兼容旧接口）
@@ -277,7 +299,7 @@ mod tests {
         let result = cache.read_internal(&path);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "hello world");
-        
+
         let _ = std::fs::remove_file(&test_file);
     }
 

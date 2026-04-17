@@ -8,15 +8,15 @@
 //! - Lazy evaluation with iterator interface
 //! - Configurable scan options
 
-use std::sync::Arc;
 use bytes::Bytes;
+use std::sync::Arc;
 use tracing::debug;
 
+use crate::cache::block_cache::BlockCache;
+use crate::cache::prefetch::{PrefetchCache, SequentialPrefetcher};
 use crate::core::error::FileKVResult;
 use crate::core::segment::SegmentFile;
-use crate::cache::block_cache::BlockCache;
 use crate::query::pruner::RangeQueryPruner;
-use crate::cache::prefetch::{SequentialPrefetcher, PrefetchCache};
 use crate::query::zone_map::ZoneMapIndex;
 
 /// Trait for providing segment data to the range scan iterator.
@@ -62,6 +62,14 @@ impl Default for RangeScanConfig {
             prefetch_batch_size: 4,
             readahead_entries: 16, // 3.1 OPTIMIZATION: Prefetch 16 entries by default
         }
+    }
+}
+
+impl RangeScanConfig {
+    /// Set the maximum number of entries to return
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = limit;
+        self
     }
 }
 
@@ -145,11 +153,7 @@ pub struct RangeScanBlockCache {
 }
 
 impl RangeScanBlockCache {
-    pub fn new(
-        block_cache: Arc<BlockCache>,
-        segment: Arc<SegmentFile>,
-        zone_map: Option<Arc<ZoneMapIndex>>,
-    ) -> Self {
+    pub fn new(block_cache: Arc<BlockCache>, segment: Arc<SegmentFile>, zone_map: Option<Arc<ZoneMapIndex>>) -> Self {
         Self {
             block_cache,
             segment,
@@ -207,7 +211,8 @@ impl PrefetchCache for RangeScanBlockCache {
             block_id * 4096
         };
 
-        self.block_cache.get(segment_id, offset)
+        self.block_cache
+            .get(segment_id, offset)
             .map(|arc| Arc::new(arc.to_vec()) as Arc<dyn Send + Sync>)
     }
 }
@@ -306,9 +311,9 @@ impl<'a> RangeScanIterator<'a> {
             let block_ranges: Vec<(u64, u64)> = blocks
                 .iter()
                 .filter_map(|block_id| {
-                    zone_map.get_block_entry(*block_id).map(|entry| {
-                        (entry.offset, entry.offset + entry.size_bytes as u64)
-                    })
+                    zone_map
+                        .get_block_entry(*block_id)
+                        .map(|entry| (entry.offset, entry.offset + entry.size_bytes as u64))
                 })
                 .collect();
 
@@ -345,7 +350,7 @@ impl<'a> RangeScanIterator<'a> {
         if let Some((key, value, segment_id, offset)) = self.readahead_buffer.pop_front() {
             self.entries_returned += 1;
             self.stats.entries_returned += 1;
-            
+
             return Ok(Some(RangeEntry {
                 key,
                 value,
@@ -362,12 +367,12 @@ impl<'a> RangeScanIterator<'a> {
         } else {
             // 3.1 OPTIMIZATION: Buffer is empty but not exhausted - refill it
             self.refill_readahead_buffer()?;
-            
+
             // Try again from refilled buffer
             if let Some((key, value, segment_id, offset)) = self.readahead_buffer.pop_front() {
                 self.entries_returned += 1;
                 self.stats.entries_returned += 1;
-                
+
                 return Ok(Some(RangeEntry {
                     key,
                     value,
@@ -414,13 +419,13 @@ impl<'a> RangeScanIterator<'a> {
             Some((key, value, offset, _checksum)) => {
                 // Calculate next offset
                 let next_offset = offset + 4 + key.len() as u64 + 4 + value.len() as u64 + 4;
-                
+
                 // Check if key is within range
                 if key.as_str() >= self.start_key.as_str() && key.as_str() <= self.end_key.as_str() {
                     self.readahead_buffer.push_back((key, value, segment_id, offset));
                     refilled += 1;
                 }
-                
+
                 // Update current_offset for next scan
                 self.current_offset = next_offset;
 
@@ -429,12 +434,12 @@ impl<'a> RangeScanIterator<'a> {
                     match segment.scan_next(self.current_offset, "", max_entries)? {
                         Some((key, value, offset, _checksum)) => {
                             let next_offset = offset + 4 + key.len() as u64 + 4 + value.len() as u64 + 4;
-                            
+
                             if key.as_str() >= self.start_key.as_str() && key.as_str() <= self.end_key.as_str() {
                                 self.readahead_buffer.push_back((key, value, segment_id, offset));
                                 refilled += 1;
                             }
-                            
+
                             self.current_offset = next_offset;
                         }
                         None => break, // No more entries
@@ -490,13 +495,16 @@ impl<'a> RangeScanIterator<'a> {
             // Fallback: original pruning logic when blocks_to_scan is not set
             if config_enable_pruning {
                 for block_entry in zm.entries() {
-                    if self.current_offset >= block_entry.offset &&
-                       self.current_offset < block_entry.offset + block_entry.size_bytes as u64 {
+                    if self.current_offset >= block_entry.offset
+                        && self.current_offset < block_entry.offset + block_entry.size_bytes as u64
+                    {
                         if block_entry.should_prune(&self.start_key, &self.end_key) {
-                            debug!("Pruning block {} at offset {}-{}",
-                                  block_entry.block_id,
-                                  block_entry.offset,
-                                  block_entry.offset + block_entry.size_bytes as u64);
+                            debug!(
+                                "Pruning block {} at offset {}-{}",
+                                block_entry.block_id,
+                                block_entry.offset,
+                                block_entry.offset + block_entry.size_bytes as u64
+                            );
                             self.current_offset = block_entry.offset + block_entry.size_bytes as u64;
                             self.stats.blocks_pruned += 1;
                         } else {
@@ -612,22 +620,26 @@ impl<'a> Iterator for RangeScanIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::core::config::FileKVConfig;
+    use crate::core::memtable::MemTableConfig;
     use crate::FileKV;
+    use tempfile::TempDir;
 
     fn create_test_kv() -> (FileKV, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let mut config = FileKVConfig::default();
-        config.segment_dir = temp_dir.path().join("segments");
-        config.index_dir = temp_dir.path().join("index");
-        config.wal_dir = temp_dir.path().join("wal");
-        config.checkpoint_dir = temp_dir.path().join("checkpoint");
-        // Set low flush threshold to force segment creation (minimum allowed: 64KB)
-        config.memtable.flush_threshold_bytes = 64 * 1024; // 64KB
-        config.memtable.max_entries = 100; // Minimum allowed
-        // Disable WAL and write coalescing for testing
-        config.enable_wal = false;
+        let config = FileKVConfig {
+            segment_dir: temp_dir.path().join("segments"),
+            index_dir: temp_dir.path().join("index"),
+            wal_dir: temp_dir.path().join("wal"),
+            checkpoint_dir: temp_dir.path().join("checkpoint"),
+            memtable: MemTableConfig {
+                flush_threshold_bytes: 64 * 1024,
+                max_entries: 100,
+                ..Default::default()
+            },
+            enable_wal: false,
+            ..Default::default()
+        };
 
         let kv = FileKV::open(config).unwrap();
 
@@ -641,7 +653,7 @@ mod tests {
         // Debug: Check memtable size before flush
         let _memtable_size = kv.memtable_ref().size_bytes();
         let _memtable_entries = kv.memtable_ref().entry_count();
-        
+
         // Force flush
         kv.flush_memtable().unwrap();
 
@@ -749,11 +761,7 @@ mod tests {
         };
 
         let mut iter = kv.range_with_config("key_000", "key_020", config).unwrap();
-        let mut _count = 0;
-        for result in &mut iter {
-            let _entry = result.unwrap();
-            _count += 1;
-        }
+        let _count = iter.by_ref().filter_map(|r| r.ok()).count();
 
         let stats = iter.stats();
         assert!(stats.entries_returned > 0);
@@ -773,11 +781,7 @@ mod tests {
         };
 
         let mut iter = kv.range_with_config("key_000", "key_149", config).unwrap();
-        let mut _count = 0;
-        for result in &mut iter {
-            let _entry = result.unwrap();
-            _count += 1;
-        }
+        let _count = iter.by_ref().filter_map(|r| r.ok()).count();
 
         let stats = iter.stats();
         assert!(stats.entries_returned > 0);

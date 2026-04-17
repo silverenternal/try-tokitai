@@ -5,8 +5,8 @@
 //! 2. 基于 NdArrayBackend
 //! 3. 支持链式调用
 
-use crate::tools::tensor::core::{Tensor, TensorResult, TensorError};
-use crate::tools::tensor::backend::{TensorBackend, NdArrayBackend};
+use crate::tools::tensor::backend::{NdArrayBackend, TensorBackend};
+use crate::tools::tensor::core::{Tensor, TensorError, TensorResult};
 
 /// 张量服务
 ///
@@ -170,7 +170,9 @@ impl TensorService {
 
     /// ReLU 激活
     pub fn relu(&self, input: &Tensor) -> TensorResult<Tensor> {
-        let data = input.as_slice().ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
+        let data = input
+            .as_slice()
+            .ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
         let output: Vec<f64> = data.iter().map(|&x| x.max(0.0)).collect();
         Tensor::from_data(&output, &input.dims())
     }
@@ -180,24 +182,36 @@ impl TensorService {
         const SQRT_2_PI: f64 = 0.7978845608028654;
         const COEF: f64 = 0.044715;
 
-        let data = input.as_slice().ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
-        let output: Vec<f64> = data.iter().map(|&x| {
-            let x3 = x * x * x;
-            let inner = SQRT_2_PI * (x + COEF * x3);
-            0.5 * x * (1.0 + inner.tanh())
-        }).collect();
+        let data = input
+            .as_slice()
+            .ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
+        let output: Vec<f64> = data
+            .iter()
+            .map(|&x| {
+                let x3 = x * x * x;
+                let inner = SQRT_2_PI * (x + COEF * x3);
+                0.5 * x * (1.0 + inner.tanh())
+            })
+            .collect();
         Tensor::from_data(&output, &input.dims())
     }
 
     /// Sigmoid 激活
     pub fn sigmoid(&self, input: &Tensor) -> TensorResult<Tensor> {
-        let data = input.as_slice().ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
+        let data = input
+            .as_slice()
+            .ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
         let output: Vec<f64> = data.iter().map(|&x| 1.0 / (1.0 + (-x).exp())).collect();
         Tensor::from_data(&output, &input.dims())
     }
 
     /// 全连接层（线性变换）
-    pub fn linear(&self, input: &Tensor, weight: &Tensor, bias: Option<&Tensor>) -> TensorResult<Tensor> {
+    pub fn linear(
+        &self,
+        input: &Tensor,
+        weight: &Tensor,
+        bias: Option<&Tensor>,
+    ) -> TensorResult<Tensor> {
         // output = input @ weight.T + bias
         let weight_t = self.transpose(weight)?;
         let mut output = self.matmul(input, &weight_t)?;
@@ -210,13 +224,24 @@ impl TensorService {
     }
 
     /// LayerNorm
-    pub fn layer_norm(&self, input: &Tensor, normalized_shape: usize, eps: f64) -> TensorResult<Tensor> {
-        let data = input.as_slice().ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
+    pub fn layer_norm(
+        &self,
+        input: &Tensor,
+        normalized_shape: usize,
+        eps: f64,
+    ) -> TensorResult<Tensor> {
+        let data = input
+            .as_slice()
+            .ok_or_else(|| TensorError::other("Cannot get tensor data"))?;
         let n = normalized_shape;
 
         if data.len() % n != 0 {
             return Err(TensorError::ShapeMismatch {
-                message: format!("Input size {} is not divisible by normalized_shape {}", data.len(), n),
+                message: format!(
+                    "Input size {} is not divisible by normalized_shape {}",
+                    data.len(),
+                    n
+                ),
             });
         }
 
@@ -268,8 +293,12 @@ mod tests {
     #[test]
     fn test_matmul() {
         let service = TensorService::new();
-        let a = service.from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap();
-        let b = service.from_data(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2]).unwrap();
+        let a = service
+            .from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])
+            .unwrap();
+        let b = service
+            .from_data(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2])
+            .unwrap();
         let result = service.matmul(&a, &b).unwrap();
         assert_eq!(result.dims(), &[2, 2]);
         assert_eq!(result.as_slice().unwrap(), &[58.0, 64.0, 139.0, 154.0]);
@@ -278,7 +307,9 @@ mod tests {
     #[test]
     fn test_relu() {
         let service = TensorService::new();
-        let input = service.from_data(&[-2.0, -1.0, 0.0, 1.0, 2.0], &[5]).unwrap();
+        let input = service
+            .from_data(&[-2.0, -1.0, 0.0, 1.0, 2.0], &[5])
+            .unwrap();
         let output = service.relu(&input).unwrap();
         assert_eq!(output.as_slice().unwrap(), &[0.0, 0.0, 0.0, 1.0, 2.0]);
     }

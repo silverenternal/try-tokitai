@@ -2,12 +2,12 @@
 //!
 //! Records all write operations for compliance and debugging.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::core::error::{FatalError, FileKVError};
+use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-use crate::core::error::{FileKVError, FatalError};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 fn io_to_filekv(e: std::io::Error) -> FileKVError {
     FileKVError::Fatal(FatalError::Io(e))
@@ -186,7 +186,8 @@ impl AuditLogger {
             metadata,
         };
 
-        let json = serde_json::to_string(&entry).map_err(|e| io_to_filekv(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+        let json = serde_json::to_string(&entry)
+            .map_err(|e| io_to_filekv(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
 
         // Check if we need to rotate the log file
         self.rotate_if_needed()?;
@@ -215,7 +216,7 @@ impl AuditLogger {
 
 /// Compute value hash for audit
 pub fn compute_value_hash(value: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(value);
     format!("sha256:{}", hex::encode(hasher.finalize()))

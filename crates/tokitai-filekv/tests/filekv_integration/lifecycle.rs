@@ -31,10 +31,7 @@ fn test_complete_lifecycle_open_put_get_flush() {
         kv.get("user:1").expect("get failed").as_deref(),
         Some(b"Alice".as_ref())
     );
-    assert_eq!(
-        kv.get("user:2").expect("get failed").as_deref(),
-        Some(b"Bob".as_ref())
-    );
+    assert_eq!(kv.get("user:2").expect("get failed").as_deref(), Some(b"Bob".as_ref()));
 
     // Flush memtable to segments
     kv.flush_memtable().expect("flush failed");
@@ -86,7 +83,8 @@ fn test_lifecycle_recovery_after_reopen() {
         );
 
         // Write more data after recovery
-        kv2.put("post_recovery_key", b"post_recovery_value").expect("put failed");
+        kv2.put("post_recovery_key", b"post_recovery_value")
+            .expect("put failed");
         let val3 = kv2.get("post_recovery_key").expect("get failed");
         assert_eq!(
             val3.as_deref(),

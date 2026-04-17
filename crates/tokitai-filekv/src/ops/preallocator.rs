@@ -39,9 +39,9 @@ pub struct AdaptivePreallocatorConfig {
 impl Default for AdaptivePreallocatorConfig {
     fn default() -> Self {
         Self {
-            min_preallocate_bytes: 1024 * 1024,            // 1MB minimum
-            max_preallocate_bytes: 64 * 1024 * 1024,       // 64MB maximum
-            initial_preallocate_bytes: 16 * 1024 * 1024,   // 16MB initial
+            min_preallocate_bytes: 1024 * 1024,          // 1MB minimum
+            max_preallocate_bytes: 64 * 1024 * 1024,     // 64MB maximum
+            initial_preallocate_bytes: 16 * 1024 * 1024, // 16MB initial
             ewma_alpha: 0.3,
             history_size: 10,
             enabled: true,
@@ -113,7 +113,7 @@ impl AdaptivePreallocator {
     /// This is called before creating a new segment file.
     pub fn next_preallocate_size(&self) -> u64 {
         let state = self.state.lock();
-        
+
         if !self.config.enabled {
             return self.config.initial_preallocate_bytes;
         }
@@ -126,7 +126,7 @@ impl AdaptivePreallocator {
     /// Call this after creating a segment file to track pre-allocation.
     pub fn record_segment_created(&self, preallocated_size: u64) {
         self.segments_created.fetch_add(1, Ordering::Relaxed);
-        
+
         let mut state = self.state.lock();
         state.total_preallocated += preallocated_size;
     }
@@ -149,16 +149,15 @@ impl AdaptivePreallocator {
         // Recalculate EWMA and optimal size
         if self.config.enabled && !state.segment_sizes.is_empty() {
             // Calculate average of recent segment sizes
-            let avg_size: f64 = state.segment_sizes.iter()
-                .map(|&s| s as f64)
-                .sum::<f64>() / state.segment_sizes.len() as f64;
+            let avg_size: f64 =
+                state.segment_sizes.iter().map(|&s| s as f64).sum::<f64>() / state.segment_sizes.len() as f64;
 
             // Update EWMA - use average directly for first segment, then EWMA
             if state.segment_sizes.len() == 1 {
                 state.ewma_segment_size = avg_size;
             } else {
-                state.ewma_segment_size = self.config.ewma_alpha * avg_size
-                    + (1.0 - self.config.ewma_alpha) * state.ewma_segment_size;
+                state.ewma_segment_size =
+                    self.config.ewma_alpha * avg_size + (1.0 - self.config.ewma_alpha) * state.ewma_segment_size;
             }
 
             // Calculate optimal pre-allocation size
@@ -176,7 +175,7 @@ impl AdaptivePreallocator {
     /// Get current statistics
     pub fn stats(&self) -> PreallocatorStats {
         let state = self.state.lock();
-        
+
         let avg_utilization = if state.total_preallocated > 0 {
             state.total_used as f64 / state.total_preallocated as f64
         } else {
@@ -285,10 +284,19 @@ mod tests {
         let stats = preallocator.stats();
 
         // Size should have increased from initial due to growing segments
-        assert!(final_size > initial_size, "Pre-allocation size should increase from initial with growing segments (initial: {}, final: {})", initial_size, final_size);
+        assert!(
+            final_size > initial_size,
+            "Pre-allocation size should increase from initial with growing segments (initial: {}, final: {})",
+            initial_size,
+            final_size
+        );
         // Final size should be around the average segment size (8.4MB) with EWMA weighting toward recent values
         // With EWMA alpha=0.5, the final EWMA is approximately 7-8MB, plus 10% buffer = ~7.7-8.8MB
-        assert!(final_size >= 7 * 1024 * 1024, "Pre-allocation size should be at least 7MB (got: {})", final_size);
+        assert!(
+            final_size >= 7 * 1024 * 1024,
+            "Pre-allocation size should be at least 7MB (got: {})",
+            final_size
+        );
         assert_eq!(stats.segments_tracked, 5);
         assert!(stats.avg_utilization > 0.0);
     }
@@ -366,7 +374,7 @@ mod tests {
         // After some segments
         let prealloc_size = 16 * 1024 * 1024;
         let actual_size = 12 * 1024 * 1024;
-        
+
         preallocator.record_segment_created(prealloc_size);
         preallocator.record_segment_closed(actual_size);
 
@@ -398,16 +406,16 @@ mod tests {
         ];
 
         let mut prev_size = preallocator.next_preallocate_size();
-        
+
         for &size in &sizes {
             preallocator.record_segment_created(prev_size);
             preallocator.record_segment_closed(size);
             let new_size = preallocator.next_preallocate_size();
-            
+
             // With low alpha, changes should be gradual
             let change_ratio = (new_size as f64 - prev_size as f64) / prev_size as f64;
             assert!(change_ratio.abs() < 0.5, "EWMA should smooth large changes");
-            
+
             prev_size = new_size;
         }
     }

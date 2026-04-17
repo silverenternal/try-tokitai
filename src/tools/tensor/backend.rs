@@ -5,8 +5,8 @@
 //! 2. 使用 ndarray 作为主要后端
 //! 3. 性能优化：使用 ndarray 内置方法
 
+use crate::tools::tensor::core::{DType, Device, Shape, Tensor, TensorError, TensorResult};
 use ndarray::ArrayD;
-use crate::tools::tensor::core::{Tensor, Shape, DType, Device, TensorError, TensorResult};
 
 /// 张量后端 trait
 ///
@@ -118,11 +118,7 @@ impl NdArrayBackend {
 
     /// 辅助函数：检查两个形状是否可以广播
     fn broadcast_shapes(a: &[usize], b: &[usize]) -> Result<Vec<usize>, TensorError> {
-        let (a, b) = if a.len() >= b.len() {
-            (a, b)
-        } else {
-            (b, a)
-        };
+        let (a, b) = if a.len() >= b.len() { (a, b) } else { (b, a) };
 
         let mut result = a.to_vec();
         let offset = a.len() - b.len();
@@ -134,9 +130,10 @@ impl NdArrayBackend {
             } else if a_dim == 1 {
                 result[i + offset] = b_dim;
             } else {
-                return Err(TensorError::broadcast_error(
-                    format!("Cannot broadcast shapes {:?} and {:?}", a, b)
-                ));
+                return Err(TensorError::broadcast_error(format!(
+                    "Cannot broadcast shapes {:?} and {:?}",
+                    a, b
+                )));
             }
         }
 
@@ -144,9 +141,12 @@ impl NdArrayBackend {
     }
 
     /// 辅助函数：广播数组到目标形状
-    fn broadcast_array(arr: &ArrayD<f64>, target_shape: &[usize]) -> Result<ArrayD<f64>, TensorError> {
+    fn broadcast_array(
+        arr: &ArrayD<f64>,
+        target_shape: &[usize],
+    ) -> Result<ArrayD<f64>, TensorError> {
         let current_shape = arr.shape();
-        
+
         // 如果形状相同，直接返回
         if current_shape == target_shape {
             return Ok(arr.clone());
@@ -160,12 +160,15 @@ impl NdArrayBackend {
 
         // 简化实现：使用 ndarray 的广播功能
         let target_dim = ndarray::IxDyn::from(target_shape.to_vec());
-        
+
         arr.broadcast(target_dim)
             .map(|view| view.to_owned())
-            .ok_or_else(|| TensorError::broadcast_error(
-                format!("Cannot broadcast shape {:?} to {:?}", current_shape, target_shape)
-            ))
+            .ok_or_else(|| {
+                TensorError::broadcast_error(format!(
+                    "Cannot broadcast shape {:?} to {:?}",
+                    current_shape, target_shape
+                ))
+            })
     }
 }
 
@@ -217,8 +220,12 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn add(&self, a: &Tensor, b: &Tensor) -> TensorResult<Tensor> {
-        let a_arr = a.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
-        let b_arr = b.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
+        let a_arr = a
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
+        let b_arr = b
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
 
         // 计算广播后的形状
         let target_shape = Self::broadcast_shapes(&a.dims(), &b.dims())?;
@@ -231,8 +238,12 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn sub(&self, a: &Tensor, b: &Tensor) -> TensorResult<Tensor> {
-        let a_arr = a.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
-        let b_arr = b.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
+        let a_arr = a
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
+        let b_arr = b
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
 
         let target_shape = Self::broadcast_shapes(&a.dims(), &b.dims())?;
         let a_broadcast = Self::broadcast_array(a_arr, &target_shape)?;
@@ -242,8 +253,12 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn mul(&self, a: &Tensor, b: &Tensor) -> TensorResult<Tensor> {
-        let a_arr = a.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
-        let b_arr = b.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
+        let a_arr = a
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
+        let b_arr = b
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
 
         let target_shape = Self::broadcast_shapes(&a.dims(), &b.dims())?;
         let a_broadcast = Self::broadcast_array(a_arr, &target_shape)?;
@@ -253,8 +268,12 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn div(&self, a: &Tensor, b: &Tensor) -> TensorResult<Tensor> {
-        let a_arr = a.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
-        let b_arr = b.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
+        let a_arr = a
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
+        let b_arr = b
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
 
         // 检查除零
         if b_arr.iter().any(|&x| x == 0.0) {
@@ -271,18 +290,26 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn add_scalar(&self, tensor: &Tensor, value: f64) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
         Ok(Tensor::from_array(arr.clone() + value))
     }
 
     fn mul_scalar(&self, tensor: &Tensor, value: f64) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
         Ok(Tensor::from_array(arr.clone() * value))
     }
 
     fn matmul(&self, a: &Tensor, b: &Tensor) -> TensorResult<Tensor> {
-        let a_arr = a.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
-        let b_arr = b.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
+        let a_arr = a
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor a"))?;
+        let b_arr = b
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor b"))?;
 
         if a_arr.ndim() != 2 || b_arr.ndim() != 2 {
             return Err(TensorError::InvalidDimension {
@@ -305,7 +332,7 @@ impl TensorBackend for NdArrayBackend {
         // 使用 ndarray 的 dot 方法（性能优化）
         let a_view = a_arr.view().into_dimensionality::<ndarray::Ix2>().unwrap();
         let b_view = b_arr.view().into_dimensionality::<ndarray::Ix2>().unwrap();
-        
+
         let result = a_view.dot(&b_view);
         Ok(Tensor::from_array(result.into_dyn()))
     }
@@ -319,7 +346,9 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn sum(&self, tensor: &Tensor, dims: &[usize]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if dims.is_empty() {
             // 对所有元素求和
@@ -340,7 +369,9 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn mean(&self, tensor: &Tensor, dims: &[usize]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         // 计算参与平均的元素数量
         let numel: usize = if dims.is_empty() {
@@ -350,13 +381,17 @@ impl TensorBackend for NdArrayBackend {
         };
 
         let sum = self.sum(tensor, dims)?;
-        let sum_arr = sum.as_array().ok_or_else(|| TensorError::other("Cannot get sum array"))?;
-        
+        let sum_arr = sum
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get sum array"))?;
+
         Ok(Tensor::from_array(sum_arr.clone() / (numel as f64)))
     }
 
     fn max(&self, tensor: &Tensor, dims: &[usize]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if dims.is_empty() {
             let max = arr.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -377,7 +412,9 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn min(&self, tensor: &Tensor, dims: &[usize]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if dims.is_empty() {
             let min = arr.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -398,17 +435,24 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn argmax(&self, tensor: &Tensor, dim: usize) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if dim >= arr.ndim() {
             return Err(TensorError::InvalidDimension {
                 dim: dim as i32,
-                message: format!("dim {} out of range for tensor with {} dimensions", dim, arr.ndim()),
+                message: format!(
+                    "dim {} out of range for tensor with {} dimensions",
+                    dim,
+                    arr.ndim()
+                ),
             });
         }
 
         let result = arr.map_axis(ndarray::Axis(dim), |axis| {
-            let (max_idx, _) = axis.iter()
+            let (max_idx, _) = axis
+                .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                 .unwrap();
@@ -419,12 +463,17 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn slice(&self, tensor: &Tensor, ranges: &[(usize, usize)]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if ranges.len() > arr.ndim() {
             return Err(TensorError::InvalidDimension {
                 dim: ranges.len() as i32,
-                message: format!("Too many slice ranges for tensor with {} dimensions", arr.ndim()),
+                message: format!(
+                    "Too many slice ranges for tensor with {} dimensions",
+                    arr.ndim()
+                ),
             });
         }
 
@@ -432,7 +481,12 @@ impl TensorBackend for NdArrayBackend {
         for (dim, (start, end)) in ranges.iter().enumerate() {
             if *end > result.shape()[dim] {
                 return Err(TensorError::IndexOutOfBounds {
-                    message: format!("Slice end {} exceeds dimension {} size {}", end, dim, result.shape()[dim]),
+                    message: format!(
+                        "Slice end {} exceeds dimension {} size {}",
+                        end,
+                        dim,
+                        result.shape()[dim]
+                    ),
                 });
             }
 
@@ -447,7 +501,9 @@ impl TensorBackend for NdArrayBackend {
                 })
                 .collect();
 
-            result = result.slice_each_axis(|ax| indices[ax.axis.index()]).to_owned();
+            result = result
+                .slice_each_axis(|ax| indices[ax.axis.index()])
+                .to_owned();
         }
 
         Ok(Tensor::from_array(result))
@@ -460,8 +516,12 @@ impl TensorBackend for NdArrayBackend {
             });
         }
 
-        let arrays: Result<Vec<_>, _> = tensors.iter()
-            .map(|t| t.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor")))
+        let arrays: Result<Vec<_>, _> = tensors
+            .iter()
+            .map(|t| {
+                t.as_array()
+                    .ok_or_else(|| TensorError::other("Cannot get array from tensor"))
+            })
             .collect();
         let arrays = arrays?;
 
@@ -477,7 +537,7 @@ impl TensorBackend for NdArrayBackend {
 
         // 转换为 ArrayView 切片
         let views: Vec<_> = arrays.iter().map(|a| a.view()).collect();
-        
+
         let result = ndarray::concatenate(ndarray::Axis(dim), &views)
             .map_err(|e| TensorError::ShapeMismatch {
                 message: format!("Concatenation failed: {}", e),
@@ -494,8 +554,12 @@ impl TensorBackend for NdArrayBackend {
             });
         }
 
-        let arrays: Result<Vec<_>, _> = tensors.iter()
-            .map(|t| t.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor")))
+        let arrays: Result<Vec<_>, _> = tensors
+            .iter()
+            .map(|t| {
+                t.as_array()
+                    .ok_or_else(|| TensorError::other("Cannot get array from tensor"))
+            })
             .collect();
         let arrays = arrays?;
 
@@ -504,13 +568,18 @@ impl TensorBackend for NdArrayBackend {
         for (i, arr) in arrays.iter().enumerate() {
             if arr.shape() != first_shape {
                 return Err(TensorError::ShapeMismatch {
-                    message: format!("Tensor {} has shape {:?} but expected {:?}", i, arr.shape(), first_shape),
+                    message: format!(
+                        "Tensor {} has shape {:?} but expected {:?}",
+                        i,
+                        arr.shape(),
+                        first_shape
+                    ),
                 });
             }
         }
 
         let views: Vec<_> = arrays.iter().map(|a| a.view()).collect();
-        
+
         let result = ndarray::stack(ndarray::Axis(dim), &views)
             .map_err(|e| TensorError::ShapeMismatch {
                 message: format!("Stacking failed: {}", e),
@@ -521,34 +590,45 @@ impl TensorBackend for NdArrayBackend {
     }
 
     fn broadcast(&self, tensor: &Tensor, shape: &[usize]) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
         let broadcasted = Self::broadcast_array(arr, shape)?;
         Ok(Tensor::from_array(broadcasted))
     }
 
     fn unsqueeze(&self, tensor: &Tensor, dim: usize) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         if dim > arr.ndim() {
             return Err(TensorError::InvalidDimension {
                 dim: dim as i32,
-                message: format!("dim {} out of range for tensor with {} dimensions", dim, arr.ndim()),
+                message: format!(
+                    "dim {} out of range for tensor with {} dimensions",
+                    dim,
+                    arr.ndim()
+                ),
             });
         }
 
         let mut new_shape = arr.shape().to_vec();
         new_shape.insert(dim, 1);
 
-        let result = arr.clone().into_shape_with_order(new_shape)
-            .map_err(|e| TensorError::ShapeMismatch {
+        let result = arr.clone().into_shape_with_order(new_shape).map_err(|e| {
+            TensorError::ShapeMismatch {
                 message: format!("Failed to unsqueeze: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Tensor::from_array(result))
     }
 
     fn squeeze(&self, tensor: &Tensor, dim: Option<usize>) -> TensorResult<Tensor> {
-        let arr = tensor.as_array().ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
+        let arr = tensor
+            .as_array()
+            .ok_or_else(|| TensorError::other("Cannot get array from tensor"))?;
 
         let mut new_shape = Vec::new();
         for (i, &d) in arr.shape().iter().enumerate() {
@@ -561,10 +641,11 @@ impl TensorBackend for NdArrayBackend {
             }
         }
 
-        let result = arr.clone().into_shape_with_order(new_shape)
-            .map_err(|e| TensorError::ShapeMismatch {
+        let result = arr.clone().into_shape_with_order(new_shape).map_err(|e| {
+            TensorError::ShapeMismatch {
                 message: format!("Failed to squeeze: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Tensor::from_array(result))
     }
@@ -596,8 +677,12 @@ mod tests {
     #[test]
     fn test_matmul() {
         let backend = NdArrayBackend::new();
-        let a = backend.from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap();
-        let b = backend.from_data(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2]).unwrap();
+        let a = backend
+            .from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])
+            .unwrap();
+        let b = backend
+            .from_data(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2])
+            .unwrap();
         let result = backend.matmul(&a, &b).unwrap();
         assert_eq!(result.dims(), &[2, 2]);
         assert_eq!(result.as_slice().unwrap(), &[58.0, 64.0, 139.0, 154.0]);

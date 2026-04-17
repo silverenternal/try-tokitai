@@ -11,30 +11,37 @@
 //! - Flush: Background flush trigger
 //! - GlobalKeyIndex: Global sorted key-to-segment-location index
 
-pub mod types;
 pub mod config;
 pub mod error;
-pub mod memtable;
-pub mod segment;
-pub mod sparse_index;
-pub mod wal;
 #[doc(hidden)]
 pub mod flush;
+pub mod global_index;
+pub mod memtable;
+#[doc(hidden)]
+pub mod memtable_manager;
+pub mod segment;
+pub mod sparse_index;
+pub mod types;
+pub mod wal;
+#[doc(hidden)]
+pub mod wal_batcher;
+#[doc(hidden)]
+pub mod wal_channel;
 #[doc(hidden)]
 pub mod write_coalescer;
-pub mod global_index;
 
 // Re-exports for convenience
-pub use types::{FileKVStats, FileKVStatsSnapshot, ValuePointer, AggressiveConfig, WalSyncMode, Durability};
 pub use config::FileKVConfig;
 pub use error::{
-    FileKVError, FatalError, TransientError, ExpectedError, DomainError,
-    FileKVResult, ReadResult, WriteResult, ErrorCategory,
+    DomainError, ErrorCategory, ExpectedError, FatalError, FileKVError, FileKVResult, ReadResult, TransientError,
+    WriteResult,
 };
+pub use flush::FlushTrigger;
+pub use global_index::{GlobalKeyIndex, IndexStats, IndexUpdate, KeyLocation};
 pub use memtable::{MemTable, MemTableConfig, MemTableEntry};
 pub use segment::{SegmentFile, SegmentStats};
-pub use sparse_index::{SparseIndex, IndexManager};
-pub use wal::{WalManager, WalEntry};
-pub use flush::FlushTrigger;
+pub use sparse_index::{IndexManager, SparseIndex};
+pub use types::{AggressiveConfig, Durability, FileKVStats, FileKVStatsSnapshot, ValuePointer, WalSyncMode};
+pub use wal::{WalEntry, WalManager};
+pub use wal_channel::{WalChannel, WalChannelConfig, WalChannelStats};
 pub use write_coalescer::{WriteCoalescer, WriteCoalescerConfig};
-pub use global_index::{GlobalKeyIndex, KeyLocation, IndexStats, IndexUpdate};

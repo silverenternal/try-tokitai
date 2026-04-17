@@ -23,7 +23,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::core::error::FatalError;
 
@@ -57,7 +57,7 @@ impl CustomBloom {
     /// * `num_bits` - Number of bits in the filter (determines memory usage)
     /// * `num_hashes` - Number of hash functions (determines accuracy)
     pub fn new(num_bits: usize, num_hashes: usize) -> Self {
-        let byte_len = (num_bits + 7) / 8;
+        let byte_len = num_bits.div_ceil(8);
         Self {
             num_bits,
             num_hashes,
@@ -80,9 +80,12 @@ impl CustomBloom {
 
     /// Insert a key into the filter
     pub fn insert(&mut self, key: &[u8]) {
-        let hashes = self.compute_hashes(key);
-        for pos in hashes {
-            self.set_bit(pos);
+        let h1 = self.hash1(key);
+        let h2 = self.hash2(key);
+        let m = self.num_bits as u64;
+        for i in 0..self.num_hashes {
+            let pos = h1.wrapping_add((i as u64).wrapping_mul(h2)) % m;
+            self.set_bit(pos as usize);
         }
     }
 
@@ -92,8 +95,13 @@ impl CustomBloom {
     /// - `true`: Key is probably in the set (may be false positive)
     /// - `false`: Key is definitely not in the set
     pub fn contains(&self, key: &[u8]) -> bool {
-        let hashes = self.compute_hashes(key);
-        hashes.iter().all(|&pos| self.get_bit(pos))
+        let h1 = self.hash1(key);
+        let h2 = self.hash2(key);
+        let m = self.num_bits as u64;
+        (0..self.num_hashes).all(|i| {
+            let pos = h1.wrapping_add((i as u64).wrapping_mul(h2)) % m;
+            self.get_bit(pos as usize)
+        })
     }
 
     /// Get number of bits
@@ -149,23 +157,6 @@ impl CustomBloom {
         } else {
             false
         }
-    }
-
-    /// Compute k hash positions using double hashing
-    ///
-    /// Double hashing: h(i) = h1(key) + i * h2(key) mod m
-    /// where h1 and h2 are XXH3 with different seeds
-    fn compute_hashes(&self, key: &[u8]) -> Vec<usize> {
-        let h1 = self.hash1(key);
-        let h2 = self.hash2(key);
-        let m = self.num_bits as u64;
-
-        (0..self.num_hashes)
-            .map(|i| {
-                let pos = h1.wrapping_add((i as u64).wrapping_mul(h2)) % m;
-                pos as usize
-            })
-            .collect()
     }
 
     /// First hash function: XXH3 with seed 0
@@ -281,7 +272,7 @@ impl CustomBloom {
         let num_hashes = u32::from_le_bytes(num_hashes_buf) as usize;
 
         // Read bitset
-        let byte_len = (num_bits + 7) / 8;
+        let byte_len = num_bits.div_ceil(8);
         let mut bits = vec![0u8; byte_len];
         reader.read_exact(&mut bits).map_err(FatalError::Io)?;
 
@@ -305,19 +296,20 @@ impl CustomBloom {
 impl CustomBloom {
     /// Create from existing bloom crate filter (for migration)
     ///
-    /// This extracts the bitset and parameters from the old bloom filter
-    /// and creates an equivalent CustomBloom.
+    /// This reconstructs the filter using XXH3 hashing. Note: the resulting
+    /// CustomBloom will have different bit patterns than the original since
+    /// it uses XXH3 instead of RandomState hashing.
     pub fn from_bloom_filter(bloom: &::bloom::BloomFilter) -> Self {
         let num_bits = bloom.num_bits();
         let num_hashes = bloom.num_hashes() as usize;
-        let bitvec_bytes = bloom.to_bytes();
 
-        // The bloom crate's to_bytes() returns the internal bit vector
-        // We need to copy it directly as-is
+        // We cannot extract the raw bitset from bloom::BloomFilter (BitVec is private).
+        // Return an empty filter with the same parameters — the caller should rebuild
+        // from keys if bit-accurate migration is needed.
         Self {
             num_bits,
             num_hashes,
-            bits: bitvec_bytes,
+            bits: vec![0u8; num_bits.div_ceil(8)],
         }
     }
 
@@ -349,13 +341,7 @@ impl CustomBloom {
     pub fn to_bloom_filter(&self) -> ::bloom::BloomFilter {
         // Reconstruct by inserting placeholder keys
         // This is only for API compatibility, not bit-identical
-        let bloom = ::bloom::BloomFilter::with_size(
-            self.num_bits,
-            self.num_hashes as u32,
-        );
-        // Cannot reconstruct exact bits without keys
-        // This method is provided for interface compatibility only
-        bloom
+        ::bloom::BloomFilter::with_size(self.num_bits, self.num_hashes as u32)
     }
 }
 
@@ -365,9 +351,7 @@ impl CustomBloom {
 
 impl PartialEq for CustomBloom {
     fn eq(&self, other: &Self) -> bool {
-        self.num_bits == other.num_bits
-            && self.num_hashes == other.num_hashes
-            && self.bits == other.bits
+        self.num_bits == other.num_bits && self.num_hashes == other.num_hashes && self.bits == other.bits
     }
 }
 
@@ -447,10 +431,7 @@ mod tests {
 
         println!(
             "FPR test: target={}, actual={} ({} false positives in {} tests)",
-            target_fpr,
-            actual_fpr,
-            false_positives,
-            test_count
+            target_fpr, actual_fpr, false_positives, test_count
         );
     }
 
@@ -470,7 +451,9 @@ mod tests {
         original.save_to_file(&path).unwrap();
 
         // Load
-        let loaded = CustomBloom::load_from_file(&path).unwrap().expect("Should load V3 bloom");
+        let loaded = CustomBloom::load_from_file(&path)
+            .unwrap()
+            .expect("Should load V3 bloom");
 
         // Verify identical
         assert_eq!(original, loaded);
@@ -526,7 +509,7 @@ mod tests {
 
         // Test optimal hashes calculation
         let hashes = CustomBloom::optimal_num_hashes(1000, bits);
-        assert!(hashes >= 1 && hashes <= 20); // Reasonable range
+        assert!((1..=20).contains(&hashes)); // Reasonable range
     }
 
     #[test]
@@ -591,10 +574,7 @@ mod tests {
         let elapsed = start.elapsed();
         let avg_us = elapsed.as_micros() as f64 / iterations as f64;
 
-        println!(
-            "Load performance: avg {:.2}µs over {} iterations",
-            avg_us, iterations
-        );
+        println!("Load performance: avg {:.2}µs over {} iterations", avg_us, iterations);
 
         // Should be well under 100µs per load
         assert!(

@@ -2,7 +2,7 @@
 //!
 //! 使用 builder pattern 支持灵活配置
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// 数据工具统一配置
 #[derive(Debug, Clone, Serialize, Deserialize)]

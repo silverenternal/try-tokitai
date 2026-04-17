@@ -1,10 +1,10 @@
-use std::path::Path;
-use std::fs;
-use tokitai::tool;
-use serde_json::{json, Value};
-use crate::tools::io::security::SecurePathResolver;
 use crate::tools::io::error::IoToolError;
-use crate::tools::io::utils::{validate_single_path, ensure_file_exists, ensure_extension};
+use crate::tools::io::security::SecurePathResolver;
+use crate::tools::io::utils::{ensure_extension, ensure_file_exists, validate_single_path};
+use serde_json::{json, Value};
+use std::fs;
+use std::path::Path;
+use tokitai::tool;
 
 /// PDF 阅读工具 - 支持读取 PDF 文件内容
 ///
@@ -58,23 +58,26 @@ impl PdfTools {
         ensure_extension(path_obj, "pdf")?;
 
         // 获取文件大小
-        let file_size = fs::metadata(path_obj)
-            .map(|m| m.len())
-            .map_err(|e| IoToolError::IoError {
-                message: e.to_string(),
-                path: Some(canonical_path.clone()),
-                operation: "get_metadata".to_string(),
-                suggestion: "请检查文件权限".to_string(),
-            })?;
+        let file_size =
+            fs::metadata(path_obj)
+                .map(|m| m.len())
+                .map_err(|e| IoToolError::IoError {
+                    message: e.to_string(),
+                    path: Some(canonical_path.clone()),
+                    operation: "get_metadata".to_string(),
+                    suggestion: "请检查文件权限".to_string(),
+                })?;
 
         // 使用 lopdf 加载 PDF
-        let doc = lopdf::Document::load(path_obj)
-            .map_err(|e| IoToolError::PdfLoadFailed {
+        let doc = lopdf::Document::load(path_obj).map_err(|e| {
+            IoToolError::PdfLoadFailed {
                 path: canonical_path.clone(),
                 message: e.to_string(),
                 file_size: Some(file_size),
                 suggestion: "文件可能已损坏、加密或不是有效的 PDF 格式".to_string(),
-            }.to_value())?;
+            }
+            .to_value()
+        })?;
 
         let page_count = doc.get_pages().len();
         let mut text = String::new();
@@ -105,18 +108,21 @@ impl PdfTools {
             text
         };
 
-        Ok(IoToolError::success_response("read_pdf", json!({
-            "path": canonical_path,
-            "content": extracted_text,
-            "page_count": page_count,
-            "file_size_bytes": file_size,
-            "failed_pages": failed_pages,
-            "message": if failed_pages.is_empty() {
-                format!("成功从 {} 页 PDF 中提取文本", page_count)
-            } else {
-                format!("从 {} 页 PDF 中提取文本，{} 页提取失败", page_count, failed_pages.len())
-            }
-        })))
+        Ok(IoToolError::success_response(
+            "read_pdf",
+            json!({
+                "path": canonical_path,
+                "content": extracted_text,
+                "page_count": page_count,
+                "file_size_bytes": file_size,
+                "failed_pages": failed_pages,
+                "message": if failed_pages.is_empty() {
+                    format!("成功从 {} 页 PDF 中提取文本", page_count)
+                } else {
+                    format!("从 {} 页 PDF 中提取文本，{} 页提取失败", page_count, failed_pages.len())
+                }
+            }),
+        ))
     }
 
     /// 获取 PDF 文件的基本信息
@@ -138,27 +144,30 @@ impl PdfTools {
 
         ensure_file_exists(path_obj)?;
 
-        let doc = lopdf::Document::load(path_obj)
-            .map_err(|e| IoToolError::PdfLoadFailed {
+        let doc = lopdf::Document::load(path_obj).map_err(|e| {
+            IoToolError::PdfLoadFailed {
                 path: canonical_path.clone(),
                 message: e.to_string(),
                 file_size: None,
                 suggestion: "文件可能已损坏或加密".to_string(),
-            }.to_value())?;
+            }
+            .to_value()
+        })?;
 
         let page_count = doc.get_pages().len();
-        let file_size = fs::metadata(path_obj)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = fs::metadata(path_obj).map(|m| m.len()).unwrap_or(0);
 
-        Ok(IoToolError::success_response("get_pdf_info", json!({
-            "path": canonical_path,
-            "page_count": page_count,
-            "file_size_bytes": file_size,
-            "file_size_human": format_size(file_size),
-            "is_encrypted": doc.is_encrypted(),
-            "pdf_version": format!("{:?}", doc.version)
-        })))
+        Ok(IoToolError::success_response(
+            "get_pdf_info",
+            json!({
+                "path": canonical_path,
+                "page_count": page_count,
+                "file_size_bytes": file_size,
+                "file_size_human": format_size(file_size),
+                "is_encrypted": doc.is_encrypted(),
+                "pdf_version": format!("{:?}", doc.version)
+            }),
+        ))
     }
 }
 
@@ -188,7 +197,10 @@ mod tests {
         let tools = PdfTools::with_resolver(SecurePathResolver::new_for_tests());
         // 使用当前目录下的不存在路径
         let current_dir = std::env::current_dir().unwrap();
-        let nonexistent_path = current_dir.join("target").join("test_tmp").join("nonexistent.pdf");
+        let nonexistent_path = current_dir
+            .join("target")
+            .join("test_tmp")
+            .join("nonexistent.pdf");
         let result = tools.read_pdf(nonexistent_path.to_string_lossy().to_string());
 
         assert!(result.is_err());
@@ -211,7 +223,10 @@ mod tests {
         let tools = PdfTools::with_resolver(SecurePathResolver::new_for_tests());
         // 使用当前目录下的不存在路径
         let current_dir = std::env::current_dir().unwrap();
-        let nonexistent_path = current_dir.join("target").join("test_tmp").join("nonexistent.pdf");
+        let nonexistent_path = current_dir
+            .join("target")
+            .join("test_tmp")
+            .join("nonexistent.pdf");
         let result = tools.get_pdf_info(nonexistent_path.to_string_lossy().to_string());
 
         assert!(result.is_err());

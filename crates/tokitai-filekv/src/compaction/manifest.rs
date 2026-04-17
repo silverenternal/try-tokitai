@@ -69,12 +69,7 @@ pub struct CompactionManifest {
 
 impl CompactionManifest {
     /// Create a new manifest for a compaction that is about to start
-    pub fn new(
-        compaction_id: u64,
-        input_segments: Vec<u64>,
-        output_segments: Vec<u64>,
-        output_level: u8,
-    ) -> Self {
+    pub fn new(compaction_id: u64, input_segments: Vec<u64>, output_segments: Vec<u64>, output_level: u8) -> Self {
         Self {
             compaction_id,
             input_segments,
@@ -132,8 +127,11 @@ impl CompactionManifest {
         let version = u32::from_le_bytes(buf[4..8].try_into()?);
 
         if magic != COMPACTION_MANIFEST_MAGIC {
-            anyhow::bail!("Invalid manifest magic: expected 0x{:08X}, got 0x{:08X}",
-                COMPACTION_MANIFEST_MAGIC, magic);
+            anyhow::bail!(
+                "Invalid manifest magic: expected 0x{:08X}, got 0x{:08X}",
+                COMPACTION_MANIFEST_MAGIC,
+                magic
+            );
         }
 
         if version != COMPACTION_MANIFEST_VERSION {
@@ -182,9 +180,8 @@ impl CompactionManifest {
             anyhow::bail!("Manifest file is empty: {}", path.display());
         }
         let mut buf = vec![0u8; file_size];
-        file.read_exact(&mut buf).map_err(|e|
-            anyhow::anyhow!("Failed to read manifest file {}: {}", path.display(), e)
-        )?;
+        file.read_exact(&mut buf)
+            .map_err(|e| anyhow::anyhow!("Failed to read manifest file {}: {}", path.display(), e))?;
         Self::from_bytes(&buf)
     }
 
@@ -233,11 +230,7 @@ impl CompactionExecutor {
         // Ensure manifest directory exists
         self.fs.create_dir_all(&self.manifest_dir)?;
 
-        let path = manifest.write_atomic(
-            self.fs.as_ref(),
-            &self.manifest_dir,
-            manifest.compaction_id,
-        )?;
+        let path = manifest.write_atomic(self.fs.as_ref(), &self.manifest_dir, manifest.compaction_id)?;
 
         self.current_manifest_path = Some(path.clone());
         tracing::info!(
@@ -322,11 +315,7 @@ pub fn recover_incomplete(
             let manifest = match CompactionManifest::read_from_file(fs, &path) {
                 Ok(m) => m,
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to parse compaction manifest {}: {}",
-                        path.display(),
-                        e
-                    );
+                    tracing::warn!("Failed to parse compaction manifest {}: {}", path.display(), e);
                     // Try to clean up the corrupt manifest
                     let _ = fs.remove_file(&path);
                     continue;
@@ -347,16 +336,9 @@ pub fn recover_incomplete(
                         let output_path = segment_dir.join(format!("segment_{}.log", output_id));
                         if fs.file_exists(&output_path) {
                             if let Err(e) = fs.remove_file(&output_path) {
-                                tracing::error!(
-                                    "Failed to delete incomplete output segment {}: {}",
-                                    output_id,
-                                    e
-                                );
+                                tracing::error!("Failed to delete incomplete output segment {}: {}", output_id, e);
                             } else {
-                                tracing::info!(
-                                    "Deleted incomplete compaction output segment {}",
-                                    output_id
-                                );
+                                tracing::info!("Deleted incomplete compaction output segment {}", output_id);
                                 deleted_outputs.push(output_id);
                             }
                         }
@@ -384,17 +366,11 @@ pub fn recover_incomplete(
                     });
                 }
                 CompactionStatus::Completed => {
-                    tracing::debug!(
-                        "Found completed compaction manifest {}, cleaning up",
-                        path.display()
-                    );
+                    tracing::debug!("Found completed compaction manifest {}, cleaning up", path.display());
                     let _ = fs.remove_file(&path);
                 }
                 CompactionStatus::Aborted => {
-                    tracing::debug!(
-                        "Found aborted compaction manifest {}, cleaning up",
-                        path.display()
-                    );
+                    tracing::debug!("Found aborted compaction manifest {}, cleaning up", path.display());
                     let _ = fs.remove_file(&path);
                 }
             }
@@ -412,12 +388,7 @@ mod tests {
 
     #[test]
     fn test_manifest_serialization_roundtrip() {
-        let manifest = CompactionManifest::new(
-            42,
-            vec![1, 2, 3],
-            vec![4],
-            1,
-        );
+        let manifest = CompactionManifest::new(42, vec![1, 2, 3], vec![4], 1);
 
         let bytes = manifest.to_bytes().unwrap();
         let restored = CompactionManifest::from_bytes(&bytes).unwrap();
@@ -434,12 +405,7 @@ mod tests {
     #[test]
     fn test_manifest_write_atomic_and_read() {
         let fs = Arc::new(MemFs::default());
-        let manifest = CompactionManifest::new(
-            100,
-            vec![10, 20],
-            vec![30],
-            2,
-        );
+        let manifest = CompactionManifest::new(100, vec![10, 20], vec![30], 2);
 
         let dir = PathBuf::from("/manifests");
         fs.create_dir_all(&dir).unwrap();
@@ -474,17 +440,9 @@ mod tests {
     #[test]
     fn test_compaction_executor_prepare() {
         let fs = Arc::new(MemFs::default());
-        let mut executor = CompactionExecutor::new(
-            fs.clone(),
-            PathBuf::from("/manifests"),
-        );
+        let mut executor = CompactionExecutor::new(fs.clone(), PathBuf::from("/manifests"));
 
-        let manifest = CompactionManifest::new(
-            99,
-            vec![1, 2, 3],
-            vec![4],
-            1,
-        );
+        let manifest = CompactionManifest::new(99, vec![1, 2, 3], vec![4], 1);
 
         let path = executor.prepare(&manifest).unwrap();
         assert!(path.to_string_lossy().contains("compaction_99.manifest"));
@@ -514,12 +472,7 @@ mod tests {
         fs.create_dir_all(&segment_dir).unwrap();
 
         // Write an InProgress manifest
-        let manifest = CompactionManifest::new(
-            55,
-            vec![1, 2],
-            vec![10],
-            1,
-        );
+        let manifest = CompactionManifest::new(55, vec![1, 2], vec![10], 1);
         let _path = manifest.write_atomic(fs.as_ref(), &manifest_dir, 55).unwrap();
 
         // Create a fake output segment (simulating crash during compaction)

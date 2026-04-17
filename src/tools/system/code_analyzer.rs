@@ -11,9 +11,9 @@
 //! ## 返回格式
 //! 所有方法同时支持人类可读格式和 JSON 格式
 
-use tokitai::tool;
 use serde_json::json;
 use std::path::Path;
+use tokitai::tool;
 
 use super::config;
 use super::error::CodeAnalysisError;
@@ -135,9 +135,7 @@ impl CodeAnalyzer {
             .map_err(|e| e.to_string())?;
 
         let total_lines = content.lines().count();
-        let non_empty_lines = content.lines()
-            .filter(|l| !l.trim().is_empty())
-            .count();
+        let non_empty_lines = content.lines().filter(|l| !l.trim().is_empty()).count();
 
         // 检测语言以确定注释风格
         let lang = detect_language_from_path(&path);
@@ -154,7 +152,8 @@ impl CodeAnalyzer {
                 "comment_lines": comment_lines,
                 "code_lines": code_lines,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 查找代码中的函数定义
@@ -220,7 +219,8 @@ impl CodeAnalyzer {
                 "functions": functions,
             },
             "message": message
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 检测文件类型（编程语言）
@@ -257,7 +257,8 @@ impl CodeAnalyzer {
                 "extension": ext,
                 "language": lang.name(),
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 搜索代码中的关键词
@@ -289,16 +290,27 @@ impl CodeAnalyzer {
     /// ## 安全
     /// - 搜索模式长度限制为 256 字符
     /// - 不支持正则表达式（纯文本匹配）
-    pub fn search_code(&self, path: String, pattern: String, limit: Option<usize>) -> Result<String, String> {
+    pub fn search_code(
+        &self,
+        path: String,
+        pattern: String,
+        limit: Option<usize>,
+    ) -> Result<String, String> {
         // 验证搜索模式
         if pattern.is_empty() {
             return Err("搜索关键词不能为空".to_string());
         }
         if pattern.len() > config::MAX_PATTERN_LENGTH {
-            return Err(format!("搜索模式过长 ({} > {} 字符)", pattern.len(), config::MAX_PATTERN_LENGTH));
+            return Err(format!(
+                "搜索模式过长 ({} > {} 字符)",
+                pattern.len(),
+                config::MAX_PATTERN_LENGTH
+            ));
         }
 
-        let limit = limit.unwrap_or(config::DEFAULT_CODE_SEARCH_LIMIT).min(config::MAX_CODE_SEARCH_LIMIT);
+        let limit = limit
+            .unwrap_or(config::DEFAULT_CODE_SEARCH_LIMIT)
+            .min(config::MAX_CODE_SEARCH_LIMIT);
 
         let content = std::fs::read_to_string(&path)
             .map_err(|e| {
@@ -342,7 +354,8 @@ impl CodeAnalyzer {
                 "matches": matches,
             },
             "message": message
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取文件基本信息
@@ -365,9 +378,7 @@ impl CodeAnalyzer {
 
         let lang = detect_language_from_path(&path);
         let total_lines = content.lines().count();
-        let non_empty_lines = content.lines()
-            .filter(|l| !l.trim().is_empty())
-            .count();
+        let non_empty_lines = content.lines().filter(|l| !l.trim().is_empty()).count();
         let comment_lines = count_comment_lines(&content, &lang);
 
         Ok(json!({
@@ -381,7 +392,8 @@ impl CodeAnalyzer {
                 "code_lines": non_empty_lines - comment_lines,
                 "language": lang.name(),
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取工具元数据
@@ -393,7 +405,8 @@ impl CodeAnalyzer {
                 "description": config::CODE_ANALYZER_METADATA.description,
                 "version": config::CODE_ANALYZER_METADATA.version,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 }
 
@@ -415,8 +428,13 @@ fn count_comment_lines(content: &str, lang: &Language) -> usize {
         let trimmed = line.trim();
 
         match lang {
-            Language::Rust | Language::C | Language::Cpp | Language::Go | Language::Java |
-            Language::JavaScript | Language::TypeScript => {
+            Language::Rust
+            | Language::C
+            | Language::Cpp
+            | Language::Go
+            | Language::Java
+            | Language::JavaScript
+            | Language::TypeScript => {
                 // 支持 // 和 /* */ 注释
                 if in_block_comment {
                     count += 1;
@@ -463,9 +481,10 @@ fn try_match_function(line: &str, lang: &Language) -> Option<FunctionInfo> {
                 .or_else(|| trimmed.strip_prefix("protected "))
                 .or_else(|| trimmed.strip_prefix("static "))
                 .unwrap_or(trimmed);
-            
+
             if without_modifiers.starts_with("fn ") || without_modifiers.starts_with("function ") {
-                let name = extract_function_name(without_modifiers, &["fn ", "function ", "pub fn "])?;
+                let name =
+                    extract_function_name(without_modifiers, &["fn ", "function ", "pub fn "])?;
                 return Some(FunctionInfo { name });
             }
         }
@@ -482,21 +501,29 @@ fn try_match_function(line: &str, lang: &Language) -> Option<FunctionInfo> {
                 return Some(FunctionInfo { name });
             }
             // 匹配 const/let foo = () =>
-            if (trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("var "))
-                && trimmed.contains("=>") {
-                    let name = extract_function_name(trimmed, &["const ", "let ", "var "])?;
-                    let name = name.split('=').next()?.trim().to_string();
-                    return Some(FunctionInfo { name });
-                }
+            if (trimmed.starts_with("const ")
+                || trimmed.starts_with("let ")
+                || trimmed.starts_with("var "))
+                && trimmed.contains("=>")
+            {
+                let name = extract_function_name(trimmed, &["const ", "let ", "var "])?;
+                let name = name.split('=').next()?.trim().to_string();
+                return Some(FunctionInfo { name });
+            }
         }
         Language::Java => {
             // Java 没有明显的关键字，需要更复杂的匹配
-            if trimmed.contains("(") && trimmed.contains(")") && trimmed.contains("{")
-                && (trimmed.starts_with("public ") || trimmed.starts_with("private ") ||
-                   trimmed.starts_with("protected ") || trimmed.starts_with("static ")) {
-                    let name = extract_java_method_name(trimmed)?;
-                    return Some(FunctionInfo { name });
-                }
+            if trimmed.contains("(")
+                && trimmed.contains(")")
+                && trimmed.contains("{")
+                && (trimmed.starts_with("public ")
+                    || trimmed.starts_with("private ")
+                    || trimmed.starts_with("protected ")
+                    || trimmed.starts_with("static "))
+            {
+                let name = extract_java_method_name(trimmed)?;
+                return Some(FunctionInfo { name });
+            }
         }
         _ => {}
     }
@@ -537,7 +564,10 @@ fn extract_java_method_name(line: &str) -> Option<String> {
     let before_paren = &line[..paren_pos];
 
     // 找到最后一个空格后的内容（方法名）
-    before_paren.split_whitespace().last().map(|s| s.to_string())
+    before_paren
+        .split_whitespace()
+        .last()
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]
@@ -631,7 +661,7 @@ def main():
         let result = analyzer.search_code(
             temp_path.to_string_lossy().to_string(),
             "nonexistent_xyz".to_string(),
-            Some(10)
+            Some(10),
         );
 
         assert!(result.is_ok());

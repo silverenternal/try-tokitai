@@ -2,10 +2,10 @@
 //!
 //! Tests for runtime feature flag control with FileKV
 
+use crate::ops::feature_flag::FeatureFlag;
+use crate::{FileKV, FileKVConfig};
 use std::sync::Arc;
 use tempfile::TempDir;
-use crate::{FileKV, FileKVConfig};
-use crate::ops::feature_flag::FeatureFlag;
 
 #[test]
 fn test_filekv_feature_flag_controller_initialization() {
@@ -235,8 +235,8 @@ fn test_filekv_individual_feature_toggles() {
 
 #[test]
 fn test_filekv_feature_flag_callback() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use crate::ops::feature_flag::FeatureStateChange;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let config = FileKVConfig {

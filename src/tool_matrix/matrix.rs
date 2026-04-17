@@ -92,17 +92,17 @@ pub struct ServiceMetadata {
 #[serde(rename_all = "snake_case")]
 pub enum ServiceCategory {
     #[default]
-    Utility,      // 通用工具
-    File,         // 文件操作
-    Network,      // 网络操作
-    System,       // 系统操作
-    Data,         // 数据处理
-    Ai,           // AI 相关
-    Vcs,          // 版本控制
-    Dialogue,     // 对话管理
-    Development,  // 开发工具
+    Utility, // 通用工具
+    File,           // 文件操作
+    Network,        // 网络操作
+    System,         // 系统操作
+    Data,           // 数据处理
+    Ai,             // AI 相关
+    Vcs,            // 版本控制
+    Dialogue,       // 对话管理
+    Development,    // 开发工具
     VersionControl, // 版本控制（Git 等）
-    Default,      // 默认（未分类）
+    Default,        // 默认（未分类）
 }
 
 /// 风险等级
@@ -135,10 +135,18 @@ pub struct QualityOfService {
     pub idempotent: bool,
 }
 
-fn default_latency() -> u64 { 1000 }
-fn default_success_rate() -> f32 { 0.99 }
-fn default_concurrency() -> usize { 10 }
-fn default_version() -> String { "1.0.0".to_string() }
+fn default_latency() -> u64 {
+    1000
+}
+fn default_success_rate() -> f32 {
+    0.99
+}
+fn default_concurrency() -> usize {
+    10
+}
+fn default_version() -> String {
+    "1.0.0".to_string()
+}
 
 impl Default for QualityOfService {
     fn default() -> Self {
@@ -349,7 +357,10 @@ impl ToolBox {
         self.tools
             .values()
             .filter(|t| {
-                let idx = risk_order.iter().position(|&r| r == t.risk_level.as_str()).unwrap_or(0);
+                let idx = risk_order
+                    .iter()
+                    .position(|&r| r == t.risk_level.as_str())
+                    .unwrap_or(0);
                 idx <= max_idx
             })
             .collect()
@@ -841,8 +852,8 @@ impl ToolUsageStats {
         }
 
         // 更新平均执行时间
-        let total_time = self.avg_execution_time_ms * (self.usage_count - 1) as f64
-            + execution_time_ms as f64;
+        let total_time =
+            self.avg_execution_time_ms * (self.usage_count - 1) as f64 + execution_time_ms as f64;
         self.avg_execution_time_ms = total_time / self.usage_count as f64;
 
         self.last_used_at = Some(chrono::Local::now().to_rfc3339());

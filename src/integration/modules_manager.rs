@@ -10,10 +10,10 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use std::path::PathBuf;
-use anyhow::{Context, Result};
+use std::sync::Arc;
 
 use crate::dialogue::{DialogueStateMachine, DialogueTools};
 use crate::observability::observability_tools::ObservabilityTools;
@@ -51,7 +51,7 @@ impl IntegratedModulesConfig {
     pub fn for_testing() -> Self {
         use std::env;
         let temp_base = env::temp_dir().join("tokitai_test");
-        
+
         Self {
             dialogue_storage_dir: temp_base.join("dialogue"),
             tracing_storage_dir: temp_base.join("traces"),
@@ -67,16 +67,16 @@ impl IntegratedModulesConfig {
 /// 集成模块管理器
 pub struct IntegratedModules {
     config: IntegratedModulesConfig,
-    
+
     pub dialogue_state: Arc<RwLock<DialogueStateMachine>>,
     pub dialogue_tools: DialogueTools,
-    
+
     pub tracing_recorder: Arc<RwLock<TracingRecorder>>,
     pub observability_tools: ObservabilityTools,
-    
+
     pub prompt_manager: Arc<RwLock<PromptTemplateManager>>,
     pub prompt_tools: PromptTools,
-    
+
     initialized: bool,
 }
 
@@ -93,7 +93,7 @@ impl IntegratedModules {
         let dialogue_state = if config.enable_persistence {
             Arc::new(RwLock::new(
                 DialogueStateMachine::new(config.dialogue_storage_dir.clone())
-                    .unwrap_or_else(|_| DialogueStateMachine::new_without_persistence())
+                    .unwrap_or_else(|_| DialogueStateMachine::new_without_persistence()),
             ))
         } else {
             Arc::new(RwLock::new(DialogueStateMachine::new_without_persistence()))
@@ -104,12 +104,12 @@ impl IntegratedModules {
                 config.tracing_storage_dir.clone(),
                 config.enable_console_output,
             )
-            .with_context(|| "创建追踪记录器失败")?
+            .with_context(|| "创建追踪记录器失败")?,
         ));
 
         let prompt_manager = Arc::new(RwLock::new(
             PromptTemplateManager::with_path(&config.prompt_templates_dir)
-                .unwrap_or_else(|_| PromptTemplateManager::default())
+                .unwrap_or_else(|_| PromptTemplateManager::default()),
         ));
 
         let dialogue_tools = DialogueTools::with_shared_state(dialogue_state.clone());
@@ -161,7 +161,7 @@ impl IntegratedModules {
 
         self.initialized = true;
         report.success = report.errors.is_empty();
-        
+
         Ok(report)
     }
 
@@ -174,7 +174,8 @@ impl IntegratedModules {
 
     fn init_tracing(&self) -> Result<String> {
         if self.config.enable_persistence {
-            let _ = self.observability_tools
+            let _ = self
+                .observability_tools
                 .cleanup_old_traces(Some(self.config.tracing_retention_days));
         }
         Ok("已就绪".to_string())
@@ -194,13 +195,18 @@ impl IntegratedModules {
     pub fn get_status(&self) -> ModulesStatus {
         ModulesStatus {
             initialized: self.initialized,
-            dialogue_state: self.dialogue_tools.get_state().unwrap_or_else(|e| format!("错误：{}", e)),
-            tracing_stats: self.observability_tools.get_stats().unwrap_or_else(|e| {
-                serde_json::json!({"error": e.to_string()})
-            }),
-            prompt_stats: self.prompt_tools.get_render_stats().unwrap_or_else(|e| {
-                serde_json::json!({"error": e.to_string()})
-            }),
+            dialogue_state: self
+                .dialogue_tools
+                .get_state()
+                .unwrap_or_else(|e| format!("错误：{}", e)),
+            tracing_stats: self
+                .observability_tools
+                .get_stats()
+                .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+            prompt_stats: self
+                .prompt_tools
+                .get_render_stats()
+                .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
         }
     }
 
@@ -221,7 +227,7 @@ impl IntegratedModules {
         report.prompts_cached = true;
 
         report.success = report.errors.is_empty();
-        
+
         Ok(report)
     }
 
@@ -307,17 +313,17 @@ mod tests {
     fn test_shared_state() {
         let config = IntegratedModulesConfig::for_testing();
         let modules = IntegratedModules::new(config).unwrap();
-        
+
         assert!(Arc::ptr_eq(
             &modules.dialogue_tools.get_state_machine(),
             &modules.dialogue_state
         ));
-        
+
         assert!(Arc::ptr_eq(
             &modules.observability_tools.get_recorder(),
             &modules.tracing_recorder
         ));
-        
+
         assert!(Arc::ptr_eq(
             &modules.prompt_tools.get_manager(),
             &modules.prompt_manager

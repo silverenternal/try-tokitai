@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokitai::tool;
 
-use super::error::{NetworkResult, DownloadError, NetworkError, HttpError};
+use super::error::{DownloadError, HttpError, NetworkError, NetworkResult};
 use super::ssrf_protection;
 
 // ============================================================================
@@ -105,17 +105,13 @@ impl Downloader {
 
         // 确保父目录存在
         if let Some(parent) = save_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                DownloadError::Io(format!("创建目录失败：{}", e))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| DownloadError::Io(format!("创建目录失败：{}", e)))?;
         }
 
         // 打开文件
         let mut file = self.open_file(save_path)?;
-        let mut start_pos = file
-            .metadata()
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let mut start_pos = file.metadata().map(|m| m.len()).unwrap_or(0);
 
         // 检查是否支持断点续传
         let supports_range = self.check_range_support(url)?;
@@ -126,9 +122,8 @@ impl Downloader {
         } else {
             // 重新下载，清空文件
             if start_pos > 0 {
-                file.set_len(0).map_err(|e| {
-                    DownloadError::Io(format!("清空文件失败：{}", e))
-                })?;
+                file.set_len(0)
+                    .map_err(|e| DownloadError::Io(format!("清空文件失败：{}", e)))?;
                 start_pos = 0;
             }
         }
@@ -149,17 +144,16 @@ impl Downloader {
         let mut last_downloaded = downloaded;
 
         loop {
-            let n = response.read(&mut buffer).map_err(|e| {
-                DownloadError::Io(format!("读取数据失败：{}", e))
-            })?;
+            let n = response
+                .read(&mut buffer)
+                .map_err(|e| DownloadError::Io(format!("读取数据失败：{}", e)))?;
 
             if n == 0 {
                 break;
             }
 
-            file.write_all(&buffer[..n]).map_err(|e| {
-                DownloadError::Io(format!("写入文件失败：{}", e))
-            })?;
+            file.write_all(&buffer[..n])
+                .map_err(|e| DownloadError::Io(format!("写入文件失败：{}", e)))?;
 
             downloaded += n as u64;
 
@@ -169,9 +163,7 @@ impl Downloader {
                     let expected_time = downloaded as f64 / limit as f64;
                     let actual_time = last_report.elapsed().as_secs_f64();
                     if actual_time < expected_time {
-                        std::thread::sleep(Duration::from_secs_f64(
-                            expected_time - actual_time,
-                        ));
+                        std::thread::sleep(Duration::from_secs_f64(expected_time - actual_time));
                     }
                 }
             }
@@ -204,9 +196,8 @@ impl Downloader {
             }
         }
 
-        file.sync_all().map_err(|e| {
-            DownloadError::Io(format!("同步文件失败：{}", e))
-        })?;
+        file.sync_all()
+            .map_err(|e| DownloadError::Io(format!("同步文件失败：{}", e)))?;
 
         tracing::info!("下载完成：{} bytes", downloaded);
         Ok(downloaded)
@@ -220,12 +211,7 @@ impl Downloader {
             .headers()
             .get("accept-ranges")
             .map(|v| v == "bytes")
-            .or_else(|| {
-                response
-                    .headers()
-                    .get("content-range")
-                    .map(|_| true)
-            })
+            .or_else(|| response.headers().get("content-range").map(|_| true))
             .unwrap_or(false);
 
         Ok(supports_range)
@@ -251,9 +237,7 @@ impl Downloader {
             .truncate(true)
             .read(true)
             .open(path)
-            .map_err(|e| {
-                DownloadError::Io(format!("打开文件失败：{}", e))
-            })
+            .map_err(|e| DownloadError::Io(format!("打开文件失败：{}", e)))
             .map_err(NetworkError::from)
     }
 }
@@ -299,9 +283,7 @@ impl DownloadTools {
         // 使用当前工作目录下的 downloads 文件夹（沙箱安全）
         if let Ok(current_dir) = std::env::current_dir() {
             let downloads_dir = current_dir.join("downloads");
-            if downloads_dir.exists()
-                || std::fs::create_dir_all(&downloads_dir).is_ok()
-            {
+            if downloads_dir.exists() || std::fs::create_dir_all(&downloads_dir).is_ok() {
                 return downloads_dir;
             }
         }
@@ -313,9 +295,8 @@ impl DownloadTools {
     /// 确保下载目录存在
     fn ensure_download_dir(path: &Path) -> NetworkResult<PathBuf> {
         if !path.exists() {
-            std::fs::create_dir_all(path).map_err(|e| {
-                DownloadError::Io(format!("创建下载目录失败：{}", e))
-            })?;
+            std::fs::create_dir_all(path)
+                .map_err(|e| DownloadError::Io(format!("创建下载目录失败：{}", e)))?;
         }
         Ok(path.to_path_buf())
     }
@@ -358,40 +339,37 @@ impl DownloadTools {
     }
 
     /// 验证下载路径是否安全
-    fn validate_download_path(
-        base_dir: &Path,
-        full_path: &Path,
-    ) -> NetworkResult<()> {
+    fn validate_download_path(base_dir: &Path, full_path: &Path) -> NetworkResult<()> {
         let path_str = full_path.to_string_lossy();
         ssrf_protection::validate_save_path(&path_str)?;
 
-        let canonical_base = base_dir.canonicalize().map_err(|e| {
-            DownloadError::Io(format!("规范化基础目录失败：{}", e))
-        })?;
+        let canonical_base = base_dir
+            .canonicalize()
+            .map_err(|e| DownloadError::Io(format!("规范化基础目录失败：{}", e)))?;
 
         if full_path.exists() {
-            let canonical_full = full_path.canonicalize().map_err(|e| {
-                DownloadError::Io(format!("规范化完整路径失败：{}", e))
-            }).map_err(NetworkError::from)?;
+            let canonical_full = full_path
+                .canonicalize()
+                .map_err(|e| DownloadError::Io(format!("规范化完整路径失败：{}", e)))
+                .map_err(NetworkError::from)?;
 
             if !canonical_full.starts_with(&canonical_base) {
-                return Err(NetworkError::Download(
-                    DownloadError::PathValidation("路径遍历攻击检测：文件不在允许的目录内".to_string()),
-                ));
+                return Err(NetworkError::Download(DownloadError::PathValidation(
+                    "路径遍历攻击检测：文件不在允许的目录内".to_string(),
+                )));
             }
         } else {
             if let Some(parent) = full_path.parent() {
                 if parent.exists() {
-                    let canonical_parent = parent.canonicalize().map_err(|e| {
-                        DownloadError::Io(
-                            format!("规范化父目录失败：{}", e),
-                        )
-                    }).map_err(NetworkError::from)?;
+                    let canonical_parent = parent
+                        .canonicalize()
+                        .map_err(|e| DownloadError::Io(format!("规范化父目录失败：{}", e)))
+                        .map_err(NetworkError::from)?;
 
                     if !canonical_parent.starts_with(&canonical_base) {
-                        return Err(NetworkError::Download(
-                            DownloadError::PathValidation("路径遍历攻击检测：父目录不在允许的范围内".to_string()),
-                        ));
+                        return Err(NetworkError::Download(DownloadError::PathValidation(
+                            "路径遍历攻击检测：父目录不在允许的范围内".to_string(),
+                        )));
                     }
                 }
             }
@@ -431,9 +409,7 @@ impl DownloadTools {
     ) -> NetworkResult<String> {
         // 确定保存目录
         let download_dir = match directory.as_deref() {
-            Some(dir) if dir != "null" && dir != "None" && !dir.is_empty() => {
-                PathBuf::from(dir)
-            }
+            Some(dir) if dir != "null" && dir != "None" && !dir.is_empty() => PathBuf::from(dir),
             _ => Self::get_default_download_dir(),
         };
 
@@ -446,9 +422,7 @@ impl DownloadTools {
             }
             _ => Self::extract_filename_from_url(&url)
                 .map(|n| Self::sanitize_filename(&n))
-                .unwrap_or_else(|| {
-                    format!("download_{}.pdf", chrono::Local::now().timestamp())
-                }),
+                .unwrap_or_else(|| format!("download_{}.pdf", chrono::Local::now().timestamp())),
         };
 
         let final_filename = if final_filename.to_lowercase().ends_with(".pdf") {
@@ -502,9 +476,7 @@ impl DownloadTools {
         directory: Option<String>,
     ) -> NetworkResult<String> {
         let download_dir = match directory.as_deref() {
-            Some(dir) if dir != "null" && dir != "None" && !dir.is_empty() => {
-                PathBuf::from(dir)
-            }
+            Some(dir) if dir != "null" && dir != "None" && !dir.is_empty() => PathBuf::from(dir),
             _ => Self::get_default_download_dir(),
         };
 
@@ -516,9 +488,7 @@ impl DownloadTools {
             }
             _ => Self::extract_filename_from_url(&url)
                 .map(|n| Self::sanitize_filename(&n))
-                .unwrap_or_else(|| {
-                    format!("download_{}", chrono::Local::now().timestamp())
-                }),
+                .unwrap_or_else(|| format!("download_{}", chrono::Local::now().timestamp())),
         };
 
         let file_path = download_dir.join(&final_filename);
@@ -566,14 +536,13 @@ impl DownloadTools {
         // 验证 URL
         ssrf_protection::validate_url(&url)?;
 
-        let speed_limit_bytes = speed_limit
-            .and_then(|limit| {
-                if limit == 0 {
-                    None
-                } else {
-                    Some(limit as u64 * 1024)
-                }
-            });
+        let speed_limit_bytes = speed_limit.and_then(|limit| {
+            if limit == 0 {
+                None
+            } else {
+                Some(limit as u64 * 1024)
+            }
+        });
 
         let config = DownloaderConfig {
             resume_enabled: resume.unwrap_or(true),

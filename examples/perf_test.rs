@@ -14,7 +14,9 @@ fn main() {
 
     // 创建测试数据集（使用更多样化的工具名称）
     let test_sizes = [100, 1000, 5000, 10000];
-    let tool_prefixes = ["file_", "net_", "sys_", "git_", "data_", "code_", "http_", "db_", "ai_", "test_"];
+    let tool_prefixes = [
+        "file_", "net_", "sys_", "git_", "data_", "code_", "http_", "db_", "ai_", "test_",
+    ];
 
     for &size in &test_sizes {
         println!("--- 工具数量：{} ---", size);
@@ -52,9 +54,19 @@ fn main() {
         let avg_search_time = total_search_time / iterations;
         let max_search_time = total_search_time * 2 / iterations; // 估算
 
-        println!("平均搜索延迟：{:?} ({} 次迭代)", avg_search_time, iterations);
+        println!(
+            "平均搜索延迟：{:?} ({} 次迭代)",
+            avg_search_time, iterations
+        );
         println!("目标：<10ms");
-        println!("结果：{}\n", if avg_search_time < Duration::from_millis(10) { "✅ 通过" } else { "❌ 失败" });
+        println!(
+            "结果：{}\n",
+            if avg_search_time < Duration::from_millis(10) {
+                "✅ 通过"
+            } else {
+                "❌ 失败"
+            }
+        );
     }
 
     // 详细对比测试
@@ -122,33 +134,31 @@ impl ToolIndex {
             trie_index: TrieIndex::new(),
         }
     }
-    
+
     fn add_tool(&mut self, tool: ToolDef) {
         let name = tool.name.clone();
-        
+
         // 提取关键词
-        let keywords: Vec<String> = name.split('_')
-            .map(|s| s.to_lowercase())
-            .collect();
-        
+        let keywords: Vec<String> = name.split('_').map(|s| s.to_lowercase()).collect();
+
         for keyword in &keywords {
             self.keyword_index
                 .entry(keyword.clone())
                 .or_insert_with(Vec::new)
                 .push(name.clone());
         }
-        
+
         // 添加到 Trie 索引
         self.trie_index.add_tool(&name, self.tools.len() as u64);
-        
+
         self.tools.insert(name.clone(), tool);
     }
-    
+
     fn search(&self, query: &str, max_results: usize) -> Vec<String> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
         let mut seen = HashMap::new();
-        
+
         // 1. Trie 树前缀搜索（最快）
         let trie_results = self.trie_index.search_prefix(&query_lower);
         for tool_name in trie_results {
@@ -160,7 +170,7 @@ impl ToolIndex {
                 }
             }
         }
-        
+
         // 2. 关键词匹配
         for (keyword, tools) in &self.keyword_index {
             if keyword.contains(&query_lower) || query_lower.contains(keyword) {
@@ -175,7 +185,7 @@ impl ToolIndex {
                 }
             }
         }
-        
+
         results
     }
 }
@@ -192,10 +202,10 @@ impl TrieIndex {
             keyword_index: HashMap::new(),
         }
     }
-    
+
     fn add_tool(&mut self, name: &str, id: u64) {
         self.tool_map.insert(name.to_string(), id);
-        
+
         // 构建前缀索引
         let prefixes = Self::extract_prefixes(name);
         for prefix in prefixes {
@@ -205,35 +215,35 @@ impl TrieIndex {
                 .push(name.to_string());
         }
     }
-    
+
     fn search_prefix(&self, prefix: &str) -> Vec<String> {
         let prefix_lower = prefix.to_lowercase();
         let mut results = Vec::new();
-        
+
         // 直接查找前缀
         if let Some(tools) = self.keyword_index.get(&prefix_lower) {
             results.extend(tools.clone());
         }
-        
+
         // 也查找包含前缀的关键词
         for (keyword, tools) in &self.keyword_index {
             if keyword.starts_with(&prefix_lower) && !results.contains(&tools[0]) {
                 results.extend(tools.clone());
             }
         }
-        
+
         results
     }
-    
+
     fn extract_prefixes(name: &str) -> Vec<String> {
         let mut prefixes = Vec::new();
         let name_lower = name.to_lowercase();
-        
+
         // 提取不同长度的前缀
         for i in 1..=name_lower.len().min(10) {
             prefixes.push(name_lower[..i].to_string());
         }
-        
+
         // 提取下划线分隔的部分
         let parts: Vec<&str> = name_lower.split('_').collect();
         for (i, part) in parts.iter().enumerate() {
@@ -242,7 +252,7 @@ impl TrieIndex {
                 prefixes.push(prefix);
             }
         }
-        
+
         prefixes
     }
 }

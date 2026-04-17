@@ -5,8 +5,8 @@
 //! - Flush trigger mechanism
 //! - Periodic flush scheduling
 
-use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -63,18 +63,18 @@
 //! }
 //! ```
 
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 use crate::autonomy::gap_detector::{
-    ToolGapDetector, TaskExecutionRecord, ToolGap, GapType, GapEvidence,
+    GapEvidence, GapType, TaskExecutionRecord, ToolGap, ToolGapDetector,
 };
 use crate::autonomy::prompt_gap_detector::{
-    PromptGapDetector, CausalAnalysisRequest, IdentifiedGap, CausalFactor, LLMClient,
+    CausalAnalysisRequest, CausalFactor, IdentifiedGap, LLMClient, PromptGapDetector,
 };
 
 /// 融合后的工具缺口
@@ -158,7 +158,7 @@ pub struct HybridConfig {
     ///
     /// **默认值**: 0.5
     ///
-    /// **调优依据**: 
+    /// **调优依据**:
     /// - 低于 0.5 会产生过多假阳性（噪声缺口）
     /// - 高于 0.7 会遗漏真实缺口（假阴性）
     /// - 建议通过 ROC 曲线分析具体场景的最佳阈值
@@ -168,7 +168,7 @@ pub struct HybridConfig {
     /// - 真阳性率 (TPR): ~0.78
     /// - 精确率：~0.72
     pub statistical_threshold: f32,
-    
+
     /// 触发因果分析的最小出现次数
     ///
     /// **默认值**: 3
@@ -179,7 +179,7 @@ pub struct HybridConfig {
     ///
     /// **成本考虑**: 每次因果分析成本约 $0.015-0.03
     pub min_occurrence_count: u32,
-    
+
     /// 是否启用因果分析
     ///
     /// **默认值**: true
@@ -189,7 +189,7 @@ pub struct HybridConfig {
     /// - 快速原型验证阶段
     /// - 仅需统计趋势分析
     pub enable_causal_analysis: bool,
-    
+
     /// 触发因果分析的最小优先级
     ///
     /// **默认值**: 6
@@ -201,25 +201,25 @@ pub struct HybridConfig {
     ///
     /// **成本效益**: 此阈值过滤掉约 60% 的低优先级候选，节省 API 成本
     pub causal_min_priority: u8,
-    
+
     /// 每周期最大因果分析数（控制成本）
     ///
     /// **默认值**: 5
     ///
-    /// **成本计算**: 
+    /// **成本计算**:
     /// - 5 次分析 × $0.015/次 = $0.075/周期
     /// - 按每日 1 周期计算：$2.25/月
     ///
-    /// **调优建议**: 
+    /// **调优建议**:
     /// - 预算充足时可提高到 10-20
     /// - 预算紧张时降低到 2-3
     pub max_causal_analyses_per_cycle: u32,
-    
+
     /// 统计证据在融合置信度中的权重
     ///
     /// **默认值**: 0.4
     ///
-    /// **设计哲学**: 
+    /// **设计哲学**:
     /// - 统计证据提供基础置信度（40%）
     /// - 因果证据提供深度推理置信度（60%）
     /// - 强调因果推理的重要性，但不完全依赖 LLM
@@ -229,14 +229,14 @@ pub struct HybridConfig {
     /// - 30/70 权重：过于依赖 LLM，稳定性下降
     /// - 40/60 权重：最佳平衡点
     pub statistical_weight: f32,
-    
+
     /// 因果证据在融合置信度中的权重
     ///
     /// **默认值**: 0.6
     ///
     /// **注意**: 应与 `statistical_weight` 之和为 1.0
     pub causal_weight: f32,
-    
+
     /// 每周期 API 预算（美元）
     ///
     /// **默认值**: 0.5
@@ -245,16 +245,16 @@ pub struct HybridConfig {
     /// - 因果分析：$0.075（5 次 × $0.015）
     /// - 预留缓冲：$0.425（用于额外分析或重试）
     ///
-    /// **月成本估算**: 
+    /// **月成本估算**:
     /// - 每日 1 周期：$15/月
     /// - 每周 1 周期：$2/月
     pub api_budget_per_cycle: f32,
-    
+
     /// 单次 API 调用的估计成本（美元）
     ///
     /// **默认值**: 0.015
     ///
-    /// **定价参考**: 
+    /// **定价参考**:
     /// - Ollama Cloud (qwen3.5:397b): ~$0.015/次（2026 年 3 月定价）
     /// - 本地 Ollama: $0（仅电费）
     /// - 其他供应商：根据实际定价调整
@@ -315,7 +315,7 @@ impl HybridGapDetector {
     /// 创建新的混合检测器（不带 LLM 客户端，仅使用统计方法）
     pub fn new_statistical_only(data_dir: PathBuf) -> Result<Self> {
         let statistical_detector = ToolGapDetector::new(data_dir.clone())?;
-        
+
         Ok(Self {
             data_dir,
             statistical_detector,
@@ -334,7 +334,7 @@ impl HybridGapDetector {
         config: HybridConfig,
     ) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
-        
+
         let statistical_detector = ToolGapDetector::new(data_dir.clone())?;
         let causal_detector = PromptGapDetector::with_config(llm_client, {
             crate::autonomy::prompt_gap_detector::PromptGapDetectorConfig::default()
@@ -398,12 +398,12 @@ impl HybridGapDetector {
             .into_iter()
             .filter(|gap| {
                 // 检查出现次数
-                let total_occurrences: u32 = gap.evidence.iter()
-                    .map(|e| e.occurrence_count)
-                    .sum();
+                let total_occurrences: u32 = gap.evidence.iter().map(|e| e.occurrence_count).sum();
 
                 // 检查最高置信度
-                let max_confidence = gap.evidence.iter()
+                let max_confidence = gap
+                    .evidence
+                    .iter()
                     .map(|e| e.confidence)
                     .fold(0.0f32, |a, b| a.max(b));
 
@@ -452,15 +452,15 @@ impl HybridGapDetector {
 
         // 按融合后的置信度排序
         hybrid_gaps.sort_by(|a, b| {
-            b.hybrid_confidence.partial_cmp(&a.hybrid_confidence)
+            b.hybrid_confidence
+                .partial_cmp(&a.hybrid_confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         info!(
             "混合检测完成：输出 {} 个缺口，平均置信度={:.2}",
             hybrid_gaps.len(),
-            hybrid_gaps.iter().map(|g| g.hybrid_confidence).sum::<f32>()
-                / hybrid_gaps.len() as f32
+            hybrid_gaps.iter().map(|g| g.hybrid_confidence).sum::<f32>() / hybrid_gaps.len() as f32
         );
 
         hybrid_gaps
@@ -514,10 +514,7 @@ impl HybridGapDetector {
                 // 构造简化的因果分析请求
                 tasks.push(CausalAnalysisRequest {
                     task_id: task_id.clone(),
-                    task_description: format!(
-                        "与缺口相关的任务：{}",
-                        candidate.description
-                    ),
+                    task_description: format!("与缺口相关的任务：{}", candidate.description),
                     success: false,
                     used_tools: vec![],
                     failure_reason: Some(evidence.description.clone()),
@@ -556,10 +553,7 @@ impl HybridGapDetector {
         };
 
         // 计算融合后的优先级
-        let hybrid_priority = self.calculate_hybrid_priority(
-            candidate.priority,
-            hybrid_confidence,
-        );
+        let hybrid_priority = self.calculate_hybrid_priority(candidate.priority, hybrid_confidence);
 
         HybridToolGap {
             id: candidate.id.clone(),
@@ -579,15 +573,17 @@ impl HybridGapDetector {
     /// 提取统计证据详情（公开用于 benchmark）
     #[doc(hidden)]
     pub fn extract_statistical_evidence(&self, candidate: &ToolGap) -> StatisticalEvidence {
-        let total_occurrences: u32 = candidate.evidence.iter()
-            .map(|e| e.occurrence_count)
-            .sum();
+        let total_occurrences: u32 = candidate.evidence.iter().map(|e| e.occurrence_count).sum();
 
-        let max_confidence = candidate.evidence.iter()
+        let max_confidence = candidate
+            .evidence
+            .iter()
             .map(|e| e.confidence)
             .fold(0.0f32, |a, b| a.max(b));
 
-        let related_task_ids: Vec<String> = candidate.evidence.iter()
+        let related_task_ids: Vec<String> = candidate
+            .evidence
+            .iter()
             .flat_map(|e| e.related_task_ids.clone())
             .collect();
 
@@ -626,9 +622,8 @@ impl HybridGapDetector {
         };
 
         // 计算 LLM 置信度
-        let llm_confidence = causal_factors.iter()
-            .map(|f| f.confidence)
-            .sum::<f32>() / causal_factors.len() as f32;
+        let llm_confidence =
+            causal_factors.iter().map(|f| f.confidence).sum::<f32>() / causal_factors.len() as f32;
 
         CausalEvidence {
             causal_factors,
@@ -638,7 +633,9 @@ impl HybridGapDetector {
                 affected_tasks: identified_gap.expected_impact.affected_tasks,
                 avg_tool_calls_reduced: identified_gap.expected_impact.avg_tool_calls_reduced,
                 time_saved_minutes: identified_gap.expected_impact.time_saved_minutes,
-                expected_success_rate_improvement: identified_gap.expected_impact.expected_success_rate_improvement,
+                expected_success_rate_improvement: identified_gap
+                    .expected_impact
+                    .expected_success_rate_improvement,
             },
         }
     }
@@ -657,17 +654,15 @@ impl HybridGapDetector {
 
         // 因果置信度分量
         let causal_factors_count = causal.causal_factors.len() as f32;
-        let causal_factors_is_causal = causal.causal_factors.iter()
-            .filter(|f| f.is_causal)
-            .count() as f32;
-        
+        let causal_factors_is_causal =
+            causal.causal_factors.iter().filter(|f| f.is_causal).count() as f32;
+
         let causal_conf = (causal.llm_confidence * 0.4)
             + ((causal_factors_is_causal / causal_factors_count.max(1.0)) * 0.3);
         let causal_conf = causal_conf.min(0.7);
 
         // 加权融合
-        (stat_conf * self.config.statistical_weight) 
-            + (causal_conf * self.config.causal_weight)
+        (stat_conf * self.config.statistical_weight) + (causal_conf * self.config.causal_weight)
     }
 
     /// 仅基于统计证据计算置信度（公开用于 benchmark）
@@ -745,12 +740,15 @@ impl HybridGapDetector {
             impact_scope: String::new(),
         });
 
-        self.cache.insert(cache_key, CacheEntry {
-            gap_id: gap_id.to_string(),
-            causal_evidence: evidence,
-            timestamp: now,
-            expires_at,
-        });
+        self.cache.insert(
+            cache_key,
+            CacheEntry {
+                gap_id: gap_id.to_string(),
+                causal_evidence: evidence,
+                timestamp: now,
+                expires_at,
+            },
+        );
     }
 
     /// 清理过期缓存
@@ -772,24 +770,23 @@ impl HybridGapDetector {
     }
 
     /// Record task execution for experiments (simplified interface)
-    pub async fn record_task_execution(
-        &mut self,
-        task_id: &str,
-        success: bool,
-        tool_calls: u32,
-    ) {
+    pub async fn record_task_execution(&mut self, task_id: &str, success: bool, tool_calls: u32) {
         use crate::autonomy::gap_detector::TaskExecutionRecord;
-        
+
         let record = TaskExecutionRecord {
             task_id: task_id.to_string(),
             task_description: format!("Task {}", task_id),
             success,
             used_tools: vec![],
             execution_time_ms: 0,
-            failure_reason: if !success { Some("Task failed".to_string()) } else { None },
+            failure_reason: if !success {
+                Some("Task failed".to_string())
+            } else {
+                None
+            },
             user_satisfaction: if success { Some(4) } else { Some(2) },
         };
-        
+
         self.record_task(record);
     }
 
@@ -799,7 +796,7 @@ impl HybridGapDetector {
         let gaps_detected = self.statistical_detector.get_gaps().len() as u32;
         let tools_created = 0; // Would need to track separately
         let tools_optimized = 0; // Would need to track separately
-        
+
         ExperimentStats {
             gaps_detected,
             tools_created,
@@ -906,7 +903,7 @@ mod tests {
         let detector = HybridGapDetector::new_statistical_only(temp_dir).unwrap();
 
         let stat_evidence = detector.extract_statistical_evidence(&gap);
-        
+
         assert_eq!(stat_evidence.affected_tasks_count, 2);
         assert_eq!(stat_evidence.pattern_frequency, 5);
         assert!(stat_evidence.failure_rate > 0.0);
@@ -950,7 +947,7 @@ mod tests {
         // 测试统计模式的检测器创建
         let temp_dir = std::env::temp_dir().join("hybrid_detector_creation_test");
         let detector = HybridGapDetector::new_statistical_only(temp_dir).unwrap();
-        
+
         let stats = detector.get_stats();
         assert_eq!(stats.cache_size, 0);
         assert_eq!(stats.used_api_budget, 0.0);
@@ -995,19 +992,28 @@ mod tests {
 
         // 验证：应该检测到至少 1 个缺口（批量读取配置文件工具缺失）
         assert!(!gaps.is_empty(), "应该检测到至少 1 个工具缺口");
-        
+
         // 验证缺口类型
         let gap = &gaps[0];
         assert_eq!(gap.gap_type, GapType::MissingTool);
-        
+
         // 验证统计证据
-        assert!(gap.statistical_evidence.failure_rate > 0.5, "失败率应该大于 0.5");
-        assert!(gap.statistical_evidence.affected_tasks_count >= 5, "应该影响至少 5 个任务");
-        assert!(gap.statistical_evidence.pattern_frequency >= 5, "模式频率应该至少 5");
-        
+        assert!(
+            gap.statistical_evidence.failure_rate > 0.5,
+            "失败率应该大于 0.5"
+        );
+        assert!(
+            gap.statistical_evidence.affected_tasks_count >= 5,
+            "应该影响至少 5 个任务"
+        );
+        assert!(
+            gap.statistical_evidence.pattern_frequency >= 5,
+            "模式频率应该至少 5"
+        );
+
         // 验证优先级（失败任务多，优先级应该较高）
         assert!(gap.priority >= 6, "优先级应该>=6");
-        
+
         // 验证融合置信度
         assert!(gap.hybrid_confidence > 0.3, "融合置信度应该>0.3");
         assert!(gap.hybrid_confidence < 1.0, "融合置信度应该<1.0");
@@ -1051,10 +1057,10 @@ mod tests {
         assert!(!gaps.is_empty(), "应该检测到至少 1 个工具缺口");
 
         // 验证：Git 工具缺口应该被检测到（出现次数更多）
-        let git_gap_found = gaps.iter().any(|g| 
-            g.description.contains("Git") || 
-            g.suggested_capabilities.iter().any(|c| c.contains("Git"))
-        );
+        let git_gap_found = gaps.iter().any(|g| {
+            g.description.contains("Git")
+                || g.suggested_capabilities.iter().any(|c| c.contains("Git"))
+        });
         // 注意：由于我们使用简化的 failure_reason 聚类，这里只验证检测到缺口
         assert!(!gaps.is_empty());
 
@@ -1142,22 +1148,25 @@ mod tests {
 
         // 手动添加一个缓存条目（设置过期时间为过去）
         let now = get_current_timestamp();
-        detector.cache.insert("test_key".to_string(), CacheEntry {
-            gap_id: "test_gap".to_string(),
-            causal_evidence: CausalEvidence {
-                causal_factors: vec![],
-                counterfactual_reasoning: String::new(),
-                llm_confidence: 0.8,
-                expected_impact: GapImpact {
-                    affected_tasks: 0,
-                    avg_tool_calls_reduced: 0.0,
-                    time_saved_minutes: 0.0,
-                    expected_success_rate_improvement: 0.0,
+        detector.cache.insert(
+            "test_key".to_string(),
+            CacheEntry {
+                gap_id: "test_gap".to_string(),
+                causal_evidence: CausalEvidence {
+                    causal_factors: vec![],
+                    counterfactual_reasoning: String::new(),
+                    llm_confidence: 0.8,
+                    expected_impact: GapImpact {
+                        affected_tasks: 0,
+                        avg_tool_calls_reduced: 0.0,
+                        time_saved_minutes: 0.0,
+                        expected_success_rate_improvement: 0.0,
+                    },
                 },
+                timestamp: now - 100000,
+                expires_at: now - 3600,
             },
-            timestamp: now - 100000,
-            expires_at: now - 3600,
-        });
+        );
 
         detector.expire_cache();
         assert_eq!(detector.cache.len(), 0);
@@ -1252,7 +1261,10 @@ mod tests {
         };
         let conf_total = detector.calculate_statistical_confidence(&total_failure);
         // 100% 失败率 + 多影响任务应该产生接近最大值 0.7 的置信度
-        assert!(conf_total > 0.6, "100% 失败率应该产生高置信度（接近 0.7 上限）");
+        assert!(
+            conf_total > 0.6,
+            "100% 失败率应该产生高置信度（接近 0.7 上限）"
+        );
         assert!(conf_total <= 0.7, "置信度不应超过实现上限 0.7");
     }
 
@@ -1269,17 +1281,19 @@ mod tests {
 
         // 不同权重配置下的融合置信度
         let stat_conf: f32 = 0.6;
-        
+
         // 配置 1: 因果权重高 (0.8)
         let causal_weight_high: f32 = 0.8;
         let causal_conf_strong: f32 = 0.9;
-        let hybrid_high = stat_conf * (1.0 - causal_weight_high) + causal_conf_strong * causal_weight_high;
+        let hybrid_high =
+            stat_conf * (1.0 - causal_weight_high) + causal_conf_strong * causal_weight_high;
         assert!((hybrid_high - 0.84f32).abs() < 0.01f32);
 
         // 配置 2: 因果权重低 (0.3)
         let causal_weight_low: f32 = 0.3;
         let causal_conf_weak: f32 = 0.4;
-        let hybrid_low = stat_conf * (1.0 - causal_weight_low) + causal_conf_weak * causal_weight_low;
+        let hybrid_low =
+            stat_conf * (1.0 - causal_weight_low) + causal_conf_weak * causal_weight_low;
         assert!((hybrid_low - 0.54f32).abs() < 0.01f32);
 
         // 验证权重变化对结果的影响
@@ -1315,9 +1329,9 @@ mod tests {
     fn test_api_budget_config() {
         let temp_dir = std::env::temp_dir().join("hybrid_budget_test");
         let mut detector = HybridGapDetector::new_statistical_only(temp_dir).unwrap();
-        
+
         // 设置严格的 API 预算
-        detector.config.api_budget_per_cycle = 0.0;  // 零预算
+        detector.config.api_budget_per_cycle = 0.0; // 零预算
         detector.config.estimated_cost_per_call = 0.015;
 
         // 验证配置被正确设置
@@ -1341,22 +1355,25 @@ mod tests {
 
         // 添加缓存条目
         let now = get_current_timestamp();
-        detector.cache.insert("key1".to_string(), CacheEntry {
-            gap_id: "gap1".to_string(),
-            causal_evidence: CausalEvidence {
-                causal_factors: vec![],
-                counterfactual_reasoning: String::new(),
-                llm_confidence: 0.8,
-                expected_impact: GapImpact {
-                    affected_tasks: 0,
-                    avg_tool_calls_reduced: 0.0,
-                    time_saved_minutes: 0.0,
-                    expected_success_rate_improvement: 0.0,
+        detector.cache.insert(
+            "key1".to_string(),
+            CacheEntry {
+                gap_id: "gap1".to_string(),
+                causal_evidence: CausalEvidence {
+                    causal_factors: vec![],
+                    counterfactual_reasoning: String::new(),
+                    llm_confidence: 0.8,
+                    expected_impact: GapImpact {
+                        affected_tasks: 0,
+                        avg_tool_calls_reduced: 0.0,
+                        time_saved_minutes: 0.0,
+                        expected_success_rate_improvement: 0.0,
+                    },
                 },
+                timestamp: now,
+                expires_at: now + 3600,
             },
-            timestamp: now,
-            expires_at: now + 3600,
-        });
+        );
 
         let stats = detector.get_stats();
         assert_eq!(stats.cache_size, 1);
@@ -1528,7 +1545,10 @@ mod tests {
             hybrid_confidence: 0.5,
         };
 
-        assert_eq!(insufficient_cap_gap.gap_type, GapType::InsufficientCapability);
+        assert_eq!(
+            insufficient_cap_gap.gap_type,
+            GapType::InsufficientCapability
+        );
         assert!(insufficient_cap_gap.statistical_evidence.failure_rate > 0.3);
         assert!(insufficient_cap_gap.statistical_evidence.failure_rate < 0.6);
     }
@@ -1541,12 +1561,14 @@ mod tests {
         config.estimated_cost_per_call = 0.015; // 每次调用$0.015
 
         // 计算最大允许调用次数
-        let max_calls = (config.api_budget_per_cycle / config.estimated_cost_per_call).floor() as u32;
+        let max_calls =
+            (config.api_budget_per_cycle / config.estimated_cost_per_call).floor() as u32;
         assert_eq!(max_calls, 6); // $0.1 / $0.015 ≈ 6.67，向下取整为 6
 
         // 验证 max_causal_analyses_per_cycle 不超过预算限制
         config.max_causal_analyses_per_cycle = 10;
-        let actual_max = (config.api_budget_per_cycle / config.estimated_cost_per_call).floor() as u32;
+        let actual_max =
+            (config.api_budget_per_cycle / config.estimated_cost_per_call).floor() as u32;
         assert!(actual_max <= 6);
     }
 
@@ -1606,7 +1628,10 @@ mod tests {
         // 反序列化
         let deserialized: StatisticalEvidence = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.failure_rate, evidence.failure_rate);
-        assert_eq!(deserialized.affected_tasks_count, evidence.affected_tasks_count);
+        assert_eq!(
+            deserialized.affected_tasks_count,
+            evidence.affected_tasks_count
+        );
         assert_eq!(deserialized.related_task_ids, evidence.related_task_ids);
     }
 
@@ -1614,15 +1639,13 @@ mod tests {
     #[test]
     fn test_causal_evidence_serialization() {
         let causal = CausalEvidence {
-            causal_factors: vec![
-                CausalFactor {
-                    factor: "缺少批量操作能力".to_string(),
-                    is_causal: true,
-                    evidence: "80% 失败任务都缺少批量操作".to_string(),
-                    confidence: 0.85,
-                    reasoning: "用户需要手动循环调用".to_string(),
-                },
-            ],
+            causal_factors: vec![CausalFactor {
+                factor: "缺少批量操作能力".to_string(),
+                is_causal: true,
+                evidence: "80% 失败任务都缺少批量操作".to_string(),
+                confidence: 0.85,
+                reasoning: "用户需要手动循环调用".to_string(),
+            }],
             counterfactual_reasoning: "如果有批量下载工具，任务成功率会提升 70%".to_string(),
             llm_confidence: 0.8,
             expected_impact: GapImpact {
@@ -1699,14 +1722,17 @@ mod tests {
 
         assert!(high_priority.priority > low_priority.priority);
         assert!(high_priority.hybrid_confidence > low_priority.hybrid_confidence);
-        assert!(high_priority.statistical_evidence.affected_tasks_count > low_priority.statistical_evidence.affected_tasks_count);
+        assert!(
+            high_priority.statistical_evidence.affected_tasks_count
+                > low_priority.statistical_evidence.affected_tasks_count
+        );
     }
 
     /// 测试混合配置自定义权重
     #[test]
     fn test_hybrid_config_custom_weights() {
         let mut config = HybridConfig::default();
-        
+
         // 默认权重
         assert_eq!(config.statistical_weight, 0.4);
         assert_eq!(config.causal_weight, 0.6);
@@ -1730,7 +1756,7 @@ mod tests {
             pattern_frequency: 0,
             related_task_ids: vec![],
         };
-        
+
         assert_eq!(evidence.failure_rate, 0.0);
         assert_eq!(evidence.affected_tasks_count, 0);
         assert_eq!(evidence.avg_satisfaction, 5.0);

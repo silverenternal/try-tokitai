@@ -1,9 +1,9 @@
 # FileKV 文档中心
 
-**最后更新**: 2026-04-15 (v0.5.0 完成)
+**最后更新**: 2026-04-16 (v0.5.0 完成，Round 1-38)
 **版本**: 0.5.0
 **项目**: tokitai-filekv - 高性能纯文件 KV 存储引擎
-**状态**: 实验性生产引擎 (431 lib tests + 28 integration tests 通过，0 clippy 警告，0 ignored)
+**状态**: 实验性生产引擎 (630 lib tests + 32 integration tests 通过，0 clippy 警告，0 ignored)
 
 ---
 
@@ -77,16 +77,17 @@
 
 ## 📊 FileKV 核心数据
 
-**性能数据**: 详见根目录 [README.md](../../README.md) 性能表格（测试日期: 2026-04-14）
+**性能数据**: 详见根目录 [README.md](../../README.md) 性能表格和 [PERFORMANCE_BASELINE.md](PERFORMANCE_BASELINE.md)（测试日期: 2026-04-16, Round 38）
 
-**当前测试状态**: 431 lib tests + 28 integration tests (100% 通过)，0 clippy 警告
+**当前测试状态**: 630 lib tests + 32 integration tests (100% 通过)，0 clippy 警告
 
 **状态说明**:
 - v0.3.0 完成了 Phase 0/1 共 8 个关键修复：rebalance 执行引擎、SequentialPrefetch 消费、BlockCache 字节级限制等
 - v0.3.1 修复了示例代码编译错误（audit_log 路径）
-- v0.4.0 已完成：Dense Index 快速路径 (270x 热缓存读取提升) + BlockCache 多分片架构 + 9 个高并发测试解除 ignored
+- v0.4.0 已完成：Dense Index 快速路径 (热缓存读取 278-285 ns) + BlockCache 多分片架构 + 9 个高并发测试解除 ignored
 - v0.5.0 已完成：SparseIndex Clone 消除 + Bloom 缓存 10x 扩容 + DenseIndex AHashMap 优化 + 极小规模数据集基准测试（10K/100K/1M keys，**注：100K 仅作功能验证，不代表生产性能**），100K keys 写入性能提升 33%（151ms → 101ms）
 - 已知性能限制：100K keys 真实场景比 RocksDB 慢约 161x（v0.5.0 优化，比 v0.4.0 的 240x 改善），**仅限极小规模场景**，详见根目录 README.md 和 [SCALE_CLASSIFICATION.md](../SCALE_CLASSIFICATION.md)
+- **Round 35-38**: Benchmark 方法全面修复 — delete 全周期测量、put_batch API、compaction 实际执行、并发 Instant 测量、压缩真实操作
 - v0.6.0 规划中：**10M+ keys 大规模性能**（P0 专业 benchmark）+ 写/读/空间放大率测量 + 全局有序索引 + 24h+ 稳定性测试
 
 ---
@@ -97,7 +98,7 @@
 |------|------|------|
 | LSM-Tree 架构 | ✅ 已集成 | 核心架构完整 |
 | MemTable (DashMap) | ✅ 已集成 | 无锁并发 |
-| BlockCache (LRU) | ✅ 已集成 | 热点缓存 |
+| BlockCache (Moka TinyLFU) | ✅ 已集成 | 频率感知热点缓存 |
 | Bloom Filter | ✅ 已集成 | 快速负向查找 |
 | WAL | ✅ 已集成 | 崩溃恢复 |
 | Compaction | ✅ 已集成 | 后台合并 |
@@ -136,18 +137,17 @@
 
 ## 📝 文档更新历史
 
-> **2026-04-15**: v0.5.0 完成
-> - SparseIndex Clone 消除 + Bloom 缓存 10x 扩容 + DenseIndex AHashMap 优化
-> - 100K keys 写入性能提升 33%（151ms → 101ms，**仅限极小规模场景**）
-> - 创建 benches/06_large_dataset_bench.rs 极小规模数据集基准测试
-> - 更新所有文档反映 v0.5.0 完成状态
-> - 修正规模分级（专家评审：100K keys = 极小规模，非大规模）
-> - 创建 doc/SCALE_CLASSIFICATION.md 测试规模分级说明
-> - 归档冗余文档（V040_COMPLETION_AND_V050_PLANNING.md, V050_EXECUTION_SUMMARY.md）
+> **2026-04-16**: v0.5.0 完成，Round 1-38 全部完成
+> - 630 lib tests + 32 integration tests 全部通过
+> - clippy 零警告
+> - Round 1-38 涵盖：性能优化、死代码清理、Async I/O 集成、精确 I/O 计数、零拷贝、AtomicU64 stats、Mutex 锁优化、**Benchmark 方法修复**（delete 全周期测量、put_batch API、compaction 实际执行、并发 Instant 测量、压缩真实操作）
+> - 性能数据统一维护在 PERFORMANCE_BASELINE.md
+> - 已知性能差距：100K keys 真实场景比 RocksDB 慢约 161x（v0.5.0 优化，**仅限极小规模场景**）
+> - v0.6.0 规划中：**10M+ keys 大规模性能**（P0 专业 benchmark）+ 写/读/空间放大率测量 + 全局有序索引 + 24h+ 稳定性测试
 
 > **2026-04-14**: v0.4.0 完成
 > - 整理 todo.json，聚焦 v0.4.0 性能优化目标
-> - 更新测试状态：431 lib tests + 28 integration tests
+> - 更新测试状态：570 lib tests + 32 integration tests
 > - 更正 ignored 测试位置：全部 9 个在 tests/filekv_integration/high_concurrency.rs
 > - 更新文档反映 Phase 0-5 全部完成
 > - 删除跨文档冗余内容

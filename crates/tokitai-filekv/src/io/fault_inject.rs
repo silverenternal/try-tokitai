@@ -8,8 +8,8 @@
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -151,11 +151,13 @@ impl FaultInjector {
                 FaultStrategy::FailRandom(probability) => {
                     // Simple LCG for determinism
                     let prev = self.rng_seed.fetch_add(1, Ordering::Relaxed);
-                    let rand_val = ((prev * 6364136223846793005u64.wrapping_add(1442695040888963407u64)) >> 33) as f64 / (u32::MAX as f64);
+                    let rand_val = ((prev * 6364136223846793005u64.wrapping_add(1442695040888963407u64)) >> 33) as f64
+                        / (u32::MAX as f64);
                     if rand_val < *probability {
-                        return Some(std::io::Error::other(
-                            format!("FaultInjector: random failure (probability={})", probability),
-                        ));
+                        return Some(std::io::Error::other(format!(
+                            "FaultInjector: random failure (probability={})",
+                            probability
+                        )));
                     }
                 }
                 FaultStrategy::AlwaysFail(kind, msg) => {
@@ -282,8 +284,12 @@ impl FileKVFileSystem for FaultInjector {
 impl MmapFileSystem for FaultInjector {
     fn mmap(&self, file: &dyn FileKVFile) -> IoResult<Arc<dyn MmapView>> {
         self.maybe_fault("mmap")?;
-        let mmap_inner = self.mmap_inner.as_ref()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Unsupported, "mmap not supported by inner filesystem"))?;
+        let mmap_inner = self.mmap_inner.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "mmap not supported by inner filesystem",
+            )
+        })?;
         let fault_file = file
             .as_any()
             .downcast_ref::<FaultInjectFile>()
@@ -329,11 +335,11 @@ impl FaultInjectFile {
                 }
                 FaultStrategy::FailRandom(probability) => {
                     let prev = self.rng_seed.fetch_add(1, Ordering::Relaxed);
-                    let rand_val = ((prev.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) >> 33) as f64 / (u32::MAX as f64);
+                    let rand_val = ((prev.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) >> 33)
+                        as f64
+                        / (u32::MAX as f64);
                     if rand_val < *probability {
-                        return Err(std::io::Error::other(
-                            "FaultInjector: random failure".to_string(),
-                        ));
+                        return Err(std::io::Error::other("FaultInjector: random failure".to_string()));
                     }
                 }
                 FaultStrategy::AlwaysFail(kind, msg) => {
@@ -348,7 +354,10 @@ impl FaultInjectFile {
                     }
                     if let FaultStrategy::FailAfterN(n) = fault.as_ref() {
                         if count >= *n {
-                            return Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "FaultInjector: combined fault"));
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::StorageFull,
+                                "FaultInjector: combined fault",
+                            ));
                         }
                     }
                 }
@@ -363,7 +372,7 @@ impl FaultInjectFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{MemFs, FileKVFileSystem};
+    use crate::io::{FileKVFileSystem, MemFs};
 
     #[test]
     fn test_fail_after_n_calls() {
@@ -373,12 +382,12 @@ mod tests {
 
         // First 3 calls should succeed
         for i in 0..3 {
-            let result = injector.create_file(&std::path::Path::new(&format!("/file_{}.txt", i)));
+            let result = injector.create_file(std::path::Path::new(&format!("/file_{}.txt", i)));
             assert!(result.is_ok(), "Call {} should succeed", i);
         }
 
         // 4th call should fail
-        let result = injector.create_file(&std::path::Path::new("/file_3.txt"));
+        let result = injector.create_file(std::path::Path::new("/file_3.txt"));
         assert!(result.is_err(), "4th call should fail (disk full)");
     }
 
@@ -389,14 +398,14 @@ mod tests {
         injector.set_disk_full_after(1);
 
         // First call succeeds
-        assert!(injector.create_file(&std::path::Path::new("/a.txt")).is_ok());
+        assert!(injector.create_file(std::path::Path::new("/a.txt")).is_ok());
         // Second fails
-        assert!(injector.create_file(&std::path::Path::new("/b.txt")).is_err());
+        assert!(injector.create_file(std::path::Path::new("/b.txt")).is_err());
 
         // Clear rules - now all succeed
         injector.clear_rules();
         for i in 0..10 {
-            let result = injector.create_file(&std::path::Path::new(&format!("/clear_{}.txt", i)));
+            let result = injector.create_file(std::path::Path::new(&format!("/clear_{}.txt", i)));
             assert!(result.is_ok());
         }
     }
@@ -408,16 +417,13 @@ mod tests {
 
         // Only fail on write operations
         injector.add_rule(FaultRule::new_for_ops(
-            FaultStrategy::AlwaysFail(
-                std::io::ErrorKind::Other,
-                "write fault".to_string(),
-            ),
+            FaultStrategy::AlwaysFail(std::io::ErrorKind::Other, "write fault".to_string()),
             &["file.write"],
         ));
 
         // read_dir should succeed
-        memfs.create_dir_all(&std::path::Path::new("/test")).unwrap();
-        assert!(injector.read_dir(&std::path::Path::new("/test")).is_ok());
+        memfs.create_dir_all(std::path::Path::new("/test")).unwrap();
+        assert!(injector.read_dir(std::path::Path::new("/test")).is_ok());
     }
 
     // ==================== IO-003: Compound Fault Rules Tests ====================
@@ -439,11 +445,14 @@ mod tests {
         injector.add_rule(FaultRule::new_all(FaultStrategy::FailAfterN(0)));
 
         // First matching rule should win (AlwaysFail -> PermissionDenied)
-        let result = injector.create_file(&std::path::Path::new("/test.txt"));
+        let result = injector.create_file(std::path::Path::new("/test.txt"));
         assert!(result.is_err(), "Should fail due to first matching rule");
         if let Err(err) = result {
-            assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied,
-                "Should use first matching rule's error");
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::PermissionDenied,
+                "Should use first matching rule's error"
+            );
         }
     }
 
@@ -462,11 +471,14 @@ mod tests {
         )));
 
         // Delay rule runs first (no error), then AlwaysFail triggers
-        let result = injector.create_file(&std::path::Path::new("/priority.txt"));
+        let result = injector.create_file(std::path::Path::new("/priority.txt"));
         assert!(result.is_err(), "Should fail due to second rule");
         if let Err(err) = result {
-            assert_eq!(err.kind(), std::io::ErrorKind::Interrupted,
-                "Second rule should trigger after first (delay) doesn't fail");
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::Interrupted,
+                "Second rule should trigger after first (delay) doesn't fail"
+            );
         }
     }
 
@@ -490,11 +502,14 @@ mod tests {
             "active rule error".to_string(),
         )));
 
-        let result = injector.create_file(&std::path::Path::new("/inactive_test.txt"));
+        let result = injector.create_file(std::path::Path::new("/inactive_test.txt"));
         assert!(result.is_err());
         if let Err(err) = result {
-            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut,
-                "Inactive rule should be skipped, active rule should trigger");
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::TimedOut,
+                "Inactive rule should be skipped, active rule should trigger"
+            );
         }
     }
 
@@ -513,12 +528,12 @@ mod tests {
 
         // First 2 calls should succeed (with delay)
         for i in 0..2 {
-            let result = injector.create_file(&std::path::Path::new(&format!("/combined_{}.txt", i)));
+            let result = injector.create_file(std::path::Path::new(&format!("/combined_{}.txt", i)));
             assert!(result.is_ok(), "Call {} should succeed (with delay)", i);
         }
 
         // 3rd call should fail
-        let result = injector.create_file(&std::path::Path::new("/combined_fail.txt"));
+        let result = injector.create_file(std::path::Path::new("/combined_fail.txt"));
         assert!(result.is_err(), "3rd call should fail (FailAfterN triggered)");
     }
 
@@ -530,22 +545,22 @@ mod tests {
 
         // Only fail on file.write operations
         injector.add_rule(FaultRule::new_for_ops(
-            FaultStrategy::AlwaysFail(
-                std::io::ErrorKind::StorageFull,
-                "write fault".to_string(),
-            ),
+            FaultStrategy::AlwaysFail(std::io::ErrorKind::StorageFull, "write fault".to_string()),
             &["file.write"],
         ));
 
         // create_dir_all should succeed
         let dir_path = std::path::Path::new("/test_dir");
-        assert!(injector.create_dir_all(dir_path).is_ok(), "create_dir_all should succeed");
+        assert!(
+            injector.create_dir_all(dir_path).is_ok(),
+            "create_dir_all should succeed"
+        );
 
         // read_dir should succeed
         assert!(injector.read_dir(dir_path).is_ok(), "read_dir should succeed");
 
         // create_file should succeed (rule only targets write, not create)
-        let file = injector.create_file(&std::path::Path::new("/test_dir/file.txt"));
+        let file = injector.create_file(std::path::Path::new("/test_dir/file.txt"));
         assert!(file.is_ok(), "create_file should succeed");
 
         // But writing to the file should fail

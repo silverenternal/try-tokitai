@@ -15,17 +15,17 @@
 //! - AI 自主维护依赖关系（非手动声明）
 //! - tokitai 深度集成
 
-use crate::tool_matrix::matrix::{ToolDefinition, ServiceCategory};
 use crate::tool_matrix::ai_classifier::LLMClient as AILLMClient;
+use crate::tool_matrix::matrix::{ServiceCategory, ToolDefinition};
 use crate::tool_matrix::trie_index::TrieIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // 工具索引（倒排索引 + Trie 树优化）
@@ -78,7 +78,8 @@ impl ToolIndex {
             .insert(tool_name.clone());
 
         // 添加到 Trie 索引（用于前缀搜索）
-        self.trie_index.add_tool(&tool_name, self.tools.len() as u64);
+        self.trie_index
+            .add_tool(&tool_name, self.tools.len() as u64);
 
         // 存储工具定义
         self.tools.insert(tool_name.clone(), tool);
@@ -142,12 +143,12 @@ impl ToolIndex {
                 if seen.insert(name.clone())
                     && (tool.name.to_lowercase().contains(&query_lower)
                         || tool.description.to_lowercase().contains(&query_lower))
-                    {
-                        results.push(tool.clone());
-                        if results.len() >= max_results {
-                            return results;
-                        }
+                {
+                    results.push(tool.clone());
+                    if results.len() >= max_results {
+                        return results;
                     }
+                }
                 // 限制兜底搜索的工具数量
                 if seen.len() > 1000 && results.len() >= remaining {
                     break;
@@ -282,10 +283,18 @@ pub struct SelectorConfig {
     pub rebuild_delay_secs: u64,
 }
 
-fn default_max_results() -> usize { 20 }
-fn default_ai_search_threshold() -> usize { 20 }
-fn default_true() -> bool { true }
-fn default_rebuild_delay() -> u64 { 2 }
+fn default_max_results() -> usize {
+    20
+}
+fn default_ai_search_threshold() -> usize {
+    20
+}
+fn default_true() -> bool {
+    true
+}
+fn default_rebuild_delay() -> u64 {
+    2
+}
 
 impl Default for SelectorConfig {
     fn default() -> Self {
@@ -374,7 +383,11 @@ impl SelectorMetrics {
 
 impl LightweightToolSelector {
     /// 创建新的选择器
-    pub fn new(tools: Vec<ToolDefinition>, config: Option<SelectorConfig>, llm_client: Option<Arc<dyn AILLMClient>>) -> Self {
+    pub fn new(
+        tools: Vec<ToolDefinition>,
+        config: Option<SelectorConfig>,
+        llm_client: Option<Arc<dyn AILLMClient>>,
+    ) -> Self {
         let config = config.unwrap_or_default();
         let mut index = ToolIndex::new();
 
@@ -476,7 +489,11 @@ impl LightweightToolSelector {
             *current_index.write().await = new_index;
 
             let elapsed = rebuild_start.elapsed();
-            info!("工具索引重建完成：新增 {} 个工具，耗时 {:?}", tools_to_add.len(), elapsed);
+            info!(
+                "工具索引重建完成：新增 {} 个工具，耗时 {:?}",
+                tools_to_add.len(),
+                elapsed
+            );
 
             // 记录重建指标
             {
@@ -550,12 +567,16 @@ impl LightweightToolSelector {
     }
 
     /// AI 搜索（复杂查询）
-    async fn ai_search(&self, query: &str, llm_client: &Arc<dyn AILLMClient>) -> Vec<ToolSearchResult> {
+    async fn ai_search(
+        &self,
+        query: &str,
+        llm_client: &Arc<dyn AILLMClient>,
+    ) -> Vec<ToolSearchResult> {
         let start_time = std::time::Instant::now();
-        
+
         // 1. 快速搜索获取候选（Top-50）
         let candidates = self.fast_search(query).await;
-        
+
         if candidates.is_empty() {
             warn!("AI 搜索：快速搜索未找到任何候选工具");
             return Vec::new();
@@ -578,7 +599,8 @@ impl LightweightToolSelector {
     ]
 }}"#,
             query,
-            candidates.iter()
+            candidates
+                .iter()
                 .map(|t| format!("- **{}**: {}", t.tool.name, t.tool.description))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -595,15 +617,23 @@ impl LightweightToolSelector {
 
         // 4. 解析 AI 响应
         let ai_result = self.parse_ai_search_response(&response, &candidates);
-        
+
         let elapsed = start_time.elapsed();
-        info!("AI 搜索完成：耗时 {:?}，返回 {} 个工具", elapsed, ai_result.len());
+        info!(
+            "AI 搜索完成：耗时 {:?}，返回 {} 个工具",
+            elapsed,
+            ai_result.len()
+        );
 
         ai_result
     }
 
     /// 解析 AI 搜索响应
-    fn parse_ai_search_response(&self, response: &str, candidates: &[ToolSearchResult]) -> Vec<ToolSearchResult> {
+    fn parse_ai_search_response(
+        &self,
+        response: &str,
+        candidates: &[ToolSearchResult],
+    ) -> Vec<ToolSearchResult> {
         // 尝试解析 JSON
         let json_value: Value = match serde_json::from_str(response) {
             Ok(v) => v,
@@ -616,7 +646,8 @@ impl LightweightToolSelector {
         // 提取 selected_tools
         let selected_tools = json_value
             .get("selected_tools")
-            .and_then(|v| v.as_array()).cloned()
+            .and_then(|v| v.as_array())
+            .cloned()
             .unwrap_or_default();
 
         // 构建结果
@@ -737,8 +768,13 @@ impl LightweightToolSelector {
         }
 
         // 规则 3: 多个动词
-        let action_words = ["创建", "读取", "写入", "删除", "修改", "分析", "搜索", "下载", "上传"];
-        let action_count = action_words.iter().filter(|w| query_lower.contains(*w)).count();
+        let action_words = [
+            "创建", "读取", "写入", "删除", "修改", "分析", "搜索", "下载", "上传",
+        ];
+        let action_count = action_words
+            .iter()
+            .filter(|w| query_lower.contains(*w))
+            .count();
         if action_count >= 2 {
             return true;
         }
@@ -756,7 +792,11 @@ impl LightweightToolSelector {
     /// 按分类获取工具
     pub async fn get_tools_by_category(&self, category: &ServiceCategory) -> Vec<ToolDefinition> {
         let index = self.current_index.read().await;
-        index.get_by_category(category).into_iter().cloned().collect()
+        index
+            .get_by_category(category)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 }
 

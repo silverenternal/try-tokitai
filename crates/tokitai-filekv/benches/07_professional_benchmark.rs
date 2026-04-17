@@ -26,19 +26,15 @@
 
 mod common;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 
-use common::{
-    flush_kv, warm_cache,
-    quick_bench_config,
-    bench_key, bench_value,
-};
+use common::{bench_key, bench_value, flush_kv, quick_bench_config, warm_cache};
 
 // ============================================================================
 // Constants
@@ -169,12 +165,26 @@ fn print_write_results(
     println!("\n{}", "=".repeat(80));
     println!("WRITE PERFORMANCE: {}", label);
     println!("{}", "-".repeat(80));
-    println!("  Keys written:          {:>12} ({})", num_keys, format_duration(elapsed));
-    println!("  Throughput:            {:>12.0} ops/sec ({:.2} MB/s)",
+    println!(
+        "  Keys written:          {:>12} ({})",
+        num_keys,
+        format_duration(elapsed)
+    );
+    println!(
+        "  Throughput:            {:>12.0} ops/sec ({:.2} MB/s)",
         qps,
-        (logical_bytes as f64 / elapsed.as_secs_f64()) / (1024.0 * 1024.0));
-    println!("  Logical data size:     {:>12} bytes ({:.2} MB)", logical_bytes, logical_bytes as f64 / (1024.0 * 1024.0));
-    println!("  Actual disk size:      {:>12} bytes ({:.2} MB)", disk_size, disk_size as f64 / (1024.0 * 1024.0));
+        (logical_bytes as f64 / elapsed.as_secs_f64()) / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Logical data size:     {:>12} bytes ({:.2} MB)",
+        logical_bytes,
+        logical_bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Actual disk size:      {:>12} bytes ({:.2} MB)",
+        disk_size,
+        disk_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  User bytes written:    {:>12} bytes", stats.user_bytes_written);
     println!("  Total bytes written:   {:>12} bytes", stats.total_bytes_written_all);
     println!();
@@ -194,18 +204,26 @@ fn print_read_results(
     sorted.sort();
 
     let qps = num_reads as f64 / elapsed.as_secs_f64();
+    let p50 = percentile(&sorted, 50.0);
     let p99 = percentile(&sorted, 99.0);
     let p999 = percentile(&sorted, 99.9);
+    let p9999 = percentile(&sorted, 99.99);
     let avg = elapsed / num_reads as u32;
 
     println!("\n{}", "=".repeat(80));
     println!("READ PERFORMANCE: {}", label);
     println!("{}", "-".repeat(80));
-    println!("  Reads completed:       {:>12} ({})", num_reads, format_duration(elapsed));
+    println!(
+        "  Reads completed:       {:>12} ({})",
+        num_reads,
+        format_duration(elapsed)
+    );
     println!("  Throughput:            {:>12.0} ops/sec", qps);
     println!("  Avg latency:           {:>12.2} us", avg.as_micros() as f64);
+    println!("  p50 latency:           {:>12.2} us", p50.as_micros() as f64);
     println!("  p99 latency:           {:>12.2} us", p99.as_micros() as f64);
     println!("  p999 latency:          {:>12.2} us", p999.as_micros() as f64);
+    println!("  p9999 latency:         {:>12.2} us", p9999.as_micros() as f64);
     println!();
     println!("  Read Amplification:    {:>12.2}x", stats.read_amplification_factor);
     println!("  Total bytes read:      {:>12} bytes", stats.total_bytes_read);
@@ -214,15 +232,13 @@ fn print_read_results(
 }
 
 /// Generate JSON result for programmatic analysis
-fn to_json_result(
-    test_name: &str,
-    metrics: &serde_json::Map<String, serde_json::Value>,
-) -> serde_json::Value {
+fn to_json_result(test_name: &str, metrics: &serde_json::Map<String, serde_json::Value>) -> serde_json::Value {
     let mut result = serde_json::Map::new();
     result.insert("test".to_string(), serde_json::Value::String(test_name.to_string()));
-    result.insert("timestamp".to_string(), serde_json::Value::String(
-        chrono::Utc::now().to_rfc3339()
-    ));
+    result.insert(
+        "timestamp".to_string(),
+        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+    );
     for (k, v) in metrics {
         result.insert(k.clone(), v.clone());
     }
@@ -265,28 +281,44 @@ fn bench_write_performance(c: &mut Criterion) {
             let disk_size = dirs_size(&[
                 config.segment_dir.as_path(),
                 config.index_dir.as_path(),
-                if config.enable_wal { config.wal_dir.as_path() } else { temp_dir.path() },
+                if config.enable_wal {
+                    config.wal_dir.as_path()
+                } else {
+                    temp_dir.path()
+                },
             ]);
 
-            print_write_results(
-                "10M Sequential Writes",
-                NUM_KEYS_10M,
-                write_elapsed,
-                disk_size,
-                &stats,
-            );
+            print_write_results("10M Sequential Writes", NUM_KEYS_10M, write_elapsed, disk_size, &stats);
 
             // Output JSON for analysis
             let mut metrics = serde_json::Map::new();
             metrics.insert("num_keys".to_string(), serde_json::Value::Number(NUM_KEYS_10M.into()));
-            metrics.insert("elapsed_ms".to_string(), serde_json::Value::Number((write_elapsed.as_millis() as u64).into()));
-            metrics.insert("qps".to_string(), serde_json::json!(NUM_KEYS_10M as f64 / write_elapsed.as_secs_f64()));
-            metrics.insert("write_amplification".to_string(), serde_json::json!(stats.write_amplification_factor));
-            metrics.insert("space_amplification".to_string(), serde_json::json!(stats.space_amplification_factor));
-            metrics.insert("disk_size_bytes".to_string(), serde_json::Value::Number(disk_size.into()));
-            metrics.insert("logical_size_bytes".to_string(), serde_json::Value::Number(
-                (NUM_KEYS_10M as u64 * (bench_key(0).len() as u64 + VALUE_SIZE as u64)).into()
-            ));
+            metrics.insert(
+                "elapsed_ms".to_string(),
+                serde_json::Value::Number((write_elapsed.as_millis() as u64).into()),
+            );
+            metrics.insert(
+                "qps".to_string(),
+                serde_json::json!(NUM_KEYS_10M as f64 / write_elapsed.as_secs_f64()),
+            );
+            metrics.insert(
+                "write_amplification".to_string(),
+                serde_json::json!(stats.write_amplification_factor),
+            );
+            metrics.insert(
+                "space_amplification".to_string(),
+                serde_json::json!(stats.space_amplification_factor),
+            );
+            metrics.insert(
+                "disk_size_bytes".to_string(),
+                serde_json::Value::Number(disk_size.into()),
+            );
+            metrics.insert(
+                "logical_size_bytes".to_string(),
+                serde_json::Value::Number(
+                    (NUM_KEYS_10M as u64 * (bench_key(0).len() as u64 + VALUE_SIZE as u64)).into(),
+                ),
+            );
 
             let json_result = to_json_result("write_performance_10m", &metrics);
             println!("\nJSON_RESULT:{}", serde_json::to_string(&json_result).unwrap());
@@ -308,138 +340,80 @@ fn bench_read_performance_hot_cache(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(300));
 
     // Point read benchmark
-    group.bench_function("random_point_read_hot_cache_100k", |_b| {
-        // Setup OUTSIDE iter
-        let temp_dir = TempDir::new().unwrap();
-        let config = professional_config(&temp_dir);
-        let kv = tokitai_filekv::FileKV::open(config.clone()).unwrap();
+    group.bench_function("random_point_read_hot_cache_100k", |b| {
+        b.iter(|| {
+            // Setup INSIDE iter (each iteration is independent)
+            let temp_dir = TempDir::new().unwrap();
+            let config = professional_config(&temp_dir);
+            let kv = tokitai_filekv::FileKV::open(config.clone()).unwrap();
 
-        // Pre-populate (NOT timed)
-        println!("\n  Pre-populating 10M keys for read benchmark...");
-        let populate_start = Instant::now();
-        for i in 0..NUM_KEYS_10M {
-            let key = bench_key(i);
-            let value = bench_value(VALUE_SIZE);
-            kv.put(&key, &value).unwrap();
-            if i % 1_000_000 == 0 && i > 0 {
-                println!("    Written {}M keys...", i / 1_000_000);
+            // Pre-populate (NOT timed)
+            for i in 0..NUM_KEYS_10M {
+                let key = bench_key(i);
+                let value = bench_value(VALUE_SIZE);
+                kv.put(&key, &value).unwrap();
             }
-        }
-        flush_kv(&kv);
-        let populate_elapsed = populate_start.elapsed();
-        println!("  Pre-population complete in {}", format_duration(populate_elapsed));
+            flush_kv(&kv);
 
-        // Warm cache
-        println!("  Warming cache...");
-        warm_cache(&kv, 100_000); // Warm subset for reasonable time
-        println!("  Cache warm complete.");
+            // Warm cache
+            warm_cache(&kv, 100_000);
 
-        // Get stats snapshot before reads
-        let _stats_before = kv.get_stats();
+            // Benchmark: random point reads
+            let read_key_idx = AtomicUsize::new(0);
+            let mut latencies = Vec::with_capacity(RANDOM_READ_SAMPLES);
 
-        // Benchmark: random point reads
-        let read_key_idx = AtomicUsize::new(0);
-        let start = Instant::now();
-        let mut latencies = Vec::with_capacity(RANDOM_READ_SAMPLES);
+            for _ in 0..RANDOM_READ_SAMPLES {
+                let idx = read_key_idx.fetch_add(1, Ordering::Relaxed) % NUM_KEYS_10M;
+                let key = bench_key(idx);
+                let op_start = Instant::now();
+                let result = kv.get(&key).unwrap();
+                let op_elapsed = op_start.elapsed();
+                latencies.push(op_elapsed);
+                black_box(result);
+            }
 
-        for _ in 0..RANDOM_READ_SAMPLES {
-            let idx = read_key_idx.fetch_add(1, Ordering::Relaxed) % NUM_KEYS_10M;
-            let key = bench_key(idx);
-            let op_start = Instant::now();
-            let result = kv.get(&key).unwrap();
-            let op_elapsed = op_start.elapsed();
-            latencies.push(op_elapsed);
-            black_box(result);
-        }
-        let read_elapsed = start.elapsed();
-
-        let stats = kv.get_stats();
-
-        print_read_results(
-            "100K Random Point Reads (Hot Cache)",
-            RANDOM_READ_SAMPLES,
-            read_elapsed,
-            &stats,
-            &latencies,
-        );
-
-        // JSON result
-        let mut sorted = latencies.clone();
-        sorted.sort();
-        let p99 = percentile(&sorted, 99.0);
-        let p999 = percentile(&sorted, 99.9);
-
-        let mut metrics = serde_json::Map::new();
-        metrics.insert("num_reads".to_string(), serde_json::Value::Number(RANDOM_READ_SAMPLES.into()));
-        metrics.insert("elapsed_ms".to_string(), serde_json::Value::Number((read_elapsed.as_millis() as u64).into()));
-        metrics.insert("qps".to_string(), serde_json::json!(RANDOM_READ_SAMPLES as f64 / read_elapsed.as_secs_f64()));
-        metrics.insert("avg_latency_us".to_string(), serde_json::json!(read_elapsed.as_micros() as f64 / RANDOM_READ_SAMPLES as f64));
-        metrics.insert("p99_latency_us".to_string(), serde_json::json!(p99.as_micros() as f64));
-        metrics.insert("p999_latency_us".to_string(), serde_json::json!(p999.as_micros() as f64));
-        metrics.insert("read_amplification".to_string(), serde_json::json!(stats.read_amplification_factor));
-
-        let json_result = to_json_result("read_point_hot_cache", &metrics);
-        println!("\nJSON_RESULT:{}", serde_json::to_string(&json_result).unwrap());
+            black_box(latencies);
+        });
     });
 
     // Range read benchmark
-    group.bench_function("range_read_hot_cache_100x1000", |_b| {
-        // Setup OUTSIDE iter
-        let temp_dir = TempDir::new().unwrap();
-        let config = professional_config(&temp_dir);
-        let kv = tokitai_filekv::FileKV::open(config.clone()).unwrap();
+    group.bench_function("range_read_hot_cache_100x1000", |b| {
+        b.iter(|| {
+            // Setup INSIDE iter
+            let temp_dir = TempDir::new().unwrap();
+            let config = professional_config(&temp_dir);
+            let kv = tokitai_filekv::FileKV::open(config.clone()).unwrap();
 
-        // Pre-populate (NOT timed)
-        println!("\n  Pre-populating 10M keys for range read benchmark...");
-        let populate_start = Instant::now();
-        for i in 0..NUM_KEYS_10M {
-            let key = bench_key(i);
-            let value = bench_value(VALUE_SIZE);
-            kv.put(&key, &value).unwrap();
-        }
-        flush_kv(&kv);
-        let populate_elapsed = populate_start.elapsed();
-        println!("  Pre-population complete in {}", format_duration(populate_elapsed));
-
-        // Warm cache
-        warm_cache(&kv, 100_000);
-
-        // Benchmark: range queries
-        let start = Instant::now();
-        let mut latencies = Vec::with_capacity(RANGE_QUERY_COUNT);
-        let mut total_keys_read = 0;
-
-        for q in 0..RANGE_QUERY_COUNT {
-            let start_key_idx = (q * 100_000) % (NUM_KEYS_10M - RANGE_QUERY_SIZE);
-
-            let op_start = Instant::now();
-            let mut count = 0;
-            for i in start_key_idx..start_key_idx + RANGE_QUERY_SIZE {
+            // Pre-populate (NOT timed)
+            for i in 0..NUM_KEYS_10M {
                 let key = bench_key(i);
-                if kv.get(&key).unwrap().is_some() {
-                    count += 1;
-                }
+                let value = bench_value(VALUE_SIZE);
+                kv.put(&key, &value).unwrap();
             }
-            let op_elapsed = op_start.elapsed();
-            latencies.push(op_elapsed);
-            total_keys_read += count;
-            black_box(count);
-        }
-        let read_elapsed = start.elapsed();
+            flush_kv(&kv);
 
-        let stats = kv.get_stats();
+            // Warm cache
+            warm_cache(&kv, 100_000);
 
-        println!("\n{}", "=".repeat(80));
-        println!("READ PERFORMANCE: Range Queries (Hot Cache)");
-        println!("{}", "-".repeat(80));
-        println!("  Range queries:         {:>12}", RANGE_QUERY_COUNT);
-        println!("  Keys per range:        {:>12}", RANGE_QUERY_SIZE);
-        println!("  Total keys read:       {:>12}", total_keys_read);
-        println!("  Elapsed:               {:>12}", format_duration(read_elapsed));
-        println!("  Throughput:            {:>12.0} ranges/sec", RANGE_QUERY_COUNT as f64 / read_elapsed.as_secs_f64());
-        println!("{}", "=".repeat(80));
+            // Benchmark: range queries
+            let mut total_keys_read = 0;
 
-        black_box((read_elapsed, total_keys_read, stats));
+            for q in 0..RANGE_QUERY_COUNT {
+                let start_key_idx = (q * 100_000) % (NUM_KEYS_10M - RANGE_QUERY_SIZE);
+
+                let mut count = 0;
+                for i in start_key_idx..start_key_idx + RANGE_QUERY_SIZE {
+                    let key = bench_key(i);
+                    if kv.get(&key).unwrap().is_some() {
+                        count += 1;
+                    }
+                }
+                total_keys_read += count;
+                black_box(count);
+            }
+
+            black_box(total_keys_read);
+        });
     });
 
     group.finish();
@@ -559,36 +533,61 @@ fn bench_mixed_workload(c: &mut Criterion) {
             println!("\n{}", "=".repeat(80));
             println!("MIXED WORKLOAD: 70% Read / 30% Write ({} ops)", MIXED_TOTAL_OPS);
             println!("{}", "-".repeat(80));
-            println!("  Total operations:      {:>12} ({})", MIXED_TOTAL_OPS, format_duration(elapsed));
+            println!(
+                "  Total operations:      {:>12} ({})",
+                MIXED_TOTAL_OPS,
+                format_duration(elapsed)
+            );
             println!("  Reads:                 {:>12}", reads);
             println!("  Writes:                {:>12}", writes);
-            println!("  Overall QPS:           {:>12.0} ops/sec", MIXED_TOTAL_OPS as f64 / elapsed.as_secs_f64());
-            println!("  Read QPS:              {:>12.0} ops/sec", reads as f64 / elapsed.as_secs_f64());
-            println!("  Write QPS:             {:>12.0} ops/sec", writes as f64 / elapsed.as_secs_f64());
+            println!(
+                "  Overall QPS:           {:>12.0} ops/sec",
+                MIXED_TOTAL_OPS as f64 / elapsed.as_secs_f64()
+            );
+            println!(
+                "  Read QPS:              {:>12.0} ops/sec",
+                reads as f64 / elapsed.as_secs_f64()
+            );
+            println!(
+                "  Write QPS:             {:>12.0} ops/sec",
+                writes as f64 / elapsed.as_secs_f64()
+            );
             println!();
 
             // Read latency
             let mut sorted_read = latencies_read.clone();
             sorted_read.sort();
             if !sorted_read.is_empty() {
+                let read_p50 = percentile(&sorted_read, 50.0);
                 let read_p99 = percentile(&sorted_read, 99.0);
                 let read_p999 = percentile(&sorted_read, 99.9);
-                println!("  Read avg latency:      {:>12.2} us",
-                    latencies_read.iter().map(|d| d.as_micros() as f64).sum::<f64>() / reads as f64);
+                let read_p9999 = percentile(&sorted_read, 99.99);
+                println!(
+                    "  Read avg latency:      {:>12.2} us",
+                    latencies_read.iter().map(|d| d.as_micros() as f64).sum::<f64>() / reads as f64
+                );
+                println!("  Read p50 latency:      {:>12.2} us", read_p50.as_micros() as f64);
                 println!("  Read p99 latency:      {:>12.2} us", read_p99.as_micros() as f64);
                 println!("  Read p999 latency:     {:>12.2} us", read_p999.as_micros() as f64);
+                println!("  Read p9999 latency:    {:>12.2} us", read_p9999.as_micros() as f64);
             }
 
             // Write latency
             let mut sorted_write = latencies_write.clone();
             sorted_write.sort();
             if !sorted_write.is_empty() {
+                let write_p50 = percentile(&sorted_write, 50.0);
                 let write_p99 = percentile(&sorted_write, 99.0);
                 let write_p999 = percentile(&sorted_write, 99.9);
-                println!("  Write avg latency:     {:>12.2} us",
-                    latencies_write.iter().map(|d| d.as_micros() as f64).sum::<f64>() / writes as f64);
+                let write_p9999 = percentile(&sorted_write, 99.99);
+                println!(
+                    "  Write avg latency:     {:>12.2} us",
+                    latencies_write.iter().map(|d| d.as_micros() as f64).sum::<f64>() / writes as f64
+                );
+                println!("  Write p50 latency:     {:>12.2} us", write_p50.as_micros() as f64);
                 println!("  Write p99 latency:     {:>12.2} us", write_p99.as_micros() as f64);
                 println!("  Write p999 latency:    {:>12.2} us", write_p999.as_micros() as f64);
+                println!("  Write p9999 latency:   {:>12.2} us", write_p9999.as_micros() as f64);
             }
 
             println!();
@@ -604,21 +603,67 @@ fn bench_mixed_workload(c: &mut Criterion) {
             sorted_w.sort();
 
             let mut metrics = serde_json::Map::new();
-            metrics.insert("total_ops".to_string(), serde_json::Value::Number(MIXED_TOTAL_OPS.into()));
+            metrics.insert(
+                "total_ops".to_string(),
+                serde_json::Value::Number(MIXED_TOTAL_OPS.into()),
+            );
             metrics.insert("reads".to_string(), serde_json::Value::Number(reads.into()));
             metrics.insert("writes".to_string(), serde_json::Value::Number(writes.into()));
-            metrics.insert("elapsed_ms".to_string(), serde_json::Value::Number((elapsed.as_millis() as u64).into()));
-            metrics.insert("overall_qps".to_string(), serde_json::json!(MIXED_TOTAL_OPS as f64 / elapsed.as_secs_f64()));
-            metrics.insert("write_amplification".to_string(), serde_json::json!(stats.write_amplification_factor));
-            metrics.insert("read_amplification".to_string(), serde_json::json!(stats.read_amplification_factor));
-            metrics.insert("space_amplification".to_string(), serde_json::json!(stats.space_amplification_factor));
+            metrics.insert(
+                "elapsed_ms".to_string(),
+                serde_json::Value::Number((elapsed.as_millis() as u64).into()),
+            );
+            metrics.insert(
+                "overall_qps".to_string(),
+                serde_json::json!(MIXED_TOTAL_OPS as f64 / elapsed.as_secs_f64()),
+            );
+            metrics.insert(
+                "write_amplification".to_string(),
+                serde_json::json!(stats.write_amplification_factor),
+            );
+            metrics.insert(
+                "read_amplification".to_string(),
+                serde_json::json!(stats.read_amplification_factor),
+            );
+            metrics.insert(
+                "space_amplification".to_string(),
+                serde_json::json!(stats.space_amplification_factor),
+            );
             if !sorted_r.is_empty() {
-                metrics.insert("read_p99_us".to_string(), serde_json::json!(percentile(&sorted_r, 99.0).as_micros() as f64));
-                metrics.insert("read_p999_us".to_string(), serde_json::json!(percentile(&sorted_r, 99.9).as_micros() as f64));
+                metrics.insert(
+                    "read_p50_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 50.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p99_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.9).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p9999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.99).as_micros() as f64),
+                );
             }
             if !sorted_w.is_empty() {
-                metrics.insert("write_p99_us".to_string(), serde_json::json!(percentile(&sorted_w, 99.0).as_micros() as f64));
-                metrics.insert("write_p999_us".to_string(), serde_json::json!(percentile(&sorted_w, 99.9).as_micros() as f64));
+                metrics.insert(
+                    "write_p50_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 50.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p99_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.9).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p9999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.99).as_micros() as f64),
+                );
             }
 
             let json_result = to_json_result("mixed_workload_70r30w", &metrics);
@@ -636,19 +681,18 @@ fn bench_mixed_workload(c: &mut Criterion) {
 // ============================================================================
 
 /// Helper to run mixed workload with configurable read/write ratio
-fn run_mixed_workload(
-    c: &mut Criterion,
-    name: &str,
-    read_ratio: f64,
-    total_ops: usize,
-    prepopulate_keys: usize,
-) {
+fn run_mixed_workload(c: &mut Criterion, name: &str, read_ratio: f64, total_ops: usize, prepopulate_keys: usize) {
     let mut group = c.benchmark_group("mixed_workload_t004");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(300));
     group.throughput(Throughput::Elements(total_ops as u64));
 
-    let bench_name = format!("{}_r{}_w{}", name, (read_ratio * 100.0) as usize, ((1.0 - read_ratio) * 100.0) as usize);
+    let bench_name = format!(
+        "{}_r{}_w{}",
+        name,
+        (read_ratio * 100.0) as usize,
+        ((1.0 - read_ratio) * 100.0) as usize
+    );
     group.bench_function(&bench_name, |b| {
         b.iter(|| {
             let temp_dir = TempDir::new().unwrap();
@@ -703,37 +747,66 @@ fn run_mixed_workload(
             let writes = write_count.load(Ordering::Relaxed);
 
             println!("\n{}", "=".repeat(80));
-            println!("MIXED WORKLOAD T-004: {}% Read / {}% Write ({} ops)",
-                (read_ratio * 100.0) as usize, ((1.0 - read_ratio) * 100.0) as usize, total_ops);
+            println!(
+                "MIXED WORKLOAD T-004: {}% Read / {}% Write ({} ops)",
+                (read_ratio * 100.0) as usize,
+                ((1.0 - read_ratio) * 100.0) as usize,
+                total_ops
+            );
             println!("{}", "-".repeat(80));
-            println!("  Total operations:      {:>12} ({})", total_ops, format_duration(elapsed));
+            println!(
+                "  Total operations:      {:>12} ({})",
+                total_ops,
+                format_duration(elapsed)
+            );
             println!("  Reads:                 {:>12}", reads);
             println!("  Writes:                {:>12}", writes);
-            println!("  Overall QPS:           {:>12.0} ops/sec", total_ops as f64 / elapsed.as_secs_f64());
-            println!("  Read QPS:              {:>12.0} ops/sec", reads as f64 / elapsed.as_secs_f64());
-            println!("  Write QPS:             {:>12.0} ops/sec", writes as f64 / elapsed.as_secs_f64());
+            println!(
+                "  Overall QPS:           {:>12.0} ops/sec",
+                total_ops as f64 / elapsed.as_secs_f64()
+            );
+            println!(
+                "  Read QPS:              {:>12.0} ops/sec",
+                reads as f64 / elapsed.as_secs_f64()
+            );
+            println!(
+                "  Write QPS:             {:>12.0} ops/sec",
+                writes as f64 / elapsed.as_secs_f64()
+            );
             println!();
 
             let mut sorted_read = latencies_read.clone();
             sorted_read.sort();
             if !sorted_read.is_empty() {
+                let read_p50 = percentile(&sorted_read, 50.0);
                 let read_p99 = percentile(&sorted_read, 99.0);
                 let read_p999 = percentile(&sorted_read, 99.9);
-                println!("  Read avg latency:      {:>12.2} us",
-                    latencies_read.iter().map(|d| d.as_micros() as f64).sum::<f64>() / reads as f64);
+                let read_p9999 = percentile(&sorted_read, 99.99);
+                println!(
+                    "  Read avg latency:      {:>12.2} us",
+                    latencies_read.iter().map(|d| d.as_micros() as f64).sum::<f64>() / reads as f64
+                );
+                println!("  Read p50 latency:      {:>12.2} us", read_p50.as_micros() as f64);
                 println!("  Read p99 latency:      {:>12.2} us", read_p99.as_micros() as f64);
                 println!("  Read p999 latency:     {:>12.2} us", read_p999.as_micros() as f64);
+                println!("  Read p9999 latency:    {:>12.2} us", read_p9999.as_micros() as f64);
             }
 
             let mut sorted_write = latencies_write.clone();
             sorted_write.sort();
             if !sorted_write.is_empty() {
+                let write_p50 = percentile(&sorted_write, 50.0);
                 let write_p99 = percentile(&sorted_write, 99.0);
                 let write_p999 = percentile(&sorted_write, 99.9);
-                println!("  Write avg latency:     {:>12.2} us",
-                    latencies_write.iter().map(|d| d.as_micros() as f64).sum::<f64>() / writes as f64);
+                let write_p9999 = percentile(&sorted_write, 99.99);
+                println!(
+                    "  Write avg latency:     {:>12.2} us",
+                    latencies_write.iter().map(|d| d.as_micros() as f64).sum::<f64>() / writes as f64
+                );
+                println!("  Write p50 latency:     {:>12.2} us", write_p50.as_micros() as f64);
                 println!("  Write p99 latency:     {:>12.2} us", write_p99.as_micros() as f64);
                 println!("  Write p999 latency:    {:>12.2} us", write_p999.as_micros() as f64);
+                println!("  Write p9999 latency:   {:>12.2} us", write_p9999.as_micros() as f64);
             }
 
             println!();
@@ -752,22 +825,71 @@ fn run_mixed_workload(
             metrics.insert("total_ops".to_string(), serde_json::Value::Number(total_ops.into()));
             metrics.insert("reads".to_string(), serde_json::Value::Number(reads.into()));
             metrics.insert("writes".to_string(), serde_json::Value::Number(writes.into()));
-            metrics.insert("elapsed_ms".to_string(), serde_json::Value::Number((elapsed.as_millis() as u64).into()));
-            metrics.insert("overall_qps".to_string(), serde_json::json!(total_ops as f64 / elapsed.as_secs_f64()));
-            metrics.insert("write_amplification".to_string(), serde_json::json!(stats.write_amplification_factor));
-            metrics.insert("read_amplification".to_string(), serde_json::json!(stats.read_amplification_factor));
-            metrics.insert("space_amplification".to_string(), serde_json::json!(stats.space_amplification_factor));
+            metrics.insert(
+                "elapsed_ms".to_string(),
+                serde_json::Value::Number((elapsed.as_millis() as u64).into()),
+            );
+            metrics.insert(
+                "overall_qps".to_string(),
+                serde_json::json!(total_ops as f64 / elapsed.as_secs_f64()),
+            );
+            metrics.insert(
+                "write_amplification".to_string(),
+                serde_json::json!(stats.write_amplification_factor),
+            );
+            metrics.insert(
+                "read_amplification".to_string(),
+                serde_json::json!(stats.read_amplification_factor),
+            );
+            metrics.insert(
+                "space_amplification".to_string(),
+                serde_json::json!(stats.space_amplification_factor),
+            );
             if !sorted_r.is_empty() {
-                metrics.insert("read_p99_us".to_string(), serde_json::json!(percentile(&sorted_r, 99.0).as_micros() as f64));
-                metrics.insert("read_p999_us".to_string(), serde_json::json!(percentile(&sorted_r, 99.9).as_micros() as f64));
+                metrics.insert(
+                    "read_p50_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 50.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p99_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.9).as_micros() as f64),
+                );
+                metrics.insert(
+                    "read_p9999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_r, 99.99).as_micros() as f64),
+                );
             }
             if !sorted_w.is_empty() {
-                metrics.insert("write_p99_us".to_string(), serde_json::json!(percentile(&sorted_w, 99.0).as_micros() as f64));
-                metrics.insert("write_p999_us".to_string(), serde_json::json!(percentile(&sorted_w, 99.9).as_micros() as f64));
+                metrics.insert(
+                    "write_p50_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 50.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p99_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.0).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.9).as_micros() as f64),
+                );
+                metrics.insert(
+                    "write_p9999_us".to_string(),
+                    serde_json::json!(percentile(&sorted_w, 99.99).as_micros() as f64),
+                );
             }
 
-            let json_result = to_json_result(&format!("mixed_workload_{}r{}w",
-                (read_ratio * 100.0) as usize, ((1.0 - read_ratio) * 100.0) as usize), &metrics);
+            let json_result = to_json_result(
+                &format!(
+                    "mixed_workload_{}r{}w",
+                    (read_ratio * 100.0) as usize,
+                    ((1.0 - read_ratio) * 100.0) as usize
+                ),
+                &metrics,
+            );
             println!("\nJSON_RESULT:{}", serde_json::to_string(&json_result).unwrap());
 
             black_box((elapsed, reads, writes, stats));
@@ -821,13 +943,26 @@ fn bench_rocksdb_comparison(c: &mut Criterion) {
             println!("\n{}", "=".repeat(80));
             println!("ROCKSDB WRITE PERFORMANCE");
             println!("{}", "-".repeat(80));
-            println!("  Keys written:          {:>12} ({})", NUM_KEYS_10M, format_duration(elapsed));
-            println!("  Throughput:            {:>12.0} ops/sec ({:.2} MB/s)",
+            println!(
+                "  Keys written:          {:>12} ({})",
+                NUM_KEYS_10M,
+                format_duration(elapsed)
+            );
+            println!(
+                "  Throughput:            {:>12.0} ops/sec ({:.2} MB/s)",
                 qps,
-                (logical_bytes as f64 / elapsed.as_secs_f64()) / (1024.0 * 1024.0));
+                (logical_bytes as f64 / elapsed.as_secs_f64()) / (1024.0 * 1024.0)
+            );
             println!("  Logical data size:     {:>12} bytes", logical_bytes);
-            println!("  Actual disk size:      {:>12} bytes ({:.2} MB)", disk_size, disk_size as f64 / (1024.0 * 1024.0));
-            println!("  Space Amplification:   {:>12.2}x", disk_size as f64 / logical_bytes as f64);
+            println!(
+                "  Actual disk size:      {:>12} bytes ({:.2} MB)",
+                disk_size,
+                disk_size as f64 / (1024.0 * 1024.0)
+            );
+            println!(
+                "  Space Amplification:   {:>12.2}x",
+                disk_size as f64 / logical_bytes as f64
+            );
             println!("{}", "=".repeat(80));
 
             black_box((elapsed, disk_size));
@@ -836,61 +971,59 @@ fn bench_rocksdb_comparison(c: &mut Criterion) {
 
     // RocksDB Read benchmark
     group.bench_function("rocksdb_read_hot_cache_100k", |b| {
-        // Setup OUTSIDE iter
-        let temp_dir = TempDir::new().unwrap();
-        let opts = rocksdb_options();
-        let db = rocksdb::DB::open(&opts, temp_dir.path()).unwrap();
+        b.iter(|| {
+            // Each iteration: fresh RocksDB instance
+            let temp_dir = TempDir::new().unwrap();
+            let opts = rocksdb_options();
+            let db = rocksdb::DB::open(&opts, temp_dir.path()).unwrap();
 
-        // Pre-populate
-        println!("\n  Pre-populating RocksDB with 10M keys...");
-        let populate_start = Instant::now();
-        for i in 0..NUM_KEYS_10M {
-            let key = bench_key(i);
-            let value = bench_value(VALUE_SIZE);
-            db.put(key.as_bytes(), &value).unwrap();
-        }
-        db.flush().unwrap();
-        let populate_elapsed = populate_start.elapsed();
-        println!("  RocksDB pre-population complete in {}", format_duration(populate_elapsed));
+            // Pre-populate (NOT timed)
+            for i in 0..NUM_KEYS_10M {
+                let key = bench_key(i);
+                let value = bench_value(VALUE_SIZE);
+                db.put(key.as_bytes(), &value).unwrap();
+            }
+            db.flush().unwrap();
 
-        // Warm cache
-        println!("  Warming RocksDB cache...");
-        for i in (0..100_000).step_by(100) {
-            let key = bench_key(i);
-            let _ = db.get(key.as_bytes());
-        }
-        println!("  RocksDB cache warm complete.");
+            // Warm cache
+            for i in (0..100_000).step_by(100) {
+                let key = bench_key(i);
+                let _ = db.get(key.as_bytes());
+            }
 
-        // Benchmark
-        let read_key_idx = AtomicUsize::new(0);
-        let start = Instant::now();
-        let mut latencies = Vec::with_capacity(RANDOM_READ_SAMPLES);
+            // Benchmark random reads
+            let read_key_idx = AtomicUsize::new(0);
+            let mut latencies = Vec::with_capacity(RANDOM_READ_SAMPLES);
 
-        for _ in 0..RANDOM_READ_SAMPLES {
-            let idx = read_key_idx.fetch_add(1, Ordering::Relaxed) % NUM_KEYS_10M;
-            let key = bench_key(idx);
-            let op_start = Instant::now();
-            let result = db.get(key.as_bytes()).unwrap();
-            let op_elapsed = op_start.elapsed();
-            latencies.push(op_elapsed);
-            black_box(result);
-        }
-        let read_elapsed = start.elapsed();
+            for _ in 0..RANDOM_READ_SAMPLES {
+                let idx = read_key_idx.fetch_add(1, Ordering::Relaxed) % NUM_KEYS_10M;
+                let key = bench_key(idx);
+                let op_start = Instant::now();
+                let result = db.get(key.as_bytes()).unwrap();
+                let op_elapsed = op_start.elapsed();
+                latencies.push(op_elapsed);
+                black_box(result);
+            }
 
-        let mut sorted = latencies.clone();
-        sorted.sort();
-        let p99 = percentile(&sorted, 99.0);
-        let p999 = percentile(&sorted, 99.9);
+            let mut sorted = latencies.clone();
+            sorted.sort();
+            let p99 = percentile(&sorted, 99.0);
+            let p999 = percentile(&sorted, 99.9);
 
-        println!("\n{}", "=".repeat(80));
-        println!("ROCKSDB READ PERFORMANCE (Hot Cache)");
-        println!("{}", "-".repeat(80));
-        println!("  Reads completed:       {:>12} ({})", RANDOM_READ_SAMPLES, format_duration(read_elapsed));
-        println!("  Throughput:            {:>12.0} ops/sec", RANDOM_READ_SAMPLES as f64 / read_elapsed.as_secs_f64());
-        println!("  Avg latency:           {:>12.2} us", read_elapsed.as_micros() as f64 / RANDOM_READ_SAMPLES as f64);
-        println!("  p99 latency:           {:>12.2} us", p99.as_micros() as f64);
-        println!("  p999 latency:          {:>12.2} us", p999.as_micros() as f64);
-        println!("{}", "=".repeat(80));
+            println!("\n{}", "=".repeat(80));
+            println!("ROCKSDB READ PERFORMANCE (Hot Cache)");
+            println!("{}", "-".repeat(80));
+            println!("  Reads completed:       {:>12}", RANDOM_READ_SAMPLES,);
+            println!(
+                "  Avg latency:           {:>12.2} us",
+                latencies.iter().map(|d| d.as_micros() as f64).sum::<f64>() / RANDOM_READ_SAMPLES as f64
+            );
+            println!("  p99 latency:           {:>12.2} us", p99.as_micros() as f64);
+            println!("  p999 latency:          {:>12.2} us", p999.as_micros() as f64);
+            println!("{}", "=".repeat(80));
+
+            black_box(latencies);
+        });
     });
 
     group.finish();
@@ -917,10 +1050,7 @@ fn bench_amplification_analysis(c: &mut Criterion) {
 
             for &batch_size in &batch_sizes {
                 let _stats_before = kv.get_stats();
-                let disk_before = dirs_size(&[
-                    config.segment_dir.as_path(),
-                    config.index_dir.as_path(),
-                ]);
+                let disk_before = dirs_size(&[config.segment_dir.as_path(), config.index_dir.as_path()]);
 
                 let start = Instant::now();
                 for i in 0..batch_size {
@@ -932,31 +1062,37 @@ fn bench_amplification_analysis(c: &mut Criterion) {
                 flush_kv(&kv);
 
                 let stats_after = kv.get_stats();
-                let disk_after = dirs_size(&[
-                    config.segment_dir.as_path(),
-                    config.index_dir.as_path(),
-                ]);
+                let disk_after = dirs_size(&[config.segment_dir.as_path(), config.index_dir.as_path()]);
 
                 let _logical_bytes = batch_size as u64 * (bench_key(0).len() as u64 + VALUE_SIZE as u64);
                 let _disk_delta = disk_after.saturating_sub(disk_before);
 
-                results.push((batch_size, write_elapsed, disk_after, stats_after.space_amplification_factor));
+                results.push((
+                    batch_size,
+                    write_elapsed,
+                    disk_after,
+                    stats_after.space_amplification_factor,
+                ));
             }
 
             println!("\n{}", "=".repeat(80));
             println!("AMPLIFICATION ANALYSIS BY DATA SIZE");
             println!("{}", "-".repeat(80));
-            println!("{:>12} | {:>12} | {:>12} | {:>12} | {:>8}",
-                "Keys", "Elapsed", "Disk Size", "Logical", "SA");
+            println!(
+                "{:>12} | {:>12} | {:>12} | {:>12} | {:>8}",
+                "Keys", "Elapsed", "Disk Size", "Logical", "SA"
+            );
             println!("{}", "-".repeat(80));
             for (keys, elapsed, disk, sa) in &results {
                 let logical = *keys as u64 * (bench_key(0).len() as u64 + VALUE_SIZE as u64);
-                println!("{:>12} | {:>12} | {:>10}MB | {:>10}MB | {:>6.2}x",
+                println!(
+                    "{:>12} | {:>12} | {:>10}MB | {:>10}MB | {:>6.2}x",
                     keys,
                     format_duration(*elapsed),
                     disk / (1024 * 1024),
                     logical / (1024 * 1024),
-                    sa);
+                    sa
+                );
             }
             println!("{}", "=".repeat(80));
 

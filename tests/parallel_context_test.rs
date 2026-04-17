@@ -10,8 +10,7 @@
 //! - 历史查看（log）
 
 use ai_assistant::context::{
-    ParallelContextManager, ParallelContextManagerConfig,
-    BranchState, MergeStrategy,
+    BranchState, MergeStrategy, ParallelContextManager, ParallelContextManagerConfig,
 };
 use tempfile::TempDir;
 
@@ -42,7 +41,7 @@ fn test_basic_branch_workflow() {
     // 2. 创建特性分支
     let feature_branch = manager.create_branch("feature-refactor", "main").unwrap();
     let feature_id = feature_branch.branch_id.clone();
-    
+
     println!("Created feature branch: {}", feature_id);
 
     // 3. 切换到特性分支
@@ -81,10 +80,10 @@ fn test_multiple_parallel_branches() {
     // 创建多个并行分支
     let branch1 = manager.create_branch("refactor-v1", "main").unwrap();
     let branch1_id = branch1.branch_id.clone();
-    
+
     let branch2 = manager.create_branch("refactor-v2", "main").unwrap();
     let branch2_id = branch2.branch_id.clone();
-    
+
     let branch3 = manager.create_branch("refactor-v3", "main").unwrap();
     let branch3_id = branch3.branch_id.clone();
 
@@ -136,16 +135,24 @@ fn test_branch_diff() {
 
     // 在 main 分支添加文件
     let main_current = manager.get_current_branch().unwrap();
-    std::fs::write(main_current.short_term_dir.join("main_file.txt"), "Main content").unwrap();
+    std::fs::write(
+        main_current.short_term_dir.join("main_file.txt"),
+        "Main content",
+    )
+    .unwrap();
 
     // 在 feature 分支添加不同文件
     manager.checkout(&feature_id).unwrap();
     let feature_current = manager.get_current_branch().unwrap();
-    std::fs::write(feature_current.short_term_dir.join("feature_file.txt"), "Feature content").unwrap();
+    std::fs::write(
+        feature_current.short_term_dir.join("feature_file.txt"),
+        "Feature content",
+    )
+    .unwrap();
 
     // 计算差异
     let diff = manager.diff("main", &feature_id).unwrap();
-    
+
     println!("Branch diff:");
     println!("  Added items: {}", diff.added_items.len());
     println!("  Removed items: {}", diff.removed_items.len());
@@ -201,7 +208,7 @@ fn test_hash_chain_log() {
     // 分支应该继承父分支的哈希链（至少有创世节点）
     // 注意：如果父分支也没有内容，哈希链可能为空
     // 所以我们只验证能正常获取日志，而不强制要求非空
-    
+
     println!("Hash chain log test passed!");
 }
 
@@ -238,7 +245,11 @@ fn test_cow_performance() {
     // 验证分支隔离
     manager.checkout(&branch1_id).unwrap();
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("branch1_unique.txt"), "Branch 1 data").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("branch1_unique.txt"),
+        "Branch 1 data",
+    )
+    .unwrap();
 
     manager.checkout(&branch2_id).unwrap();
     let current = manager.get_current_branch().unwrap();
@@ -266,20 +277,31 @@ fn test_merge_strategies() {
 
     // 测试 FastForward 合并
     manager.checkout("main").unwrap();
-    let result = manager.merge(&feature_id, "main", Some(MergeStrategy::FastForward)).unwrap();
+    let result = manager
+        .merge(&feature_id, "main", Some(MergeStrategy::FastForward))
+        .unwrap();
     println!("FastForward merge: success={}", result.success);
 
     // 测试 SelectiveMerge 合并
     let feature2 = manager.create_branch("merge-test-2", "main").unwrap();
     let feature2_id = feature2.branch_id.clone();
-    
+
     manager.checkout(&feature2_id).unwrap();
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("merge_test_2.txt"), "Test data 2").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("merge_test_2.txt"),
+        "Test data 2",
+    )
+    .unwrap();
 
     manager.checkout("main").unwrap();
-    let result = manager.merge(&feature2_id, "main", Some(MergeStrategy::SelectiveMerge)).unwrap();
-    println!("SelectiveMerge merge: success={}, merged={}", result.success, result.merged_count);
+    let result = manager
+        .merge(&feature2_id, "main", Some(MergeStrategy::SelectiveMerge))
+        .unwrap();
+    println!(
+        "SelectiveMerge merge: success={}, merged={}",
+        result.success, result.merged_count
+    );
 
     println!("Merge strategies test passed!");
 }
@@ -307,33 +329,55 @@ fn test_full_workflow() {
 
     // Step 3: 在每个分支进行独立探索
     println!("\n3. Exploring different hypotheses in parallel...");
-    
+
     manager.checkout(&b1_id).unwrap();
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("h1_evidence.txt"), "Evidence for hypothesis 1").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("h1_evidence.txt"),
+        "Evidence for hypothesis 1",
+    )
+    .unwrap();
     println!("   Branch {}: Added evidence for hypothesis 1", b1_id);
 
     manager.checkout(&b2_id).unwrap();
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("h2_evidence.txt"), "Evidence for hypothesis 2").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("h2_evidence.txt"),
+        "Evidence for hypothesis 2",
+    )
+    .unwrap();
     println!("   Branch {}: Added evidence for hypothesis 2", b2_id);
 
     manager.checkout(&b3_id).unwrap();
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("h3_evidence.txt"), "Evidence for hypothesis 3").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("h3_evidence.txt"),
+        "Evidence for hypothesis 3",
+    )
+    .unwrap();
     println!("   Branch {}: Added evidence for hypothesis 3", b3_id);
 
     // Step 4: 比较分支差异
     println!("\n4. Comparing branches...");
     let diff_1_2 = manager.diff(&b1_id, &b2_id).unwrap();
-    println!("   Diff between {} and {}: {} added, {} removed", 
-             b1_id, b2_id, diff_1_2.added_items.len(), diff_1_2.removed_items.len());
+    println!(
+        "   Diff between {} and {}: {} added, {} removed",
+        b1_id,
+        b2_id,
+        diff_1_2.added_items.len(),
+        diff_1_2.removed_items.len()
+    );
 
     // Step 5: 选择最佳方案并合并
     println!("\n5. Merging best hypothesis (hypothesis-2)...");
     manager.checkout("main").unwrap();
-    let merge_result = manager.merge(&b2_id, "main", Some(MergeStrategy::SelectiveMerge)).unwrap();
-    println!("   Merge completed: {} items merged", merge_result.merged_count);
+    let merge_result = manager
+        .merge(&b2_id, "main", Some(MergeStrategy::SelectiveMerge))
+        .unwrap();
+    println!(
+        "   Merge completed: {} items merged",
+        merge_result.merged_count
+    );
 
     // Step 6: 废弃其他分支
     println!("\n6. Aborting unused hypotheses...");

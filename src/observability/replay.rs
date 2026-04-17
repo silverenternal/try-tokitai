@@ -16,11 +16,11 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::Result;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -260,7 +260,7 @@ impl ReplayPlayer {
     /// 获取播放状态
     pub fn get_status(&self) -> ReplayStatus {
         let total_events = self.record.as_ref().map(|r| r.events.len()).unwrap_or(0);
-        
+
         ReplayStatus {
             is_playing: !self.is_paused,
             current_event_index: self.position.event_index,
@@ -307,7 +307,7 @@ impl ReplaySystem {
         let data_dir = data_dir.as_ref().to_path_buf();
         let replays_dir = data_dir.join("replays");
         std::fs::create_dir_all(&replays_dir)?;
-        
+
         let mut system = Self {
             data_dir,
             current_recording: None,
@@ -315,10 +315,10 @@ impl ReplaySystem {
             player: ReplayPlayer::new(),
             config: ReplayConfig::default(),
         };
-        
+
         // 加载已有回放
         system.load_saved_replays()?;
-        
+
         Ok(system)
     }
 
@@ -328,7 +328,7 @@ impl ReplaySystem {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let header = ReplayHeader {
             iteration_id: iteration_id.to_string(),
             goal: goal.to_string(),
@@ -338,19 +338,24 @@ impl ReplaySystem {
             total_snapshots: 0,
             status: IterationStatus::Running,
         };
-        
+
         self.current_recording = Some(ReplayRecord {
             header,
             events: Vec::new(),
             snapshots: Vec::new(),
         });
-        
+
         // 记录开始事件
-        self.record_event(EventType::IterationStart, Some(serde_json::json!({
-            "iteration_id": iteration_id,
-            "goal": goal,
-        })), None, None)?;
-        
+        self.record_event(
+            EventType::IterationStart,
+            Some(serde_json::json!({
+                "iteration_id": iteration_id,
+                "goal": goal,
+            })),
+            None,
+            None,
+        )?;
+
         Ok(())
     }
 
@@ -365,15 +370,15 @@ impl ReplaySystem {
         if self.current_recording.is_none() {
             anyhow::bail!("No active recording");
         }
-        
+
         let recording = self.current_recording.as_mut().unwrap();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let id = format!("evt_{}_{}", event_type.as_str(), now);
-        
+
         let data_str = data.map(|v| {
             let json = serde_json::to_string(&v).unwrap();
             if json.len() > self.config.max_event_data_size {
@@ -382,7 +387,7 @@ impl ReplaySystem {
                 json
             }
         });
-        
+
         let event = ReplayEvent {
             id: id.clone(),
             event_type,
@@ -391,10 +396,10 @@ impl ReplaySystem {
             task_id: task_id.map(String::from),
             tool_name: tool_name.map(String::from),
         };
-        
+
         recording.events.push(event);
         recording.header.total_events = recording.events.len();
-        
+
         Ok(id)
     }
 
@@ -403,25 +408,25 @@ impl ReplaySystem {
         if self.current_recording.is_none() {
             anyhow::bail!("No active recording");
         }
-        
+
         let recording = self.current_recording.as_mut().unwrap();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let id = format!("snap_{}", now);
-        
+
         let snapshot = StateSnapshot {
             id: id.clone(),
             timestamp: now,
             data: serde_json::to_string(&data)?,
             description: description.to_string(),
         };
-        
+
         recording.snapshots.push(snapshot);
         recording.header.total_snapshots = recording.snapshots.len();
-        
+
         Ok(id)
     }
 
@@ -432,15 +437,16 @@ impl ReplaySystem {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            
+
             recording.header.end_time = now;
             recording.header.status = status.clone();
 
             // 记录结束事件
             let event_data = serde_json::to_string(&serde_json::json!({
                 "status": status.as_str()
-            })).unwrap();
-            
+            }))
+            .unwrap();
+
             recording.events.push(ReplayEvent {
                 id: format!("evt_IterationEnd_{}", now),
                 event_type: EventType::IterationEnd,
@@ -451,13 +457,13 @@ impl ReplaySystem {
             });
 
             recording.header.total_events = recording.events.len();
-            
+
             // 保存回放
             let file_path = self.save_replay(&recording)?;
-            
+
             return Ok(Some(file_path));
         }
-        
+
         Ok(None)
     }
 
@@ -465,13 +471,13 @@ impl ReplaySystem {
     fn save_replay(&mut self, replay: &ReplayRecord) -> Result<PathBuf> {
         let replays_dir = self.data_dir.join("replays");
         std::fs::create_dir_all(&replays_dir)?;
-        
+
         let file_name = format!("replay_{}.json", replay.header.iteration_id);
         let file_path = replays_dir.join(&file_name);
-        
+
         let json = serde_json::to_string_pretty(replay)?;
         std::fs::write(&file_path, json)?;
-        
+
         self.saved_replays.push(file_path.clone());
 
         // 清理旧回放
@@ -486,7 +492,7 @@ impl ReplaySystem {
     /// 加载已保存的回放
     fn load_saved_replays(&mut self) -> Result<()> {
         let replays_dir = self.data_dir.join("replays");
-        
+
         if replays_dir.exists() {
             for entry in std::fs::read_dir(&replays_dir)? {
                 let entry = entry?;
@@ -496,7 +502,7 @@ impl ReplaySystem {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -505,16 +511,16 @@ impl ReplaySystem {
         let replays_dir = self.data_dir.join("replays");
         let file_name = format!("replay_{}.json", iteration_id);
         let file_path = replays_dir.join(&file_name);
-        
+
         if !file_path.exists() {
             anyhow::bail!("Replay not found: {}", iteration_id);
         }
-        
+
         let json = std::fs::read_to_string(&file_path)?;
         let replay: ReplayRecord = serde_json::from_str(&json)?;
-        
+
         self.player.load(replay);
-        
+
         Ok(())
     }
 
@@ -581,21 +587,22 @@ mod tests {
     fn test_recording() {
         let temp_dir = TempDir::new().unwrap();
         let mut system = ReplaySystem::new(temp_dir.path()).unwrap();
-        
+
         system.start_recording("iter_1", "Test goal").unwrap();
-        
-        system.record_event(
-            EventType::TaskDecompose,
-            Some(serde_json::json!({"tasks": ["task1", "task2"]})),
-            None,
-            None,
-        ).unwrap();
-        
-        system.add_snapshot(
-            serde_json::json!({"state": "test"}),
-            "Test snapshot",
-        ).unwrap();
-        
+
+        system
+            .record_event(
+                EventType::TaskDecompose,
+                Some(serde_json::json!({"tasks": ["task1", "task2"]})),
+                None,
+                None,
+            )
+            .unwrap();
+
+        system
+            .add_snapshot(serde_json::json!({"state": "test"}), "Test snapshot")
+            .unwrap();
+
         let file_path = system.stop_recording(IterationStatus::Completed).unwrap();
         assert!(file_path.is_some());
         assert!(file_path.unwrap().exists());
@@ -604,7 +611,7 @@ mod tests {
     #[test]
     fn test_player_controls() {
         let mut player = ReplayPlayer::new();
-        
+
         let record = ReplayRecord {
             header: ReplayHeader {
                 iteration_id: "test".to_string(),
@@ -635,7 +642,7 @@ mod tests {
             ],
             snapshots: Vec::new(),
         };
-        
+
         player.load(record);
 
         // 测试单步前进
@@ -649,7 +656,7 @@ mod tests {
         // 测试单步后退（后退一步回到 evt2）
         let event2_again = player.step_backward();
         assert_eq!(event2_again.unwrap().id, "evt2");
-        
+
         // 再后退一步回到 evt1
         let event1_again = player.step_backward();
         assert_eq!(event1_again.unwrap().id, "evt1");

@@ -36,10 +36,10 @@ use thiserror::Error;
 pub enum ZoneMapError {
     #[error("Invalid range: start > end")]
     InvalidRange,
-    
+
     #[error("Block not found: {0}")]
     BlockNotFound(u64),
-    
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -189,10 +189,7 @@ impl ZoneMapBuilder {
 
     /// Finalize the current block
     fn finalize_current_block(&mut self) {
-        if let (Some(min_key), Some(max_key)) = (
-            self.current_min_key.take(),
-            self.current_max_key.take(),
-        ) {
+        if let (Some(min_key), Some(max_key)) = (self.current_min_key.take(), self.current_max_key.take()) {
             let entry = ZoneMapEntry::new(
                 self.current_block_id,
                 min_key,
@@ -252,10 +249,7 @@ impl ZoneMapIndex {
     /// This avoids cloning the entries when sharing between components.
     /// Note: entries are assumed to be already sorted by min_key.
     pub fn from_shared(segment_id: u64, entries: Arc<Vec<ZoneMapEntry>>) -> Self {
-        Self {
-            entries,
-            segment_id,
-        }
+        Self { entries, segment_id }
     }
 
     /// Get all zone map entries
@@ -310,7 +304,8 @@ impl ZoneMapIndex {
     ///
     /// QUERY-001 FIX: Uses binary search on block_id via a sorted lookup.
     pub fn should_prune_block(&self, block_id: u64, query_start: &str, query_end: &str) -> ZoneMapResult<bool> {
-        let entry = self.get_block_entry(block_id)
+        let entry = self
+            .get_block_entry(block_id)
             .ok_or(ZoneMapError::BlockNotFound(block_id))?;
 
         Ok(entry.should_prune(query_start, query_end))
@@ -357,7 +352,7 @@ impl RangeQueryStats {
         } else {
             0.0
         };
-        
+
         Self {
             total_blocks,
             blocks_scanned: scanned,
@@ -405,17 +400,14 @@ impl SequentialDetector {
     pub fn record_access(&mut self, key: &str) -> Option<i64> {
         if let Some(last_key) = &self.last_key {
             // Try to detect numeric key pattern
-            if let (Ok(last_num), Ok(curr_num)) = (
-                last_key.parse::<i64>(),
-                key.parse::<i64>(),
-            ) {
+            if let (Ok(last_num), Ok(curr_num)) = (last_key.parse::<i64>(), key.parse::<i64>()) {
                 let current_stride = curr_num - last_num;
-                
+
                 if current_stride == 1 || current_stride == -1 {
                     // Sequential access detected
                     self.sequential_count += 1;
                     self.stride = Some(current_stride);
-                    
+
                     if self.sequential_count >= self.prefetch_threshold {
                         return Some(current_stride);
                     }
@@ -443,7 +435,7 @@ impl SequentialDetector {
                 }
             }
         }
-        
+
         self.last_key = Some(key.to_string());
         None
     }
@@ -475,10 +467,10 @@ mod tests {
         let entry = ZoneMapEntry::new(1, "a".to_string(), "m".to_string(), 0, 100, 10);
 
         // Overlapping ranges
-        assert!(entry.overlaps("b", "c"));  // Within range
-        assert!(entry.overlaps("a", "m"));  // Exact match
-        assert!(entry.overlaps("a", "e"));  // Partial overlap
-        
+        assert!(entry.overlaps("b", "c")); // Within range
+        assert!(entry.overlaps("a", "m")); // Exact match
+        assert!(entry.overlaps("a", "e")); // Partial overlap
+
         // Non-overlapping ranges
         assert!(!entry.overlaps("n", "z")); // After range
         assert!(!entry.overlaps("x", "z")); // After range
@@ -487,18 +479,18 @@ mod tests {
     #[test]
     fn test_zone_map_builder() {
         let mut builder = ZoneMapBuilder::new(3); // 3 entries per block
-        
+
         builder.start_block(0);
         builder.add_entry("key_1");
         builder.add_entry("key_2");
         builder.add_entry("key_3"); // Block full
-        
+
         builder.start_block(100);
         builder.add_entry("key_4");
         builder.add_entry("key_5");
-        
+
         let entries = builder.finish();
-        
+
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].min_key, "key_1");
         assert_eq!(entries[0].max_key, "key_3");
@@ -512,17 +504,17 @@ mod tests {
             ZoneMapEntry::new(1, "a".to_string(), "m".to_string(), 0, 100, 10),
             ZoneMapEntry::new(2, "n".to_string(), "z".to_string(), 100, 100, 10),
         ];
-        
+
         let index = ZoneMapIndex::new(1, entries);
-        
+
         // Query "b" to "c" should only scan block 1
         let overlapping = index.find_overlapping_blocks("b", "c");
         assert_eq!(overlapping, vec![1]);
-        
+
         // Query "y" to "z" should only scan block 2
         let overlapping = index.find_overlapping_blocks("y", "z");
         assert_eq!(overlapping, vec![2]);
-        
+
         // Query "a" to "z" should scan both blocks
         let overlapping = index.find_overlapping_blocks("a", "z");
         assert_eq!(overlapping.len(), 2);
@@ -685,9 +677,7 @@ mod tests {
         assert!(overlapping.is_empty());
 
         // Single block index
-        let entries = vec![
-            ZoneMapEntry::new(1, "a".to_string(), "z".to_string(), 0, 1000, 100),
-        ];
+        let entries = vec![ZoneMapEntry::new(1, "a".to_string(), "z".to_string(), 0, 1000, 100)];
         let index = ZoneMapIndex::new(1, entries);
         let overlapping = index.find_overlapping_blocks("m", "n");
         assert_eq!(overlapping, vec![1]);
@@ -696,7 +686,7 @@ mod tests {
     #[test]
     fn test_zone_map_stress_test() {
         // Create a zone map index with moderate entries
-        let num_entries = 100;  // Reduced from 1000
+        let num_entries = 100; // Reduced from 1000
         let mut entries = Vec::with_capacity(num_entries);
         for i in 0..num_entries {
             let min_key = format!("key_{:06}", i * 10);
@@ -721,16 +711,14 @@ mod tests {
         let last_idx = num_entries;
         let overlapping = index.find_overlapping_blocks(
             &format!("key_{:06}", (num_entries - 1) * 10),
-            &format!("key_{:06}", (num_entries - 1) * 10 + 9)
+            &format!("key_{:06}", (num_entries - 1) * 10 + 9),
         );
         assert_eq!(overlapping, vec![last_idx as u64]);
 
         // Query middle block
         let mid = num_entries / 2;
-        let overlapping = index.find_overlapping_blocks(
-            &format!("key_{:06}", mid * 10),
-            &format!("key_{:06}", mid * 10 + 9)
-        );
+        let overlapping =
+            index.find_overlapping_blocks(&format!("key_{:06}", mid * 10), &format!("key_{:06}", mid * 10 + 9));
         assert_eq!(overlapping, vec![(mid + 1) as u64]);
 
         // Query spanning multiple blocks

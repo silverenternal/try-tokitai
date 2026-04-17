@@ -17,7 +17,8 @@
 //! ├── cache_state: Arc<CacheState>
 //! │   ├── bloom_filter_cache, adaptive_bloom_cache, block_cache, unified_cache
 //! └── stats_state: Arc<StatsState>
-//!     └── stats: Arc<FileKVStats>
+//!     ├── stats: Arc<FileKVStats>
+//!     └── amplification_tracker: Arc<AmplificationTracker>  (OPT-008)
 //! ```
 //!
 //! # Backward Compatibility
@@ -28,23 +29,23 @@
 //!
 //! **Migration path**: Gradually replace `state.X` with `state.X_state.X` or `state.x()`.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
 use arc_swap::ArcSwap;
 use parking_lot::RwLock;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::Arc;
 
+use crate::bloom::adaptive::AdaptiveBloomCache;
+use crate::bloom::filter_cache::BloomFilterCache;
+use crate::cache::block_cache::BlockCache;
+use crate::cache::UnifiedCacheManager;
+use crate::core::global_index::GlobalKeyIndex;
+use crate::core::memtable::MemTable;
 use crate::core::segment::SegmentFile;
 use crate::core::sparse_index::IndexManager;
 use crate::core::types::FileKVConfig;
 use crate::core::types::FileKVStats;
-use crate::core::memtable::MemTable;
-use crate::core::global_index::GlobalKeyIndex;
-use crate::bloom::filter_cache::BloomFilterCache;
-use crate::bloom::adaptive::AdaptiveBloomCache;
-use crate::cache::block_cache::BlockCache;
-use crate::cache::UnifiedCacheManager;
 
 // ============================================================================
 // SegmentState - manages segment files and ID allocation
@@ -66,10 +67,7 @@ pub struct SegmentState {
 }
 
 impl SegmentState {
-    pub fn new(
-        segments: BTreeMap<u64, Arc<SegmentFile>>,
-        next_segment_id: AtomicU64,
-    ) -> Self {
+    pub fn new(segments: BTreeMap<u64, Arc<SegmentFile>>, next_segment_id: AtomicU64) -> Self {
         // ENG-005: Initialize atomic counters from initial segments
         let segment_count = AtomicUsize::new(segments.len());
         let total_size_bytes: u64 = segments.values().map(|s| s.size()).sum();
@@ -148,13 +146,30 @@ impl CacheState {
 // ============================================================================
 
 /// Statistics state (shared atomic counters)
+/// OPT-008: Added amplification_tracker for real-time WA/RA/SA monitoring
 pub struct StatsState {
     pub stats: Arc<FileKVStats>,
+    /// Real-time amplification tracker (lock-free atomic counters)
+    pub amplification_tracker: Arc<crate::ops::amplification::AmplificationTracker>,
 }
 
 impl StatsState {
     pub fn new(stats: Arc<FileKVStats>) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            amplification_tracker: Arc::new(crate::ops::amplification::AmplificationTracker::new()),
+        }
+    }
+
+    /// Create with a custom amplification tracker
+    pub fn with_amplification_tracker(
+        stats: Arc<FileKVStats>,
+        tracker: Arc<crate::ops::amplification::AmplificationTracker>,
+    ) -> Self {
+        Self {
+            stats,
+            amplification_tracker: tracker,
+        }
     }
 }
 
@@ -319,10 +334,7 @@ impl EngineStateBuilder {
         let global_index = self.global_index.unwrap_or_else(|| Arc::new(GlobalKeyIndex::new()));
         EngineState {
             config: self.config,
-            segment_state: Arc::new(SegmentState::new(
-                self.segments,
-                AtomicU64::new(self.next_segment_id),
-            )),
+            segment_state: Arc::new(SegmentState::new(self.segments, AtomicU64::new(self.next_segment_id))),
             index_state: Arc::new(IndexState::new(self.index_manager)),
             memtable_state: Arc::new(MemTableState::new(self.memtable)),
             cache_state: Arc::new(CacheState::new(

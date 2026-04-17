@@ -5,10 +5,8 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use crate::experiments::{
-    ExperimentGroup, ExperimentConfig,
-    runner::ExperimentRunner,
-    collector::DataCollector,
-    benchmark_tasks::BenchmarkTask,
+    benchmark_tasks::BenchmarkTask, collector::DataCollector, runner::ExperimentRunner,
+    ExperimentConfig, ExperimentGroup,
 };
 
 /// Run experiment CLI command
@@ -65,7 +63,7 @@ fn print_help() {
 /// Parse command line arguments
 fn parse_args(args: &[String]) -> Result<ExperimentArgs> {
     let mut parsed = ExperimentArgs::default();
-    
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -84,8 +82,7 @@ fn parse_args(args: &[String]) -> Result<ExperimentArgs> {
                 if i >= args.len() {
                     anyhow::bail!("Missing days value after --days");
                 }
-                parsed.days = args[i].parse()
-                    .with_context(|| "Invalid days value")?;
+                parsed.days = args[i].parse().with_context(|| "Invalid days value")?;
             }
             "--all-groups" | "-a" => {
                 parsed.all_groups = true;
@@ -141,21 +138,28 @@ impl Default for ExperimentArgs {
 /// Run benchmark experiments
 async fn run_benchmark(args: &[String]) -> Result<()> {
     let parsed = parse_args(args)?;
-    
+
     // Load benchmark tasks
     let tasks = load_benchmark_tasks(&parsed.project_path)?;
     println!("📊 Loaded {} benchmark tasks\n", tasks.len());
 
     // Determine which groups to run
     let groups_to_run = determine_groups(&parsed);
-    println!("🔬 Running experiments for {} groups\n", groups_to_run.len());
+    println!(
+        "🔬 Running experiments for {} groups\n",
+        groups_to_run.len()
+    );
 
     let mut all_summaries = Vec::new();
 
     // Run each group
     for group in &groups_to_run {
         println!("════════════════════════════════════════");
-        println!("Running: {} ({})", group.description(), group.log_dir_name());
+        println!(
+            "Running: {} ({})",
+            group.description(),
+            group.log_dir_name()
+        );
         println!("════════════════════════════════════════\n");
 
         let config = ExperimentConfig {
@@ -167,7 +171,7 @@ async fn run_benchmark(args: &[String]) -> Result<()> {
 
         let runner = ExperimentRunner::new(config, group.clone())?;
         let summary = runner.run_benchmark(&tasks).await?;
-        
+
         println!("\n✅ {} completed", group.description());
         println!("   Tasks: {}", summary.total_tasks);
         println!("   Success rate: {:.1}%", summary.success_rate * 100.0);
@@ -219,8 +223,10 @@ fn analyze_results(args: &[String]) -> Result<()> {
         ExperimentGroup::OursNoFix,
     ];
 
-    println!("{:<20} {:>10} {:>12} {:>12} {:>12} {:>10}", 
-             "Group", "Tasks", "Success", "Avg Tools", "Avg Time", "Satisfaction");
+    println!(
+        "{:<20} {:>10} {:>12} {:>12} {:>12} {:>10}",
+        "Group", "Tasks", "Success", "Avg Tools", "Avg Time", "Satisfaction"
+    );
     println!("{:-<80}", "");
 
     for group in &groups {
@@ -238,13 +244,15 @@ fn analyze_results(args: &[String]) -> Result<()> {
                 );
 
                 let success_pct = metrics.success_rate * 100.0;
-                println!("{:<20} {:>10} {:>11.1}% {:>12.1} {:>11.0}ms {:>10.1}/5",
-                         group.description(),
-                         metrics.total_tasks,
-                         success_pct,
-                         metrics.avg_tool_calls,
-                         metrics.avg_execution_time_ms,
-                         metrics.avg_satisfaction);
+                println!(
+                    "{:<20} {:>10} {:>11.1}% {:>12.1} {:>11.0}ms {:>10.1}/5",
+                    group.description(),
+                    metrics.total_tasks,
+                    success_pct,
+                    metrics.avg_tool_calls,
+                    metrics.avg_execution_time_ms,
+                    metrics.avg_satisfaction
+                );
             }
             _ => {
                 println!("{:<20} {:>10}", group.description(), "No data");
@@ -265,7 +273,7 @@ fn load_benchmark_tasks(project_path: &Path) -> Result<Vec<BenchmarkTask>> {
     use crate::experiments::benchmark_tasks::load_benchmark_tasks_from_file;
 
     let tasks_file = project_path.join("experiments/tasks/benchmark_tasks.json");
-    
+
     let tasks = load_benchmark_tasks_from_file(&tasks_file)
         .with_context(|| format!("Failed to load benchmark tasks from {:?}", tasks_file))?;
 

@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
 use std::fs::{self, Metadata};
+use std::path::{Path, PathBuf};
 use tracing::warn;
 
 /// 安全的文件操作沙箱
 ///
 /// 限制文件操作在允许的目录内，防止访问敏感文件
-/// 
+///
 /// 安全增强：
 /// - 符号链接循环检测
 /// - TOCTOU 防护（先验证后操作）
@@ -37,7 +37,10 @@ impl SandboxedFileOps {
     /// 检查路径是否在允许的目录内（不解析符号链接，避免 TOCTOU）
     pub fn is_path_allowed(&self, path: &Path) -> bool {
         // 防止路径遍历攻击
-        if path.components().any(|c| c.as_os_str().to_str() == Some("..")) {
+        if path
+            .components()
+            .any(|c| c.as_os_str().to_str() == Some(".."))
+        {
             warn!("检测到路径遍历尝试：{:?}", path);
             return false;
         }
@@ -58,9 +61,9 @@ impl SandboxedFileOps {
             .unwrap_or(abs_path);
 
         // 检查是否在任何一个允许的目录内
-        self.allowed_dirs.iter().any(|dir| {
-            normalized.starts_with(dir)
-        })
+        self.allowed_dirs
+            .iter()
+            .any(|dir| normalized.starts_with(dir))
     }
 
     /// 安全检查路径（带符号链接检测）
@@ -68,12 +71,15 @@ impl SandboxedFileOps {
         // 先检查路径是否允许
         if !self.is_path_allowed(path) {
             warn!("尝试访问不允许的路径：{:?}", path);
-            return Err(anyhow::anyhow!("访问被拒绝：路径 {:?} 不在允许的目录内", path));
+            return Err(anyhow::anyhow!(
+                "访问被拒绝：路径 {:?} 不在允许的目录内",
+                path
+            ));
         }
 
         // 获取元数据（跟随符号链接）
-        let metadata = fs::metadata(path)
-            .with_context(|| format!("获取文件元数据失败：{:?}", path))?;
+        let metadata =
+            fs::metadata(path).with_context(|| format!("获取文件元数据失败：{:?}", path))?;
 
         // 检查符号链接循环
         if metadata.file_type().is_symlink() {
@@ -102,9 +108,9 @@ impl SandboxedFileOps {
 
     /// 检查文件大小是否超过限制
     pub fn check_file_size(&self, path: &Path) -> Result<()> {
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("获取文件元数据失败：{:?}", path))?;
-        
+        let metadata =
+            std::fs::metadata(path).with_context(|| format!("获取文件元数据失败：{:?}", path))?;
+
         let size = metadata.len() as usize;
         if size > self.max_file_size {
             anyhow::bail!(
@@ -120,7 +126,7 @@ impl SandboxedFileOps {
     pub fn read_file(&self, path: &Path) -> Result<String> {
         // 使用安全验证（包括符号链接检查）
         let metadata = self.safe_validate_path(path)?;
-        
+
         // 检查文件大小
         let size = metadata.len() as usize;
         if size > self.max_file_size {
@@ -132,8 +138,7 @@ impl SandboxedFileOps {
         }
 
         // 直接读取（TOCTOU 窗口很小）
-        std::fs::read_to_string(path)
-            .with_context(|| format!("读取文件失败：{:?}", path))
+        std::fs::read_to_string(path).with_context(|| format!("读取文件失败：{:?}", path))
     }
 
     /// 安全的写入文件（带 TOCTOU 防护）
@@ -141,7 +146,10 @@ impl SandboxedFileOps {
         // 检查路径允许性
         if !self.is_path_allowed(path) {
             warn!("尝试写入不允许的路径：{:?}", path);
-            return Err(anyhow::anyhow!("访问被拒绝：路径 {:?} 不在允许的目录内", path));
+            return Err(anyhow::anyhow!(
+                "访问被拒绝：路径 {:?} 不在允许的目录内",
+                path
+            ));
         }
 
         // 检查写入内容大小
@@ -161,8 +169,7 @@ impl SandboxedFileOps {
             }
         }
 
-        std::fs::write(path, content)
-            .with_context(|| format!("写入文件失败：{:?}", path))
+        std::fs::write(path, content).with_context(|| format!("写入文件失败：{:?}", path))
     }
 
     /// 获取允许的最大文件大小
@@ -180,20 +187,20 @@ impl SandboxedFileOps {
 #[allow(dead_code)]
 pub fn create_default_sandbox() -> SandboxedFileOps {
     let mut allowed_dirs = Vec::new();
-    
+
     // 当前目录
     if let Ok(current) = std::env::current_dir() {
         allowed_dirs.push(current);
     }
-    
+
     // 用户主目录
     if let Some(home) = dirs::home_dir() {
         allowed_dirs.push(home);
     }
-    
+
     // 临时目录
     allowed_dirs.push(PathBuf::from("/tmp"));
-    
+
     SandboxedFileOps::new(allowed_dirs, None)
 }
 

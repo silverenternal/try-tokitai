@@ -80,6 +80,42 @@ bench-one bench_name:
 bench-rocksdb:
     cargo bench --features rocksdb-compare
 
+# ─── Performance Baselines & Regression ───────────────────────────────────
+
+# Save current benchmark results as a baseline
+save-baseline name:
+    ./scripts/save-baseline.sh "{{name}}"
+
+# Run performance regression check against baseline
+check-regression baseline:
+    ./scripts/bench-regression.sh --baseline "{{baseline}}"
+
+# Run performance regression check (auto-select latest baseline)
+check-regression-auto:
+    ./scripts/bench-regression.sh
+
+# List all saved baselines
+list-baselines:
+    #!/usr/bin/env bash
+    echo "Saved baselines in benches/baselines/:"
+    ls -la benches/baselines/*.json 2>/dev/null || echo "  (no baselines found)"
+    echo ""
+    for f in benches/baselines/*.json; do
+        if [[ -f "$f" ]]; then
+            python3 -c "
+import json
+with open('$f') as f2:
+    d = json.load(f2)
+print(f'  {d[\"name\"]}: {len(d[\"benchmarks\"])} benchmarks, created {d[\"created\"]}, commit {d[\"git_commit\"]}')
+" 2>/dev/null
+        fi
+    done
+
+# Delete a baseline
+delete-baseline name:
+    rm -f "benches/baselines/{{name}}.json"
+    echo "Deleted baseline: {{name}}"
+
 # ─── Cleanup ──────────────────────────────────────────────────────────────
 
 # Clean build artifacts

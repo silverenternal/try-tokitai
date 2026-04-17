@@ -30,6 +30,10 @@ fn main() -> anyhow::Result<()> {
             flush_threshold_bytes: 16 * 1024 * 1024, // 16MB
             max_entries: 100_000,
             max_memory_bytes: 64 * 1024 * 1024, // 64MB
+            shards: 32,
+            enable_async_flush: false,
+            max_immutable_memtables: 1,
+            immutable_flush_threshold_bytes: 16 * 1024 * 1024,
         },
         segment_dir,
         enable_wal: true,
@@ -38,6 +42,7 @@ fn main() -> anyhow::Result<()> {
         cache: tokitai_filekv::cache::block_cache::BlockCacheConfig {
             max_items: 50_000,
             max_memory_bytes: 128 * 1024 * 1024, // 128MB
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
@@ -55,6 +60,12 @@ fn main() -> anyhow::Result<()> {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: false,
             streaming_compaction_enabled: true,
+            write_amplification_threshold: 3.0,
+            max_background_compaction_threads: 1,
+            l0_size_bytes_threshold: 64 * 1024 * 1024,
+            l0_compaction_strategy: tokitai_filekv::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         segment_preallocate_size: 32 * 1024 * 1024,
         block_size: 8192,
@@ -80,8 +91,15 @@ fn main() -> anyhow::Result<()> {
         enable_adaptive_bloom_cache: true,
         enable_zone_map_pruning: true,
         enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: std::sync::Arc::new(tokitai_filekv::io::StdFs),
+        // Use defaults for remaining fields
+        enable_multi_level_cache: true,
+        l2_cache_max_bytes: 4 * 1024 * 1024 * 1024,
+        l2_to_l1_threshold: 5,
+        enable_wal_channel: false,
+        wal_channel_interval_ms: 2,
+        wal_channel_max_entries: 1000,
+        wal_channel_capacity: 10_000,
     };
 
     // Open FileKV

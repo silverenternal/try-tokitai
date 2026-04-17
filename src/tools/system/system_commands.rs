@@ -13,8 +13,8 @@
 //! - **危险命令**（黑名单）：rm, chmod, sudo 等（完全禁止）
 //! - **任意命令**：需要 confirmed=true 且记录日志
 
-use tokitai::tool;
 use serde_json::json;
+use tokitai::tool;
 
 use super::config;
 use super::error::CommandError;
@@ -91,12 +91,13 @@ impl SystemCommands {
                 "命令过长 ({} > {} 字符)",
                 command.len(),
                 config::MAX_COMMAND_LENGTH
-            )).to_string());
+            ))
+            .to_string());
         }
 
         // 使用 shlex 解析命令（安全的 shell 分词）
         let parts = safe_split_command(&command)?;
-        
+
         if parts.is_empty() {
             return Err(CommandError::InvalidArgument("空命令".to_string()).to_string());
         }
@@ -117,7 +118,9 @@ impl SystemCommands {
         let output = std::process::Command::new(&parts[0])
             .args(&parts[1..])
             .output()
-            .map_err(|e| CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string())?;
+            .map_err(|e| {
+                CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
+            })?;
 
         let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -186,14 +189,17 @@ impl SystemCommands {
                 "命令过长 ({} > {} 字符)",
                 command.len(),
                 config::MAX_COMMAND_LENGTH
-            )).to_string());
+            ))
+            .to_string());
         }
 
         // 使用 bash -c 执行完整命令（支持管道、重定向等）
         let output = std::process::Command::new("bash")
             .args(["-c", &command])
             .output()
-            .map_err(|e| CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string())?;
+            .map_err(|e| {
+                CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
+            })?;
 
         let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -216,7 +222,8 @@ impl SystemCommands {
                 "stderr": stderr,
             },
             "confirmed": confirmed,
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取当前工作目录
@@ -234,7 +241,8 @@ impl SystemCommands {
                     "data": {
                         "path": p.to_string_lossy().to_string()
                     }
-                }).to_string()
+                })
+                .to_string()
             })
             .map_err(|e| format!("获取当前目录失败：{}", e))
     }
@@ -263,7 +271,8 @@ impl SystemCommands {
                         "key": key,
                         "value": v
                     }
-                }).to_string()
+                })
+                .to_string()
             })
             .map_err(|e| format!("获取环境变量失败：{}", e))
     }
@@ -289,7 +298,8 @@ impl SystemCommands {
                 "variables": vars
             },
             "note": "敏感环境变量已过滤"
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 以 JSON 格式执行安全命令（已废弃，使用 run_safe_command 替代）
@@ -356,7 +366,9 @@ fn safe_split_command(command: &str) -> Result<Vec<String>, String> {
                 }
             }
             // 检查危险字符（在引号外）
-            ';' | '|' | '&' | '$' | '`' | '<' | '>' | '(' | ')' if !in_single_quote && !in_double_quote => {
+            ';' | '|' | '&' | '$' | '`' | '<' | '>' | '(' | ')'
+                if !in_single_quote && !in_double_quote =>
+            {
                 return Err(format!("命令包含危险的 shell 元字符：{}", ch));
             }
             _ => {
@@ -395,7 +407,9 @@ fn is_whitelisted_command(command: &str) -> bool {
 /// 检查是否为敏感环境变量
 fn is_sensitive_env_key(key: &str) -> bool {
     let upper = key.to_uppercase();
-    config::SENSITIVE_ENV_PATTERNS.iter().any(|pattern| upper.contains(pattern))
+    config::SENSITIVE_ENV_PATTERNS
+        .iter()
+        .any(|pattern| upper.contains(pattern))
 }
 
 #[cfg(test)]
@@ -434,7 +448,10 @@ mod tests {
     #[test]
     fn test_safe_split_command_simple() {
         assert_eq!(safe_split_command("ls -la").unwrap(), vec!["ls", "-la"]);
-        assert_eq!(safe_split_command("cat file.txt").unwrap(), vec!["cat", "file.txt"]);
+        assert_eq!(
+            safe_split_command("cat file.txt").unwrap(),
+            vec!["cat", "file.txt"]
+        );
     }
 
     #[test]
@@ -484,7 +501,9 @@ mod tests {
         // 不在白名单的命令应该返回错误
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
-        assert!(err_msg.contains("白名单") || err_msg.contains("黑名单") || err_msg.contains("禁止"));
+        assert!(
+            err_msg.contains("白名单") || err_msg.contains("黑名单") || err_msg.contains("禁止")
+        );
     }
 
     #[test]

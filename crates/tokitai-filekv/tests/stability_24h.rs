@@ -54,25 +54,43 @@ impl std::fmt::Display for StabilityReport {
         writeln!(f, "Initial QPS:            {:.0}", self.initial_qps)?;
         writeln!(f, "Final QPS:              {:.0}", self.final_qps)?;
         writeln!(f, "Perf Degradation:       {:.2}%", self.performance_degradation_pct)?;
-        writeln!(f, "Memory Growth:          {} bytes ({:.2} MB)", self.memory_growth_bytes, self.memory_growth_bytes as f64 / 1024.0 / 1024.0)?;
-        writeln!(f, "Consistency Success:    {:.4}%", self.consistency_success_rate * 100.0)?;
+        writeln!(
+            f,
+            "Memory Growth:          {} bytes ({:.2} MB)",
+            self.memory_growth_bytes,
+            self.memory_growth_bytes as f64 / 1024.0 / 1024.0
+        )?;
+        writeln!(
+            f,
+            "Consistency Success:    {:.4}%",
+            self.consistency_success_rate * 100.0
+        )?;
         writeln!(f, "───────────────────────────────────────────────────────────")?;
         writeln!(f, "Samples collected:      {}", self.samples.len())?;
 
         if !self.samples.is_empty() {
             writeln!(f)?;
-            writeln!(f, "  {:>8}  {:>10}  {:>12}  {:>12}  {:>10}  {:>10}",
-                "Time(s)", "QPS", "Mem(MB)", "Disk(MB)", "Success", "Failed")?;
-            writeln!(f, "  {:>8}  {:>10}  {:>12}  {:>12}  {:>10}  {:>10}",
-                "────────", "──────────", "────────────", "────────────", "──────────", "──────────")?;
+            writeln!(
+                f,
+                "  {:>8}  {:>10}  {:>12}  {:>12}  {:>10}  {:>10}",
+                "Time(s)", "QPS", "Mem(MB)", "Disk(MB)", "Success", "Failed"
+            )?;
+            writeln!(
+                f,
+                "  {:>8}  {:>10}  {:>12}  {:>12}  {:>10}  {:>10}",
+                "────────", "──────────", "────────────", "────────────", "──────────", "──────────"
+            )?;
             for s in &self.samples {
-                writeln!(f, "  {:>8}  {:>10.0}  {:>12.2}  {:>12.2}  {:>10}  {:>10}",
+                writeln!(
+                    f,
+                    "  {:>8}  {:>10.0}  {:>12.2}  {:>12.2}  {:>10}  {:>10}",
                     s.elapsed_seconds,
                     s.qps,
                     s.memory_bytes as f64 / 1024.0 / 1024.0,
                     s.disk_bytes as f64 / 1024.0 / 1024.0,
                     s.success_ops,
-                    s.failed_ops)?;
+                    s.failed_ops
+                )?;
             }
         }
 
@@ -81,10 +99,16 @@ impl std::fmt::Display for StabilityReport {
         // Verdict
         let mut issues = Vec::new();
         if self.performance_degradation_pct > 50.0 {
-            issues.push(format!("High performance degradation: {:.2}%", self.performance_degradation_pct));
+            issues.push(format!(
+                "High performance degradation: {:.2}%",
+                self.performance_degradation_pct
+            ));
         }
         if self.consistency_success_rate < 0.9999 {
-            issues.push(format!("Low consistency rate: {:.4}%", self.consistency_success_rate * 100.0));
+            issues.push(format!(
+                "Low consistency rate: {:.4}%",
+                self.consistency_success_rate * 100.0
+            ));
         }
         if self.memory_growth_bytes > 1024 * 1024 * 1024 {
             issues.push(format!("Excessive memory growth: {} bytes", self.memory_growth_bytes));
@@ -113,7 +137,6 @@ fn create_test_config(temp_dir: &TempDir) -> FileKVConfig {
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         enable_wal: false,
         enable_background_flush: false,
-        enable_background_cache_rebalance: false,
         compaction: CompactionConfig {
             auto_compact: false,
             ..Default::default()
@@ -190,12 +213,7 @@ fn generate_value(seed: u64, index: u64) -> Vec<u8> {
 }
 
 /// Run a consistency check: read random keys and verify they match expected values
-fn run_consistency_check(
-    kv: &FileKV,
-    seed: u64,
-    num_keys: usize,
-    max_index: u64,
-) -> (usize, usize) {
+fn run_consistency_check(kv: &FileKV, seed: u64, num_keys: usize, max_index: u64) -> (usize, usize) {
     use rand::seq::SliceRandom;
     use rand::SeedableRng;
 
@@ -306,8 +324,10 @@ fn test_24h_continuous_write_stability() {
     let mut total_consistency_failed = 0usize;
 
     println!("Starting continuous write test...");
-    println!("Batch size: {}, Sampling every: {:?}, Consistency check every: {:?}",
-        batch_size, sample_interval, consistency_interval);
+    println!(
+        "Batch size: {}, Sampling every: {:?}, Consistency check every: {:?}",
+        batch_size, sample_interval, consistency_interval
+    );
 
     while start_time.elapsed() < test_duration {
         // Write a batch of keys
@@ -344,7 +364,11 @@ fn test_24h_continuous_write_stability() {
             let current_failed = failed_ops.load(Ordering::Relaxed);
             let delta_ops = current_success - last_success_ops;
             let delta_time = last_sample_time.elapsed().as_secs_f64();
-            let qps = if delta_time > 0.0 { delta_ops as f64 / delta_time } else { 0.0 };
+            let qps = if delta_time > 0.0 {
+                delta_ops as f64 / delta_time
+            } else {
+                0.0
+            };
 
             let sample = StabilityMetrics {
                 elapsed_seconds: start_time.elapsed().as_secs(),
@@ -436,8 +460,16 @@ fn test_24h_continuous_write_stability() {
 
     // Assertions
     assert_eq!(final_failed, 0, "No write operations should have failed");
-    assert!(consistency_rate >= 0.999, "Consistency rate should be >= 99.9%, got {:.4}%", consistency_rate * 100.0);
-    assert!(perf_degradation < 80.0, "Performance degradation should be < 80%, got {:.2}%", perf_degradation);
+    assert!(
+        consistency_rate >= 0.999,
+        "Consistency rate should be >= 99.9%, got {:.4}%",
+        consistency_rate * 100.0
+    );
+    assert!(
+        perf_degradation < 80.0,
+        "Performance degradation should be < 80%, got {:.2}%",
+        perf_degradation
+    );
 }
 
 // ─── Test 2: Periodic compaction stability ───
@@ -509,7 +541,10 @@ fn test_periodic_compaction_stability() {
         write_success as f64 / write_elapsed.as_secs_f64()
     );
 
-    assert_eq!(write_failed, 0, "No write operations should have failed during initial write");
+    assert_eq!(
+        write_failed, 0,
+        "No write operations should have failed during initial write"
+    );
 
     let initial_segments = kv.segments().load().len();
     println!("Initial segment count: {}", initial_segments);
@@ -596,18 +631,28 @@ fn test_periodic_compaction_stability() {
     println!("Initial segments:       {}", initial_segments);
     println!("Final segments:         {}", final_segments);
     println!("Total compactions:      {}", compaction_stats.len());
-    println!("Consistency checks:     {}/{} passed ({:.4}%)",
+    println!(
+        "Consistency checks:     {}/{} passed ({:.4}%)",
         total_consistency_success,
         total_checks,
         consistency_rate * 100.0
     );
-    println!("Final disk size:        {:.2} MB", final_disk_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "Final disk size:        {:.2} MB",
+        final_disk_bytes as f64 / 1024.0 / 1024.0
+    );
 
     // Assertions
-    assert_eq!(total_consistency_failed, 0, "All consistency checks should pass after compaction");
-    assert!(final_segments <= initial_segments + num_compactions,
+    assert_eq!(
+        total_consistency_failed, 0,
+        "All consistency checks should pass after compaction"
+    );
+    assert!(
+        final_segments <= initial_segments + num_compactions,
         "Final segments ({}) should not grow unboundedly (initial: {})",
-        final_segments, initial_segments);
+        final_segments,
+        initial_segments
+    );
 }
 
 // ─── Test 3: High-load mixed operations stability ───
@@ -650,7 +695,10 @@ fn test_high_load_mixed_operations_stability() {
         kv.put(&key, value.as_bytes()).expect("Pre-populate write failed");
     }
     kv.flush_memtable().expect("Pre-populate flush failed");
-    println!("Pre-populate complete in {:.2}s\n", prepopulate_start.elapsed().as_secs_f64());
+    println!(
+        "Pre-populate complete in {:.2}s\n",
+        prepopulate_start.elapsed().as_secs_f64()
+    );
 
     // Shared counters
     let total_puts = Arc::new(AtomicU64::new(0));
@@ -742,7 +790,9 @@ fn test_high_load_mixed_operations_stability() {
                     let value = format!("v_t{}_k{}", thread_seed, key_index);
                     match kv_clone.put(&key, value.as_bytes()) {
                         Ok(_) => local_puts += 1,
-                        Err(_) => { put_errors.fetch_add(1, Ordering::Relaxed); }
+                        Err(_) => {
+                            put_errors.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 } else {
                     // Read operation - mix of preloaded and thread-specific keys
@@ -753,12 +803,14 @@ fn test_high_load_mixed_operations_stability() {
                     };
                     match kv_clone.get(&key) {
                         Ok(_) => local_gets += 1,
-                        Err(_) => { get_errors.fetch_add(1, Ordering::Relaxed); }
+                        Err(_) => {
+                            get_errors.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 }
 
                 // Update shared counters periodically
-                if (local_puts + local_gets) % 100 == 0 {
+                if (local_puts + local_gets).is_multiple_of(100) {
                     puts.fetch_add(local_puts, Ordering::Relaxed);
                     gets.fetch_add(local_gets, Ordering::Relaxed);
                     local_puts = 0;
@@ -860,13 +912,28 @@ fn test_high_load_mixed_operations_stability() {
     println!("Actual read %:          {:.1}%", read_pct_actual);
     println!("Actual write %:         {:.1}%", write_pct_actual);
     println!("Overall QPS:            {:.0}", qps);
-    println!("Final disk size:        {:.2} MB", final_disk_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "Final disk size:        {:.2} MB",
+        final_disk_bytes as f64 / 1024.0 / 1024.0
+    );
 
     // Assertions
-    assert!(total_errors == 0 || (total_errors as f64 / total_ops as f64) < 0.001,
+    assert!(
+        total_errors == 0 || (total_errors as f64 / total_ops as f64) < 0.001,
         "Error rate should be < 0.1%, got {:.4}%",
-        if total_ops > 0 { total_errors as f64 / total_ops as f64 * 100.0 } else { 0.0 });
-    assert!(perf_degradation < 80.0,
-        "Performance degradation should be < 80%, got {:.2}%", perf_degradation);
-    assert!(final_disk_bytes > 0, "Disk size should be greater than 0 after operations");
+        if total_ops > 0 {
+            total_errors as f64 / total_ops as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
+    assert!(
+        perf_degradation < 80.0,
+        "Performance degradation should be < 80%, got {:.2}%",
+        perf_degradation
+    );
+    assert!(
+        final_disk_bytes > 0,
+        "Disk size should be greater than 0 after operations"
+    );
 }

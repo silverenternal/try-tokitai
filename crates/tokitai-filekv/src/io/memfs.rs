@@ -3,11 +3,11 @@
 //! Uses `BTreeMap<PathBuf, Vec<u8>>` to simulate a filesystem.
 //! No actual disk I/O is performed.
 
+use parking_lot::Mutex;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 use crate::io::{FileKVFile, FileKVFileSystem, FileMetadata, IoResult};
 
@@ -278,7 +278,10 @@ impl FileKVFile for MemFile {
     fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
         let written = self.write(buf)?;
         if written < buf.len() {
-            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "failed to write whole buffer"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "failed to write whole buffer",
+            ));
         }
         Ok(())
     }

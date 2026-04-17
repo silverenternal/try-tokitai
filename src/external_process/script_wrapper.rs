@@ -17,21 +17,17 @@
 //! - Stdout/stderr capture
 
 use crate::external_process::metadata::{
-    ExternalToolMetadata,
-    ExternalToolType,
-    ScriptConfig,
-    ToolExecutionResult,
-    RiskLevel,
+    ExternalToolMetadata, ExternalToolType, RiskLevel, ScriptConfig, ToolExecutionResult,
 };
-use crate::external_process::wrapper::{ExternalTool, validation};
+use crate::external_process::wrapper::{validation, ExternalTool};
 use crate::tool_matrix::matrix::ToolDefinition;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, warn, info};
+use tracing::{debug, info, warn};
 
 /// Script wrapper for script files
 ///
@@ -220,12 +216,16 @@ impl ScriptWrapper {
         let config = self.config();
 
         // Determine interpreter
-        let interpreter = config.interpreter.clone()
+        let interpreter = config
+            .interpreter
+            .clone()
             .or_else(|| Self::detect_interpreter(&config.script_path))
-            .with_context(|| format!(
-                "Could not determine interpreter for script: {:?}",
-                config.script_path
-            ))?;
+            .with_context(|| {
+                format!(
+                    "Could not determine interpreter for script: {:?}",
+                    config.script_path
+                )
+            })?;
 
         // Verify script exists
         if !config.script_path.exists() {
@@ -308,8 +308,7 @@ impl ExternalTool for ScriptWrapper {
         }
 
         // Get input as object
-        let input_obj = input.as_object()
-            .context("Input must be a JSON object")?;
+        let input_obj = input.as_object().context("Input must be a JSON object")?;
 
         // Build command
         let cmd = self.build_command(input_obj)?;
@@ -343,7 +342,7 @@ impl ExternalTool for ScriptWrapper {
     }
 
     fn to_tool_definition(&self) -> ToolDefinition {
-        use crate::tool_matrix::matrix::{ServiceMetadata, ServiceCategory};
+        use crate::tool_matrix::matrix::{ServiceCategory, ServiceMetadata};
 
         let risk_level_str = match self.metadata.risk_level {
             RiskLevel::Low => "safe",
@@ -523,10 +522,9 @@ pub mod script_scanner {
             // Use WalkDir for recursive scanning
             for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file()
-                    && ScriptWrapper::detect_interpreter(path).is_some() {
-                        scripts.push(path.to_path_buf());
-                    }
+                if path.is_file() && ScriptWrapper::detect_interpreter(path).is_some() {
+                    scripts.push(path.to_path_buf());
+                }
             }
         } else {
             // Non-recursive: only read directory
@@ -578,7 +576,9 @@ pub mod script_scanner {
             let description = format!("Execute script: {}", script_path.display());
 
             // Create wrapper with auto-detected interpreter
-            if let Some(builder) = ScriptWrapperBuilder::with_auto_interpreter(&tool_name, script_path.clone()) {
+            if let Some(builder) =
+                ScriptWrapperBuilder::with_auto_interpreter(&tool_name, script_path.clone())
+            {
                 let wrapper = builder
                     .description(description)
                     .domain("script")
@@ -602,15 +602,27 @@ mod tests {
     use super::*;
     use crate::external_process::metadata::schema_helpers;
     use serde_json::json;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_interpreter_detection() {
-        assert_eq!(ScriptWrapper::detect_interpreter("test.sh"), Some("bash".to_string()));
-        assert_eq!(ScriptWrapper::detect_interpreter("test.py"), Some("python3".to_string()));
-        assert_eq!(ScriptWrapper::detect_interpreter("test.js"), Some("node".to_string()));
-        assert_eq!(ScriptWrapper::detect_interpreter("test.rb"), Some("ruby".to_string()));
+        assert_eq!(
+            ScriptWrapper::detect_interpreter("test.sh"),
+            Some("bash".to_string())
+        );
+        assert_eq!(
+            ScriptWrapper::detect_interpreter("test.py"),
+            Some("python3".to_string())
+        );
+        assert_eq!(
+            ScriptWrapper::detect_interpreter("test.js"),
+            Some("node".to_string())
+        );
+        assert_eq!(
+            ScriptWrapper::detect_interpreter("test.rb"),
+            Some("ruby".to_string())
+        );
         assert_eq!(ScriptWrapper::detect_interpreter("test.unknown"), None);
     }
 
@@ -637,13 +649,13 @@ mod tests {
     async fn test_script_wrapper_echo() {
         let temp_dir = TempDir::new().unwrap();
         let script_path = temp_dir.path().join("echo.sh");
-        
+
         // Create a simple echo script
         let script_content = r#"#!/bin/bash
 echo "Message: $1"
 "#;
         fs::write(&script_path, script_content).unwrap();
-        
+
         // Make executable on Unix
         #[cfg(unix)]
         {
@@ -657,9 +669,11 @@ echo "Message: $1"
             .description("Echo script")
             .interpreter("bash")
             .args(vec!["{{message}}".to_string()])
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("message", "Message to echo", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "message",
+                "Message to echo",
+                true,
+            )]))
             .domain("test")
             .tag("test")
             .build();
@@ -675,7 +689,7 @@ echo "Message: $1"
     async fn test_script_wrapper_python() {
         let temp_dir = TempDir::new().unwrap();
         let script_path = temp_dir.path().join("hello.py");
-        
+
         // Create a simple Python script
         let script_content = r#"import sys
 print(f"Hello, {sys.argv[1]}!")
@@ -686,9 +700,11 @@ print(f"Hello, {sys.argv[1]}!")
             .description("Python hello script")
             .interpreter("python3")
             .args(vec!["{{name}}".to_string()])
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("name", "Name to greet", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "name",
+                "Name to greet",
+                true,
+            )]))
             .domain("test")
             .tag("python")
             .build();
@@ -708,7 +724,7 @@ print(f"Hello, {sys.argv[1]}!")
     #[test]
     fn test_script_scanner() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // Create some test scripts
         fs::write(temp_dir.path().join("test1.sh"), "#!/bin/bash").unwrap();
         fs::write(temp_dir.path().join("test2.py"), "# Python").unwrap();
@@ -716,7 +732,7 @@ print(f"Hello, {sys.argv[1]}!")
         fs::write(temp_dir.path().join("test4.txt"), "Not a script").unwrap();
 
         let scripts = script_scanner::scan_directory(temp_dir.path(), false);
-        
+
         // Should find 3 scripts (sh, py, js)
         assert_eq!(scripts.len(), 3);
     }
@@ -727,8 +743,7 @@ print(f"Hello, {sys.argv[1]}!")
         let script_path = temp_dir.path().join("test.sh");
         fs::write(&script_path, "#!/bin/bash").unwrap();
 
-        let wrapper = ScriptWrapperBuilder::new("test", script_path)
-            .build();
+        let wrapper = ScriptWrapperBuilder::new("test", script_path).build();
 
         let input = serde_json::Map::from_iter(vec![
             ("name".to_string(), Value::String("Alice".to_string())),

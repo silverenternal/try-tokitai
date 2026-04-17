@@ -113,14 +113,14 @@ impl DictionaryCompressor {
         if let Some(ref cdict) = self.cdict {
             let mut compressor = zstd::bulk::Compressor::with_prepared_dictionary(cdict.as_ref())
                 .map_err(|e| anyhow::anyhow!("zstd dictionary compressor creation failed: {}", e))?;
-            let compressed = compressor.compress(input)
+            let compressed = compressor
+                .compress(input)
                 .map_err(|e| anyhow::anyhow!("zstd dictionary compression failed: {}", e))?;
             return Ok(compressed);
         }
 
         // 无字典，使用 plain zstd
-        let compressed = zstd::encode_all(input, 3)
-            .map_err(|e| anyhow::anyhow!("zstd compression failed: {}", e))?;
+        let compressed = zstd::encode_all(input, 3).map_err(|e| anyhow::anyhow!("zstd compression failed: {}", e))?;
 
         Ok(compressed)
     }
@@ -137,14 +137,14 @@ impl DictionaryCompressor {
                 .map_err(|e| anyhow::anyhow!("zstd dictionary decompressor creation failed: {}", e))?;
             // decompress 需要预估大小，先尝试用 10x 压缩大小作为上限
             let capacity = input.len().saturating_mul(10).max(1024);
-            let decompressed = decompressor.decompress(input, capacity)
+            let decompressed = decompressor
+                .decompress(input, capacity)
                 .map_err(|e| anyhow::anyhow!("zstd dictionary decompression failed: {}", e))?;
             return Ok(decompressed);
         }
 
         // 无字典，使用 plain zstd
-        let decompressed = zstd::decode_all(input)
-            .map_err(|e| anyhow::anyhow!("zstd decompression failed: {}", e))?;
+        let decompressed = zstd::decode_all(input).map_err(|e| anyhow::anyhow!("zstd decompression failed: {}", e))?;
 
         Ok(decompressed)
     }
@@ -268,8 +268,7 @@ impl DictionaryTrainer {
         let crc = crc32c(&crc_data);
         buffer.extend_from_slice(&crc.to_le_bytes());
 
-        std::fs::write(path, &buffer)
-            .map_err(|e| anyhow::anyhow!("Failed to write dictionary file: {}", e))?;
+        std::fs::write(path, &buffer).map_err(|e| anyhow::anyhow!("Failed to write dictionary file: {}", e))?;
 
         Ok(())
     }
@@ -280,8 +279,7 @@ impl DictionaryTrainer {
     pub fn load_dictionary(path: &Path) -> anyhow::Result<Vec<u8>> {
         use crc32c::crc32c;
 
-        let data = std::fs::read(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read dictionary file: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| anyhow::anyhow!("Failed to read dictionary file: {}", e))?;
 
         if data.len() < 12 {
             return Err(anyhow::anyhow!("Dictionary file too small"));
@@ -399,14 +397,14 @@ pub fn decompress_block(data: &[u8], is_compressed: bool, algorithm_id: u8) -> a
     match algorithm_id {
         1 => {
             // Zstd
-            let decompressed = zstd::decode_all(data)
-                .map_err(|e| anyhow::anyhow!("zstd block decompression failed: {}", e))?;
+            let decompressed =
+                zstd::decode_all(data).map_err(|e| anyhow::anyhow!("zstd block decompression failed: {}", e))?;
             Ok(decompressed)
         }
         2 => {
             // Snappy
-            let len = snap::raw::decompress_len(data)
-                .map_err(|e| anyhow::anyhow!("snappy decompress_len failed: {}", e))?;
+            let len =
+                snap::raw::decompress_len(data).map_err(|e| anyhow::anyhow!("snappy decompress_len failed: {}", e))?;
             let mut output = vec![0u8; len];
             snap::raw::Decoder::new()
                 .decompress(data, &mut output)
@@ -485,7 +483,11 @@ mod tests {
         assert_eq!(original, decompressed);
         // With repeated patterns, compression ratio should be significant
         let ratio = compressed.len() as f64 / original.len() as f64;
-        assert!(ratio < 0.5, "Compression ratio should be < 0.5 for repeated data, got {:.2}", ratio);
+        assert!(
+            ratio < 0.5,
+            "Compression ratio should be < 0.5 for repeated data, got {:.2}",
+            ratio
+        );
     }
 
     #[test]
@@ -513,7 +515,11 @@ mod tests {
         let decompressed = decompress_block(&compressed, is_compressed, algo_id).unwrap();
         assert_eq!(original, decompressed);
         let ratio = compressed.len() as f64 / original.len() as f64;
-        assert!(ratio < 0.5, "Compression ratio should be < 0.5 for repeated data, got {:.2}", ratio);
+        assert!(
+            ratio < 0.5,
+            "Compression ratio should be < 0.5 for repeated data, got {:.2}",
+            ratio
+        );
     }
 
     #[test]
@@ -583,15 +589,27 @@ mod tests {
         // Verify that each algorithm produces a unique algorithm_id
         let data = b"test data for algorithm id verification";
 
-        let config_none = BlockCompressionConfig { mode: BlockCompressionMode::None, ..BlockCompressionConfig::default() };
-        let config_zstd = BlockCompressionConfig { mode: BlockCompressionMode::Zstd, ..BlockCompressionConfig::default() };
-        let config_snappy = BlockCompressionConfig { mode: BlockCompressionMode::Snappy, ..BlockCompressionConfig::default() };
-        let config_lz4 = BlockCompressionConfig { mode: BlockCompressionMode::Lz4, ..BlockCompressionConfig::default() };
+        let config_none = BlockCompressionConfig {
+            mode: BlockCompressionMode::None,
+            ..BlockCompressionConfig::default()
+        };
+        let config_zstd = BlockCompressionConfig {
+            mode: BlockCompressionMode::Zstd,
+            ..BlockCompressionConfig::default()
+        };
+        let config_snappy = BlockCompressionConfig {
+            mode: BlockCompressionMode::Snappy,
+            ..BlockCompressionConfig::default()
+        };
+        let config_lz4 = BlockCompressionConfig {
+            mode: BlockCompressionMode::Lz4,
+            ..BlockCompressionConfig::default()
+        };
 
         let (_, _, _, id_none) = compress_block(data, &config_none).unwrap();
-        let (_, _, _, id_zstd) = compress_block(data, &config_zstd).unwrap();
-        let (_, _, _, id_snappy) = compress_block(data, &config_snappy).unwrap();
-        let (_, _, _, id_lz4) = compress_block(data, &config_lz4).unwrap();
+        let (_, _, _, _id_zstd) = compress_block(data, &config_zstd).unwrap();
+        let (_, _, _, _id_snappy) = compress_block(data, &config_snappy).unwrap();
+        let (_, _, _, _id_lz4) = compress_block(data, &config_lz4).unwrap();
 
         assert_eq!(id_none, 0);
         // Zstd/Snappy/LZ4 may skip compression if data is too small, so id could be 0
@@ -852,7 +870,11 @@ mod tests {
 
         // With repetitive patterns, 1MB should compress significantly
         let ratio = compressed.len() as f64 / original.len() as f64;
-        assert!(ratio < 0.1, "Large repetitive data should compress well, ratio: {:.4}", ratio);
+        assert!(
+            ratio < 0.1,
+            "Large repetitive data should compress well, ratio: {:.4}",
+            ratio
+        );
     }
 
     #[test]
@@ -899,8 +921,10 @@ mod tests {
 
         // Incompressible data may grow slightly due to compression overhead
         // but should not be dramatically smaller
-        assert!(compressed.len() >= original.len() / 2,
-            "Incompressible data should not compress dramatically");
+        assert!(
+            compressed.len() >= original.len() / 2,
+            "Incompressible data should not compress dramatically"
+        );
     }
 
     #[test]

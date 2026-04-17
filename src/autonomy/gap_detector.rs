@@ -10,10 +10,10 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use anyhow::Result;
 
 /// 工具缺口类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -140,7 +140,7 @@ impl ToolGapDetector {
     /// 创建新的检测器
     pub fn new(data_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
-        
+
         Ok(Self {
             data_dir,
             task_records: Vec::new(),
@@ -161,16 +161,19 @@ impl ToolGapDetector {
     pub fn record_task(&mut self, record: TaskExecutionRecord) {
         // 更新工具统计
         for tool in &record.used_tools {
-            let stats = self.tool_stats.entry(tool.clone()).or_insert_with(|| ToolUsageStats {
-                tool_name: tool.clone(),
-                usage_count: 0,
-                success_rate: 1.0,
-                avg_execution_time_ms: 0.0,
-                avg_satisfaction: 3.0,
-            });
-            
+            let stats = self
+                .tool_stats
+                .entry(tool.clone())
+                .or_insert_with(|| ToolUsageStats {
+                    tool_name: tool.clone(),
+                    usage_count: 0,
+                    success_rate: 1.0,
+                    avg_execution_time_ms: 0.0,
+                    avg_satisfaction: 3.0,
+                });
+
             stats.usage_count += 1;
-            
+
             // 更新成功率
             let total = stats.usage_count as f32;
             let successes = if record.success {
@@ -181,8 +184,9 @@ impl ToolGapDetector {
             stats.success_rate = successes / total;
 
             // 更新平均执行时间
-            stats.avg_execution_time_ms =
-                (stats.avg_execution_time_ms * (total - 1.0) as f64 + record.execution_time_ms as f64) / total as f64;
+            stats.avg_execution_time_ms = (stats.avg_execution_time_ms * (total - 1.0) as f64
+                + record.execution_time_ms as f64)
+                / total as f64;
 
             // 更新满意度
             if let Some(sat) = record.user_satisfaction {
@@ -190,43 +194,44 @@ impl ToolGapDetector {
                     (stats.avg_satisfaction * (total - 1.0) + sat as f32) / total;
             }
         }
-        
+
         self.task_records.push(record);
     }
 
     /// 分析并检测工具缺口
     pub fn analyze_and_detect(&mut self) -> Vec<&ToolGap> {
         self.identified_gaps.clear();
-        
+
         // 1. 分析失败任务
         self.detect_from_failures();
-        
+
         // 2. 分析低满意度任务
         self.detect_from_low_satisfaction();
-        
+
         // 3. 分析性能瓶颈
         self.detect_from_performance_issues();
-        
+
         // 4. 分析工具组合断点
         self.detect_combination_gaps();
-        
+
         // 按优先级排序
-        self.identified_gaps.sort_by(|a, b| b.priority.cmp(&a.priority));
-        
+        self.identified_gaps
+            .sort_by(|a, b| b.priority.cmp(&a.priority));
+
         self.identified_gaps.iter().collect()
     }
 
     /// 从失败任务中检测缺口
     fn detect_from_failures(&mut self) {
         let failed_tasks: Vec<_> = self.task_records.iter().filter(|r| !r.success).collect();
-        
+
         if failed_tasks.is_empty() {
             return;
         }
-        
+
         // 分析失败原因
         let mut failure_patterns: HashMap<String, Vec<&TaskExecutionRecord>> = HashMap::new();
-        
+
         for record in &failed_tasks {
             if let Some(reason) = &record.failure_reason {
                 // 提取关键词模式
@@ -234,7 +239,7 @@ impl ToolGapDetector {
                 failure_patterns.entry(pattern).or_default().push(record);
             }
         }
-        
+
         // 生成缺口
         for (pattern, records) in failure_patterns {
             if records.len() as u32 >= self.config.min_evidence_count {
@@ -254,7 +259,7 @@ impl ToolGapDetector {
                     }],
                     impact_scope: format!("影响{}个任务", records.len()),
                 };
-                
+
                 self.identified_gaps.push(gap);
             }
         }
@@ -262,22 +267,27 @@ impl ToolGapDetector {
 
     /// 从低满意度任务中检测缺口
     fn detect_from_low_satisfaction(&mut self) {
-        let low_sat_tasks: Vec<_> = self.task_records.iter()
-            .filter(|r| r.user_satisfaction.is_some_and(|s| s as f32 <= self.config.low_satisfaction_threshold))
+        let low_sat_tasks: Vec<_> = self
+            .task_records
+            .iter()
+            .filter(|r| {
+                r.user_satisfaction
+                    .is_some_and(|s| s as f32 <= self.config.low_satisfaction_threshold)
+            })
             .collect();
-        
+
         if low_sat_tasks.is_empty() {
             return;
         }
-        
+
         // 分析共同特征
         let mut common_issues: HashMap<String, Vec<&TaskExecutionRecord>> = HashMap::new();
-        
+
         for record in &low_sat_tasks {
             let issue = self.extract_satisfaction_issue(record);
             common_issues.entry(issue).or_default().push(record);
         }
-        
+
         for (issue, records) in common_issues {
             if records.len() as u32 >= self.config.min_evidence_count {
                 let gap = ToolGap {
@@ -296,7 +306,7 @@ impl ToolGapDetector {
                     }],
                     impact_scope: format!("影响{}个任务的用户体验", records.len()),
                 };
-                
+
                 self.identified_gaps.push(gap);
             }
         }
@@ -305,11 +315,15 @@ impl ToolGapDetector {
     /// 从性能问题中检测缺口
     fn detect_from_performance_issues(&mut self) {
         for (tool_name, stats) in &self.tool_stats {
-            if stats.avg_execution_time_ms > self.config.performance_degradation_threshold_ms as f64 {
+            if stats.avg_execution_time_ms > self.config.performance_degradation_threshold_ms as f64
+            {
                 let gap = ToolGap {
                     id: format!("gap_perf_{}", tool_name),
                     gap_type: GapType::PerformanceBottleneck,
-                    description: format!("工具{}执行时间过长（平均{:.0}ms）", tool_name, stats.avg_execution_time_ms),
+                    description: format!(
+                        "工具{}执行时间过长（平均{:.0}ms）",
+                        tool_name, stats.avg_execution_time_ms
+                    ),
                     suggested_tool_name: Some(format!("{}_optimized", tool_name)),
                     suggested_capabilities: vec![
                         "优化执行性能".to_string(),
@@ -318,14 +332,17 @@ impl ToolGapDetector {
                     priority: 7,
                     evidence: vec![GapEvidence {
                         evidence_type: "performance_issue".to_string(),
-                        description: format!("平均执行时间{:.0}ms，超过阈值", stats.avg_execution_time_ms),
+                        description: format!(
+                            "平均执行时间{:.0}ms，超过阈值",
+                            stats.avg_execution_time_ms
+                        ),
                         confidence: 0.9,
                         related_task_ids: Vec::new(),
                         occurrence_count: stats.usage_count,
                     }],
                     impact_scope: format!("影响{}次工具调用", stats.usage_count),
                 };
-                
+
                 self.identified_gaps.push(gap);
             }
         }
@@ -335,7 +352,7 @@ impl ToolGapDetector {
     fn detect_combination_gaps(&mut self) {
         // 分析经常一起出现但缺少直接组合的工具
         let mut tool_pairs: HashMap<(String, String), u32> = HashMap::new();
-        
+
         for record in &self.task_records {
             let tools = &record.used_tools;
             for i in 0..tools.len() {
@@ -345,7 +362,7 @@ impl ToolGapDetector {
                 }
             }
         }
-        
+
         // 找出频繁共现但没有组合工具的情况
         for ((tool1, tool2), count) in &tool_pairs {
             if *count >= self.config.min_evidence_count {
@@ -355,7 +372,10 @@ impl ToolGapDetector {
                     let gap = ToolGap {
                         id: format!("gap_combo_{}_{}", tool1, tool2),
                         gap_type: GapType::CombinationGap,
-                        description: format!("工具{}和{}经常一起使用，建议创建组合工具", tool1, tool2),
+                        description: format!(
+                            "工具{}和{}经常一起使用，建议创建组合工具",
+                            tool1, tool2
+                        ),
                         suggested_tool_name: Some(combo_name),
                         suggested_capabilities: vec![
                             format!("整合{}的功能", tool1),
@@ -372,7 +392,7 @@ impl ToolGapDetector {
                         }],
                         impact_scope: format!("影响{}个任务", count),
                     };
-                    
+
                     self.identified_gaps.push(gap);
                 }
             }
@@ -461,7 +481,7 @@ mod tests {
     fn test_record_task() {
         let temp_dir = TempDir::new().unwrap();
         let mut detector = ToolGapDetector::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         let record = TaskExecutionRecord {
             task_id: "test_1".to_string(),
             task_description: "Test task".to_string(),
@@ -471,7 +491,7 @@ mod tests {
             failure_reason: None,
             user_satisfaction: Some(5),
         };
-        
+
         detector.record_task(record);
         assert_eq!(detector.task_records.len(), 1);
         assert!(detector.tool_stats.contains_key("tool_a"));
@@ -481,7 +501,7 @@ mod tests {
     fn test_detect_from_failures() {
         let temp_dir = TempDir::new().unwrap();
         let mut detector = ToolGapDetector::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         // 记录多个相似失败任务
         for i in 0..5 {
             detector.record_task(TaskExecutionRecord {
@@ -494,7 +514,7 @@ mod tests {
                 user_satisfaction: Some(1),
             });
         }
-        
+
         let gaps = detector.analyze_and_detect();
         assert!(!gaps.is_empty());
     }

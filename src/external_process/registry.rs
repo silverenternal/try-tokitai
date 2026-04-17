@@ -11,21 +11,21 @@
 
 #![allow(dead_code)]
 
-use crate::external_process::metadata::{ExternalToolMetadata, RiskLevel};
-use crate::external_process::wrapper::ExternalTool;
-use crate::external_process::process_wrapper::{ProcessWrapper, ProcessWrapperBuilder};
 use crate::external_process::http_wrapper::{HTTPWrapper, HTTPWrapperBuilder};
-use crate::external_process::script_wrapper::{ScriptWrapper, ScriptWrapperBuilder};
 use crate::external_process::metadata::ExternalToolType;
-use crate::tool_matrix::matrix::{ToolDefinition, ToolBox};
-use crate::tool_matrix::registry::ToolSource;
+use crate::external_process::metadata::{ExternalToolMetadata, RiskLevel};
+use crate::external_process::process_wrapper::{ProcessWrapper, ProcessWrapperBuilder};
+use crate::external_process::script_wrapper::{ScriptWrapper, ScriptWrapperBuilder};
+use crate::external_process::wrapper::ExternalTool;
+use crate::tool_matrix::matrix::{ToolBox, ToolDefinition};
 use crate::tool_matrix::registry::ToolRegistry;
-use anyhow::{Context, Result, bail};
+use crate::tool_matrix::registry::ToolSource;
+use anyhow::{bail, Context, Result};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tracing::{debug, info, warn};
 
 /// External tool registry entry
@@ -82,7 +82,10 @@ impl ExternalTool for ExternalToolEntry {
         self.metadata()
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<crate::external_process::metadata::ToolExecutionResult> {
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<crate::external_process::metadata::ToolExecutionResult> {
         match self {
             Self::Process(wrapper) => wrapper.execute(input).await,
             Self::Http(wrapper) => wrapper.execute(input).await,
@@ -138,14 +141,13 @@ pub struct ExternalToolRegistry {
 impl ExternalToolRegistry {
     /// Create a new external tool registry
     pub fn new() -> Result<Self> {
-        let workspace_root = std::env::current_dir()
-            .context("Failed to get current directory")?;
+        let workspace_root = std::env::current_dir().context("Failed to get current directory")?;
         let storage_dir = workspace_root.join(".tokitai").join("external_tools");
-        
+
         // Create storage directory
         std::fs::create_dir_all(&storage_dir)
             .with_context(|| format!("Failed to create storage directory: {:?}", storage_dir))?;
-        
+
         Ok(Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
             storage_dir,
@@ -156,11 +158,11 @@ impl ExternalToolRegistry {
     /// Create with custom storage directory
     pub fn with_storage_dir<P: AsRef<Path>>(storage_dir: P) -> Result<Self> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
-        
+
         // Create storage directory
         std::fs::create_dir_all(&storage_dir)
             .with_context(|| format!("Failed to create storage directory: {:?}", storage_dir))?;
-        
+
         Ok(Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
             storage_dir,
@@ -251,14 +253,14 @@ impl ExternalToolRegistry {
     /// Register multiple tools from metadata
     pub fn register_batch(&self, metadata_list: Vec<ExternalToolMetadata>) -> Result<usize> {
         let mut registered_count = 0;
-        
+
         for metadata in metadata_list {
             match self.register_from_metadata(metadata) {
                 Ok(()) => registered_count += 1,
                 Err(e) => warn!("Failed to register tool: {}", e),
             }
         }
-        
+
         info!("Registered {} tools from batch", registered_count);
         Ok(registered_count)
     }
@@ -284,7 +286,8 @@ impl ExternalToolRegistry {
     /// Get tools by domain
     pub fn get_tools_by_domain(&self, domain: &str) -> Vec<ExternalToolEntry> {
         let tools = self.tools.read();
-        tools.values()
+        tools
+            .values()
             .filter(|t| t.domain() == domain)
             .cloned()
             .collect()
@@ -293,7 +296,8 @@ impl ExternalToolRegistry {
     /// Get tools by tag
     pub fn get_tools_by_tag(&self, tag: &str) -> Vec<ExternalToolEntry> {
         let tools = self.tools.read();
-        tools.values()
+        tools
+            .values()
             .filter(|t| t.metadata().tags.contains(&tag.to_string()))
             .cloned()
             .collect()
@@ -302,16 +306,16 @@ impl ExternalToolRegistry {
     /// Remove a tool
     pub fn remove_tool(&self, name: &str) -> Result<()> {
         let mut tools = self.tools.write();
-        
+
         if tools.remove(name).is_some() {
             info!("Removed tool: {}", name);
-            
+
             // Remove metadata file if exists
             let meta_file = self.storage_dir.join(format!("{}.json", name));
             if meta_file.exists() {
                 std::fs::remove_file(&meta_file)?;
             }
-            
+
             Ok(())
         } else {
             bail!("Tool not found: {}", name)
@@ -321,14 +325,15 @@ impl ExternalToolRegistry {
     /// Enable/disable a tool
     pub fn set_tool_enabled(&self, name: &str, enabled: bool) -> Result<()> {
         let mut tools = self.tools.write();
-        
-        let entry = tools.get_mut(name)
+
+        let entry = tools
+            .get_mut(name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", name))?;
-        
+
         // Note: This is a simplified implementation
         // In a full implementation, we would need to update the metadata
         // which requires mutable access to the wrapper
-        
+
         info!("Tool {} {}abled", name, if enabled { "en" } else { "dis" });
         Ok(())
     }
@@ -336,16 +341,17 @@ impl ExternalToolRegistry {
     /// Save tool metadata to storage
     pub fn save_tool_metadata(&self, name: &str) -> Result<()> {
         let tools = self.tools.read();
-        
-        let entry = tools.get(name)
+
+        let entry = tools
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", name))?;
-        
+
         let metadata = entry.metadata();
         let file_path = self.storage_dir.join(format!("{}.json", name));
-        
+
         let content = serde_json::to_string_pretty(metadata)?;
         std::fs::write(&file_path, content)?;
-        
+
         debug!("Saved tool metadata: {:?}", file_path);
         Ok(())
     }
@@ -353,29 +359,29 @@ impl ExternalToolRegistry {
     /// Load tool metadata from storage
     pub fn load_tool_metadata(&self, name: &str) -> Result<ExternalToolMetadata> {
         let file_path = self.storage_dir.join(format!("{}.json", name));
-        
+
         if !file_path.exists() {
             bail!("Metadata file not found: {:?}", file_path);
         }
-        
+
         let content = std::fs::read_to_string(&file_path)?;
         let metadata: ExternalToolMetadata = serde_json::from_str(&content)?;
-        
+
         Ok(metadata)
     }
 
     /// Load all tool metadata from storage
     pub fn load_all_metadata(&self) -> Result<Vec<ExternalToolMetadata>> {
         let mut metadata_list = Vec::new();
-        
+
         if !self.storage_dir.exists() {
             return Ok(metadata_list);
         }
-        
+
         for entry in std::fs::read_dir(&self.storage_dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if let Ok(metadata) = serde_json::from_str::<ExternalToolMetadata>(&content) {
@@ -384,7 +390,7 @@ impl ExternalToolRegistry {
                 }
             }
         }
-        
+
         info!("Loaded {} tool metadata", metadata_list.len());
         Ok(metadata_list)
     }
@@ -393,18 +399,18 @@ impl ExternalToolRegistry {
     pub fn register_to_tool_matrix(&self, tool_registry: &mut ToolRegistry) -> Result<usize> {
         let tools = self.tools.read();
         let mut registered_count = 0;
-        
+
         for entry in tools.values() {
             if !entry.is_enabled() {
                 debug!("Skipping disabled tool: {}", entry.name());
                 continue;
             }
-            
+
             let tool_def = entry.to_tool_definition();
-            
+
             // Determine toolbox based on domain
             let toolbox_id = self.get_toolbox_for_domain(entry.domain());
-            
+
             // Ensure toolbox exists
             if tool_registry.get_toolbox(&toolbox_id).is_none() {
                 let toolbox = ToolBox::new(
@@ -414,7 +420,7 @@ impl ExternalToolRegistry {
                 );
                 tool_registry.create_toolbox(toolbox)?;
             }
-            
+
             // Register tool
             match tool_registry.register_tool_to_box_sync(
                 tool_def,
@@ -422,7 +428,11 @@ impl ExternalToolRegistry {
                 ToolSource::Dynamic,
             ) {
                 Ok(()) => {
-                    info!("Registered {} to tool matrix (toolbox: {})", entry.name(), toolbox_id);
+                    info!(
+                        "Registered {} to tool matrix (toolbox: {})",
+                        entry.name(),
+                        toolbox_id
+                    );
                     registered_count += 1;
                 }
                 Err(e) => {
@@ -430,8 +440,11 @@ impl ExternalToolRegistry {
                 }
             }
         }
-        
-        info!("Registered {} external tools to tool matrix", registered_count);
+
+        info!(
+            "Registered {} external tools to tool matrix",
+            registered_count
+        );
         Ok(registered_count)
     }
 
@@ -454,24 +467,24 @@ impl ExternalToolRegistry {
     /// Get registry statistics
     pub fn stats(&self) -> ExternalRegistryStats {
         let tools = self.tools.read();
-        
+
         let mut process_count = 0;
         let mut http_count = 0;
         let mut script_count = 0;
         let mut enabled_count = 0;
-        
+
         for entry in tools.values() {
             match entry {
                 ExternalToolEntry::Process(_) => process_count += 1,
                 ExternalToolEntry::Http(_) => http_count += 1,
                 ExternalToolEntry::Script(_) => script_count += 1,
             }
-            
+
             if entry.is_enabled() {
                 enabled_count += 1;
             }
         }
-        
+
         ExternalRegistryStats {
             total_count: tools.len(),
             process_count,
@@ -554,19 +567,19 @@ impl ExternalToolBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::external_process::process_wrapper::ProcessWrapperBuilder;
     use crate::external_process::metadata::{schema_helpers, ProcessConfig};
-    use tempfile::TempDir;
+    use crate::external_process::process_wrapper::ProcessWrapperBuilder;
     use serde_json::json;
+    use tempfile::TempDir;
 
     #[test]
     fn test_registry_creation() -> Result<()> {
         let temp_dir = TempDir::new().unwrap();
         let registry = ExternalToolRegistry::with_storage_dir(temp_dir.path())?;
-        
+
         assert_eq!(registry.get_tool_names().len(), 0);
         assert!(registry.storage_dir().exists());
-        
+
         Ok(())
     }
 
@@ -574,21 +587,23 @@ mod tests {
     fn test_register_process() -> Result<()> {
         let temp_dir = TempDir::new().unwrap();
         let registry = ExternalToolRegistry::with_storage_dir(temp_dir.path())?;
-        
+
         let wrapper = ProcessWrapperBuilder::new("test_echo", "echo")
             .description("Test echo command")
             .args(vec!["{{message}}".to_string()])
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("message", "Message to echo", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "message",
+                "Message to echo",
+                true,
+            )]))
             .domain("test")
             .build();
-        
+
         registry.register_process(wrapper)?;
-        
+
         assert_eq!(registry.get_tool_names().len(), 1);
         assert!(registry.get_tool("test_echo").is_some());
-        
+
         Ok(())
     }
 
@@ -596,9 +611,9 @@ mod tests {
     fn test_register_batch() -> Result<()> {
         let temp_dir = TempDir::new().unwrap();
         let registry = ExternalToolRegistry::with_storage_dir(temp_dir.path())?;
-        
+
         let mut metadata_list = Vec::new();
-        
+
         // Create test metadata
         for i in 0..3 {
             let config = ProcessConfig::new(format!("test_cmd_{}", i));
@@ -612,11 +627,11 @@ mod tests {
             );
             metadata_list.push(metadata);
         }
-        
+
         let registered = registry.register_batch(metadata_list)?;
         assert_eq!(registered, 3);
         assert_eq!(registry.get_tool_names().len(), 3);
-        
+
         Ok(())
     }
 
@@ -624,19 +639,19 @@ mod tests {
     fn test_save_load_metadata() -> Result<()> {
         let temp_dir = TempDir::new().unwrap();
         let registry = ExternalToolRegistry::with_storage_dir(temp_dir.path())?;
-        
+
         let wrapper = ProcessWrapperBuilder::new("test_save", "echo")
             .description("Test save")
             .domain("test")
             .build();
-        
+
         registry.register_process(wrapper)?;
         registry.save_tool_metadata("test_save")?;
-        
+
         // Load metadata
         let metadata = registry.load_tool_metadata("test_save")?;
         assert_eq!(metadata.name, "test_save");
-        
+
         Ok(())
     }
 
@@ -644,20 +659,19 @@ mod tests {
     fn test_registry_stats() -> Result<()> {
         let temp_dir = TempDir::new().unwrap();
         let registry = ExternalToolRegistry::with_storage_dir(temp_dir.path())?;
-        
+
         let stats = registry.stats();
         assert_eq!(stats.total_count, 0);
         assert_eq!(stats.process_count, 0);
-        
+
         // Register a tool
-        let wrapper = ProcessWrapperBuilder::new("test_stats", "echo")
-            .build();
+        let wrapper = ProcessWrapperBuilder::new("test_stats", "echo").build();
         registry.register_process(wrapper)?;
-        
+
         let stats = registry.stats();
         assert_eq!(stats.total_count, 1);
         assert_eq!(stats.process_count, 1);
-        
+
         Ok(())
     }
 }

@@ -3,9 +3,7 @@
 //! Provides factory functions to create compression strategies based on
 //! the configured `BlockCompressionMode`.
 
-use crate::compression::strategy::{
-    CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor,
-};
+use crate::compression::strategy::{CompressionStrategy, Lz4Compressor, SnappyCompressor, ZstdCompressor};
 use crate::core::types::BlockCompressionMode;
 
 /// Create a compressor based on the configured compression mode

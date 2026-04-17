@@ -16,10 +16,10 @@
 //! - Level 4: 5.0%
 //! - Level 5: 10.0% (lowest accuracy, for cold segments)
 
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
 use dashmap::DashMap;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use tracing::debug;
 
 use super::migration::{AccessRecord, MigrationThresholds};
@@ -48,17 +48,17 @@ impl FPRLevel {
 /// Predefined FPR levels
 impl FPRLevel {
     /// Level 0: Highest accuracy (hot segments)
-    pub const LEVEL_0: Self = Self::new(0.001, 2.0, 100.0);   // 0.1%
+    pub const LEVEL_0: Self = Self::new(0.001, 2.0, 100.0); // 0.1%
     /// Level 1: High accuracy
-    pub const LEVEL_1: Self = Self::new(0.005, 1.5, 50.0);    // 0.5%
+    pub const LEVEL_1: Self = Self::new(0.005, 1.5, 50.0); // 0.5%
     /// Level 2: Default accuracy
-    pub const LEVEL_2: Self = Self::new(0.01, 1.0, 10.0);     // 1.0%
+    pub const LEVEL_2: Self = Self::new(0.01, 1.0, 10.0); // 1.0%
     /// Level 3: Medium accuracy
-    pub const LEVEL_3: Self = Self::new(0.02, 0.75, 5.0);     // 2.0%
+    pub const LEVEL_3: Self = Self::new(0.02, 0.75, 5.0); // 2.0%
     /// Level 4: Low accuracy
-    pub const LEVEL_4: Self = Self::new(0.05, 0.5, 1.0);      // 5.0%
+    pub const LEVEL_4: Self = Self::new(0.05, 0.5, 1.0); // 5.0%
     /// Level 5: Lowest accuracy (cold segments)
-    pub const LEVEL_5: Self = Self::new(0.10, 0.25, 0.0);     // 10.0%
+    pub const LEVEL_5: Self = Self::new(0.10, 0.25, 0.0); // 10.0%
 }
 
 /// FPR adaptation policy configuration
@@ -81,7 +81,7 @@ impl Default for AdaptationPolicy {
         Self {
             min_level: 0,
             max_level: 5,
-            hysteresis: 0.2, // 20% hysteresis
+            hysteresis: 0.2,                  // 20% hysteresis
             stabilization_window_ms: 120_000, // 2 minutes
             gradual_transitions: true,
         }
@@ -251,7 +251,7 @@ impl FPRController {
                 .unwrap_or_default()
                 .as_millis() as u64;
             let last_adjustment = state.last_adjustment_ms.load(Ordering::Relaxed);
-            
+
             if now_ms.saturating_sub(last_adjustment) < self.policy.stabilization_window_ms {
                 // Still in stabilization window, don't adjust yet
                 state.set_target_level(target_level);
@@ -264,7 +264,8 @@ impl FPRController {
             }
 
             // Apply gradual transition if enabled
-            let new_level = if self.policy.gradual_transitions && (target_level as i16 - current_level as i16).abs() > 1 {
+            let new_level = if self.policy.gradual_transitions && (target_level as i16 - current_level as i16).abs() > 1
+            {
                 if target_level > current_level {
                     current_level + 1
                 } else {
@@ -333,7 +334,9 @@ impl FPRController {
     /// Returns base estimate if level is out of bounds.
     pub fn estimate_memory(&self, num_elements: usize, level: u8) -> usize {
         let base_size = num_elements * 10; // ~10 bits per element
-        let multiplier = self.levels.get(level as usize)
+        let multiplier = self
+            .levels
+            .get(level as usize)
             .map(|l| l.memory_multiplier)
             .unwrap_or(1.0); // default multiplier for out-of-bounds
         (base_size as f64 * multiplier) as usize
@@ -446,7 +449,6 @@ impl FPRAdjustedBloom {
 
     /// Build the bloom filter
     pub fn build(&self) -> bloom::BloomFilter {
-        
         bloom::BloomFilter::with_rate(self.fpr as f32, self.num_elements.try_into().unwrap_or(10000))
     }
 
@@ -456,12 +458,12 @@ impl FPRAdjustedBloom {
         let base_bits = self.num_elements * 10;
         // Adjust based on FPR level
         let level_multiplier = match self.level {
-            0 => 2.0,   // 0.1% = 2x memory
-            1 => 1.5,   // 0.5% = 1.5x
-            2 => 1.0,   // 1.0% = base
-            3 => 0.75,  // 2.0% = 0.75x
-            4 => 0.5,   // 5.0% = 0.5x
-            _ => 0.25,  // 10.0% = 0.25x
+            0 => 2.0,  // 0.1% = 2x memory
+            1 => 1.5,  // 0.5% = 1.5x
+            2 => 1.0,  // 1.0% = base
+            3 => 0.75, // 2.0% = 0.75x
+            4 => 0.5,  // 5.0% = 0.5x
+            _ => 0.25, // 10.0% = 0.25x
         };
         (base_bits as f64 * level_multiplier / 8.0) as usize // Convert bits to bytes
     }
@@ -485,11 +487,11 @@ mod tests {
     #[test]
     fn test_fpr_controller_default() {
         let controller = FPRController::with_defaults();
-        
+
         // Default level should be 2
         let level = controller.get_level(1);
         assert_eq!(level, 2);
-        
+
         // Default FPR should be 1%
         let fpr = controller.get_current_fpr(1);
         assert!((fpr - 0.01).abs() < 0.001);
@@ -498,15 +500,15 @@ mod tests {
     #[test]
     fn test_fpr_controller_level_determination() {
         let controller = FPRController::with_defaults();
-        
+
         // High QPS should give low level (better accuracy)
         let level_high = controller.determine_target_level(150.0);
         assert!(level_high <= 1);
-        
+
         // Medium QPS
         let level_med = controller.determine_target_level(20.0);
-        assert!(level_med >= 1 && level_med <= 3);
-        
+        assert!((1..=3).contains(&level_med));
+
         // Low QPS should give high level (worse accuracy)
         let level_low = controller.determine_target_level(0.5);
         assert_eq!(level_low, 5);
@@ -515,11 +517,11 @@ mod tests {
     #[test]
     fn test_fpr_controller_memory_estimate() {
         let controller = FPRController::with_defaults();
-        
+
         // Level 0 should use more memory than level 5
         let mem_l0 = controller.estimate_memory(10000, 0);
         let mem_l5 = controller.estimate_memory(10000, 5);
-        
+
         assert!(mem_l0 > mem_l5);
         assert!((mem_l0 as f64 / mem_l5 as f64) > 4.0); // Should be roughly 8x
     }
@@ -528,10 +530,10 @@ mod tests {
     fn test_fpr_adjusted_bloom() {
         let spec = FPRAdjustedBloom::new(1000, 0.01, 2);
         let bloom = spec.build();
-        
+
         // Verify bloom filter was created
-        assert!(bloom.contains(&"test".to_string()) == false);
-        
+        assert!(!bloom.contains(&"test".to_string()));
+
         // Check memory estimate
         let mem = spec.estimated_memory();
         assert!(mem > 0);
@@ -540,7 +542,7 @@ mod tests {
     #[test]
     fn test_fpr_controller_stats() {
         let controller = FPRController::with_defaults();
-        
+
         // Access a segment to create state
         let access = AccessRecord {
             total_count: 100,
@@ -548,7 +550,7 @@ mod tests {
             window_duration_ms: 5000,
             current_layer: 2,
         };
-        
+
         controller.record_access(1, &access);
 
         let stats = controller.stats();

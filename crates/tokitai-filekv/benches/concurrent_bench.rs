@@ -8,19 +8,19 @@
 //! - BENCH-004: 修复吞吐量计算错误 (thread_count vs total_ops)
 //! - BENCH-005: 修复 pre-population 在 iter_custom 内的问题
 
-use std::sync::Arc;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use rand::Rng;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-use rand::Rng;
 
-use tokitai_filekv::{FileKV, FileKVConfig, MemTableConfig, DictionaryCompressionConfig, AggressiveConfig};
 use tokitai_filekv::cache::block_cache::BlockCacheConfig;
 use tokitai_filekv::compaction::CompactionConfig;
-use tokitai_filekv::AuditLogConfig;
 use tokitai_filekv::core::types::BlockCompressionConfig;
 use tokitai_filekv::io::MemFs;
+use tokitai_filekv::AuditLogConfig;
+use tokitai_filekv::{AggressiveConfig, FileKV, FileKVConfig, MemTableConfig};
 
 /// Create test FileKV instance for concurrent benchmarks
 fn setup_concurrent_kv() -> (tempfile::TempDir, FileKV) {
@@ -38,6 +38,7 @@ fn setup_concurrent_kv() -> (tempfile::TempDir, FileKV) {
             flush_threshold_bytes: 64 * 1024 * 1024,
             max_entries: 1_000_000,
             max_memory_bytes: 256 * 1024 * 1024,
+            ..Default::default()
         },
         segment_dir,
         enable_wal: true,
@@ -46,10 +47,10 @@ fn setup_concurrent_kv() -> (tempfile::TempDir, FileKV) {
         cache: BlockCacheConfig {
             max_items: 100_000,
             max_memory_bytes: 256 * 1024 * 1024,
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 100,
         block_size: 8192,
         block_compression: BlockCompressionConfig::default(),
         compaction: CompactionConfig {
@@ -65,31 +66,17 @@ fn setup_concurrent_kv() -> (tempfile::TempDir, FileKV) {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: true,
             streaming_compaction_enabled: true,
+            ..Default::default()
         },
-        segment_preallocate_size: 64 * 1024 * 1024,
-        wal_max_size_bytes: 1024 * 1024 * 1024,
-        wal_max_files: 10,
-        cache_warming_enabled: false,
-        compression: DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 8,
-        async_io_max_queue_depth: 4096,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         audit_log: AuditLogConfig {
             log_dir: temp_dir.path().join("audit_logs"),
             enabled: false,
-            rotation_interval_hours: 24,
-            retention_days: 30,
+            ..Default::default()
         },
         aggressive: AggressiveConfig::performance(),
-        enable_adaptive_bloom_cache: true,
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: Arc::new(MemFs::new()),
+        ..Default::default()
     };
 
     let kv = FileKV::open(config).unwrap();
@@ -185,8 +172,13 @@ fn bench_concurrent_mixed_workload(c: &mut Criterion) {
                     } else {
                         0.0
                     };
-                    println!("  [mixed_workload] Ops/sec: {:.0} (threads={}, total_ops={}, duration={:.3}s)",
-                             ops_per_sec, thread_count, total_ops, total_duration.as_secs_f64());
+                    println!(
+                        "  [mixed_workload] Ops/sec: {:.0} (threads={}, total_ops={}, duration={:.3}s)",
+                        ops_per_sec,
+                        thread_count,
+                        total_ops,
+                        total_duration.as_secs_f64()
+                    );
 
                     total_duration
                 });
@@ -266,8 +258,13 @@ fn bench_concurrent_read_scalability(c: &mut Criterion) {
                     } else {
                         0.0
                     };
-                    println!("  [read_scalability] Reads/sec: {:.0} (threads={}, total_reads={}, duration={:.3}s)",
-                             reads_per_sec, thread_count, total_reads, total_duration.as_secs_f64());
+                    println!(
+                        "  [read_scalability] Reads/sec: {:.0} (threads={}, total_reads={}, duration={:.3}s)",
+                        reads_per_sec,
+                        thread_count,
+                        total_reads,
+                        total_duration.as_secs_f64()
+                    );
 
                     total_duration
                 });

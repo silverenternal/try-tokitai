@@ -3,9 +3,9 @@
 //! 提供统一的 URL 和 IP 地址安全检查，防止服务器端请求伪造攻击
 //! 所有网络工具都应通过此模块进行安全验证
 
+use parking_lot::RwLock;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
-use parking_lot::RwLock;
 use url::Url;
 
 use super::error::{NetworkResult, SsrfError};
@@ -43,7 +43,7 @@ impl Default for SsrfConfig {
                 "localhost.localdomain".to_string(),
                 "internal".to_string(),
                 "intranet".to_string(),
-                "metric".to_string(),  // 防止访问云服务商元数据
+                "metric".to_string(), // 防止访问云服务商元数据
             ],
             sensitive_paths: vec![
                 "/etc".to_string(),
@@ -139,7 +139,10 @@ pub fn validate_url(url: &str) -> NetworkResult<()> {
 }
 
 /// 验证 URL 是否安全（带配置）
-pub fn validate_url_with_config(url: &str, runtime_config: &RuntimeSsrfConfig) -> NetworkResult<()> {
+pub fn validate_url_with_config(
+    url: &str,
+    runtime_config: &RuntimeSsrfConfig,
+) -> NetworkResult<()> {
     let config = &runtime_config.config;
 
     // 检查 URL 长度
@@ -205,7 +208,10 @@ pub fn check_ip_safety(ip: &IpAddr) -> NetworkResult<()> {
 }
 
 /// 检查 IP 地址是否安全（带配置）
-pub fn check_ip_safety_with_config(ip: &IpAddr, runtime_config: &RuntimeSsrfConfig) -> NetworkResult<()> {
+pub fn check_ip_safety_with_config(
+    ip: &IpAddr,
+    runtime_config: &RuntimeSsrfConfig,
+) -> NetworkResult<()> {
     check_ip_safety_internal(ip, runtime_config)
 }
 
@@ -309,7 +315,10 @@ pub fn validate_save_path(path: &str) -> NetworkResult<()> {
 }
 
 /// 验证保存路径是否安全（带配置）
-pub fn validate_save_path_with_config(path: &str, runtime_config: &RuntimeSsrfConfig) -> NetworkResult<()> {
+pub fn validate_save_path_with_config(
+    path: &str,
+    runtime_config: &RuntimeSsrfConfig,
+) -> NetworkResult<()> {
     let config = &runtime_config.config;
 
     // 检查路径长度
@@ -321,18 +330,17 @@ pub fn validate_save_path_with_config(path: &str, runtime_config: &RuntimeSsrfCo
 
     // 规范化路径（解析符号链接和相对路径）
     let absolute_path = if path_buf.exists() {
-        path_buf.canonicalize().map_err(|e| {
-            SsrfError::InvalidUrl(format!("规范化路径失败：{}", e))
-        })?
+        path_buf
+            .canonicalize()
+            .map_err(|e| SsrfError::InvalidUrl(format!("规范化路径失败：{}", e)))?
     } else {
         // 路径不存在，尝试规范化
         path_buf.clone()
     };
 
     // 获取当前工作目录
-    let cwd = std::env::current_dir().map_err(|e| {
-        SsrfError::InvalidUrl(format!("获取当前目录失败：{}", e))
-    })?;
+    let cwd = std::env::current_dir()
+        .map_err(|e| SsrfError::InvalidUrl(format!("获取当前目录失败：{}", e)))?;
 
     // 检查路径是否在当前目录或其子目录下
     if !absolute_path.starts_with(&cwd) {
@@ -459,35 +467,45 @@ mod tests {
         // 公网 IP 应该安全
         assert!(is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(8, 8, 8, 8))));
         assert!(is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(1, 1, 1, 1))));
-        assert!(is_ip_safe(&IpAddr::V6(std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))));
+        assert!(is_ip_safe(&IpAddr::V6(std::net::Ipv6Addr::new(
+            0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+        ))));
     }
 
     #[test]
     fn test_check_ip_safety_private() {
         // 内网 IP 应该不安全
-        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))));
-        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1))));
-        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))));
-        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(172, 16, 0, 1))));
+        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(
+            127, 0, 0, 1
+        ))));
+        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(
+            192, 168, 1, 1
+        ))));
+        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(
+            10, 0, 0, 1
+        ))));
+        assert!(!is_ip_safe(&IpAddr::V4(std::net::Ipv4Addr::new(
+            172, 16, 0, 1
+        ))));
     }
 
     #[test]
     fn test_runtime_config_dynamic_rules() {
         let config = RuntimeSsrfConfig::new();
-        
+
         // 动态添加黑名单
         let blocked_ip = IpAddr::V4(std::net::Ipv4Addr::new(1, 2, 3, 4));
         config.block_ip(blocked_ip);
-        
+
         // 该 IP 应该被拒绝
         assert!(check_ip_safety_with_config(&blocked_ip, &config).is_err());
-        
+
         // 动态添加白名单（优先级更高）
         config.allow_ip(blocked_ip);
-        
+
         // 现在应该允许
         assert!(check_ip_safety_with_config(&blocked_ip, &config).is_ok());
-        
+
         // 清空规则
         config.clear_dynamic_rules();
     }
@@ -504,7 +522,8 @@ mod tests {
         assert!(check_ip_safety_with_config(
             &IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             &runtime_config
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]

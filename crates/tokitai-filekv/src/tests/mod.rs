@@ -8,10 +8,10 @@
 //! - wal_recovery: WAL recovery tests
 //! - stability: Long-running stability tests
 
-pub mod integration;
 pub mod batch_atomic;
-pub mod write_buffer;
-pub mod range_query;
-pub mod wal_recovery;
-pub mod stability;
+pub mod integration;
 pub mod property_tests;
+pub mod range_query;
+pub mod stability;
+pub mod wal_recovery;
+pub mod write_buffer;

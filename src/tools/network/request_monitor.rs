@@ -2,10 +2,10 @@
 //!
 //! 提供请求统计、日志记录和背压控制
 
-use std::sync::Arc;
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
-use chrono::{DateTime, Utc};
+use std::sync::Arc;
 
 // ============================================================================
 // 数据结构
@@ -139,8 +139,7 @@ impl RequestMonitor {
         // 更新平均响应时间
         let total = stats.successful_requests + stats.failed_requests;
         stats.avg_response_time_ms =
-            (stats.avg_response_time_ms * (total - 1) as f64 + duration_ms)
-                / total as f64;
+            (stats.avg_response_time_ms * (total - 1) as f64 + duration_ms) / total as f64;
 
         // 记录日志（保留最近 max_logs 条）
         let mut logs = self.logs.write();
@@ -163,7 +162,7 @@ impl RequestMonitor {
         if latencies.len() > 1000 {
             latencies.pop_front();
         }
-        
+
         // 更新百分位数
         self.update_percentile_stats(&mut stats, &latencies);
     }
@@ -186,7 +185,7 @@ impl RequestMonitor {
     /// 更新背压状态
     fn update_backpressure_status(&self, queue_len: usize) {
         let ratio = queue_len as f32 / self.config.max_queue_size as f32;
-        
+
         let new_status = if ratio >= self.config.reject_threshold {
             BackpressureStatus::Critical
         } else if ratio >= self.config.warning_threshold {
@@ -236,7 +235,7 @@ impl RequestMonitor {
         if !self.config.enabled {
             return true;
         }
-        
+
         let status = self.get_backpressure_status();
         status.is_accepting()
     }
@@ -279,7 +278,7 @@ impl RequestMonitor {
 
         let min = latencies.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = latencies.iter().cloned().fold(0.0, f64::max);
-        
+
         if min == max {
             return vec![(min, latencies.len())];
         }
@@ -373,19 +372,28 @@ mod tests {
         let monitor = RequestMonitor::with_config(config);
 
         // 初始状态应该是 Normal
-        assert_eq!(monitor.get_backpressure_status(), BackpressureStatus::Normal);
+        assert_eq!(
+            monitor.get_backpressure_status(),
+            BackpressureStatus::Normal
+        );
 
         // 填充队列到 80%
         for _ in 0..8 {
             monitor.record(create_test_log(200, 100));
         }
-        assert_eq!(monitor.get_backpressure_status(), BackpressureStatus::Warning);
+        assert_eq!(
+            monitor.get_backpressure_status(),
+            BackpressureStatus::Warning
+        );
 
         // 填充队列到 95%
         for _ in 0..2 {
             monitor.record(create_test_log(200, 100));
         }
-        assert_eq!(monitor.get_backpressure_status(), BackpressureStatus::Critical);
+        assert_eq!(
+            monitor.get_backpressure_status(),
+            BackpressureStatus::Critical
+        );
 
         // 在 Critical 状态下，新请求应该被拒绝
         assert!(!monitor.can_accept_request());
@@ -419,7 +427,7 @@ mod tests {
         }
 
         let stats = monitor.get_stats();
-        
+
         // P50 应该在 50 左右
         assert!(stats.p50_latency_ms >= 49.0 && stats.p50_latency_ms <= 51.0);
         // P95 应该在 95 左右
@@ -439,7 +447,7 @@ mod tests {
 
         let histogram = monitor.get_latency_histogram(5);
         assert_eq!(histogram.len(), 5);
-        
+
         // 所有桶的计数总和应该等于请求数
         let total: usize = histogram.iter().map(|(_, count)| count).sum();
         assert_eq!(total, 10);
@@ -468,6 +476,9 @@ mod tests {
 
         let logs = monitor.get_recent_logs(100);
         assert_eq!(logs.len(), 0);
-        assert_eq!(monitor.get_backpressure_status(), BackpressureStatus::Normal);
+        assert_eq!(
+            monitor.get_backpressure_status(),
+            BackpressureStatus::Normal
+        );
     }
 }

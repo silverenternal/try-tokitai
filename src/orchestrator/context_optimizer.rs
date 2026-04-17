@@ -250,10 +250,7 @@ impl ContextOptimizer {
             OptimizationStrategy::Summarization {
                 message_threshold,
                 token_threshold,
-            } => {
-                self.messages.len() > *message_threshold
-                    || self.current_tokens > *token_threshold
-            }
+            } => self.messages.len() > *message_threshold || self.current_tokens > *token_threshold,
         };
 
         if needs_optimization {
@@ -372,18 +369,12 @@ impl ContextOptimizer {
         important.sort_by(|a, b| b.importance.cmp(&a.importance));
 
         // 保留最重要的几条
-        let kept_important: Vec<ContextMessage> = important
-            .into_iter()
-            .take(keep_important_count)
-            .collect();
+        let kept_important: Vec<ContextMessage> =
+            important.into_iter().take(keep_important_count).collect();
 
         // 普通消息应用滑动窗口
-        let kept_normal: Vec<ContextMessage> = normal
-            .into_iter()
-            .rev()
-            .take(window_size)
-            .rev()
-            .collect();
+        let kept_normal: Vec<ContextMessage> =
+            normal.into_iter().rev().take(window_size).rev().collect();
 
         // 重建消息队列
         let mut new_tokens = 0;

@@ -3,27 +3,25 @@
 //! 提供标准化的测试数据创建函数
 
 use crate::context::ContextBranch;
-use crate::orchestrator::{Workflow, Stage, Step, AgentRole};
+use crate::orchestrator::{AgentRole, Stage, Step, Workflow};
 use crate::provider_config::ProviderConfig;
 use std::path::Path;
 
 /// 创建测试用的 ContextBranch
 pub fn create_test_branch(id: &str, name: &str, parent: Option<&str>) -> ContextBranch {
-    let parent_hash = parent.unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000");
+    let parent_hash =
+        parent.unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000");
     ContextBranch::new(
         id,
         name,
         parent_hash,
         Path::new("/tmp/test_branches").to_path_buf(),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 /// 创建测试用的 Workflow
-pub fn create_test_workflow(
-    name: &str,
-    stage_count: usize,
-    steps_per_stage: usize,
-) -> Workflow {
+pub fn create_test_workflow(name: &str, stage_count: usize, steps_per_stage: usize) -> Workflow {
     let mut workflow = Workflow::new(
         name.to_string(),
         format!("Test Workflow: {}", name),
@@ -88,7 +86,8 @@ pub fn create_sequential_access_pattern(size: usize) -> Vec<usize> {
 
 /// 创建循环访问模式测试数据
 pub fn create_cyclic_access_pattern(cycle: &[usize], repetitions: usize) -> Vec<usize> {
-    cycle.iter()
+    cycle
+        .iter()
         .cycle()
         .take(cycle.len() * repetitions)
         .copied()
@@ -99,9 +98,7 @@ pub fn create_cyclic_access_pattern(cycle: &[usize], repetitions: usize) -> Vec<
 pub fn create_random_data(size: usize, min: usize, max: usize) -> Vec<usize> {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    (0..size)
-        .map(|_| rng.gen_range(min..=max))
-        .collect()
+    (0..size).map(|_| rng.gen_range(min..=max)).collect()
 }
 
 #[cfg(test)]

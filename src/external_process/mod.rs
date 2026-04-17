@@ -126,17 +126,16 @@
 //!
 //! Always validate and sanitize inputs before passing to external tools.
 
-pub mod metadata;
-pub mod wrapper;
-pub mod process_wrapper;
-pub mod http_wrapper;
-pub mod script_wrapper;
 pub mod discovery;
-pub mod registry;
+pub mod http_wrapper;
+pub mod metadata;
 pub mod orchestration;
+pub mod process_wrapper;
+pub mod registry;
+pub mod script_wrapper;
+pub mod wrapper;
 
 // Re-export main types for convenience
-
 
 #[allow(unused_imports)]
 pub use discovery::ExternalToolDiscovery;
@@ -146,21 +145,25 @@ pub use registry::ExternalToolRegistry;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::external_process::metadata::{
+        ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel,
+    };
     use crate::external_process::wrapper::ExternalTool;
-    use crate::external_process::metadata::{RiskLevel, ExternalToolType, ProcessConfig, ExternalToolMetadata};
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_external_tool_trait_process() {
-        use process_wrapper::ProcessWrapperBuilder;
         use metadata::schema_helpers;
+        use process_wrapper::ProcessWrapperBuilder;
 
         let wrapper = ProcessWrapperBuilder::new("echo_test", "echo")
             .description("Echo test")
             .args(vec!["{{message}}".to_string()])
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("message", "Message to echo", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "message",
+                "Message to echo",
+                true,
+            )]))
             .domain("test")
             .build();
 

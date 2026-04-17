@@ -2,15 +2,13 @@
 //!
 //! 提供 JSON 路径查询、键提取等功能
 
-use tokitai::tool;
-use serde_json::{json, Value};
-use std::sync::Arc;
 use crate::tools::data::config::DataToolConfig;
 use crate::tools::data::error::DataToolError;
-use crate::tools::data::validator::{
-    JsonLengthValidator, PathLengthValidator, Validator,
-};
-use crate::tools::data::metrics::{MetricsCollector, DataToolOperation};
+use crate::tools::data::metrics::{DataToolOperation, MetricsCollector};
+use crate::tools::data::validator::{JsonLengthValidator, PathLengthValidator, Validator};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokitai::tool;
 
 /// JSON 查询工具集
 #[derive(Debug)]
@@ -32,14 +30,16 @@ impl JsonQueryTools {
     }
 
     fn parse_and_validate(&self, json_string: &str) -> Result<Value, Value> {
-        JsonLengthValidator { json_string }.validate(&self.config)
+        JsonLengthValidator { json_string }
+            .validate(&self.config)
             .map_err(|e| e.to_value())?;
         serde_json::from_str(json_string)
             .map_err(|e| DataToolError::json_parse(e.to_string()).to_value())
     }
 
     fn validate_path(&self, path: &str) -> Result<(), Value> {
-        PathLengthValidator { path }.validate(&self.config)
+        PathLengthValidator { path }
+            .validate(&self.config)
             .map_err(|e| e.to_value())
     }
 
@@ -47,11 +47,13 @@ impl JsonQueryTools {
         let mut current = value;
         for part in path.split('.') {
             current = if let Ok(index) = part.parse::<usize>() {
-                current.as_array()
+                current
+                    .as_array()
                     .and_then(|arr| arr.get(index))
                     .ok_or_else(|| DataToolError::path_not_found(path.to_string()).to_value())?
             } else {
-                current.as_object()
+                current
+                    .as_object()
                     .and_then(|obj| obj.get(part))
                     .ok_or_else(|| DataToolError::path_not_found(path.to_string()).to_value())?
             };

@@ -44,11 +44,7 @@ impl<'a> Validator for JsonDepthValidator<'a> {
 impl<'a> JsonDepthValidator<'a> {
     fn check_depth(value: &Value, current: usize, max: usize) -> DataToolResult<()> {
         if current > max {
-            return Err(DataToolError::resource_exceeded(
-                "JSON 深度",
-                current,
-                max,
-            ));
+            return Err(DataToolError::resource_exceeded("JSON 深度", current, max));
         }
 
         match value {
@@ -165,16 +161,13 @@ impl<'a> Default for CompositeValidator<'a> {
 
 /// 验证器辅助函数
 #[allow(dead_code)]
-pub fn validate_json(
-    json_string: &str,
-    config: &DataToolConfig,
-) -> DataToolResult<Value> {
+pub fn validate_json(json_string: &str, config: &DataToolConfig) -> DataToolResult<Value> {
     // 验证长度
     JsonLengthValidator { json_string }.validate(config)?;
 
     // 解析 JSON
-    let parsed: Value = serde_json::from_str(json_string)
-        .map_err(|e| DataToolError::json_parse(e.to_string()))?;
+    let parsed: Value =
+        serde_json::from_str(json_string).map_err(|e| DataToolError::json_parse(e.to_string()))?;
 
     // 验证深度
     JsonDepthValidator { value: &parsed }.validate(config)?;
@@ -188,9 +181,7 @@ mod tests {
 
     #[test]
     fn test_json_length_validator() {
-        let config = DataToolConfig::builder()
-            .max_length(100)
-            .build();
+        let config = DataToolConfig::builder().max_length(100).build();
 
         let validator = JsonLengthValidator {
             json_string: &"a".repeat(101),
@@ -205,9 +196,7 @@ mod tests {
 
     #[test]
     fn test_json_depth_validator() {
-        let config = DataToolConfig::builder()
-            .max_depth(5)
-            .build();
+        let config = DataToolConfig::builder().max_depth(5).build();
 
         // 创建深度超限的 JSON
         let mut deep = Value::from(1);
@@ -226,9 +215,7 @@ mod tests {
 
     #[test]
     fn test_path_length_validator() {
-        let config = DataToolConfig::builder()
-            .max_path_length(10)
-            .build();
+        let config = DataToolConfig::builder().max_path_length(10).build();
 
         let validator = PathLengthValidator {
             path: "very.long.path",
@@ -241,9 +228,7 @@ mod tests {
 
     #[test]
     fn test_merge_count_validator() {
-        let config = DataToolConfig::builder()
-            .max_merge_count(5)
-            .build();
+        let config = DataToolConfig::builder().max_merge_count(5).build();
 
         let validator = MergeCountValidator { count: 6 };
         assert!(validator.validate(&config).is_err());
@@ -261,9 +246,7 @@ mod tests {
 
         let text = "a".repeat(50);
         let mut composite = CompositeValidator::new();
-        composite.add(JsonLengthValidator {
-            json_string: &text,
-        });
+        composite.add(JsonLengthValidator { json_string: &text });
         composite.add(PathLengthValidator { path: "short" });
 
         assert!(composite.validate(&config).is_ok());

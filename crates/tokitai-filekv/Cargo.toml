@@ -206,7 +206,19 @@ harness = false
 required-features = ["benchmarks"]
 
 [[bench]]
+name = "09_10m_benchmark"
+path = "benches/09_10m_benchmark.rs"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
 name = "block_cache_get_by_key"
 path = "benches/block_cache_get_by_key.rs"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "custom_bloom_perf"
+path = "benches/custom_bloom_perf.rs"
 harness = false
 required-features = ["benchmarks"]

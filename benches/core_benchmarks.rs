@@ -15,7 +15,7 @@
 //! - 上下文哈希链性能
 //! - 规则分类器性能
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -35,9 +35,7 @@ fn benchmark_noop(c: &mut Criterion) {
 /// 基准测试：字符串创建
 fn benchmark_string_creation(c: &mut Criterion) {
     c.bench_function("string_creation", |b| {
-        b.iter(|| {
-            black_box(String::from("test_string_for_benchmark"))
-        })
+        b.iter(|| black_box(String::from("test_string_for_benchmark")))
     });
 }
 
@@ -72,9 +70,7 @@ fn benchmark_json_serialization(c: &mut Criterion) {
     };
 
     c.bench_function("json_serialization", |b| {
-        b.iter(|| {
-            black_box(serde_json::to_string(&data).unwrap())
-        })
+        b.iter(|| black_box(serde_json::to_string(&data).unwrap()))
     });
 }
 
@@ -92,9 +88,7 @@ fn benchmark_json_deserialization(c: &mut Criterion) {
     let json = r#"{"name":"test","value":42,"items":["item1","item2"]}"#;
 
     c.bench_function("json_deserialization", |b| {
-        b.iter(|| {
-            black_box(serde_json::from_str::<TestData>(json).unwrap())
-        })
+        b.iter(|| black_box(serde_json::from_str::<TestData>(json).unwrap()))
     });
 }
 
@@ -103,9 +97,7 @@ fn benchmark_regex_match(c: &mut Criterion) {
     let re = regex::Regex::new(r"^\w+@\w+\.\w+$").unwrap();
 
     c.bench_function("regex_match", |b| {
-        b.iter(|| {
-            black_box(re.is_match("test@example.com"))
-        })
+        b.iter(|| black_box(re.is_match("test@example.com")))
     });
 }
 
@@ -193,20 +185,21 @@ fn benchmark_tool_search(c: &mut Criterion) {
 
     // 预创建索引
     let tools: Vec<ToolDef> = (0..5000)
-        .map(|i| ToolDef::new(
-            &format!("file_op_{}", i),
-            &format!("File operation tool {} for reading and writing", i),
-        ))
+        .map(|i| {
+            ToolDef::new(
+                &format!("file_op_{}", i),
+                &format!("File operation tool {} for reading and writing", i),
+            )
+        })
         .collect();
 
-    let index: HashMap<String, &ToolDef> = tools.iter()
-        .map(|t| (t.name.clone(), t))
-        .collect();
+    let index: HashMap<String, &ToolDef> = tools.iter().map(|t| (t.name.clone(), t)).collect();
 
     // 测试前缀搜索
     group.bench_function("prefix_search_file", |b| {
         b.iter(|| {
-            let results: Vec<_> = index.iter()
+            let results: Vec<_> = index
+                .iter()
                 .filter(|(name, _)| name.starts_with("file_"))
                 .take(50)
                 .collect();
@@ -217,7 +210,8 @@ fn benchmark_tool_search(c: &mut Criterion) {
     // 测试包含搜索
     group.bench_function("contains_search_op", |b| {
         b.iter(|| {
-            let results: Vec<_> = index.iter()
+            let results: Vec<_> = index
+                .iter()
                 .filter(|(name, _)| name.contains("op"))
                 .take(50)
                 .collect();
@@ -234,7 +228,7 @@ fn benchmark_tool_search(c: &mut Criterion) {
 
 /// 基准测试：上下文哈希链追加性能
 fn benchmark_hash_chain_append(c: &mut Criterion) {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let mut group = c.benchmark_group("hash_chain_append");
 
@@ -242,8 +236,9 @@ fn benchmark_hash_chain_append(c: &mut Criterion) {
     for &size in [10, 100, 1000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
-                let mut current_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
-                
+                let mut current_hash =
+                    "0x0000000000000000000000000000000000000000000000000000000000000000";
+
                 for i in 0..size {
                     let content_hash = format!("content_{}", i);
                     let mut hasher = Sha256::new();
@@ -252,7 +247,7 @@ fn benchmark_hash_chain_append(c: &mut Criterion) {
                     let result = hasher.finalize();
                     current_hash = &format!("0x{}", hex::encode(result));
                 }
-                
+
                 black_box(current_hash);
             })
         });
@@ -262,14 +257,14 @@ fn benchmark_hash_chain_append(c: &mut Criterion) {
 
 /// 基准测试：上下文哈希链验证性能
 fn benchmark_hash_chain_verify(c: &mut Criterion) {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let mut group = c.benchmark_group("hash_chain_verify");
 
     // 预先生成哈希链
     let mut chain: Vec<(String, String)> = Vec::new();
     let mut current_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
-    
+
     for i in 0..100 {
         let content_hash = format!("content_{}", i);
         let mut hasher = Sha256::new();
@@ -282,23 +277,24 @@ fn benchmark_hash_chain_verify(c: &mut Criterion) {
 
     group.bench_function("verify_100_nodes", |b| {
         b.iter(|| {
-            let mut prev_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
+            let mut prev_hash =
+                "0x0000000000000000000000000000000000000000000000000000000000000000";
             let mut valid = true;
-            
+
             for (node_hash, content_hash) in &chain {
                 let mut hasher = Sha256::new();
                 hasher.update(prev_hash.as_bytes());
                 hasher.update(content_hash.as_bytes());
                 let result = hasher.finalize();
                 let expected_hash = format!("0x{}", hex::encode(result));
-                
+
                 if &expected_hash != node_hash {
                     valid = false;
                     break;
                 }
                 prev_hash = node_hash;
             }
-            
+
             black_box(valid);
         })
     });

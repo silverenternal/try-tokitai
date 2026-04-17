@@ -161,7 +161,12 @@ impl DialogueHistory {
     }
 
     /// 添加状态转换
-    pub fn add_transition(&mut self, from: DialogueState, to: DialogueState, reason: Option<String>) {
+    pub fn add_transition(
+        &mut self,
+        from: DialogueState,
+        to: DialogueState,
+        reason: Option<String>,
+    ) {
         self.transitions.push(StateTransition {
             from,
             to,
@@ -172,7 +177,8 @@ impl DialogueHistory {
 
     /// 添加上下文快照
     pub fn add_snapshot(&mut self, context: &DialogueContext) {
-        self.context_snapshots.push((chrono::Utc::now().timestamp(), context.clone()));
+        self.context_snapshots
+            .push((chrono::Utc::now().timestamp(), context.clone()));
     }
 
     /// 获取最近的上下文
@@ -220,7 +226,7 @@ impl DialogueStateMachine {
 
         Ok(machine)
     }
-    
+
     /// 创建不带持久化的状态机（用于测试）
     pub fn new_without_persistence() -> Self {
         use std::env;
@@ -234,7 +240,11 @@ impl DialogueStateMachine {
     }
 
     /// 转换状态
-    pub fn transition(&mut self, new_state: DialogueState, reason: Option<String>) -> Result<(), DialogueError> {
+    pub fn transition(
+        &mut self,
+        new_state: DialogueState,
+        reason: Option<String>,
+    ) -> Result<(), DialogueError> {
         let old_state = self.current_state.clone();
 
         // 验证状态转换合法性
@@ -246,7 +256,8 @@ impl DialogueStateMachine {
         }
 
         // 记录转换
-        self.history.add_transition(old_state.clone(), new_state.clone(), reason);
+        self.history
+            .add_transition(old_state.clone(), new_state.clone(), reason);
 
         // 保存上下文快照
         self.history.add_snapshot(&self.context);
@@ -284,53 +295,53 @@ impl DialogueStateMachine {
     pub fn history(&self) -> &DialogueHistory {
         &self.history
     }
-    
+
     /// 获取状态转换历史
     pub fn get_history(&self) -> &Vec<StateTransition> {
         &self.history.transitions
     }
-    
+
     /// 设置任务目标
     pub fn set_goal(&mut self, goal: String) -> Result<(), DialogueError> {
         self.context.current_goal = Some(goal);
         self.save_state()
     }
-    
+
     /// 设置任务计划
     pub fn set_plan(&mut self, plan: String) -> Result<(), DialogueError> {
         self.context.plan = Some(plan);
         self.save_state()
     }
-    
+
     /// 记录工具执行
     pub fn record_tool(&mut self, tool_name: String) -> Result<(), DialogueError> {
         self.context.executed_tools.push(tool_name);
         self.save_state()
     }
-    
+
     /// 添加待确认事项
     pub fn add_confirmation(&mut self, item: String) -> Result<(), DialogueError> {
         self.context.pending_confirmations.push(item);
         self.save_state()
     }
-    
+
     /// 清除待确认事项
     pub fn clear_confirmations(&mut self) -> Result<(), DialogueError> {
         self.context.pending_confirmations.clear();
         self.save_state()
     }
-    
+
     /// 设置变量
     pub fn set_variable(&mut self, key: String, value: String) -> Result<(), DialogueError> {
         self.context.variables.insert(key, value);
         self.save_state()
     }
-    
+
     /// 获取变量
     pub fn get_variable(&self, key: &str) -> Option<&String> {
         self.context.variables.get(key)
     }
-    
+
     /// 保存到文件
     pub fn save_to_file(&self, path: &str) -> Result<(), DialogueError> {
         let state = DialogueStateFile {
@@ -342,7 +353,7 @@ impl DialogueStateMachine {
         fs::write(path, content)?;
         Ok(())
     }
-    
+
     /// 从文件加载
     pub fn load_from_file(&mut self, path: &str) -> Result<(), DialogueError> {
         let content = fs::read_to_string(path)?;
@@ -367,11 +378,11 @@ impl DialogueStateMachine {
         if let Some(last_transition) = self.history.transitions.last() {
             let previous_state = last_transition.from.clone();
             self.current_state = previous_state;
-            
+
             if let Some(last_snapshot) = self.history.context_snapshots.iter().rev().nth(1) {
                 self.context = last_snapshot.1.clone();
             }
-            
+
             self.save_state()?;
         }
         Ok(())
@@ -380,7 +391,7 @@ impl DialogueStateMachine {
     /// 保存状态
     fn save_state(&self) -> Result<(), DialogueError> {
         let state_path = self.storage_dir.join("dialogue_state.json");
-        
+
         let state = DialogueStateFile {
             current_state: self.current_state.clone(),
             context: self.context.clone(),
@@ -396,7 +407,7 @@ impl DialogueStateMachine {
     /// 加载状态
     fn load_state(&mut self) -> Result<(), DialogueError> {
         let state_path = self.storage_dir.join("dialogue_state.json");
-        
+
         if state_path.exists() {
             let content = fs::read_to_string(&state_path)?;
             let state: DialogueStateFile = serde_json::from_str(&content)?;
@@ -413,22 +424,49 @@ impl DialogueStateMachine {
     fn is_valid_transition(from: &DialogueState, to: &DialogueState) -> bool {
         match from {
             DialogueState::Idle => {
-                matches!(to, DialogueState::Clarifying | DialogueState::Planning | DialogueState::Executing)
+                matches!(
+                    to,
+                    DialogueState::Clarifying | DialogueState::Planning | DialogueState::Executing
+                )
             }
             DialogueState::Clarifying => {
-                matches!(to, DialogueState::Idle | DialogueState::Planning | DialogueState::Error)
+                matches!(
+                    to,
+                    DialogueState::Idle | DialogueState::Planning | DialogueState::Error
+                )
             }
             DialogueState::Planning => {
-                matches!(to, DialogueState::Executing | DialogueState::Clarifying | DialogueState::Error | DialogueState::WaitingForConfirmation)
+                matches!(
+                    to,
+                    DialogueState::Executing
+                        | DialogueState::Clarifying
+                        | DialogueState::Error
+                        | DialogueState::WaitingForConfirmation
+                )
             }
             DialogueState::Executing => {
-                matches!(to, DialogueState::Reviewing | DialogueState::Planning | DialogueState::Error | DialogueState::WaitingForConfirmation)
+                matches!(
+                    to,
+                    DialogueState::Reviewing
+                        | DialogueState::Planning
+                        | DialogueState::Error
+                        | DialogueState::WaitingForConfirmation
+                )
             }
             DialogueState::Reviewing => {
-                matches!(to, DialogueState::Executing | DialogueState::Planning | DialogueState::Completed | DialogueState::Error)
+                matches!(
+                    to,
+                    DialogueState::Executing
+                        | DialogueState::Planning
+                        | DialogueState::Completed
+                        | DialogueState::Error
+                )
             }
             DialogueState::WaitingForConfirmation => {
-                matches!(to, DialogueState::Executing | DialogueState::Planning | DialogueState::Idle)
+                matches!(
+                    to,
+                    DialogueState::Executing | DialogueState::Planning | DialogueState::Idle
+                )
             }
             DialogueState::Completed | DialogueState::Error => {
                 matches!(to, DialogueState::Idle)
@@ -459,7 +497,9 @@ mod tests {
         assert_eq!(machine.current_state(), &DialogueState::Idle);
 
         // 转换到规划
-        machine.transition(DialogueState::Planning, Some("用户请求".to_string())).unwrap();
+        machine
+            .transition(DialogueState::Planning, Some("用户请求".to_string()))
+            .unwrap();
         assert_eq!(machine.current_state(), &DialogueState::Planning);
 
         // 转换到执行
@@ -494,8 +534,12 @@ mod tests {
         let mut machine = DialogueStateMachine::new(temp_dir.path().to_path_buf()).unwrap();
 
         // 设置上下文
-        machine.context_mut().set("task_id".to_string(), "123".to_string());
-        machine.context_mut().set("goal".to_string(), "测试目标".to_string());
+        machine
+            .context_mut()
+            .set("task_id".to_string(), "123".to_string());
+        machine
+            .context_mut()
+            .set("goal".to_string(), "测试目标".to_string());
 
         assert_eq!(machine.context().get("task_id"), Some(&"123".to_string()));
         assert_eq!(machine.context().get("goal"), Some(&"测试目标".to_string()));
@@ -508,7 +552,9 @@ mod tests {
         {
             let mut machine = DialogueStateMachine::new(temp_dir.path().to_path_buf()).unwrap();
             machine.transition(DialogueState::Planning, None).unwrap();
-            machine.context_mut().set("key".to_string(), "value".to_string());
+            machine
+                .context_mut()
+                .set("key".to_string(), "value".to_string());
             machine.save_state().unwrap(); // 保存上下文
         }
 

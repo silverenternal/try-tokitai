@@ -1,12 +1,12 @@
+use crate::tools::io::error::IoToolError;
+use crate::tools::io::security::SecurePathResolver;
+use crate::tools::io::utils::{ensure_is_dir, validate_single_path};
+use regex::Regex;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashSet;
-use regex::Regex;
 use tokitai::tool;
-use crate::tools::io::security::SecurePathResolver;
-use crate::tools::io::error::IoToolError;
-use crate::tools::io::utils::{validate_single_path, ensure_is_dir};
 
 /// 文件搜索工具集
 /// 提供类似 grep 的文件内容搜索功能
@@ -50,8 +50,8 @@ impl FileSearchTools {
         use_regex: Option<bool>,
     ) -> Result<Value, Value> {
         // 验证路径
-        let canonical_path = validate_single_path(&self.resolver, &path)
-            .map_err(|e| e.to_value())?;
+        let canonical_path =
+            validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
 
         // 验证模式长度
         if pattern.len() > MAX_PATTERN_LENGTH {
@@ -59,17 +59,20 @@ impl FileSearchTools {
                 length: pattern.len(),
                 max_length: MAX_PATTERN_LENGTH,
                 suggestion: "请缩短搜索模式或使用更精确的正则表达式".to_string(),
-            }.to_value());
+            }
+            .to_value());
         }
 
         // 读取文件
-        let content = fs::read_to_string(&canonical_path)
-            .map_err(|e| IoToolError::IoError {
+        let content = fs::read_to_string(&canonical_path).map_err(|e| {
+            IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(canonical_path.clone()),
                 operation: "read_file (for grep)".to_string(),
                 suggestion: "请检查文件权限或文件是否存在".to_string(),
-            }.to_value())?;
+            }
+            .to_value()
+        })?;
 
         let max_results = max_results.unwrap_or(100);
         let case_sensitive = case_sensitive.unwrap_or(true);
@@ -82,11 +85,14 @@ impl FileSearchTools {
             } else {
                 format!("(?i){}", pattern)
             };
-            Some(Regex::new(&re_pattern).map_err(|e| IoToolError::InvalidRegex {
-                pattern: pattern.clone(),
-                message: e.to_string(),
-                suggestion: "请检查正则表达式语法是否正确".to_string(),
-            }.to_value())?)
+            Some(Regex::new(&re_pattern).map_err(|e| {
+                IoToolError::InvalidRegex {
+                    pattern: pattern.clone(),
+                    message: e.to_string(),
+                    suggestion: "请检查正则表达式语法是否正确".to_string(),
+                }
+                .to_value()
+            })?)
         } else {
             None
         };
@@ -114,14 +120,17 @@ impl FileSearchTools {
             }
         }
 
-        Ok(IoToolError::success_response("grep", json!({
-            "file": canonical_path,
-            "pattern": pattern,
-            "total_matches": total_matches,
-            "results": results,
-            "truncated": total_matches > max_results,
-            "use_regex": use_regex
-        })))
+        Ok(IoToolError::success_response(
+            "grep",
+            json!({
+                "file": canonical_path,
+                "pattern": pattern,
+                "total_matches": total_matches,
+                "results": results,
+                "truncated": total_matches > max_results,
+                "use_regex": use_regex
+            }),
+        ))
     }
 
     /// 在目录中递归搜索文件
@@ -135,10 +144,9 @@ impl FileSearchTools {
         max_depth: Option<usize>,
     ) -> Result<Value, Value> {
         // 验证路径
-        let canonical_dir = validate_single_path(&self.resolver, &directory)
-            .map_err(|e| e.to_value())?;
-        ensure_is_dir(Path::new(&canonical_dir))
-            .map_err(|e| e.to_value())?;
+        let canonical_dir =
+            validate_single_path(&self.resolver, &directory).map_err(|e| e.to_value())?;
+        ensure_is_dir(Path::new(&canonical_dir)).map_err(|e| e.to_value())?;
 
         let max_results = max_results.unwrap_or(100);
         let max_depth = max_depth.unwrap_or(MAX_SEARCH_DEPTH);
@@ -152,15 +160,20 @@ impl FileSearchTools {
             // 检查是否匹配
             let matches = match (&pattern, &extension) {
                 (Some(p), None) => name.contains(p),
-                (None, Some(ext)) => entry.path().extension()
+                (None, Some(ext)) => entry
+                    .path()
+                    .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| e == ext.trim_start_matches('.'))
                     .unwrap_or(false),
                 (Some(p), Some(ext)) => {
-                    name.contains(p) && entry.path().extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e == ext.trim_start_matches('.'))
-                        .unwrap_or(false)
+                    name.contains(p)
+                        && entry
+                            .path()
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e == ext.trim_start_matches('.'))
+                            .unwrap_or(false)
                 }
                 (None, None) => true,
             };
@@ -175,23 +188,29 @@ impl FileSearchTools {
             }
         }
 
-        Ok(IoToolError::success_response("find_files", json!({
-            "directory": canonical_dir,
-            "pattern": pattern,
-            "extension": extension,
-            "results": results,
-            "total": results.len()
-        })))
+        Ok(IoToolError::success_response(
+            "find_files",
+            json!({
+                "directory": canonical_dir,
+                "pattern": pattern,
+                "extension": extension,
+                "results": results,
+                "total": results.len()
+            }),
+        ))
     }
 
     /// 统计目录中各类文件的数量
     /// 按扩展名统计文件分布
-    pub fn count_file_types(&self, directory: String, max_depth: Option<usize>) -> Result<Value, Value> {
+    pub fn count_file_types(
+        &self,
+        directory: String,
+        max_depth: Option<usize>,
+    ) -> Result<Value, Value> {
         // 验证路径
-        let canonical_dir = validate_single_path(&self.resolver, &directory)
-            .map_err(|e| e.to_value())?;
-        ensure_is_dir(Path::new(&canonical_dir))
-            .map_err(|e| e.to_value())?;
+        let canonical_dir =
+            validate_single_path(&self.resolver, &directory).map_err(|e| e.to_value())?;
+        ensure_is_dir(Path::new(&canonical_dir)).map_err(|e| e.to_value())?;
 
         let max_depth = max_depth.unwrap_or(MAX_SEARCH_DEPTH);
 
@@ -213,7 +232,8 @@ impl FileSearchTools {
                     total_size += metadata.len();
                 }
 
-                let ext = path.extension()
+                let ext = path
+                    .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("无扩展名")
                     .to_string();
@@ -221,7 +241,8 @@ impl FileSearchTools {
             }
         }
 
-        let mut file_types: Vec<Value> = stats.iter()
+        let mut file_types: Vec<Value> = stats
+            .iter()
             .map(|(ext, count)| {
                 json!({
                     "extension": ext,
@@ -231,18 +252,22 @@ impl FileSearchTools {
             .collect();
 
         file_types.sort_by(|a, b| {
-            b.get("count").and_then(|c| c.as_u64())
+            b.get("count")
+                .and_then(|c| c.as_u64())
                 .unwrap_or(0)
                 .cmp(&a.get("count").and_then(|c| c.as_u64()).unwrap_or(0))
         });
 
-        Ok(IoToolError::success_response("count_file_types", json!({
-            "directory": canonical_dir,
-            "total_files": total_files,
-            "total_dirs": total_dirs,
-            "total_size_bytes": total_size,
-            "file_types": file_types
-        })))
+        Ok(IoToolError::success_response(
+            "count_file_types",
+            json!({
+                "directory": canonical_dir,
+                "total_files": total_files,
+                "total_dirs": total_dirs,
+                "total_size_bytes": total_size,
+                "file_types": file_types
+            }),
+        ))
     }
 
     /// 查找大文件
@@ -255,10 +280,9 @@ impl FileSearchTools {
         max_depth: Option<usize>,
     ) -> Result<Value, Value> {
         // 验证路径
-        let canonical_dir = validate_single_path(&self.resolver, &directory)
-            .map_err(|e| e.to_value())?;
-        ensure_is_dir(Path::new(&canonical_dir))
-            .map_err(|e| e.to_value())?;
+        let canonical_dir =
+            validate_single_path(&self.resolver, &directory).map_err(|e| e.to_value())?;
+        ensure_is_dir(Path::new(&canonical_dir)).map_err(|e| e.to_value())?;
 
         let min_size_bytes = ((min_size_mb.unwrap_or(10.0) * 1024.0 * 1024.0) as u64).max(1);
         let max_results = max_results.unwrap_or(50);
@@ -286,32 +310,38 @@ impl FileSearchTools {
 
         // 按大小排序
         results.sort_by(|a, b| {
-            b.get("size_bytes").and_then(|s| s.as_u64())
+            b.get("size_bytes")
+                .and_then(|s| s.as_u64())
                 .unwrap_or(0)
                 .cmp(&a.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0))
         });
 
-        Ok(IoToolError::success_response("find_large_files", json!({
-            "directory": canonical_dir,
-            "min_size_mb": min_size_mb.unwrap_or(10.0),
-            "results": results
-        })))
+        Ok(IoToolError::success_response(
+            "find_large_files",
+            json!({
+                "directory": canonical_dir,
+                "min_size_mb": min_size_mb.unwrap_or(10.0),
+                "results": results
+            }),
+        ))
     }
 
     /// 获取文件详细信息
     /// 包括大小、修改时间、权限等
     pub fn get_file_info(&self, path: String) -> Result<Value, Value> {
         // 验证路径
-        let canonical_path = validate_single_path(&self.resolver, &path)
-            .map_err(|e| e.to_value())?;
+        let canonical_path =
+            validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
 
-        let metadata = fs::metadata(&canonical_path)
-            .map_err(|e| IoToolError::IoError {
+        let metadata = fs::metadata(&canonical_path).map_err(|e| {
+            IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(canonical_path.clone()),
                 operation: "get_file_info".to_string(),
                 suggestion: "请检查文件是否存在及权限设置".to_string(),
-            }.to_value())?;
+            }
+            .to_value()
+        })?;
 
         let file_type = if metadata.is_file() {
             "file"
@@ -328,17 +358,20 @@ impl FileSearchTools {
                 .unwrap_or_else(|| "unknown".to_string())
         };
 
-        Ok(IoToolError::success_response("get_file_info", json!({
-            "path": canonical_path,
-            "type": file_type,
-            "size_bytes": metadata.len(),
-            "size_human": format_size(metadata.len()),
-            "modified_timestamp": timestamp_to_string(metadata.modified()),
-            "created_timestamp": timestamp_to_string(metadata.created()),
-            "accessed_timestamp": timestamp_to_string(metadata.accessed()),
-            "is_readable": !metadata.permissions().readonly(),
-            "is_writable": !metadata.permissions().readonly()
-        })))
+        Ok(IoToolError::success_response(
+            "get_file_info",
+            json!({
+                "path": canonical_path,
+                "type": file_type,
+                "size_bytes": metadata.len(),
+                "size_human": format_size(metadata.len()),
+                "modified_timestamp": timestamp_to_string(metadata.modified()),
+                "created_timestamp": timestamp_to_string(metadata.created()),
+                "accessed_timestamp": timestamp_to_string(metadata.accessed()),
+                "is_readable": !metadata.permissions().readonly(),
+                "is_writable": !metadata.permissions().readonly()
+            }),
+        ))
     }
 }
 
@@ -362,9 +395,7 @@ impl DirEntry {
     }
 
     pub fn file_name(&self) -> &str {
-        self.path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
+        self.path.file_name().and_then(|n| n.to_str()).unwrap_or("")
     }
 }
 
@@ -469,17 +500,19 @@ mod tests {
         std::fs::write(&test_file, "hello world\nfoo bar\nhello rust\n").unwrap();
 
         let tools = FileSearchTools::new();
-        let result = tools.grep(
-            "hello".to_string(),
-            test_file.to_string_lossy().to_string(),
-            Some(true),
-            Some(10),
-            None,
-        ).unwrap();
+        let result = tools
+            .grep(
+                "hello".to_string(),
+                test_file.to_string_lossy().to_string(),
+                Some(true),
+                Some(10),
+                None,
+            )
+            .unwrap();
 
         assert_eq!(result["status"], "success");
         assert_eq!(result["data"]["total_matches"], 2);
-        
+
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 
@@ -490,17 +523,19 @@ mod tests {
         std::fs::write(&test_file, "abc123\nfoo456\nbar789\n").unwrap();
 
         let tools = FileSearchTools::new();
-        let result = tools.grep(
-            r"\d+".to_string(),
-            test_file.to_string_lossy().to_string(),
-            None,
-            Some(10),
-            Some(true),
-        ).unwrap();
+        let result = tools
+            .grep(
+                r"\d+".to_string(),
+                test_file.to_string_lossy().to_string(),
+                None,
+                Some(10),
+                Some(true),
+            )
+            .unwrap();
 
         assert_eq!(result["data"]["use_regex"], true);
         assert_eq!(result["data"]["total_matches"], 3);
-        
+
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 
@@ -512,17 +547,19 @@ mod tests {
         std::fs::write(test_dir.join("file.txt"), "content").unwrap();
 
         let tools = FileSearchTools::new();
-        let result = tools.find_files(
-            test_dir.to_string_lossy().to_string(),
-            None,
-            Some("rs".to_string()),
-            Some(10),
-            None,
-        ).unwrap();
+        let result = tools
+            .find_files(
+                test_dir.to_string_lossy().to_string(),
+                None,
+                Some("rs".to_string()),
+                Some(10),
+                None,
+            )
+            .unwrap();
 
         assert_eq!(result["status"], "success");
         assert_eq!(result["data"]["total"], 2);
-        
+
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 
@@ -533,12 +570,14 @@ mod tests {
         std::fs::write(&test_file, "hello").unwrap();
 
         let tools = FileSearchTools::new();
-        let result = tools.get_file_info(test_file.to_string_lossy().to_string()).unwrap();
+        let result = tools
+            .get_file_info(test_file.to_string_lossy().to_string())
+            .unwrap();
 
         assert_eq!(result["status"], "success");
         assert_eq!(result["data"]["type"], "file");
         assert!(result["data"]["size_bytes"].as_u64().unwrap() > 0);
-        
+
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 }

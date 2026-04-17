@@ -9,11 +9,11 @@
 
 #![allow(dead_code)]
 
+use super::state_machine::{DialogueState, DialogueStateMachine};
+use parking_lot::RwLock;
+use std::sync::Arc;
 use tokitai::tool;
 use tokitai::Value;
-use super::state_machine::{DialogueStateMachine, DialogueState};
-use std::sync::Arc;
-use parking_lot::RwLock;
 
 /// 对话状态工具集
 #[tool]
@@ -92,8 +92,7 @@ impl DialogueTools {
     pub fn get_context(&self) -> Result<Value, String> {
         let state_machine = self.state_machine.read();
         let ctx = state_machine.context();
-        serde_json::to_value(ctx)
-            .map_err(|e| format!("序列化上下文失败：{}", e))
+        serde_json::to_value(ctx).map_err(|e| format!("序列化上下文失败：{}", e))
     }
 
     /// 获取状态历史
@@ -101,8 +100,7 @@ impl DialogueTools {
     pub fn get_history(&self) -> Result<Value, String> {
         let state_machine = self.state_machine.read();
         let history = state_machine.get_history();
-        serde_json::to_value(history)
-            .map_err(|e| format!("序列化历史失败：{}", e))
+        serde_json::to_value(history).map_err(|e| format!("序列化历史失败：{}", e))
     }
 
     /// 设置任务目标
@@ -139,7 +137,7 @@ impl DialogueTools {
     #[tool(description = "切换到指定状态，用于任务流程控制")]
     pub fn transition(&self, target_state: String) -> Result<String, String> {
         let mut state_machine = self.state_machine.write();
-        
+
         let target = match target_state.to_lowercase().as_str() {
             "idle" | "空闲" => DialogueState::Idle,
             "clarifying" | "澄清中" => DialogueState::Clarifying,
@@ -156,7 +154,7 @@ impl DialogueTools {
         state_machine
             .transition(target, Some("手动转换".to_string()))
             .map_err(|e| format!("状态转换失败：{}", e))?;
-        
+
         Ok(format!("状态已转换：{} → {}", current, target_state))
     }
 
@@ -176,7 +174,7 @@ impl DialogueTools {
         let state_machine = self.state_machine.read();
         let ctx = state_machine.context();
         let history = state_machine.history();
-        
+
         Ok(serde_json::json!({
             "current_state": state_machine.current_state().to_string(),
             "transition_count": history.transition_count(),

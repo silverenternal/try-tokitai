@@ -7,26 +7,23 @@
 //! - Multiple workload patterns (YCSB-inspired)
 //! - Write/read/space amplification analysis
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-use tempfile::tempdir;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use std::thread;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 
 // FileKV imports
-use tokitai_filekv::{FileKV, FileKVConfig, MemTableConfig};
 use tokitai_filekv::cache::block_cache::BlockCacheConfig;
 use tokitai_filekv::compaction::CompactionConfig;
-use tokitai_filekv::audit_log::AuditLogConfig;
+use tokitai_filekv::{AuditLogConfig, FileKV, FileKVConfig, MemTableConfig};
 
 // RocksDB imports
-use rocksdb::{DB, Options, BlockBasedOptions, DBCompressionType};
+use rand::Rng;
+use rocksdb::{BlockBasedOptions, DBCompressionType, Options, DB};
 
 /// Test dataset configuration
 const NUM_ENTRIES: usize = 100_000;
-const KEY_SIZE: usize = 16;
 const VALUE_SIZE: usize = 100;
 const BLOOM_FPR: f64 = 0.01;
 
@@ -66,7 +63,11 @@ impl TestDataset {
             nonexistent_keys.push(generate_key(i));
         }
 
-        Self { keys, values, nonexistent_keys }
+        Self {
+            keys,
+            values,
+            nonexistent_keys,
+        }
     }
 }
 
@@ -85,6 +86,7 @@ fn create_filekv_config(dir: &tempfile::TempDir) -> FileKVConfig {
             flush_threshold_bytes: 64 * 1024 * 1024,
             max_entries: 1_000_000,
             max_memory_bytes: 256 * 1024 * 1024,
+            ..Default::default()
         },
         segment_dir,
         enable_wal: true,
@@ -93,12 +95,10 @@ fn create_filekv_config(dir: &tempfile::TempDir) -> FileKVConfig {
         cache: BlockCacheConfig {
             max_items: 100_000,
             max_memory_bytes: 256 * 1024 * 1024,
-            min_block_size: 64,
-            max_block_size: 4 * 1024 * 1024,
+            frequency_aware: false,
         },
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 100,
         compaction: CompactionConfig {
             leveled_compaction_enabled: true,
             async_compaction_enabled: false,
@@ -111,32 +111,16 @@ fn create_filekv_config(dir: &tempfile::TempDir) -> FileKVConfig {
             l0_file_count_threshold: 4,
             auto_compact: true,
             check_interval: 100,
+            ..Default::default()
         },
-        segment_preallocate_size: 64 * 1024 * 1024,
-        wal_max_size_bytes: 1024 * 1024 * 1024,
-        wal_max_files: 10,
-        write_coalescing_enabled: false,
-        cache_warming_enabled: false,
-        compression: tokitai_filekv::DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 8,
-        async_io_max_queue_depth: 4096,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: dir.path().join("checkpoints"),
         audit_log: AuditLogConfig {
             log_dir: dir.path().join("audit_logs"),
             enabled: false,
-            max_file_size_bytes: 1024 * 1024 * 1024,
-            max_files: 10,
-            record_latency: false,
-            include_value_hash: false,
-            flush_on_write: false,
+            ..Default::default()
         },
         aggressive: tokitai_filekv::AggressiveConfig::performance(),
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
+        ..Default::default()
     }
 }
 
@@ -144,19 +128,16 @@ fn create_filekv_config(dir: &tempfile::TempDir) -> FileKVConfig {
 fn create_rocksdb_config() -> Options {
     let mut opts = Options::default();
     opts.create_if_missing(true);
-    
+
     // Bloom Filter (same FPR as FileKV)
     let mut block_opts = BlockBasedOptions::default();
     block_opts.set_bloom_filter(BLOOM_FPR, false);
     block_opts.set_block_cache(&rocksdb::Cache::new_lru_cache(256 * 1024 * 1024));
     opts.set_block_based_table_factory(&block_opts);
-    
+
     // Compression
     opts.set_compression_type(DBCompressionType::None);
-    
-    // WAL
-    opts.enable_wal(true);
-    
+
     opts
 }
 
@@ -172,7 +153,7 @@ fn bench_write_throughput_comparison(c: &mut Criterion) {
     group.bench_function("FileKV_write", |b| {
         b.iter_custom(|iters| {
             let mut total_duration = Duration::ZERO;
-            
+
             for _ in 0..iters {
                 let dir = tempdir().unwrap();
                 let config = create_filekv_config(&dir);
@@ -184,7 +165,7 @@ fn bench_write_throughput_comparison(c: &mut Criterion) {
                 }
                 total_duration += start.elapsed();
             }
-            
+
             total_duration
         });
     });
@@ -192,7 +173,7 @@ fn bench_write_throughput_comparison(c: &mut Criterion) {
     group.bench_function("RocksDB_write", |b| {
         b.iter_custom(|iters| {
             let mut total_duration = Duration::ZERO;
-            
+
             for _ in 0..iters {
                 let dir = tempdir().unwrap();
                 let db_path = dir.path().join("rocksdb");
@@ -205,7 +186,7 @@ fn bench_write_throughput_comparison(c: &mut Criterion) {
                 }
                 total_duration += start.elapsed();
             }
-            
+
             total_duration
         });
     });
@@ -221,7 +202,7 @@ fn bench_read_latency_hot_cache(c: &mut Criterion) {
     let filekv_dir = tempdir().unwrap();
     let filekv_config = create_filekv_config(&filekv_dir);
     let filekv = FileKV::open(filekv_config).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         filekv.put(key, value).unwrap();
     }
@@ -231,7 +212,7 @@ fn bench_read_latency_hot_cache(c: &mut Criterion) {
     let rocksdb_path = rocksdb_dir.path().join("rocksdb");
     let rocksdb_opts = create_rocksdb_config();
     let rocksdb = DB::open(&rocksdb_opts, &rocksdb_path).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         rocksdb.put(key.as_bytes(), value).unwrap();
     }
@@ -273,7 +254,7 @@ fn bench_bloom_filter_negative(c: &mut Criterion) {
     let filekv_dir = tempdir().unwrap();
     let filekv_config = create_filekv_config(&filekv_dir);
     let filekv = FileKV::open(filekv_config).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         filekv.put(key, value).unwrap();
     }
@@ -284,7 +265,7 @@ fn bench_bloom_filter_negative(c: &mut Criterion) {
     let rocksdb_path = rocksdb_dir.path().join("rocksdb");
     let rocksdb_opts = create_rocksdb_config();
     let rocksdb = DB::open(&rocksdb_opts, &rocksdb_path).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         rocksdb.put(key.as_bytes(), value).unwrap();
     }
@@ -320,7 +301,7 @@ fn bench_ycsb_mixed_workload(c: &mut Criterion) {
     let filekv_dir = tempdir().unwrap();
     let filekv_config = create_filekv_config(&filekv_dir);
     let filekv = FileKV::open(filekv_config).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         filekv.put(key, value).unwrap();
     }
@@ -330,7 +311,7 @@ fn bench_ycsb_mixed_workload(c: &mut Criterion) {
     let rocksdb_path = rocksdb_dir.path().join("rocksdb");
     let rocksdb_opts = create_rocksdb_config();
     let rocksdb = DB::open(&rocksdb_opts, &rocksdb_path).unwrap();
-    
+
     for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
         rocksdb.put(key.as_bytes(), value).unwrap();
     }
@@ -384,7 +365,7 @@ fn bench_concurrent_read_scalability(c: &mut Criterion) {
         let filekv_dir = tempdir().unwrap();
         let filekv_config = create_filekv_config(&filekv_dir);
         let filekv = Arc::new(FileKV::open(filekv_config).unwrap());
-        
+
         for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
             filekv.put(key, value).unwrap();
         }
@@ -394,57 +375,61 @@ fn bench_concurrent_read_scalability(c: &mut Criterion) {
         let rocksdb_path = rocksdb_dir.path().join("rocksdb");
         let rocksdb_opts = create_rocksdb_config();
         let rocksdb = Arc::new(DB::open(&rocksdb_opts, &rocksdb_path).unwrap());
-        
+
         for (key, value) in dataset.keys.iter().zip(dataset.values.iter()) {
             rocksdb.put(key.as_bytes(), value).unwrap();
         }
 
+        let keys = dataset.keys.clone();
+
         group.bench_with_input(BenchmarkId::new("FileKV", thread_count), &thread_count, |b, &tc| {
-            b.iter_custom(|iters| {
+            b.iter_custom(|_iters| {
                 let start = Instant::now();
                 let mut handles = vec![];
-                
+
                 for _ in 0..tc {
                     let kv = Arc::clone(&filekv);
+                    let keys = keys.clone();
                     let handle = thread::spawn(move || {
                         let mut rng = rand::thread_rng();
                         for _ in 0..100 {
                             let idx = rng.gen_range(0..NUM_ENTRIES);
-                            let _ = kv.get(&dataset.keys[idx]);
+                            let _ = kv.get(&keys[idx]);
                         }
                     });
                     handles.push(handle);
                 }
-                
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 start.elapsed()
             });
         });
 
         group.bench_with_input(BenchmarkId::new("RocksDB", thread_count), &thread_count, |b, &tc| {
-            b.iter_custom(|iters| {
+            b.iter_custom(|_iters| {
                 let start = Instant::now();
                 let mut handles = vec![];
-                
+
                 for _ in 0..tc {
                     let db = Arc::clone(&rocksdb);
+                    let keys = keys.clone();
                     let handle = thread::spawn(move || {
                         let mut rng = rand::thread_rng();
                         for _ in 0..100 {
                             let idx = rng.gen_range(0..NUM_ENTRIES);
-                            let _ = db.get(dataset.keys[idx].as_bytes());
+                            let _ = db.get(keys[idx].as_bytes());
                         }
                     });
                     handles.push(handle);
                 }
-                
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 start.elapsed()
             });
         });

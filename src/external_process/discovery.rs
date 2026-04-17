@@ -11,17 +11,13 @@
 
 #![allow(dead_code)]
 
+use crate::external_process::http_wrapper::openapi_parser;
 use crate::external_process::metadata::{
-    ExternalToolMetadata,
-    ExternalToolType,
-    ProcessConfig,
-    ScriptConfig,
-    RiskLevel,
+    ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel, ScriptConfig,
 };
 use crate::external_process::script_wrapper::script_scanner;
-use crate::external_process::http_wrapper::openapi_parser;
 use crate::external_process::wrapper::ExternalTool;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
@@ -93,9 +89,9 @@ impl ExternalToolDiscovery {
     /// * `Result<Vec<ExternalToolMetadata>>` - Discovered tool metadata
     pub async fn scan_executables(&mut self) -> Result<Vec<ExternalToolMetadata>> {
         info!("Scanning system PATH for executables...");
-        
+
         let mut tools = Vec::new();
-        
+
         // Common CLI tools to check for
         let common_tools = vec![
             ("git", "version_control", "Git version control"),
@@ -125,18 +121,17 @@ impl ExternalToolDiscovery {
         for (tool_name, domain, description) in common_tools {
             if let Some(tool_path) = find_executable(tool_name, &self.search_paths) {
                 debug!("Found executable: {} at {:?}", tool_name, tool_path);
-                
+
                 // Create basic metadata
-                let config = ProcessConfig::new(tool_name)
-                    .with_timeout(30000);
-                
+                let config = ProcessConfig::new(tool_name).with_timeout(30000);
+
                 // Create minimal input schema (can be enriched later)
                 let input_schema = serde_json::json!({
                     "type": "object",
                     "properties": {},
                     "description": format!("Execute {} command", tool_name)
                 });
-                
+
                 let metadata = ExternalToolMetadata::new(
                     format!("cli_{}", tool_name.replace('.', "_")),
                     format!("{} - {}", description, tool_path.display()),
@@ -151,7 +146,7 @@ impl ExternalToolDiscovery {
                     tool_name.to_string(),
                 ])
                 .with_risk_level(RiskLevel::Medium);
-                
+
                 tools.push(metadata);
             }
         }
@@ -168,10 +163,13 @@ impl ExternalToolDiscovery {
     ///
     /// # Returns
     /// * `Result<Vec<ExternalToolMetadata>>` - Discovered script tool metadata
-    pub async fn scan_scripts<P: AsRef<Path>>(&mut self, dir: P) -> Result<Vec<ExternalToolMetadata>> {
+    pub async fn scan_scripts<P: AsRef<Path>>(
+        &mut self,
+        dir: P,
+    ) -> Result<Vec<ExternalToolMetadata>> {
         let dir = dir.as_ref();
         info!("Scanning directory for scripts: {:?}", dir);
-        
+
         if !dir.exists() {
             bail!("Directory does not exist: {:?}", dir);
         }
@@ -183,20 +181,20 @@ impl ExternalToolDiscovery {
             if let Some(filename) = script_path.file_stem().and_then(|s| s.to_str()) {
                 // Generate tool name
                 let tool_name = format!("script_{}", filename.replace('.', "_"));
-                
+
                 // Generate description
                 let description = format!("Execute script: {}", script_path.display());
-                
+
                 // Create config
                 let config = ScriptConfig::new(script_path.clone());
-                
+
                 // Create minimal input schema
                 let input_schema = serde_json::json!({
                     "type": "object",
                     "properties": {},
                     "description": description
                 });
-                
+
                 let metadata = ExternalToolMetadata::new(
                     &tool_name,
                     &description,
@@ -211,7 +209,7 @@ impl ExternalToolDiscovery {
                     filename.to_string(),
                 ])
                 .with_risk_level(RiskLevel::Medium);
-                
+
                 tools.push(metadata);
             }
         }
@@ -228,21 +226,24 @@ impl ExternalToolDiscovery {
     ///
     /// # Returns
     /// * `Result<Vec<ExternalToolMetadata>>` - Discovered HTTP tool metadata
-    pub async fn from_openapi(&mut self, openapi_url_or_path: &str) -> Result<Vec<ExternalToolMetadata>> {
+    pub async fn from_openapi(
+        &mut self,
+        openapi_url_or_path: &str,
+    ) -> Result<Vec<ExternalToolMetadata>> {
         info!("Loading tools from OpenAPI spec: {}", openapi_url_or_path);
-        
+
         // Fetch or load OpenAPI spec
         let spec = load_openapi_spec(openapi_url_or_path).await?;
-        
+
         // Parse OpenAPI and generate wrappers
         let wrappers = openapi_parser::parse_openapi(&spec, &self.created_by)?;
-        
+
         // Convert wrappers to metadata
         let mut tools = Vec::new();
         for wrapper in &wrappers {
             tools.push(wrapper.metadata().clone());
         }
-        
+
         info!("Discovered {} HTTP tools from OpenAPI", tools.len());
         self.discovered_tools.extend(tools.clone());
         Ok(tools)
@@ -257,12 +258,15 @@ impl ExternalToolDiscovery {
     ///
     /// # Returns
     /// * `Result<ExternalToolMetadata>` - Enriched metadata
-    pub async fn ai_enrich_metadata(&self, mut tool: ExternalToolMetadata) -> Result<ExternalToolMetadata> {
+    pub async fn ai_enrich_metadata(
+        &self,
+        mut tool: ExternalToolMetadata,
+    ) -> Result<ExternalToolMetadata> {
         // This would normally call an LLM to generate better metadata
         // For now, we provide a simplified implementation
-        
+
         debug!("Enriching metadata for tool: {}", tool.name);
-        
+
         // Generate a better description based on tool type and name
         let enriched_description = match &tool.tool_type {
             ExternalToolType::Process { config } => {
@@ -275,27 +279,24 @@ impl ExternalToolDiscovery {
             ExternalToolType::Http { config } => {
                 format!(
                     "Make a {} request to {}. This HTTP endpoint is part of the {} domain.",
-                    config.method,
-                    config.path_template,
-                    tool.domain
+                    config.method, config.path_template, tool.domain
                 )
             }
             ExternalToolType::Script { config } => {
                 format!(
                     "Execute the script at {:?}. This script is used for {} operations.",
-                    config.script_path,
-                    tool.domain
+                    config.script_path, tool.domain
                 )
             }
         };
-        
+
         tool.description = enriched_description;
-        
+
         // Add common tags
         if !tool.tags.contains(&"auto_generated".to_string()) {
             tool.tags.push("auto_generated".to_string());
         }
-        
+
         Ok(tool)
     }
 
@@ -319,16 +320,13 @@ impl Default for ExternalToolDiscovery {
 /// Get system PATH environment variable
 fn get_system_path() -> Vec<PathBuf> {
     let path_env = std::env::var("PATH").unwrap_or_default();
-    
+
     #[cfg(windows)]
     let separator = ';';
     #[cfg(not(windows))]
     let separator = ':';
-    
-    path_env
-        .split(separator)
-        .map(PathBuf::from)
-        .collect()
+
+    path_env.split(separator).map(PathBuf::from).collect()
 }
 
 /// Find executable in search paths
@@ -342,7 +340,7 @@ fn find_executable(name: &str, search_paths: &[PathBuf]) -> Option<PathBuf> {
     // Search in PATH
     for path_dir in search_paths {
         let candidate = path_dir.join(name);
-        
+
         #[cfg(windows)]
         {
             // Try with .exe extension
@@ -351,7 +349,7 @@ fn find_executable(name: &str, search_paths: &[PathBuf]) -> Option<PathBuf> {
                 return Some(candidate_exe);
             }
         }
-        
+
         if candidate.exists() {
             // Check if executable
             #[cfg(unix)]
@@ -364,12 +362,12 @@ fn find_executable(name: &str, search_paths: &[PathBuf]) -> Option<PathBuf> {
                     }
                 }
             }
-            
+
             #[cfg(windows)]
             {
                 return Some(candidate);
             }
-            
+
             #[cfg(not(any(unix, windows)))]
             {
                 return Some(candidate);
@@ -388,25 +386,26 @@ async fn load_openapi_spec(source: &str) -> Result<Value> {
         let response = reqwest::get(source)
             .await
             .context("Failed to fetch OpenAPI spec")?;
-        
+
         if !response.status().is_success() {
             bail!("Failed to fetch OpenAPI spec: {}", response.status());
         }
-        
-        let spec: Value = response.json()
+
+        let spec: Value = response
+            .json()
             .await
             .context("Failed to parse OpenAPI spec JSON")?;
-        
+
         Ok(spec)
     } else {
         // Load from file
         let path = PathBuf::from(source);
         debug!("Loading OpenAPI spec from file: {:?}", path);
-        
+
         if !path.exists() {
             bail!("OpenAPI spec file not found: {:?}", path);
         }
-        
+
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read OpenAPI spec file: {:?}", path))?;
 
@@ -435,17 +434,16 @@ pub async fn discover_workspace_tools(
     created_by: &str,
 ) -> Result<Vec<ExternalToolMetadata>> {
     info!("Discovering workspace tools...");
-    
-    let mut discovery = ExternalToolDiscovery::new()
-        .with_created_by(created_by);
-    
+
+    let mut discovery = ExternalToolDiscovery::new().with_created_by(created_by);
+
     // Add script directories
     for dir in script_dirs {
         discovery = discovery.with_script_dir(dir.clone());
     }
-    
+
     let mut all_tools = Vec::new();
-    
+
     // Scan executables
     match discovery.scan_executables().await {
         Ok(tools) => {
@@ -456,7 +454,7 @@ pub async fn discover_workspace_tools(
             warn!("Failed to scan executables: {}", e);
         }
     }
-    
+
     // Scan script directories
     for dir in script_dirs {
         match discovery.scan_scripts(dir).await {
@@ -469,7 +467,7 @@ pub async fn discover_workspace_tools(
             }
         }
     }
-    
+
     // Load OpenAPI specs
     for spec_source in openapi_specs {
         match discovery.from_openapi(spec_source).await {
@@ -482,7 +480,7 @@ pub async fn discover_workspace_tools(
             }
         }
     }
-    
+
     info!("Total discovered tools: {}", all_tools.len());
     Ok(all_tools)
 }
@@ -490,9 +488,9 @@ pub async fn discover_workspace_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::fs;
     use crate::external_process::metadata::ProcessConfig;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_discovery_creation() {
@@ -505,10 +503,10 @@ mod tests {
     async fn test_scan_executables() {
         let mut discovery = ExternalToolDiscovery::new();
         let tools = discovery.scan_executables().await.unwrap();
-        
+
         // Should find at least some common tools
         assert!(!tools.is_empty());
-        
+
         // Verify metadata structure
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -520,31 +518,38 @@ mod tests {
     #[tokio::test]
     async fn test_scan_scripts() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // Create test scripts
         fs::write(temp_dir.path().join("test1.sh"), "#!/bin/bash\necho test").unwrap();
-        fs::write(temp_dir.path().join("test2.py"), "#!/usr/bin/env python3\nprint('test')").unwrap();
-        
+        fs::write(
+            temp_dir.path().join("test2.py"),
+            "#!/usr/bin/env python3\nprint('test')",
+        )
+        .unwrap();
+
         let mut discovery = ExternalToolDiscovery::new();
         let tools = discovery.scan_scripts(temp_dir.path()).await.unwrap();
-        
+
         assert_eq!(tools.len(), 2);
-        
+
         for tool in &tools {
             assert!(tool.name.starts_with("script_"));
-            assert_eq!(tool.tags.iter().filter(|t| *t == "auto_discovered").count(), 1);
+            assert_eq!(
+                tool.tags.iter().filter(|t| *t == "auto_discovered").count(),
+                1
+            );
         }
     }
 
     #[test]
     fn test_find_executable() {
         let paths = get_system_path();
-        
+
         // Should find common executables
         let found = find_executable("ls", &paths);
         #[cfg(unix)]
         assert!(found.is_some());
-        
+
         // Should not find non-existent executable
         let not_found = find_executable("nonexistent_binary_xyz123", &paths);
         assert!(not_found.is_none());

@@ -3,11 +3,11 @@
 //! Implements sparse indexing for efficient segment lookups.
 //! Uses hybrid approach: HashMap for O(1) point lookups + sorted Vec for range queries.
 
+use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use ahash::AHashMap;
-use serde::{Deserialize, Serialize};
 
 use crate::query::zone_map::{ZoneMapEntry, ZoneMapIndex};
 
@@ -40,8 +40,8 @@ pub struct SparseIndexEntry {
 /// - `zone_map`: Zone map entries for range query pruning (shared via Arc)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SparseIndex {
-    #[serde(skip)]  // Don't serialize, rebuild on load
-    key_map: AHashMap<String, u64>,  // key -> offset for O(1) lookup
+    #[serde(skip)] // Don't serialize, rebuild on load
+    key_map: AHashMap<String, u64>, // key -> offset for O(1) lookup
 
     pub entries: Vec<SparseIndexEntry>,
     pub segment_id: u64,
@@ -65,13 +65,11 @@ impl SparseIndex {
         self.key_map.insert(key.clone(), offset);
         self.entries.push(SparseIndexEntry { key, offset, seq_num });
     }
-    
+
     /// Build key_map from entries (called after deserialization)
     pub fn build_key_map(&mut self) {
         if self.key_map.is_empty() && !self.entries.is_empty() {
-            self.key_map = self.entries.iter()
-                .map(|e| (e.key.clone(), e.offset))
-                .collect();
+            self.key_map = self.entries.iter().map(|e| (e.key.clone(), e.offset)).collect();
         }
     }
 
@@ -147,12 +145,12 @@ impl DenseIndex {
 }
 
 /// Dense index entry for detailed lookups
-/// 
+///
 /// GAP-C4: Added block_id field for sequential prefetch tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DenseIndexEntry {
     pub offset: u64,
-    pub key_len: u32,  // CFG-003: Added for fast lookups
+    pub key_len: u32, // CFG-003: Added for fast lookups
     pub value_len: u32,
     pub checksum: u32,
     pub seq_num: u64,
@@ -224,9 +222,9 @@ impl IndexManager {
     /// Get zone map index for a segment
     /// Returns a ZoneMapIndex that shares the entries via Arc (no clone of entries)
     pub fn get_zone_map(&self, segment_id: u64) -> Option<ZoneMapIndex> {
-        self.indexes.get(&segment_id).map(|idx| {
-            ZoneMapIndex::from_shared(segment_id, Arc::clone(&idx.zone_map))
-        })
+        self.indexes
+            .get(&segment_id)
+            .map(|idx| ZoneMapIndex::from_shared(segment_id, Arc::clone(&idx.zone_map)))
     }
 
     /// Update zone map for a segment

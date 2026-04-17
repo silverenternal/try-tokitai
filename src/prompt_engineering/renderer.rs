@@ -35,10 +35,7 @@ impl PromptRenderer {
             "lowercase".to_string(),
             Box::new(|s: &str| s.to_lowercase()),
         );
-        functions.insert(
-            "trim".to_string(),
-            Box::new(|s: &str| s.trim().to_string()),
-        );
+        functions.insert("trim".to_string(), Box::new(|s: &str| s.trim().to_string()));
 
         Self { functions }
     }
@@ -233,8 +230,7 @@ impl PromptRenderer {
     where
         F: Fn(&str) -> String + Send + Sync + 'static,
     {
-        self.functions
-            .insert(name.to_string(), Box::new(func));
+        self.functions.insert(name.to_string(), Box::new(func));
     }
 
     /// 截断文本到指定长度

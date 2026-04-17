@@ -9,11 +9,11 @@
 
 #![allow(dead_code)]
 
-use tokitai::tool;
 use super::git_workflow::GitWorkflow;
+use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
+use tokitai::tool;
 
 /// Git 自主工作流工具集
 pub struct GitWorkflowTools {
@@ -43,11 +43,12 @@ impl GitWorkflowTools {
     /// 检查 Git 状态
     pub fn git_status(&self) -> Result<String, String> {
         let workflow = self.workflow.read();
-        let status = workflow.git_status()
+        let status = workflow
+            .git_status()
             .map_err(|e| format!("获取 Git 状态失败：{}", e))?;
-        
+
         let mut output = format!("分支：{}\n", status.branch);
-        
+
         if !status.modified.is_empty() {
             output.push_str(&format!("修改的文件：{}\n", status.modified.join(", ")));
         }
@@ -57,25 +58,27 @@ impl GitWorkflowTools {
         if !status.deleted.is_empty() {
             output.push_str(&format!("删除的文件：{}\n", status.deleted.join(", ")));
         }
-        
+
         if status.modified.is_empty() && status.untracked.is_empty() && status.deleted.is_empty() {
             output.push_str("工作区干净，无修改");
         }
-        
+
         Ok(output)
     }
 
     /// 获取 Git diff 摘要
     pub fn get_diff_summary(&self) -> Result<String, String> {
         let workflow = self.workflow.read();
-        workflow.get_diff_summary()
+        workflow
+            .get_diff_summary()
             .map_err(|e| format!("获取 diff 失败：{}", e))
     }
 
     /// 生成提交消息
     pub fn generate_commit_message(&self, changes_summary: String) -> Result<String, String> {
         let workflow = self.workflow.read();
-        let (commit_type, message) = workflow.generate_commit_message(&changes_summary)
+        let (commit_type, message) = workflow
+            .generate_commit_message(&changes_summary)
             .map_err(|e| format!("生成提交消息失败：{}", e))?;
         Ok(format!("{}: {}", commit_type, message))
     }
@@ -83,15 +86,21 @@ impl GitWorkflowTools {
     /// 提交变更
     pub fn commit(&self, message: String, run_pre_commit: bool) -> Result<String, String> {
         let mut workflow = self.workflow.write();
-        let record = workflow.commit(&message, run_pre_commit)
+        let record = workflow
+            .commit(&message, run_pre_commit)
             .map_err(|e| format!("提交失败：{}", e))?;
-        Ok(format!("提交成功：{} - {}", &record.hash[..8], record.message))
+        Ok(format!(
+            "提交成功：{} - {}",
+            &record.hash[..8],
+            record.message
+        ))
     }
 
     /// 推送到远程
     pub fn push(&self) -> Result<String, String> {
         let workflow = self.workflow.read();
-        workflow.push()
+        workflow
+            .push()
             .map_err(|e| format!("推送失败：{}", e))
             .map(|_| "推送成功".to_string())
     }
@@ -99,7 +108,8 @@ impl GitWorkflowTools {
     /// 执行回滚
     pub fn rollback(&self) -> Result<String, String> {
         let workflow = self.workflow.read();
-        workflow.rollback()
+        workflow
+            .rollback()
             .map_err(|e| format!("回滚失败：{}", e))
             .map(|_| "回滚成功".to_string())
     }
@@ -108,7 +118,7 @@ impl GitWorkflowTools {
     pub fn get_commit_history(&self) -> Result<String, String> {
         let workflow = self.workflow.read();
         let history = workflow.commits();
-        
+
         let mut output = String::new();
         for commit in history {
             output.push_str(&format!(
@@ -118,7 +128,7 @@ impl GitWorkflowTools {
                 commit.commit_type
             ));
         }
-        
+
         Ok(output)
     }
 
@@ -134,7 +144,8 @@ impl GitWorkflowTools {
     /// 设置回滚检查点
     pub fn set_rollback_checkpoint(&self) -> Result<String, String> {
         let mut workflow = self.workflow.write();
-        workflow.set_rollback_checkpoint()
+        workflow
+            .set_rollback_checkpoint()
             .map_err(|e| format!("设置检查点失败：{}", e))
             .map(|_| "回滚检查点已设置".to_string())
     }
@@ -143,22 +154,22 @@ impl GitWorkflowTools {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokitai::ToolProvider;
     use tempfile::TempDir;
+    use tokitai::ToolProvider;
 
     #[test]
     fn test_git_workflow_tools_creation() {
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path().to_path_buf();
         let storage_dir = temp_dir.path().join(".tokitai").join("autonomy");
-        
+
         // 初始化 Git 仓库
         std::process::Command::new("git")
             .arg("init")
             .current_dir(&repo_dir)
             .output()
             .expect("Failed to init git repo");
-        
+
         let tools = GitWorkflowTools::new(repo_dir, storage_dir);
         assert!(tools.is_ok());
     }

@@ -2,10 +2,10 @@
 //!
 //! Provides runtime control for experimental features.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Feature flags for INNO-001 and INNO-002
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,9 +84,30 @@ impl FeatureFlagController {
     pub fn new() -> Self {
         let mut states = HashMap::new();
         // Default: all features enabled
-        states.insert(FeatureFlag::Inno001AdaptiveBloomCache, FeatureState { enabled: true, hits: 0, misses: 0 });
-        states.insert(FeatureFlag::Inno002ZoneMapPruning, FeatureState { enabled: true, hits: 0, misses: 0 });
-        states.insert(FeatureFlag::Inno002SequentialPrefetch, FeatureState { enabled: true, hits: 0, misses: 0 });
+        states.insert(
+            FeatureFlag::Inno001AdaptiveBloomCache,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
+        states.insert(
+            FeatureFlag::Inno002ZoneMapPruning,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
+        states.insert(
+            FeatureFlag::Inno002SequentialPrefetch,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
 
         Self {
             states: RwLock::new(states),
@@ -115,8 +136,7 @@ impl FeatureFlagController {
     }
 
     pub fn is_inno002_fully_enabled(&self) -> bool {
-        self.is_enabled(FeatureFlag::Inno002ZoneMapPruning)
-            && self.is_enabled(FeatureFlag::Inno002SequentialPrefetch)
+        self.is_enabled(FeatureFlag::Inno002ZoneMapPruning) && self.is_enabled(FeatureFlag::Inno002SequentialPrefetch)
     }
 
     pub fn is_enabled(&self, flag: FeatureFlag) -> bool {
@@ -209,9 +229,30 @@ impl FeatureFlagController {
     /// Use this in test cleanup to prevent cross-test pollution.
     pub fn reset(&self) {
         let mut states = self.states.write();
-        states.insert(FeatureFlag::Inno001AdaptiveBloomCache, FeatureState { enabled: true, hits: 0, misses: 0 });
-        states.insert(FeatureFlag::Inno002ZoneMapPruning, FeatureState { enabled: true, hits: 0, misses: 0 });
-        states.insert(FeatureFlag::Inno002SequentialPrefetch, FeatureState { enabled: true, hits: 0, misses: 0 });
+        states.insert(
+            FeatureFlag::Inno001AdaptiveBloomCache,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
+        states.insert(
+            FeatureFlag::Inno002ZoneMapPruning,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
+        states.insert(
+            FeatureFlag::Inno002SequentialPrefetch,
+            FeatureState {
+                enabled: true,
+                hits: 0,
+                misses: 0,
+            },
+        );
         self.toggle_count.store(0, Ordering::Relaxed);
         self.total_checks.store(0, Ordering::Relaxed);
         self.enabled_hits.store(0, Ordering::Relaxed);

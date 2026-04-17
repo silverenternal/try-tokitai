@@ -9,11 +9,9 @@
 #[cfg(test)]
 mod tests {
     use ai_assistant::autonomy::gap_detector::{
-        ToolGapDetector, TaskExecutionRecord, ToolUsageStats,
+        TaskExecutionRecord, ToolGapDetector, ToolUsageStats,
     };
-    use ai_assistant::autonomy::tool_optimizer::{
-        ToolOptimizer, ToolMetrics, OptimizationType,
-    };
+    use ai_assistant::autonomy::tool_optimizer::{OptimizationType, ToolMetrics, ToolOptimizer};
     use tempfile::TempDir;
 
     // ========== ToolGapDetector 测试 ==========
@@ -50,7 +48,7 @@ mod tests {
 
         // 验证结果
         assert!(!gaps.is_empty(), "应该检测到至少一个缺口");
-        
+
         let gap = &gaps[0];
         assert!(!gap.id.is_empty());
         assert!(!gap.description.is_empty());
@@ -76,15 +74,16 @@ mod tests {
         }
 
         let gaps = detector.analyze_and_detect();
-        
+
         // 应该识别出模式并生成缺口
         assert!(!gaps.is_empty());
-        
+
         // 验证缺口信息
-        let gap = gaps.iter()
+        let gap = gaps
+            .iter()
             .find(|g| g.description.contains("批量") || g.description.contains("batch"))
             .expect("应该检测到批量操作相关的缺口");
-        
+
         assert!(gap.priority >= 5, "重复出现的缺口应该有较高优先级");
     }
 
@@ -101,7 +100,11 @@ mod tests {
                 success: i < 8, // 80% 成功率
                 used_tools: vec!["read_file".to_string()],
                 execution_time_ms: 50 + (i * 10) as u64,
-                failure_reason: if i >= 8 { Some("失败".to_string()) } else { None },
+                failure_reason: if i >= 8 {
+                    Some("失败".to_string())
+                } else {
+                    None
+                },
                 user_satisfaction: Some(if i < 8 { 4 } else { 2 }),
             });
         }
@@ -149,12 +152,23 @@ mod tests {
 
         optimizer.calculate_health_scores();
 
-        let healthy_score = optimizer.health_scores.get("healthy_tool").unwrap().health_score;
-        let unhealthy_score = optimizer.health_scores.get("unhealthy_tool").unwrap().health_score;
+        let healthy_score = optimizer
+            .health_scores
+            .get("healthy_tool")
+            .unwrap()
+            .health_score;
+        let unhealthy_score = optimizer
+            .health_scores
+            .get("unhealthy_tool")
+            .unwrap()
+            .health_score;
 
         assert!(healthy_score > 0.8, "健康工具应该有高分数");
         assert!(unhealthy_score < 0.5, "不健康工具应该有低分数");
-        assert!(healthy_score > unhealthy_score, "健康工具分数应该高于不健康工具");
+        assert!(
+            healthy_score > unhealthy_score,
+            "健康工具分数应该高于不健康工具"
+        );
     }
 
     #[test]
@@ -190,11 +204,12 @@ mod tests {
         let suggestions = optimizer.analyze_and_optimize();
 
         // 应该检测到冗余并建议合并
-        let merge_suggestion = suggestions.iter()
+        let merge_suggestion = suggestions
+            .iter()
             .find(|s| s.optimization_type == OptimizationType::Merge);
-        
+
         assert!(merge_suggestion.is_some(), "应该检测到冗余工具并建议合并");
-        
+
         if let Some(suggestion) = merge_suggestion {
             assert!(suggestion.affected_tools.len() >= 2);
             assert!(suggestion.priority >= 5);
@@ -235,13 +250,16 @@ mod tests {
         let suggestions = optimizer.analyze_and_optimize();
 
         // 应该建议废弃或改进低使用率工具
-        let deprecate_suggestion = suggestions.iter()
+        let deprecate_suggestion = suggestions
+            .iter()
             .find(|s| s.optimization_type == OptimizationType::Deprecate);
-        
+
         assert!(deprecate_suggestion.is_some(), "应该建议废弃低使用率工具");
-        
+
         if let Some(suggestion) = deprecate_suggestion {
-            assert!(suggestion.affected_tools.contains(&"rarely_used_tool".to_string()));
+            assert!(suggestion
+                .affected_tools
+                .contains(&"rarely_used_tool".to_string()));
         }
     }
 
@@ -250,10 +268,10 @@ mod tests {
     #[test]
     fn test_gap_detector_and_optimizer_integration() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // 创建缺口检测器
         let mut detector = ToolGapDetector::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         // 模拟真实使用场景：某些工具频繁失败
         for i in 0..20 {
             let success = i < 10; // 50% 失败率
@@ -263,7 +281,11 @@ mod tests {
                 success,
                 used_tools: vec!["http_get".to_string()],
                 execution_time_ms: if success { 200 } else { 5000 },
-                failure_reason: if !success { Some("超时或连接失败".to_string()) } else { None },
+                failure_reason: if !success {
+                    Some("超时或连接失败".to_string())
+                } else {
+                    None
+                },
                 user_satisfaction: Some(if success { 4 } else { 1 }),
             });
         }
@@ -274,7 +296,7 @@ mod tests {
 
         // 创建优化器并导入数据
         let mut optimizer = ToolOptimizer::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         // 基于缺口检测的结果更新优化器指标
         optimizer.update_metrics(ToolMetrics {
             tool_name: "http_get".to_string(),
@@ -289,27 +311,28 @@ mod tests {
         });
 
         let suggestions = optimizer.analyze_and_optimize();
-        
+
         // 应该生成改进建议
         assert!(!suggestions.is_empty());
-        
+
         // 验证建议质量
-        let improve_suggestion = suggestions.iter()
+        let improve_suggestion = suggestions
+            .iter()
             .find(|s| s.optimization_type == OptimizationType::Improve);
-        
+
         assert!(improve_suggestion.is_some(), "应该建议改进低可靠性的工具");
     }
 
     #[test]
     fn test_concurrent_task_recording() {
-        use std::thread;
         use std::sync::{Arc, Mutex};
-        
+        use std::thread;
+
         let temp_dir = TempDir::new().unwrap();
         let detector: Arc<Mutex<ToolGapDetector>> = Arc::new(Mutex::new(
-            ToolGapDetector::new(temp_dir.path().to_path_buf()).unwrap()
+            ToolGapDetector::new(temp_dir.path().to_path_buf()).unwrap(),
         ));
-        
+
         // 多线程记录任务
         let mut handles = vec![];
         for i in 0..10 {

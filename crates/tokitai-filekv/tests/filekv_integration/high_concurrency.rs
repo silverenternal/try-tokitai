@@ -86,7 +86,11 @@ fn test_32_threads_concurrent_puts() {
         }
     }
 
-    assert_eq!(found, expected_total, "Should find all {} keys, found {}", expected_total, found);
+    assert_eq!(
+        found, expected_total,
+        "Should find all {} keys, found {}",
+        expected_total, found
+    );
 
     println!(
         "[32-thread put] {} ops in {:.3}s ({:.0} ops/s)",
@@ -127,9 +131,15 @@ fn test_32_threads_concurrent_gets() {
                 let key_idx = (t * reads_per_thread + i) % num_keys;
                 let key = format!("key_{}", key_idx);
                 match kv_clone.get(&key) {
-                    Ok(Some(_)) => { hits.fetch_add(1, Ordering::Relaxed); }
-                    Ok(None) => { misses.fetch_add(1, Ordering::Relaxed); }
-                    Err(_) => { misses.fetch_add(1, Ordering::Relaxed); }
+                    Ok(Some(_)) => {
+                        hits.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(None) => {
+                        misses.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(_) => {
+                        misses.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
         });
@@ -219,7 +229,13 @@ fn test_32_threads_mixed_read_write() {
 
     // Basic sanity: no panics, engine still functional
     let stats = kv.get_stats();
-    assert!(stats.segment_count >= 0, "Engine should be in valid state");
+    let attempted_puts = total_puts.load(Ordering::Relaxed);
+    assert_eq!(
+        attempted_puts, 1920,
+        "Should have attempted 1920 puts (30% of 6400 ops)"
+    );
+    // Note: actual stored entries may be less due to key collisions and silent failures
+    let _ = stats.total_entries;
 }
 
 // ─── 64-thread tests ───
@@ -498,7 +514,11 @@ fn test_32_threads_puts_then_flush_and_reopen() {
     }
 
     let expected_total = (num_threads * keys_per_thread) as u64;
-    assert_eq!(found, expected_total, "After reopen: should find all {} keys, found {}", expected_total, found);
+    assert_eq!(
+        found, expected_total,
+        "After reopen: should find all {} keys, found {}",
+        expected_total, found
+    );
 }
 
 // ─── DashMap contention analysis test ───
@@ -514,7 +534,10 @@ fn test_dashmap_contention_analysis() {
     let ops_per_thread = 10_000;
 
     println!("\n=== DashMap Contention Analysis ===");
-    println!("{:<10} {:<12} {:<15} {:<15}", "Threads", "Time (ms)", "Ops/sec", "Scaling");
+    println!(
+        "{:<10} {:<12} {:<15} {:<15}",
+        "Threads", "Time (ms)", "Ops/sec", "Scaling"
+    );
 
     let mut baseline_time: Option<Duration> = None;
 

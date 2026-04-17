@@ -79,8 +79,8 @@ impl Default for RebalanceConfig {
             high_hit_rate_threshold: 0.8,
             min_hit_rate_gap: 0.2,
             max_transfer_ratio: 0.1,
-            min_budget_bytes: 1024 * 1024,        // 1MB
-            max_budget_bytes: 256 * 1024 * 1024,   // 256MB
+            min_budget_bytes: 1024 * 1024,       // 1MB
+            max_budget_bytes: 256 * 1024 * 1024, // 256MB
             min_access_samples: 100,
         }
     }
@@ -125,12 +125,7 @@ impl RebalanceDecision {
         // Case 1: Block is low, Bloom is high -> transfer from Block to Bloom
         if block_is_low && bloom_is_high && gap >= config.min_hit_rate_gap {
             let transfer_bytes = Self::calculate_transfer(block_memory, config);
-            let transfer_bytes = Self::clamp_transfer(
-                transfer_bytes,
-                block_memory,
-                bloom_memory,
-                config,
-            );
+            let transfer_bytes = Self::clamp_transfer(transfer_bytes, block_memory, bloom_memory, config);
             if transfer_bytes > 0 {
                 decisions.push(RebalanceDecision::ShrinkBlock(transfer_bytes));
                 decisions.push(RebalanceDecision::GrowBloom(transfer_bytes));
@@ -140,12 +135,7 @@ impl RebalanceDecision {
         // Case 2: Bloom is low, Block is high -> transfer from Bloom to Block
         if bloom_is_low && block_is_high && (-gap) >= config.min_hit_rate_gap {
             let transfer_bytes = Self::calculate_transfer(bloom_memory, config);
-            let transfer_bytes = Self::clamp_transfer(
-                transfer_bytes,
-                bloom_memory,
-                block_memory,
-                config,
-            );
+            let transfer_bytes = Self::clamp_transfer(transfer_bytes, bloom_memory, block_memory, config);
             if transfer_bytes > 0 {
                 decisions.push(RebalanceDecision::ShrinkBloom(transfer_bytes));
                 decisions.push(RebalanceDecision::GrowBlock(transfer_bytes));
@@ -166,12 +156,7 @@ impl RebalanceDecision {
     }
 
     /// Clamp transfer to respect min/max budget bounds.
-    fn clamp_transfer(
-        transfer_bytes: u64,
-        donor_memory: u64,
-        receiver_memory: u64,
-        config: &RebalanceConfig,
-    ) -> u64 {
+    fn clamp_transfer(transfer_bytes: u64, donor_memory: u64, receiver_memory: u64, config: &RebalanceConfig) -> u64 {
         // Donor cannot go below min_budget
         let donor_min = donor_memory.saturating_sub(transfer_bytes);
         let donor_safe = if donor_min < config.min_budget_bytes {
@@ -221,12 +206,7 @@ impl RebalanceStats {
     }
 
     /// Create stats for a skipped cycle (insufficient samples)
-    pub fn skipped(
-        block_hit_rate: f64,
-        bloom_hit_rate: f64,
-        block_memory_bytes: u64,
-        bloom_memory_bytes: u64,
-    ) -> Self {
+    pub fn skipped(block_hit_rate: f64, bloom_hit_rate: f64, block_memory_bytes: u64, bloom_memory_bytes: u64) -> Self {
         Self {
             block_hit_rate,
             bloom_hit_rate,
@@ -322,13 +302,16 @@ mod tests {
         // Both hit rates are in the medium range (0.3-0.8)
         let decisions = RebalanceDecision::evaluate(
             &config,
-            0.5,  // block: medium
-            0.6,  // bloom: medium
+            0.5, // block: medium
+            0.6, // bloom: medium
             10 * 1024 * 1024,
             5 * 1024 * 1024,
         );
 
-        assert!(decisions.is_empty(), "No decisions expected when both caches are medium");
+        assert!(
+            decisions.is_empty(),
+            "No decisions expected when both caches are medium"
+        );
     }
 
     #[test]
@@ -343,7 +326,10 @@ mod tests {
             5 * 1024 * 1024,
         );
 
-        assert!(decisions.is_empty(), "No decisions expected when both caches are high performing");
+        assert!(
+            decisions.is_empty(),
+            "No decisions expected when both caches are high performing"
+        );
     }
 
     #[test]
@@ -358,7 +344,10 @@ mod tests {
             5 * 1024 * 1024,
         );
 
-        assert!(decisions.is_empty(), "No decisions expected when both caches are low performing");
+        assert!(
+            decisions.is_empty(),
+            "No decisions expected when both caches are low performing"
+        );
     }
 
     #[test]
@@ -368,8 +357,8 @@ mod tests {
         // Block is low, Bloom is high, gap is sufficient
         let decisions = RebalanceDecision::evaluate(
             &config,
-            0.1,  // block: low (< 0.3)
-            0.9,  // bloom: high (> 0.8)
+            0.1,              // block: low (< 0.3)
+            0.9,              // bloom: high (> 0.8)
             10 * 1024 * 1024, // 10MB block
             5 * 1024 * 1024,  // 5MB bloom
         );
@@ -380,17 +369,24 @@ mod tests {
             RebalanceDecision::ShrinkBlock(bytes) => {
                 assert!(*bytes > 0, "Should transfer some bytes");
                 // Transfer should be at most 10% of block memory
-                assert!(*bytes <= (10 * 1024 * 1024) / 10, "Transfer should not exceed max_transfer_ratio");
+                assert!(
+                    *bytes <= (10 * 1024 * 1024) / 10,
+                    "Transfer should not exceed max_transfer_ratio"
+                );
             }
             _ => panic!("Expected ShrinkBlock as first decision"),
         }
         // Second decision should be growing bloom
         match &decisions[1] {
             RebalanceDecision::GrowBloom(bytes) => {
-                assert_eq!(*bytes, match &decisions[0] {
-                    RebalanceDecision::ShrinkBlock(b) => *b,
-                    _ => panic!("Mismatched decisions"),
-                }, "Grow amount should match shrink amount");
+                assert_eq!(
+                    *bytes,
+                    match &decisions[0] {
+                        RebalanceDecision::ShrinkBlock(b) => *b,
+                        _ => panic!("Mismatched decisions"),
+                    },
+                    "Grow amount should match shrink amount"
+                );
             }
             _ => panic!("Expected GrowBloom as second decision"),
         }
@@ -403,8 +399,8 @@ mod tests {
         // Bloom is low, Block is high, gap is sufficient
         let decisions = RebalanceDecision::evaluate(
             &config,
-            0.9,  // block: high
-            0.1,  // bloom: low
+            0.9, // block: high
+            0.1, // bloom: low
             10 * 1024 * 1024,
             5 * 1024 * 1024,
         );
@@ -413,16 +409,23 @@ mod tests {
         match &decisions[0] {
             RebalanceDecision::ShrinkBloom(bytes) => {
                 assert!(*bytes > 0, "Should transfer some bytes");
-                assert!(*bytes <= (5 * 1024 * 1024) / 10, "Transfer should not exceed max_transfer_ratio");
+                assert!(
+                    *bytes <= (5 * 1024 * 1024) / 10,
+                    "Transfer should not exceed max_transfer_ratio"
+                );
             }
             _ => panic!("Expected ShrinkBloom as first decision"),
         }
         match &decisions[1] {
             RebalanceDecision::GrowBlock(bytes) => {
-                assert_eq!(*bytes, match &decisions[0] {
-                    RebalanceDecision::ShrinkBloom(b) => *b,
-                    _ => panic!("Mismatched decisions"),
-                }, "Grow amount should match shrink amount");
+                assert_eq!(
+                    *bytes,
+                    match &decisions[0] {
+                        RebalanceDecision::ShrinkBloom(b) => *b,
+                        _ => panic!("Mismatched decisions"),
+                    },
+                    "Grow amount should match shrink amount"
+                );
             }
             _ => panic!("Expected GrowBlock as second decision"),
         }
@@ -454,8 +457,8 @@ mod tests {
         // Block has only 6MB, min is 5MB, so transfer should be limited to 1MB
         let decisions = RebalanceDecision::evaluate(
             &config,
-            0.1,  // block: low
-            0.9,  // bloom: high
+            0.1,             // block: low
+            0.9,             // bloom: high
             6 * 1024 * 1024, // 6MB block
             5 * 1024 * 1024,
         );
@@ -464,7 +467,7 @@ mod tests {
         match &decisions[0] {
             RebalanceDecision::ShrinkBlock(bytes) => {
                 // Cannot shrink below 5MB, so max transfer is 1MB
-                assert!(*bytes <= 1 * 1024 * 1024, "Transfer should respect min_budget");
+                assert!(*bytes <= 1024 * 1024, "Transfer should respect min_budget");
             }
             _ => panic!("Expected ShrinkBlock"),
         }
@@ -480,8 +483,8 @@ mod tests {
         // Bloom is at 5.5MB, max is 6MB, so can only receive 0.5MB
         let decisions = RebalanceDecision::evaluate(
             &config,
-            0.1,  // block: low
-            0.9,  // bloom: high
+            0.1, // block: low
+            0.9, // bloom: high
             10 * 1024 * 1024,
             5500 * 1024, // ~5.5MB bloom
         );
@@ -519,10 +522,7 @@ mod tests {
 
     #[test]
     fn test_rebalance_stats_completed_with_action() {
-        let decisions = vec![
-            RebalanceDecision::ShrinkBlock(1024),
-            RebalanceDecision::GrowBloom(1024),
-        ];
+        let decisions = vec![RebalanceDecision::ShrinkBlock(1024), RebalanceDecision::GrowBloom(1024)];
         let stats = RebalanceStats::completed(0.1, 0.9, 10 * 1024, 5 * 1024, decisions);
 
         assert_eq!(stats.status, RebalanceStatus::Completed);

@@ -20,10 +20,10 @@ use thiserror::Error;
 pub enum CompressionError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Invalid compressed data: {0}")]
     InvalidData(String),
-    
+
     #[error("Huffman tree error: {0}")]
     HuffmanError(String),
 }
@@ -100,9 +100,10 @@ impl HuffmanCodec {
             nodes.push(merged);
         }
 
-        let root = nodes.into_iter().next().ok_or_else(|| {
-            CompressionError::HuffmanError("Huffman tree build resulted in empty tree".to_string())
-        })?;
+        let root = nodes
+            .into_iter()
+            .next()
+            .ok_or_else(|| CompressionError::HuffmanError("Huffman tree build resulted in empty tree".to_string()))?;
         let mut encode_table = HashMap::new();
 
         // Generate encoding table
@@ -110,10 +111,9 @@ impl HuffmanCodec {
             // Special case: only one symbol
             // P1-008 FIX: Use ok_or_else for unwrap
             encode_table.insert(
-                root.symbol.ok_or_else(|| {
-                    CompressionError::HuffmanError("Leaf node has no symbol".to_string())
-                })?,
-                (0, 1)
+                root.symbol
+                    .ok_or_else(|| CompressionError::HuffmanError("Leaf node has no symbol".to_string()))?,
+                (0, 1),
             );
         } else {
             Self::build_encoding_table(&root, 0, 0, &mut encode_table)?;
@@ -207,11 +207,11 @@ impl HuffmanCodec {
         let mut bit_count: u8 = 0;
 
         for &byte in input {
-            let (code, code_bits) = self.encode_table.get(&byte)
-                .ok_or_else(|| CompressionError::HuffmanError(
-                    format!("Symbol {} not in Huffman table", byte)
-                ))?;
-            
+            let (code, code_bits) = self
+                .encode_table
+                .get(&byte)
+                .ok_or_else(|| CompressionError::HuffmanError(format!("Symbol {} not in Huffman table", byte)))?;
+
             // Append code to bit buffer
             bit_buffer |= code << bit_count;
             bit_count += code_bits;
@@ -235,9 +235,11 @@ impl HuffmanCodec {
     /// Decode Huffman-encoded data
     fn decode(&self, input: &[u8], total_bits: usize) -> CompressionResult<Vec<u8>> {
         let mut output = Vec::new();
-        let mut current = self.decode_tree.as_ref()
+        let mut current = self
+            .decode_tree
+            .as_ref()
             .ok_or_else(|| CompressionError::HuffmanError("Decode tree not initialized".to_string()))?;
-        
+
         let mut bit_count = 0;
 
         for &byte in input {
@@ -245,7 +247,7 @@ impl HuffmanCodec {
                 if bit_count >= total_bits {
                     return Ok(output);
                 }
-                
+
                 let bit = (byte >> bit_idx) & 1;
 
                 current = if bit == 0 {
@@ -253,22 +255,23 @@ impl HuffmanCodec {
                 } else {
                     current.right.as_ref()
                 }
-                .ok_or_else(|| CompressionError::HuffmanError(
-                    format!("Invalid Huffman encoding at bit {}", bit_count)
-                ))?;
+                .ok_or_else(|| {
+                    CompressionError::HuffmanError(format!("Invalid Huffman encoding at bit {}", bit_count))
+                })?;
 
                 if current.is_leaf() {
                     // P1-008 FIX: Use ok_or_else instead of unwrap for symbol
-                    let symbol = current.symbol.ok_or_else(|| {
-                        CompressionError::HuffmanError("Leaf node has no symbol".to_string())
-                    })?;
+                    let symbol = current
+                        .symbol
+                        .ok_or_else(|| CompressionError::HuffmanError("Leaf node has no symbol".to_string()))?;
                     output.push(symbol);
                     // P1-008 FIX: Use ok_or_else instead of unwrap for decode_tree
-                    current = self.decode_tree.as_ref().ok_or_else(|| {
-                        CompressionError::HuffmanError("Decode tree not initialized".to_string())
-                    })?;
+                    current = self
+                        .decode_tree
+                        .as_ref()
+                        .ok_or_else(|| CompressionError::HuffmanError("Decode tree not initialized".to_string()))?;
                 }
-                
+
                 bit_count += 1;
             }
         }
@@ -300,7 +303,7 @@ impl RleEncoder {
             // Expand buffer
             self.bits.resize(self.bits.len() * 2 + 1, 0);
         }
-        
+
         if bit {
             self.bits[self.current_bit / 8] |= 1 << (self.current_bit % 8);
         }
@@ -335,10 +338,7 @@ pub struct RleDecoder<'a> {
 
 impl<'a> RleDecoder<'a> {
     pub fn new(bits: &'a [u8]) -> Self {
-        Self {
-            bits,
-            current_bit: 0,
-        }
+        Self { bits, current_bit: 0 }
     }
 
     /// Read a single bit
@@ -346,7 +346,7 @@ impl<'a> RleDecoder<'a> {
         if self.current_bit >= self.bits.len() * 8 {
             return None;
         }
-        
+
         let byte_idx = self.current_bit / 8;
         let bit_idx = self.current_bit % 8;
         let bit = (self.bits[byte_idx] >> bit_idx) & 1 == 1;
@@ -447,16 +447,19 @@ impl CompressedBloom {
             if huffman_encoded.len() < rle_encoded.len() {
                 // Calculate total bits: each symbol's code length * frequency
                 // P1-008 FIX: Use unwrap_or_else instead of expect for better performance
-                let total_bits: usize = rle_encoded.iter()
+                let total_bits: usize = rle_encoded
+                    .iter()
                     .map(|&byte| {
-                        let (_, code_bits) = codec.encode_table.get(&byte).unwrap_or_else(|| {
-                            panic!("Huffman encode table missing symbol {}", byte)
-                        });
+                        let (_, code_bits) = codec
+                            .encode_table
+                            .get(&byte)
+                            .unwrap_or_else(|| panic!("Huffman encode table missing symbol {}", byte));
                         *code_bits as usize
                     })
                     .sum();
                 // Build Huffman table for decoding: (symbol, code_length, code_bits)
-                let table: Vec<(u8, u8, u64)> = codec.encode_table
+                let table: Vec<(u8, u8, u64)> = codec
+                    .encode_table
                     .iter()
                     .map(|(&symbol, &(code, len))| (symbol, len, code))
                     .collect();
@@ -501,9 +504,10 @@ impl CompressedBloom {
                 // Then decode RLE
                 Self::rle_decode(&rle_encoded, (self.original_size as usize).div_ceil(8))
             }
-            _ => Err(CompressionError::InvalidData(
-                format!("Unknown compression type: {}", self.compression_type),
-            )),
+            _ => Err(CompressionError::InvalidData(format!(
+                "Unknown compression type: {}",
+                self.compression_type
+            ))),
         }
     }
 
@@ -565,7 +569,7 @@ impl CompressedBloom {
             if run_length == 0 {
                 continue; // Skip zero-length runs
             }
-            
+
             for _ in 0..run_length {
                 if output_bit >= output_bytes * 8 {
                     return Ok(output);
@@ -591,24 +595,6 @@ impl CompressedBloom {
         frequencies
     }
 
-    /// Estimate frequencies from compressed data (for decoding)
-    /// NOTE: Reserved for future adaptive compression support
-    #[allow(dead_code)]
-    fn estimate_frequencies_from_data(data: &[u8]) -> HashMap<u8, usize> {
-        // Count actual byte frequencies from the compressed data
-        let mut frequencies = HashMap::new();
-        for &byte in data {
-            *frequencies.entry(byte).or_insert(0) += 1;
-        }
-        
-        // If empty, use default frequencies
-        if frequencies.is_empty() {
-            frequencies.insert(0, 1);
-        }
-        
-        frequencies
-    }
-
     /// Get compression ratio
     pub fn compression_ratio(&self) -> f64 {
         if self.compressed_data.is_empty() {
@@ -628,8 +614,12 @@ impl CompressedBloom {
         bytes.extend_from_slice(&(self.compressed_data.len() as u32).to_le_bytes());
         bytes.push(self.compression_type);
         bytes.push(0); // flags
-        // Store huffman_total_bits in reserved field (only needed for type 2)
-        let huffman_bits = if self.compression_type == 2 { self.huffman_total_bits as u16 } else { 0u16 };
+                       // Store huffman_total_bits in reserved field (only needed for type 2)
+        let huffman_bits = if self.compression_type == 2 {
+            self.huffman_total_bits as u16
+        } else {
+            0u16
+        };
         bytes.extend_from_slice(&huffman_bits.to_le_bytes());
 
         // For type 2 (RLE+Huffman), serialize Huffman table first
@@ -658,38 +648,45 @@ impl CompressedBloom {
 
         // P1-008 FIX: Use proper error handling instead of unwrap for byte parsing
         let magic = u32::from_le_bytes(
-            bytes[0..4].try_into()
-                .map_err(|_| CompressionError::InvalidData("Invalid magic bytes".to_string()))?
+            bytes[0..4]
+                .try_into()
+                .map_err(|_| CompressionError::InvalidData("Invalid magic bytes".to_string()))?,
         );
         if magic != Self::COMPRESSED_BLOOM_MAGIC {
-            return Err(CompressionError::InvalidData(
-                format!("Invalid magic: expected {:08X}, got {:08X}",
-                        Self::COMPRESSED_BLOOM_MAGIC, magic),
-            ));
+            return Err(CompressionError::InvalidData(format!(
+                "Invalid magic: expected {:08X}, got {:08X}",
+                Self::COMPRESSED_BLOOM_MAGIC,
+                magic
+            )));
         }
 
         let version = u32::from_le_bytes(
-            bytes[4..8].try_into()
-                .map_err(|_| CompressionError::InvalidData("Invalid version bytes".to_string()))?
+            bytes[4..8]
+                .try_into()
+                .map_err(|_| CompressionError::InvalidData("Invalid version bytes".to_string()))?,
         );
         if version != Self::COMPRESSED_BLOOM_VERSION {
-            return Err(CompressionError::InvalidData(
-                format!("Unsupported version: {}", version),
-            ));
+            return Err(CompressionError::InvalidData(format!(
+                "Unsupported version: {}",
+                version
+            )));
         }
 
         let original_size = u64::from_le_bytes(
-            bytes[8..16].try_into()
-                .map_err(|_| CompressionError::InvalidData("Invalid original_size bytes".to_string()))?
+            bytes[8..16]
+                .try_into()
+                .map_err(|_| CompressionError::InvalidData("Invalid original_size bytes".to_string()))?,
         );
         let compressed_size = u32::from_le_bytes(
-            bytes[16..20].try_into()
-                .map_err(|_| CompressionError::InvalidData("Invalid compressed_size bytes".to_string()))?
+            bytes[16..20]
+                .try_into()
+                .map_err(|_| CompressionError::InvalidData("Invalid compressed_size bytes".to_string()))?,
         ) as usize;
         let _compression_type = bytes[20];
         let huffman_total_bits = u16::from_le_bytes(
-            bytes[22..24].try_into()
-                .map_err(|_| CompressionError::InvalidData("Invalid huffman_total_bits bytes".to_string()))?
+            bytes[22..24]
+                .try_into()
+                .map_err(|_| CompressionError::InvalidData("Invalid huffman_total_bits bytes".to_string()))?,
         ) as usize;
 
         // For type 2 (RLE+Huffman), parse Huffman table first
@@ -703,8 +700,9 @@ impl CompressedBloom {
                 ));
             }
             let table_size = u16::from_le_bytes(
-                bytes[offset..offset+2].try_into()
-                    .map_err(|_| CompressionError::InvalidData("Invalid table_size bytes".to_string()))?
+                bytes[offset..offset + 2]
+                    .try_into()
+                    .map_err(|_| CompressionError::InvalidData("Invalid table_size bytes".to_string()))?,
             ) as usize;
             offset += 2;
 
@@ -718,8 +716,9 @@ impl CompressedBloom {
                 let symbol = bytes[offset];
                 let code_length = bytes[offset + 1];
                 let code_bits = u64::from_le_bytes(
-                    bytes[offset+2..offset+10].try_into()
-                        .map_err(|_| CompressionError::InvalidData("Invalid code_bits bytes".to_string()))?
+                    bytes[offset + 2..offset + 10]
+                        .try_into()
+                        .map_err(|_| CompressionError::InvalidData("Invalid code_bits bytes".to_string()))?,
                 );
                 huffman_table.push((symbol, code_length, code_bits));
                 offset += 10;

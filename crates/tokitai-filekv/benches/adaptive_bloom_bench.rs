@@ -2,23 +2,20 @@
 //!
 //! INNO-001: Performance benchmarks for multi-layer bloom filter cache
 
-use std::time::Duration;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use std::time::Duration;
 use tempfile::TempDir;
-use tokitai_filekv::{BloomFilter, ASMS};
 
-use tokitai_filekv::{
-    AdaptiveBloomCache, AdaptiveBloomCacheConfig,
-    BloomFilterCache, BloomFilterCacheConfig,
-    FPRController,
-};
-use tokitai_filekv::bloom::migration::{
-    MigrationController, MigrationThresholds,
-};
 use tokitai_filekv::bloom::compressed::CompressedBloom;
+use tokitai_filekv::bloom::migration::{MigrationController, MigrationThresholds};
+use tokitai_filekv::bloom::{CustomBloom, FilterWrapper};
 use tokitai_filekv::core::error::FileKVResult;
+use tokitai_filekv::{
+    AdaptiveBloomCache, AdaptiveBloomCacheConfig, BloomFilter, BloomFilterCache, BloomFilterCacheConfig, FPRController,
+    ASMS,
+};
 
-/// Create test bloom filter
+/// Create test BloomFilter (for AdaptiveBloomCache::insert)
 fn create_test_bloom(num_elements: usize, fpr: f64) -> BloomFilter {
     let mut bloom = BloomFilter::with_rate(fpr as f32, num_elements as u32);
     for i in 0..num_elements {
@@ -27,14 +24,24 @@ fn create_test_bloom(num_elements: usize, fpr: f64) -> BloomFilter {
     bloom
 }
 
-/// Mock loader for AdaptiveBloomCache (returns BloomFilter + zone_map entries)
-fn mock_adaptive_loader(_segment_id: u64) -> FileKVResult<Option<(BloomFilter, Vec<String>)>> {
-    Ok(Some((create_test_bloom(1000, 0.01), vec![])))
+/// Create test CustomBloom (V3 format, for loaders)
+fn create_test_custom_bloom(num_elements: usize, fpr: f64) -> CustomBloom {
+    let mut bloom = CustomBloom::with_capacity(num_elements, fpr);
+    for i in 0..num_elements {
+        bloom.insert(format!("key_{}", i).as_bytes());
+    }
+    bloom
 }
 
-/// Mock loader for BloomFilterCache (returns just BloomFilter)
-fn mock_bfc_loader(_segment_id: u64) -> FileKVResult<Option<BloomFilter>> {
-    Ok(Some(create_test_bloom(1000, 0.01)))
+/// Mock loader for AdaptiveBloomCache (returns CustomBloom + zone_map entries)
+fn mock_adaptive_loader(_segment_id: u64) -> FileKVResult<Option<(CustomBloom, Vec<String>)>> {
+    Ok(Some((create_test_custom_bloom(1000, 0.01), vec![])))
+}
+
+/// Mock loader for BloomFilterCache (returns FilterWrapper)
+fn mock_bfc_loader(_segment_id: u64) -> FileKVResult<Option<FilterWrapper>> {
+    let bloom = create_test_custom_bloom(1000, 0.01);
+    Ok(Some(FilterWrapper::Custom(bloom)))
 }
 
 /// Benchmark adaptive bloom cache insert
@@ -139,8 +146,8 @@ fn bench_traditional_bloom_cache(c: &mut Criterion) {
     let cache = BloomFilterCache::new(config, temp_dir.path().to_path_buf());
 
     for i in 1..=100 {
-        let bloom = create_test_bloom(1000, 0.01);
-        cache.insert(i, bloom);
+        let bloom = create_test_custom_bloom(1000, 0.01);
+        cache.insert(i, FilterWrapper::Custom(bloom));
     }
 
     let mut group = c.benchmark_group("traditional_bloom_cache");
@@ -172,9 +179,9 @@ fn bench_adaptive_vs_traditional(c: &mut Criterion) {
 
     for i in 1..=100 {
         let bloom1 = create_test_bloom(1000, 0.01);
-        let bloom2 = create_test_bloom(1000, 0.01);
+        let bloom2 = create_test_custom_bloom(1000, 0.01);
         adaptive_cache.insert(i, bloom1);
-        traditional_cache.insert(i, bloom2);
+        traditional_cache.insert(i, FilterWrapper::Custom(bloom2));
     }
 
     let mut group = c.benchmark_group("adaptive_vs_traditional");
@@ -210,8 +217,8 @@ fn bench_compression_ratio(c: &mut Criterion) {
     group.bench_function("compress_dense_bloom", |b| {
         b.iter(|| {
             let mut bits = vec![0u8; 1024];
-            for i in 0..512 {
-                bits[i] = 0xFF;
+            for byte in bits.iter_mut().take(512) {
+                *byte = 0xFF;
             }
             let compressed = CompressedBloom::compress(&bits, false);
             debug_assert!(compressed.is_ok());

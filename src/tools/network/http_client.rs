@@ -9,9 +9,9 @@ use std::time::Duration;
 use tokitai::tool;
 
 use super::{
-    error::{NetworkResult, HttpError},
-    ssrf_protection::{self, RuntimeSsrfConfig},
+    error::{HttpError, NetworkResult},
     request_monitor::{RequestLog, RequestMonitor},
+    ssrf_protection::{self, RuntimeSsrfConfig},
 };
 use crate::tool_matrix::matrix::{ServiceHealth, ServiceLifecycle, ServiceStats};
 
@@ -139,12 +139,7 @@ impl HttpClientTools {
     }
 
     /// 包装请求并记录监控信息
-    fn request_with_monitor<F, T>(
-        &self,
-        method: &str,
-        url: &str,
-        f: F,
-    ) -> NetworkResult<(T, u64)>
+    fn request_with_monitor<F, T>(&self, method: &str, url: &str, f: F) -> NetworkResult<(T, u64)>
     where
         F: FnOnce() -> NetworkResult<(T, u64)>,
     {
@@ -189,7 +184,8 @@ impl HttpClientTools {
         if url.len() > MAX_URL_LENGTH {
             return Err(HttpError::WithContext {
                 context: format!("URL 过长 ({} > {} 字符)", url.len(), MAX_URL_LENGTH),
-            }.into());
+            }
+            .into());
         }
 
         ssrf_protection::validate_url_with_config(url, &self.config.ssrf_config)
@@ -200,7 +196,7 @@ impl HttpClientTools {
         if let Some(remote_addr) = response.remote_addr() {
             ssrf_protection::check_ip_safety_with_config(
                 &remote_addr.ip(),
-                &self.config.ssrf_config
+                &self.config.ssrf_config,
             )?;
         }
         Ok(())
@@ -212,7 +208,8 @@ impl HttpClientTools {
             return Err(HttpError::ResponseTooLarge {
                 size,
                 max: self.config.max_response_size,
-            }.into());
+            }
+            .into());
         }
         Ok(())
     }
@@ -336,12 +333,7 @@ impl HttpClientTools {
             let headers_map: std::collections::HashMap<String, String> = response
                 .headers()
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.as_str().to_string(),
-                        v.to_str().unwrap_or("").to_string(),
-                    )
-                })
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
 
             let headers_json = serde_json::to_value(&headers_map)?;
@@ -376,7 +368,12 @@ impl HttpClientTools {
     ///
     /// # 返回
     /// 返回 JSON 格式：`{ status, headers, body, url }`
-    #[tool(default_body = "null", default_content_type = "null", default_headers = "null", default_timeout = "null")]
+    #[tool(
+        default_body = "null",
+        default_content_type = "null",
+        default_headers = "null",
+        default_timeout = "null"
+    )]
     pub fn http_post(
         &self,
         url: String,
@@ -422,12 +419,7 @@ impl HttpClientTools {
             let headers_map: std::collections::HashMap<String, String> = response
                 .headers()
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.as_str().to_string(),
-                        v.to_str().unwrap_or("").to_string(),
-                    )
-                })
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
 
             let headers_json = serde_json::to_value(&headers_map)?;
@@ -475,7 +467,7 @@ impl HttpClientTools {
                 if let Some(remote_addr) = resp.remote_addr() {
                     if let Err(e) = ssrf_protection::check_ip_safety_with_config(
                         &remote_addr.ip(),
-                        &self.config.ssrf_config
+                        &self.config.ssrf_config,
                     ) {
                         return Ok(json!({
                             "accessible": false,
@@ -518,10 +510,7 @@ impl HttpClientTools {
         timeout: Option<u64>,
     ) -> NetworkResult<String> {
         self.validate_url(&url)?;
-        ssrf_protection::validate_save_path_with_config(
-            &save_path,
-            &self.config.ssrf_config
-        )?;
+        ssrf_protection::validate_save_path_with_config(&save_path, &self.config.ssrf_config)?;
 
         let mut req = self.client.get(&url);
         if let Some(timeout_secs) = timeout {
@@ -536,7 +525,8 @@ impl HttpClientTools {
             return Err(HttpError::StatusCode {
                 status: status.as_u16(),
                 message: "下载失败".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         let bytes = response.bytes()?;
@@ -547,14 +537,17 @@ impl HttpClientTools {
             return Err(HttpError::ResponseTooLarge {
                 size: bytes.len(),
                 max: MAX_FILE_SIZE,
-            }.into());
+            }
+            .into());
         }
 
         std::fs::write(&save_path, &bytes)?;
 
         Ok(format!(
             "✅ 成功下载文件\nURL: {}\n保存路径：{}\n文件大小：{} bytes",
-            url, save_path, bytes.len()
+            url,
+            save_path,
+            bytes.len()
         ))
     }
 
@@ -645,7 +638,7 @@ mod tests {
     fn test_ssrf_config_update() {
         let mut client = HttpClientTools::new();
         let new_config = RuntimeSsrfConfig::new();
-        
+
         // 测试热更新
         client.update_ssrf_config(new_config);
     }

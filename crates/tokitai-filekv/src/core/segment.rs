@@ -13,20 +13,230 @@
 //! │ ...                                 │
 //! └─────────────────────────────────────┘
 
+use arc_swap::ArcSwapOption;
+use parking_lot::Mutex;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use parking_lot::Mutex;
-use arc_swap::ArcSwapOption;  // RES-001: Lock-free Arc<Mmap> management
+use std::sync::Arc; // RES-001: Lock-free Arc<Mmap> management
 
-use crate::core::error::{
-    FatalError,
-};
-use crate::io::{FileKVFileSystem, FileKVFile, MmapView};
+use crate::core::error::FatalError;
+use crate::io::{FileKVFile, FileKVFileSystem, MmapView};
 
 pub const SEGMENT_MAGIC: u32 = 0x54435347; // "TCSG" = Tokitai Context SeGment
 pub const SEGMENT_VERSION: u32 = 1;
+
+// ============================================================
+// OPT-009: Segment V2 Format - Block-level metadata
+// ============================================================
+
+/// OPT-009 Block header format for V2 segments
+///
+/// Each block in V2 format has a header containing key range metadata:
+/// ┌──────────────────────────────────────────────────┐
+/// │ OPT-009 Block Header (variable size)             │
+/// │ ├─ magic: u32 (0x424C4B48 = "BLKH")              │
+/// │ ├─ min_key_len: u16                              │
+/// │ ├─ min_key: bytes                                │
+/// │ ├─ max_key_len: u16                              │
+/// │ ├─ max_key: bytes                                │
+/// │ ├─ entry_count: u16                              │
+/// │ ├─ block_offset: u64                             │
+/// │ ├─ bloom_size: u32 (0 if bloom disabled)         │
+/// │ ├─ bloom_filter: bytes (variable, if bloom_size>0)│
+/// ├──────────────────────────────────────────────────┤
+/// │ Existing BlockHeader (compression, if enabled)   │
+/// ├──────────────────────────────────────────────────┤
+/// │ Block Data (entries)                             │
+/// └──────────────────────────────────────────────────┘
+pub const OPT009_BLOCK_HEADER_MAGIC: u32 = 0x4F505432; // "OPT2" = OPT-009 V2
+
+/// OPT-009 Tail index format for V2 segments
+///
+/// Appended at end of segment file after all blocks:
+/// ┌─────────────────────────────────────────┐
+/// │ Tail Index                              │
+/// │ ├─ magic: u32 (0x494E4458 = "INDX")    │
+/// │ ├─ sparse_index_entries: Vec<u8>        │
+/// │ ├─ zone_map_entries: Vec<u8>            │
+/// │ ├─ checksum: u32 (CRC32C)               │
+/// └─────────────────────────────────────────┘
+pub const OPT009_TAIL_INDEX_MAGIC: u32 = 0x494E4458; // "INDX" = INDeX
+
+/// OPT-009: Block-level metadata header for V2 segments
+///
+/// This header is placed before each block's entries (and before the compression BlockHeader if compression is enabled).
+/// It provides block-level key range filtering and bloom filter support.
+#[derive(Debug, Clone)]
+pub struct Opt009BlockHeader {
+    pub min_key: String,
+    pub max_key: String,
+    pub entry_count: u16,
+    pub block_offset: u64,
+    pub bloom_filter: Option<Vec<u8>>, // Serialized CustomBloom bits
+}
+
+impl Opt009BlockHeader {
+    /// Serialize to bytes
+    /// Format: [magic:u32][min_key_len:u16][min_key][max_key_len:u16][max_key][entry_count:u16][block_offset:u64][bloom_size:u32][bloom_bytes]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let min_key_bytes = self.min_key.as_bytes();
+        let max_key_bytes = self.max_key.as_bytes();
+        let bloom_size = self.bloom_filter.as_ref().map(|b| b.len() as u32).unwrap_or(0);
+
+        let total_size = 4 + 2 + min_key_bytes.len() + 2 + max_key_bytes.len() + 2 + 8 + 4 + bloom_size as usize;
+        let mut buf = Vec::with_capacity(total_size);
+
+        buf.extend_from_slice(&OPT009_BLOCK_HEADER_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&(min_key_bytes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(min_key_bytes);
+        buf.extend_from_slice(&(max_key_bytes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(max_key_bytes);
+        buf.extend_from_slice(&self.entry_count.to_le_bytes());
+        buf.extend_from_slice(&self.block_offset.to_le_bytes());
+        buf.extend_from_slice(&bloom_size.to_le_bytes());
+        if let Some(ref bloom) = self.bloom_filter {
+            buf.extend_from_slice(bloom);
+        }
+
+        buf
+    }
+
+    /// Deserialize from bytes
+    pub fn from_bytes(data: &[u8], offset: &mut usize) -> Result<Self, FatalError> {
+        let total_len = data.len();
+
+        // Read magic
+        if *offset + 4 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for magic".to_string(),
+            ));
+        }
+        let magic = u32::from_le_bytes(
+            data[*offset..*offset + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 magic bytes: {}", e)))?,
+        );
+        *offset += 4;
+
+        if magic != OPT009_BLOCK_HEADER_MAGIC {
+            return Err(FatalError::Corruption(format!(
+                "Invalid OPT-009 block header magic: expected {:08X}, got {:08X}",
+                OPT009_BLOCK_HEADER_MAGIC, magic
+            )));
+        }
+
+        // Read min_key
+        if *offset + 2 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for min_key_len".to_string(),
+            ));
+        }
+        let min_key_len = u16::from_le_bytes(
+            data[*offset..*offset + 2]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 min_key_len bytes: {}", e)))?,
+        ) as usize;
+        *offset += 2;
+
+        if *offset + min_key_len > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for min_key".to_string(),
+            ));
+        }
+        let min_key = String::from_utf8(data[*offset..*offset + min_key_len].to_vec())
+            .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 min_key UTF-8: {}", e)))?;
+        *offset += min_key_len;
+
+        // Read max_key
+        if *offset + 2 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for max_key_len".to_string(),
+            ));
+        }
+        let max_key_len = u16::from_le_bytes(
+            data[*offset..*offset + 2]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 max_key_len bytes: {}", e)))?,
+        ) as usize;
+        *offset += 2;
+
+        if *offset + max_key_len > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for max_key".to_string(),
+            ));
+        }
+        let max_key = String::from_utf8(data[*offset..*offset + max_key_len].to_vec())
+            .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 max_key UTF-8: {}", e)))?;
+        *offset += max_key_len;
+
+        // Read entry_count
+        if *offset + 2 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for entry_count".to_string(),
+            ));
+        }
+        let entry_count = u16::from_le_bytes(
+            data[*offset..*offset + 2]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 entry_count bytes: {}", e)))?,
+        );
+        *offset += 2;
+
+        // Read block_offset
+        if *offset + 8 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for block_offset".to_string(),
+            ));
+        }
+        let block_offset = u64::from_le_bytes(
+            data[*offset..*offset + 8]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 block_offset bytes: {}", e)))?,
+        );
+        *offset += 8;
+
+        // Read bloom_size
+        if *offset + 4 > total_len {
+            return Err(FatalError::Corruption(
+                "Invalid OPT-009 block header: not enough data for bloom_size".to_string(),
+            ));
+        }
+        let bloom_size = u32::from_le_bytes(
+            data[*offset..*offset + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid OPT-009 bloom_size bytes: {}", e)))?,
+        ) as usize;
+        *offset += 4;
+
+        // Read bloom_filter
+        let bloom_filter = if bloom_size > 0 {
+            if *offset + bloom_size > total_len {
+                return Err(FatalError::Corruption(
+                    "Invalid OPT-009 block header: not enough data for bloom_filter".to_string(),
+                ));
+            }
+            let bloom_bytes = data[*offset..*offset + bloom_size].to_vec();
+            *offset += bloom_size;
+            Some(bloom_bytes)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            min_key,
+            max_key,
+            entry_count,
+            block_offset,
+            bloom_filter,
+        })
+    }
+
+    /// Check if a key might exist in this block based on key range
+    pub fn key_might_exist(&self, key: &str) -> bool {
+        key >= self.min_key.as_str() && key <= self.max_key.as_str()
+    }
+}
 
 /// Block header format for compressed blocks
 ///
@@ -79,14 +289,37 @@ impl BlockHeader {
 
     /// Deserialize block header from bytes
     pub fn from_bytes(buf: &[u8; BLOCK_HEADER_SIZE as usize]) -> Result<Self, FatalError> {
-        let magic = u32::from_le_bytes(buf[0..4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid block magic bytes: {}", e)))?);
+        let magic = u32::from_le_bytes(
+            buf[0..4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid block magic bytes: {}", e)))?,
+        );
         if magic != BLOCK_HEADER_MAGIC {
-            return Err(FatalError::Corruption(format!("Invalid block header magic: expected {:08X}, got {:08X}", BLOCK_HEADER_MAGIC, magic)));
+            return Err(FatalError::Corruption(format!(
+                "Invalid block header magic: expected {:08X}, got {:08X}",
+                BLOCK_HEADER_MAGIC, magic
+            )));
         }
-        let version = u32::from_le_bytes(buf[4..8].try_into().map_err(|e| FatalError::Corruption(format!("Invalid block version bytes: {}", e)))?);
-        let compressed_size = u32::from_le_bytes(buf[8..12].try_into().map_err(|e| FatalError::Corruption(format!("Invalid compressed size bytes: {}", e)))?);
-        let uncompressed_size = u32::from_le_bytes(buf[12..16].try_into().map_err(|e| FatalError::Corruption(format!("Invalid uncompressed size bytes: {}", e)))?);
-        let checksum = u32::from_le_bytes(buf[16..20].try_into().map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?);
+        let version = u32::from_le_bytes(
+            buf[4..8]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid block version bytes: {}", e)))?,
+        );
+        let compressed_size = u32::from_le_bytes(
+            buf[8..12]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid compressed size bytes: {}", e)))?,
+        );
+        let uncompressed_size = u32::from_le_bytes(
+            buf[12..16]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid uncompressed size bytes: {}", e)))?,
+        );
+        let checksum = u32::from_le_bytes(
+            buf[16..20]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?,
+        );
         let is_compressed = buf[20] != 0;
         // V2 has algorithm_id at byte 21; V1 defaults to zstd (1) for backward compatibility
         let algorithm_id = if version >= 2 { buf[21] } else { 1 };
@@ -102,13 +335,32 @@ impl BlockHeader {
     /// Deserialize block header from V1 bytes (21 bytes, no algorithm_id)
     /// Used for backward compatibility with old segment files
     pub fn from_bytes_v1(buf: &[u8; BLOCK_HEADER_SIZE_V1 as usize]) -> Result<Self, FatalError> {
-        let magic = u32::from_le_bytes(buf[0..4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid block magic bytes: {}", e)))?);
+        let magic = u32::from_le_bytes(
+            buf[0..4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid block magic bytes: {}", e)))?,
+        );
         if magic != BLOCK_HEADER_MAGIC {
-            return Err(FatalError::Corruption(format!("Invalid block header magic: expected {:08X}, got {:08X}", BLOCK_HEADER_MAGIC, magic)));
+            return Err(FatalError::Corruption(format!(
+                "Invalid block header magic: expected {:08X}, got {:08X}",
+                BLOCK_HEADER_MAGIC, magic
+            )));
         }
-        let compressed_size = u32::from_le_bytes(buf[8..12].try_into().map_err(|e| FatalError::Corruption(format!("Invalid compressed size bytes: {}", e)))?);
-        let uncompressed_size = u32::from_le_bytes(buf[12..16].try_into().map_err(|e| FatalError::Corruption(format!("Invalid uncompressed size bytes: {}", e)))?);
-        let checksum = u32::from_le_bytes(buf[16..20].try_into().map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?);
+        let compressed_size = u32::from_le_bytes(
+            buf[8..12]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid compressed size bytes: {}", e)))?,
+        );
+        let uncompressed_size = u32::from_le_bytes(
+            buf[12..16]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid uncompressed size bytes: {}", e)))?,
+        );
+        let checksum = u32::from_le_bytes(
+            buf[16..20]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?,
+        );
         let is_compressed = buf[20] != 0;
         // V1 only supports zstd
         Ok(Self {
@@ -146,9 +398,9 @@ pub struct SegmentFile {
     /// 1.2 OPTIMIZATION: Compaction level (0=memtable flush, 1+=compacted)
     pub level: u8,
     /// Minimum key in this segment (for L1+ range-based lookup)
-    pub min_key: parking_lot::Mutex<Option<String>>,
+    pub min_key: parking_lot::RwLock<Option<String>>,
     /// Maximum key in this segment (for L1+ range-based lookup)
-    pub max_key: parking_lot::Mutex<Option<String>>,
+    pub max_key: parking_lot::RwLock<Option<String>>,
     /// 文件路径
     pub path: PathBuf,
     /// Filesystem abstraction
@@ -176,8 +428,8 @@ pub struct SegmentFile {
 
 impl std::fmt::Debug for SegmentFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let min_key = self.min_key.lock();
-        let max_key = self.max_key.lock();
+        let min_key = self.min_key.read();
+        let max_key = self.max_key.read();
         f.debug_struct("SegmentFile")
             .field("id", &self.id)
             .field("level", &self.level)
@@ -202,7 +454,7 @@ impl SegmentFile {
     /// * `level` - 1.2 OPTIMIZATION: Compaction level (0=L0 memtable flush, 1+=compacted)
     /// * `readahead_multiplier` - CFG-001: 预读倍数
     /// * `dense_index_enabled` - CFG-003: 是否构建全内存密集索引
-    #[allow(clippy::too_many_arguments)]  // Segment creation requires many configuration parameters
+    #[allow(clippy::too_many_arguments)] // Segment creation requires many configuration parameters
     pub fn create(
         fs: Arc<dyn FileKVFileSystem>,
         id: u64,
@@ -223,15 +475,16 @@ impl SegmentFile {
             0
         };
 
-        let mut file = fs.open_file(path, true, true, true)
-            .map_err(FatalError::Io)?;
+        let mut file = fs.open_file(path, true, true, true).map_err(FatalError::Io)?;
 
         // Write header for new empty files
         let initial_size = if !file_exists || existing_size == 0 {
             // Write 8-byte header (magic + version)
             let writer = &mut *file;
             writer.write_all(&SEGMENT_MAGIC.to_le_bytes()).map_err(FatalError::Io)?;
-            writer.write_all(&SEGMENT_VERSION.to_le_bytes()).map_err(FatalError::Io)?;
+            writer
+                .write_all(&SEGMENT_VERSION.to_le_bytes())
+                .map_err(FatalError::Io)?;
             writer.flush().map_err(FatalError::Io)?;
             8u64
         } else {
@@ -274,8 +527,8 @@ impl SegmentFile {
         Ok(Self {
             id,
             level,
-            min_key: parking_lot::Mutex::new(None),
-            max_key: parking_lot::Mutex::new(None),
+            min_key: parking_lot::RwLock::new(None),
+            max_key: parking_lot::RwLock::new(None),
             path: path.to_path_buf(),
             fs,
             mmap_fs,
@@ -319,8 +572,7 @@ impl SegmentFile {
         // Derive mmap_fs from fs if supported
         let mmap_fs: Option<Arc<dyn crate::io::MmapFileSystem>> = fs.clone_as_mmap_fs();
         // Open file for reading and writing
-        let file = fs.open_file(path, true, true, true)
-            .map_err(FatalError::Io)?;
+        let file = fs.open_file(path, true, true, true).map_err(FatalError::Io)?;
 
         let metadata = file.metadata().map_err(FatalError::Io)?;
         let size = metadata.len;
@@ -328,9 +580,10 @@ impl SegmentFile {
         // P1-006 FIX: Validate file size before mmap
         // Files smaller than header (8 bytes) are invalid
         if size > 0 && size < 8 {
-            return Err(FatalError::Corruption(
-                format!("Segment file too small: {} bytes (minimum: 8 bytes for header)", size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Segment file too small: {} bytes (minimum: 8 bytes for header)",
+                size
+            )));
         }
 
         // PERF-002: Create persistent mmap once at open time (if enabled)
@@ -340,28 +593,34 @@ impl SegmentFile {
             let mmap = if let Some(ref mmap_fs) = mmap_fs {
                 mmap_fs.mmap(file.as_ref()).map_err(FatalError::Io)?
             } else {
-                return Err(FatalError::Corruption("mmap filesystem not available for persistent mmap".to_string()));
+                return Err(FatalError::Corruption(
+                    "mmap filesystem not available for persistent mmap".to_string(),
+                ));
             };
 
             // P1-006 FIX: Validate mmap contents
             if size >= 8 {
                 // SAFETY: mmap size is validated >= 8
-                let magic_buf: [u8; 4] = mmap.as_slice()[0..4].try_into()
+                let magic_buf: [u8; 4] = mmap.as_slice()[0..4]
+                    .try_into()
                     .map_err(|_| FatalError::Corruption("Failed to read magic bytes from mmap".to_string()))?;
                 let magic = u32::from_le_bytes(magic_buf);
                 if magic != SEGMENT_MAGIC {
-                    return Err(FatalError::Corruption(
-                        format!("Invalid segment file magic: expected {:08X}, got {:08X}", SEGMENT_MAGIC, magic)
-                    ));
+                    return Err(FatalError::Corruption(format!(
+                        "Invalid segment file magic: expected {:08X}, got {:08X}",
+                        SEGMENT_MAGIC, magic
+                    )));
                 }
 
-                let version_buf: [u8; 4] = mmap.as_slice()[4..8].try_into()
+                let version_buf: [u8; 4] = mmap.as_slice()[4..8]
+                    .try_into()
                     .map_err(|_| FatalError::Corruption("Failed to read version bytes from mmap".to_string()))?;
                 let version = u32::from_le_bytes(version_buf);
                 if version != SEGMENT_VERSION {
-                    return Err(FatalError::Corruption(
-                        format!("Unsupported segment version: expected {}, got {}", SEGMENT_VERSION, version)
-                    ));
+                    return Err(FatalError::Corruption(format!(
+                        "Unsupported segment version: expected {}, got {}",
+                        SEGMENT_VERSION, version
+                    )));
                 }
             }
 
@@ -377,7 +636,11 @@ impl SegmentFile {
             match Self::load_dense_index(fs.as_ref(), &idx_path) {
                 Ok(index) => {
                     // Successfully loaded from file - skip expensive build_dense_index()
-                    tracing::debug!(segment_id = id, "Loaded dense index from file ({} entries)", index.entries.len());
+                    tracing::debug!(
+                        segment_id = id,
+                        "Loaded dense index from file ({} entries)",
+                        index.entries.len()
+                    );
                     Some(parking_lot::RwLock::new(index.entries))
                 }
                 Err(_) => {
@@ -394,8 +657,8 @@ impl SegmentFile {
         Ok(Self {
             id,
             level,
-            min_key: parking_lot::Mutex::new(None),
-            max_key: parking_lot::Mutex::new(None),
+            min_key: parking_lot::RwLock::new(None),
+            max_key: parking_lot::RwLock::new(None),
             path: path.to_path_buf(),
             fs,
             mmap_fs,
@@ -433,7 +696,7 @@ impl SegmentFile {
         while pos + 4 <= file_size {
             let entry_start = pos as u64;
 
-            let key_len = match mmap.as_slice()[pos..pos+4].try_into() {
+            let key_len = match mmap.as_slice()[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -443,7 +706,7 @@ impl SegmentFile {
                 break;
             }
 
-            let key_bytes = &mmap.as_slice()[pos..pos+key_len];
+            let key_bytes = &mmap.as_slice()[pos..pos + key_len];
             let key = match String::from_utf8(key_bytes.to_vec()) {
                 Ok(s) => s,
                 Err(_) => break, // Invalid UTF-8, stop indexing
@@ -454,7 +717,7 @@ impl SegmentFile {
                 break;
             }
 
-            let value_len = match mmap.as_slice()[pos..pos+4].try_into() {
+            let value_len = match mmap.as_slice()[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf),
                 Err(_) => break,
             };
@@ -466,7 +729,7 @@ impl SegmentFile {
 
             pos += value_len as usize;
 
-            let checksum = match mmap.as_slice()[pos..pos+4].try_into() {
+            let checksum = match mmap.as_slice()[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf),
                 Err(_) => break,
             };
@@ -477,14 +740,17 @@ impl SegmentFile {
 
             // CFG-003: Store in dense index
             // key_len is stored as u32 for consistency
-            index.entries.insert(key, SparseDenseIndexEntry {
-                offset: entry_start,
-                key_len: key_len as u32,
-                value_len,
-                checksum,
-                seq_num: 0, // Not tracked in segment-level dense index
-                block_id, // GAP-C4: Track block ID for prefetch
-            });
+            index.entries.insert(
+                key,
+                SparseDenseIndexEntry {
+                    offset: entry_start,
+                    key_len: key_len as u32,
+                    value_len,
+                    checksum,
+                    seq_num: 0, // Not tracked in segment-level dense index
+                    block_id,   // GAP-C4: Track block ID for prefetch
+                },
+            );
         }
 
         Ok(index)
@@ -530,9 +796,8 @@ impl SegmentFile {
         std_file.read_to_end(&mut buffer).map_err(FatalError::Io)?;
 
         // Deserialize using bincode for performance
-        let index: crate::core::sparse_index::DenseIndex =
-            bincode::deserialize(&buffer)
-                .map_err(|e| FatalError::Corruption(format!("Failed to deserialize dense index: {}", e)))?;
+        let index: crate::core::sparse_index::DenseIndex = bincode::deserialize(&buffer)
+            .map_err(|e| FatalError::Corruption(format!("Failed to deserialize dense index: {}", e)))?;
 
         Ok(index)
     }
@@ -569,7 +834,11 @@ impl SegmentFile {
             use crate::core::sparse_index::DenseIndexEntry as SparseDenseIndexEntry;
             // Calculate block_id for sequential prefetch
             const DEFAULT_BLOCK_SIZE: u64 = 8192;
-            let block_id = if DEFAULT_BLOCK_SIZE > 0 { offset / DEFAULT_BLOCK_SIZE } else { 0 };
+            let block_id = if DEFAULT_BLOCK_SIZE > 0 {
+                offset / DEFAULT_BLOCK_SIZE
+            } else {
+                0
+            };
             index.write().insert(
                 key.to_string(),
                 SparseDenseIndexEntry {
@@ -578,7 +847,7 @@ impl SegmentFile {
                     value_len,
                     checksum,
                     seq_num: 0, // Not tracked in segment-level dense index
-                    block_id, // GAP-C4: Track block ID for prefetch
+                    block_id,   // GAP-C4: Track block ID for prefetch
                 },
             );
         }
@@ -606,7 +875,10 @@ impl SegmentFile {
         };
 
         // Open file for reading
-        let file = self.fs.open_file(&self.path, true, false, false).map_err(FatalError::Io)?;
+        let file = self
+            .fs
+            .open_file(&self.path, true, false, false)
+            .map_err(FatalError::Io)?;
 
         let metadata = file.metadata().map_err(FatalError::Io)?;
         let file_size = metadata.len;
@@ -629,7 +901,7 @@ impl SegmentFile {
     fn update_key_range(&self, key: &str) {
         // Update min_key
         {
-            let mut min = self.min_key.lock();
+            let mut min = self.min_key.write();
             match min.as_ref() {
                 Some(current_min) if key < current_min.as_str() => {
                     *min = Some(key.to_string());
@@ -643,7 +915,7 @@ impl SegmentFile {
 
         // Update max_key
         {
-            let mut max = self.max_key.lock();
+            let mut max = self.max_key.write();
             match max.as_ref() {
                 Some(current_max) if key > current_max.as_str() => {
                     *max = Some(key.to_string());
@@ -675,10 +947,10 @@ impl SegmentFile {
                     }
                 }
                 if let Some(k) = min_key {
-                    *self.min_key.lock() = Some(k.to_string());
+                    *self.min_key.write() = Some(k.to_string());
                 }
                 if let Some(k) = max_key {
-                    *self.max_key.lock() = Some(k.to_string());
+                    *self.max_key.write() = Some(k.to_string());
                 }
             }
         }
@@ -708,7 +980,10 @@ impl SegmentFile {
 
         // Fallback: create temporary mmap or read from file
         if let Some(ref mmap_fs) = self.mmap_fs {
-            let file = self.fs.open_file(&self.path, true, false, false).map_err(FatalError::Io)?;
+            let file = self
+                .fs
+                .open_file(&self.path, true, false, false)
+                .map_err(FatalError::Io)?;
             let mmap = mmap_fs.mmap(file.as_ref()).map_err(FatalError::Io)?;
             self.read_at_from_mmap(&mmap, offset)
         } else {
@@ -722,14 +997,18 @@ impl SegmentFile {
         // Read entire file
         let file_size = self.fs.file_metadata(&self.path).map(|m| m.len).unwrap_or(0) as usize;
         if offset as usize >= file_size {
-            return Err(FatalError::Corruption(
-                format!("Read offset {} out of bounds (file size: {})", offset, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Read offset {} out of bounds (file size: {})",
+                offset, file_size
+            )));
         }
 
         // We need to read the file from the offset
         // Since we can't seek with the trait, we read from beginning and skip
-        let mut file = self.fs.open_file(&self.path, true, false, false).map_err(FatalError::Io)?;
+        let mut file = self
+            .fs
+            .open_file(&self.path, true, false, false)
+            .map_err(FatalError::Io)?;
         let mut buf = vec![0u8; file_size];
         let mut pos = 0;
         while pos < file_size {
@@ -751,46 +1030,59 @@ impl SegmentFile {
 
         // P1-006 FIX: Validate offset is within bounds
         if offset as usize >= file_size {
-            return Err(FatalError::Corruption(
-                format!("Read offset {} out of bounds (file size: {})", offset, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Read offset {} out of bounds (file size: {})",
+                offset, file_size
+            )));
         }
 
         // P1-006 FIX: Validate offset and all slice accesses
         let mut pos = offset as usize;
 
         if pos + 4 > file_size {
-            return Err(FatalError::Corruption(
-                format!("Invalid offset: not enough data for key length (pos={}, mmap_size={})", pos, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Invalid offset: not enough data for key length (pos={}, mmap_size={})",
+                pos, file_size
+            )));
         }
 
-        let key_len = u32::from_le_bytes(data[pos..pos+4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid key length bytes: {}", e)))?) as usize;
+        let key_len = u32::from_le_bytes(
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid key length bytes: {}", e)))?,
+        ) as usize;
         pos += 4;
 
         if pos + key_len > file_size {
-            return Err(FatalError::Corruption(
-                format!("Invalid key length: extends beyond file (pos={}, key_len={}, mmap_size={})", pos, key_len, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Invalid key length: extends beyond file (pos={}, key_len={}, mmap_size={})",
+                pos, key_len, file_size
+            )));
         }
         pos += key_len;
 
         if pos + 4 > file_size {
-            return Err(FatalError::Corruption(
-                format!("Invalid offset: not enough data for value length (pos={}, mmap_size={})", pos, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Invalid offset: not enough data for value length (pos={}, mmap_size={})",
+                pos, file_size
+            )));
         }
 
-        let value_len = u32::from_le_bytes(data[pos..pos+4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid value length bytes: {}", e)))?) as usize;
+        let value_len = u32::from_le_bytes(
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid value length bytes: {}", e)))?,
+        ) as usize;
         pos += 4;
 
         if pos + value_len > file_size {
-            return Err(FatalError::Corruption(
-                format!("Invalid value length: extends beyond file (pos={}, value_len={}, mmap_size={})", pos, value_len, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Invalid value length: extends beyond file (pos={}, value_len={}, mmap_size={})",
+                pos, value_len, file_size
+            )));
         }
 
-        let value = data[pos..pos+value_len].to_vec();
+        let value = data[pos..pos + value_len].to_vec();
         Ok(value)
     }
 
@@ -809,7 +1101,7 @@ impl SegmentFile {
     /// # P1-006 FIX: Safety measures
     /// - Validates all offsets before mmap access
     /// - All slice accesses include bounds checking
-    /// 
+    ///
     /// # P4-001: When use_persistent_mmap is false
     /// - Creates a temporary mmap for this read
     pub fn read_at_fast(&self, offset: u64, key_len: usize, value_len: usize) -> Result<Vec<u8>, FatalError> {
@@ -826,7 +1118,10 @@ impl SegmentFile {
 
         // Fallback: create temporary mmap or read from file
         if let Some(ref mmap_fs) = self.mmap_fs {
-            let file = self.fs.open_file(&self.path, true, false, false).map_err(FatalError::Io)?;
+            let file = self
+                .fs
+                .open_file(&self.path, true, false, false)
+                .map_err(FatalError::Io)?;
             let mmap = mmap_fs.mmap(file.as_ref()).map_err(FatalError::Io)?;
             self.read_at_fast_from_mmap(&mmap, offset, key_len, value_len)
         } else {
@@ -844,15 +1139,23 @@ impl SegmentFile {
         // Return just the value portion (after key_len + key + value_len)
         let value_start = 4 + _key_len + 4;
         if value_start + value_len > data.len() {
-            return Err(FatalError::Corruption(
-                format!("Not enough data for value (need {} bytes, got {})", value_start + value_len, data.len())
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Not enough data for value (need {} bytes, got {})",
+                value_start + value_len,
+                data.len()
+            )));
         }
         Ok(data[value_start..value_start + value_len].to_vec())
     }
 
     /// Helper: fast read from a given mmap
-    fn read_at_fast_from_mmap(&self, mmap: &Arc<dyn MmapView>, offset: u64, key_len: usize, value_len: usize) -> Result<Vec<u8>, FatalError> {
+    fn read_at_fast_from_mmap(
+        &self,
+        mmap: &Arc<dyn MmapView>,
+        offset: u64,
+        key_len: usize,
+        value_len: usize,
+    ) -> Result<Vec<u8>, FatalError> {
         let file_size = mmap.len();
         let data = mmap.as_slice();
         let mut pos = offset as usize;
@@ -861,9 +1164,10 @@ impl SegmentFile {
         // Entry layout: key_len(4) + key + value_len(4) + value + checksum(4)
         let entry_size = 4 + key_len + 4 + value_len + 4;
         if pos + entry_size > file_size {
-            return Err(FatalError::Corruption(
-                format!("Read offset {} with len {} out of bounds (file size: {})", offset, entry_size, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Read offset {} with len {} out of bounds (file size: {})",
+                offset, entry_size, file_size
+            )));
         }
 
         // Skip key_len (4 bytes) + key
@@ -873,8 +1177,79 @@ impl SegmentFile {
         pos += 4;
 
         // Directly read value
-        let value = data[pos..pos+value_len].to_vec();
+        let value = data[pos..pos + value_len].to_vec();
         Ok(value)
+    }
+
+    /// PERF-ZEROCOPY-001: Zero-copy fast read returning `bytes::Bytes` backed by mmap.
+    ///
+    /// Instead of allocating a new `Vec<u8>` on every read, this returns a `Bytes`
+    /// that holds a clone of the `Arc<dyn MmapView>`, so the value slice is zero-copy.
+    ///
+    /// # Arguments
+    /// * `offset` - entry 起始偏移（key_len 位置）
+    /// * `key_len` - key 长度（字节）
+    /// * `value_len` - value 长度（字节）
+    pub fn read_at_fast_with_bytes(
+        &self,
+        offset: u64,
+        key_len: usize,
+        value_len: usize,
+    ) -> Result<bytes::Bytes, FatalError> {
+        self.flush()?;
+
+        // Resolve which mmap to use
+        let mmap: Arc<dyn MmapView> = if self.use_persistent_mmap {
+            let mmap_guard = self.mmap.load();
+            match &*mmap_guard {
+                Some(inner_arc) => Arc::clone(&**inner_arc),
+                None => return self.read_at_fast_with_bytes_fallback(offset, key_len, value_len),
+            }
+        } else if let Some(ref mmap_fs) = self.mmap_fs {
+            let file = self
+                .fs
+                .open_file(&self.path, true, false, false)
+                .map_err(FatalError::Io)?;
+            mmap_fs.mmap(file.as_ref()).map_err(FatalError::Io)?
+        } else {
+            return self.read_at_fast_with_bytes_fallback(offset, key_len, value_len);
+        };
+
+        let file_size = mmap.len();
+        let mut pos = offset as usize;
+
+        let entry_size = 4 + key_len + 4 + value_len + 4;
+        if pos + entry_size > file_size {
+            return Err(FatalError::Corruption(format!(
+                "Read offset {} with len {} out of bounds (file size: {})",
+                offset, entry_size, file_size
+            )));
+        }
+
+        // Skip key_len (4 bytes) + key
+        pos += 4 + key_len;
+        // Skip value_len (4 bytes)
+        pos += 4;
+
+        // Zero-copy: create a Bytes that owns the mmap reference
+        let value_start = pos;
+        let mmap_owner = MmapSliceOwner {
+            mmap,
+            offset: value_start,
+            len: value_len,
+        };
+        Ok(bytes::Bytes::from_owner(mmap_owner))
+    }
+
+    /// Fallback: allocate Vec<u8> when mmap is not available
+    fn read_at_fast_with_bytes_fallback(
+        &self,
+        offset: u64,
+        key_len: usize,
+        value_len: usize,
+    ) -> Result<bytes::Bytes, FatalError> {
+        let value = self.read_at_fast(offset, key_len, value_len)?;
+        Ok(bytes::Bytes::from(value))
     }
 
     /// POL-004: Quick check if key might exist in this segment (using dense index)
@@ -886,6 +1261,7 @@ impl SegmentFile {
     /// - Some(true) - key exists in dense index, proceed to read
     /// - Some(false) - key definitely not in this segment (dense index says no)
     /// - None - dense index not enabled, caller must use bloom/zone map
+    #[allow(dead_code)]
     pub fn key_might_exist_in_dense_index(&self, key: &str) -> Option<bool> {
         if let Some(ref index) = self.dense_index {
             let index_read = index.read();
@@ -918,9 +1294,7 @@ impl SegmentFile {
                 let mmap = match &*mmap_guard {
                     Some(m) => m,
                     None => {
-                        return Err(FatalError::Corruption(
-                            "Segment file not mapped or empty".to_string()
-                        ));
+                        return Err(FatalError::Corruption("Segment file not mapped or empty".to_string()));
                     }
                 };
 
@@ -942,7 +1316,7 @@ impl SegmentFile {
 
                 // Validate checksum
                 let checksum_pos = value_pos + value_len as usize;
-                let checksum_bytes = data[checksum_pos..checksum_pos+4].try_into();
+                let checksum_bytes = data[checksum_pos..checksum_pos + 4].try_into();
                 let stored_checksum = match checksum_bytes {
                     Ok(bytes) => u32::from_le_bytes(bytes),
                     Err(_) => return Ok(None), // Corrupted entry, treat as not found
@@ -964,16 +1338,16 @@ impl SegmentFile {
     /// Uses `self.readahead_multiplier` to determine how many additional blocks to pre-read.
     /// Useful for sequential scan workloads where consecutive entries are likely to be accessed.
     /// P4-001: Read with readahead (预读)
-    /// 
+    ///
     /// # Arguments
     /// * `offset` - entry 起始偏移
     /// * `key_len` - key 长度
     /// * `value_len` - value 长度
     /// * `readahead_blocks` - 预读的额外 block 数量（0 = 不预读）
-    /// 
+    ///
     /// # Returns
     /// - Ok((value, readahead_data)) - 读取的值和预读的数据
-    /// 
+    ///
     /// # P4-001: Readahead mechanism
     /// - When readahead_blocks > 0, reads additional consecutive blocks
     /// - Useful for sequential scan workloads
@@ -986,16 +1360,16 @@ impl SegmentFile {
         readahead_blocks: u32,
     ) -> Result<(Vec<u8>, Vec<Vec<u8>>), FatalError> {
         let value = self.read_at_fast(offset, key_len, value_len)?;
-        
+
         if readahead_blocks == 0 {
             return Ok((value, Vec::new()));
         }
-        
+
         // P4-001: Read additional blocks for readahead
         // Assume average block size is ~value_len for simplicity
         let mut readahead_data = Vec::with_capacity(readahead_blocks as usize);
         let next_offset = offset + 4 + key_len as u64 + 4 + value_len as u64 + 4; // Skip to next entry
-        
+
         for i in 0..readahead_blocks {
             let next_off = next_offset + (i as u64 * (value_len as u64 + 20)); // Estimate next entry offset
             match self.read_at_fast(next_off, key_len, value_len) {
@@ -1003,15 +1377,15 @@ impl SegmentFile {
                 Err(_) => break, // Stop if we hit EOF or error
             }
         }
-        
+
         Ok((value, readahead_data))
     }
 
     /// CFG-001: Read with automatic readahead based on configured multiplier
-    /// 
+    ///
     /// Uses `self.readahead_multiplier` to determine how many additional blocks to pre-read.
     /// This is the primary read method for sequential scan workloads.
-    /// 
+    ///
     /// # Returns
     /// - Ok((value, readahead_data)) - 读取的值和预读的数据
     pub fn read_at_with_configured_readahead(
@@ -1040,7 +1414,13 @@ impl SegmentFile {
     /// # PERF-003: Fast path with checksum verification
     /// - Single mmap read, no re-parsing
     /// - Checksum verification included
-    pub fn read_at_fast_verified(&self, offset: u64, key_len: usize, value_len: usize, expected_checksum: u32) -> Result<Option<Vec<u8>>, FatalError> {
+    pub fn read_at_fast_verified(
+        &self,
+        offset: u64,
+        key_len: usize,
+        value_len: usize,
+        expected_checksum: u32,
+    ) -> Result<Option<Vec<u8>>, FatalError> {
         let value = self.read_at_fast(offset, key_len, value_len)?;
 
         // Verify checksum
@@ -1051,7 +1431,9 @@ impl SegmentFile {
         if computed != expected_checksum {
             tracing::warn!(
                 "Checksum mismatch at offset {}: expected {:08X}, got {:08X}",
-                offset, expected_checksum, computed
+                offset,
+                expected_checksum,
+                computed
             );
             return Ok(None);
         }
@@ -1074,9 +1456,7 @@ impl SegmentFile {
         let mmap = match &*mmap_guard {
             Some(m) => m,
             None => {
-                return Err(FatalError::Corruption(
-                    "Segment file not mapped or empty".to_string()
-                ));
+                return Err(FatalError::Corruption("Segment file not mapped or empty".to_string()));
             }
         };
 
@@ -1084,57 +1464,80 @@ impl SegmentFile {
         let data = mmap.as_slice();
 
         if offset as usize >= file_size {
-            return Err(FatalError::Corruption(
-                format!("Read offset {} out of bounds (file size: {})", offset, file_size)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Read offset {} out of bounds (file size: {})",
+                offset, file_size
+            )));
         }
 
         let mut pos = offset as usize;
 
         // P1-006 FIX: Bounds-checked slice access
         if pos + 4 > file_size {
-            return Err(FatalError::Corruption("Invalid entry offset: not enough data for key length".to_string()));
+            return Err(FatalError::Corruption(
+                "Invalid entry offset: not enough data for key length".to_string(),
+            ));
         }
 
-        let key_len = u32::from_le_bytes(data[pos..pos+4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid key length bytes: {}", e)))?) as usize;
+        let key_len = u32::from_le_bytes(
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid key length bytes: {}", e)))?,
+        ) as usize;
         pos += 4;
 
         if pos + key_len > file_size {
-            return Err(FatalError::Corruption("Invalid entry: key extends beyond file boundary".to_string()));
+            return Err(FatalError::Corruption(
+                "Invalid entry: key extends beyond file boundary".to_string(),
+            ));
         }
 
-        let key = String::from_utf8_lossy(&data[pos..pos+key_len]).to_string();
+        let key = String::from_utf8_lossy(&data[pos..pos + key_len]).to_string();
         pos += key_len;
 
         if pos + 4 > file_size {
-            return Err(FatalError::Corruption("Invalid entry: not enough data for value length".to_string()));
+            return Err(FatalError::Corruption(
+                "Invalid entry: not enough data for value length".to_string(),
+            ));
         }
 
-        let value_len = u32::from_le_bytes(data[pos..pos+4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid value length bytes: {}", e)))?) as usize;
+        let value_len = u32::from_le_bytes(
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid value length bytes: {}", e)))?,
+        ) as usize;
         pos += 4;
 
         if pos + value_len > file_size {
-            return Err(FatalError::Corruption("Invalid entry: value extends beyond file boundary".to_string()));
+            return Err(FatalError::Corruption(
+                "Invalid entry: value extends beyond file boundary".to_string(),
+            ));
         }
 
-        let value = data[pos..pos+value_len].to_vec();
+        let value = data[pos..pos + value_len].to_vec();
         pos += value_len;
 
         if pos + 4 > file_size {
-            return Err(FatalError::Corruption("Invalid entry: not enough data for checksum".to_string()));
+            return Err(FatalError::Corruption(
+                "Invalid entry: not enough data for checksum".to_string(),
+            ));
         }
 
-        let checksum = u32::from_le_bytes(data[pos..pos+4].try_into().map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?);
+        let checksum = u32::from_le_bytes(
+            data[pos..pos + 4]
+                .try_into()
+                .map_err(|e| FatalError::Corruption(format!("Invalid checksum bytes: {}", e)))?,
+        );
 
         let mut hasher = crc32c::Crc32cHasher::default();
         hasher.write(key.as_bytes());
         hasher.write(&value);
         let computed = hasher.finish() as u32;
         if checksum != computed {
-            return Err(FatalError::Corruption(
-                format!("Checksum mismatch at offset {}: expected {:08X}, got {:08X}",
-                         offset, checksum, computed)
-            ));
+            return Err(FatalError::Corruption(format!(
+                "Checksum mismatch at offset {}: expected {:08X}, got {:08X}",
+                offset, checksum, computed
+            )));
         }
 
         Ok((key, value, checksum))
@@ -1175,7 +1578,7 @@ impl SegmentFile {
 
         // P1-006 FIX: All bounds checking uses explicit comparisons
         while pos + 4 <= file_size && entries_scanned < max_entries {
-            let key_len = match data[pos..pos+4].try_into() {
+            let key_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1185,14 +1588,14 @@ impl SegmentFile {
                 break;
             }
 
-            let key = String::from_utf8_lossy(&data[pos..pos+key_len]).to_string();
+            let key = String::from_utf8_lossy(&data[pos..pos + key_len]).to_string();
             pos += key_len;
 
             if pos + 4 > file_size {
                 break;
             }
 
-            let value_len = match data[pos..pos+4].try_into() {
+            let value_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1202,10 +1605,10 @@ impl SegmentFile {
                 break;
             }
 
-            let value = data[pos..pos+value_len].to_vec();
+            let value = data[pos..pos + value_len].to_vec();
             pos += value_len;
 
-            let checksum = match data[pos..pos+4].try_into() {
+            let checksum = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf),
                 Err(_) => break,
             };
@@ -1242,10 +1645,15 @@ impl SegmentFile {
     ///
     /// # Returns
     /// Some((key, value, offset, checksum)) if an entry is found, None otherwise
-    /// 
+    ///
     /// ARCH-004: Added max_entries parameter to avoid hard-coded limit
     /// If max_entries is None, uses a default limit of 1000 for safety.
-    pub fn scan_next(&self, start_offset: u64, min_key: &str, max_entries: Option<usize>) -> Result<ScanResult, FatalError> {
+    pub fn scan_next(
+        &self,
+        start_offset: u64,
+        min_key: &str,
+        max_entries: Option<usize>,
+    ) -> Result<ScanResult, FatalError> {
         self.flush()?;
 
         // RES-001: Use ArcSwapOption load() for lock-free access
@@ -1272,7 +1680,7 @@ impl SegmentFile {
         while pos + 4 <= file_size && entries_scanned < max_entries {
             let entry_start = pos; // Record entry start position
 
-            let key_len = match data[pos..pos+4].try_into() {
+            let key_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1284,7 +1692,7 @@ impl SegmentFile {
 
             // PERF-003: Use String::from_utf8 directly instead of from_utf8_lossy + to_string
             // This avoids creating an intermediate Cow<str>
-            let key_bytes = &data[pos..pos+key_len];
+            let key_bytes = &data[pos..pos + key_len];
             let key = match String::from_utf8(key_bytes.to_vec()) {
                 Ok(s) => s,
                 Err(_) => {
@@ -1293,7 +1701,7 @@ impl SegmentFile {
                     if pos + 4 > file_size {
                         break;
                     }
-                    let value_len = match data[pos..pos+4].try_into() {
+                    let value_len = match data[pos..pos + 4].try_into() {
                         Ok(buf) => u32::from_le_bytes(buf) as usize,
                         Err(_) => break,
                     };
@@ -1308,7 +1716,7 @@ impl SegmentFile {
                 break;
             }
 
-            let value_len = match data[pos..pos+4].try_into() {
+            let value_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1318,10 +1726,10 @@ impl SegmentFile {
                 break;
             }
 
-            let value = data[pos..pos+value_len].to_vec();
+            let value = data[pos..pos + value_len].to_vec();
             pos += value_len;
 
-            let checksum = match data[pos..pos+4].try_into() {
+            let checksum = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf),
                 Err(_) => break,
             };
@@ -1417,10 +1825,10 @@ impl SegmentFile {
         let mut file = self.write_file.lock();
         file.flush()?;
         drop(file); // Release lock before refreshing mmap
-        
+
         // PERF-002: Refresh mmap to make new data visible to readers
         self.refresh_mmap()?;
-        
+
         Ok(())
     }
 
@@ -1462,7 +1870,7 @@ impl SegmentFile {
 
         // P1-006 FIX: All bounds checking uses explicit comparisons
         while pos + 4 <= file_size {
-            let key_len = match data[pos..pos+4].try_into() {
+            let key_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1472,14 +1880,14 @@ impl SegmentFile {
                 break;
             }
 
-            let key = String::from_utf8_lossy(&data[pos..pos+key_len]).to_string();
+            let key = String::from_utf8_lossy(&data[pos..pos + key_len]).to_string();
             pos += key_len;
 
             if pos + 4 > file_size {
                 break;
             }
 
-            let value_len = match data[pos..pos+4].try_into() {
+            let value_len = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf) as usize,
                 Err(_) => break,
             };
@@ -1489,14 +1897,14 @@ impl SegmentFile {
                 break;
             }
 
-            let value = &data[pos..pos+value_len];
+            let value = &data[pos..pos + value_len];
             pos += value_len;
 
             if pos + 4 > file_size {
                 break;
             }
 
-            let _checksum = match data[pos..pos+4].try_into() {
+            let _checksum = match data[pos..pos + 4].try_into() {
                 Ok(buf) => u32::from_le_bytes(buf),
                 Err(_) => break,
             };
@@ -1525,6 +1933,105 @@ impl SegmentFile {
     {
         self.iterate_all(f)
     }
+
+    /// Iterate over all entries in the segment file, providing byte offsets.
+    ///
+    /// Like `iterate_all()`, but the callback also receives the entry's byte offset
+    /// within the segment file (the position of the key_length field).
+    ///
+    /// # Arguments
+    /// * `f` - Callback function called for each entry with (key, value, offset, deleted)
+    ///
+    /// # Returns
+    /// * `Ok(())` - Iteration successful
+    /// * `Err(FatalError)` - Iteration failed
+    pub fn iterate_all_with_offset<F>(&self, mut f: F) -> Result<(), FatalError>
+    where
+        F: FnMut(&str, &[u8], u64, bool) -> Result<(), FatalError>,
+    {
+        self.flush()?;
+
+        let mmap_guard = self.mmap.load();
+        let mmap = match &*mmap_guard {
+            Some(m) => m,
+            None => {
+                return Ok(()); // Empty file, nothing to iterate
+            }
+        };
+
+        let file_size = mmap.len();
+        let data = mmap.as_slice();
+        let mut pos = 8usize; // Skip header (magic + version)
+
+        while pos + 4 <= file_size {
+            let entry_offset = pos as u64; // Record entry start position
+
+            let key_len = match data[pos..pos + 4].try_into() {
+                Ok(buf) => u32::from_le_bytes(buf) as usize,
+                Err(_) => break,
+            };
+            pos += 4;
+
+            if pos + key_len > file_size {
+                break;
+            }
+
+            let key = String::from_utf8_lossy(&data[pos..pos + key_len]).to_string();
+            pos += key_len;
+
+            if pos + 4 > file_size {
+                break;
+            }
+
+            let value_len = match data[pos..pos + 4].try_into() {
+                Ok(buf) => u32::from_le_bytes(buf) as usize,
+                Err(_) => break,
+            };
+            pos += 4;
+
+            if pos + value_len > file_size {
+                break;
+            }
+
+            let value = &data[pos..pos + value_len];
+            pos += value_len;
+
+            if pos + 4 > file_size {
+                break;
+            }
+
+            let _checksum = match data[pos..pos + 4].try_into() {
+                Ok(buf) => u32::from_le_bytes(buf),
+                Err(_) => break,
+            };
+            pos += 4;
+
+            f(&key, value, entry_offset, false)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Holds an Arc<dyn MmapView> and a slice range, implementing Deref<Target=[u8]>
+/// so that Bytes::from_owner can use it as a zero-copy owner.
+struct MmapSliceOwner {
+    mmap: Arc<dyn MmapView>,
+    offset: usize,
+    len: usize,
+}
+
+impl std::ops::Deref for MmapSliceOwner {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &self.mmap.as_slice()[self.offset..self.offset + self.len]
+    }
+}
+
+impl AsRef<[u8]> for MmapSliceOwner {
+    fn as_ref(&self) -> &[u8] {
+        &self.mmap.as_slice()[self.offset..self.offset + self.len]
+    }
 }
 
 /// 段统计信息
@@ -1540,8 +2047,8 @@ pub struct SegmentStats {
 mod tests {
     use super::*;
     use crate::io::StdFs;
-    use tempfile::TempDir;
     use std::thread;
+    use tempfile::TempDir;
 
     fn test_fs() -> Arc<dyn FileKVFileSystem> {
         Arc::new(StdFs)

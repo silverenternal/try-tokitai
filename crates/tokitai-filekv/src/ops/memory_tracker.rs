@@ -28,11 +28,7 @@ pub struct MemoryUsage {
 impl MemoryUsage {
     /// Total memory usage across all components
     pub fn total_bytes(&self) -> u64 {
-        self.block_cache_bytes
-            + self.dense_index_bytes
-            + self.memtable_bytes
-            + self.wal_buffer_bytes
-            + self.mmap_bytes
+        self.block_cache_bytes + self.dense_index_bytes + self.memtable_bytes + self.wal_buffer_bytes + self.mmap_bytes
     }
 
     /// Total memory in MB
@@ -58,6 +54,14 @@ impl MemoryUsage {
 ///
 /// Tracks memory usage across all components and provides
 /// methods to query and limit memory consumption.
+///
+/// Supports two modes:
+/// 1. **Component-level tracking** (existing): `set_*` methods for periodic snapshots
+/// 2. **Real-time allocation tracking** (new): `record_allocation`/`record_deallocation`
+///    for incremental tracking at allocation sites (MemTable, BlockCache, etc.)
+///
+/// `get_usage()` returns component-level snapshots.
+/// `get_actual_memory_bytes()` returns the cumulative allocation counter.
 #[derive(Debug)]
 pub struct MemoryTracker {
     /// Block cache memory (tracked by cache itself)
@@ -72,6 +76,9 @@ pub struct MemoryTracker {
     mmap_bytes: AtomicU64,
     /// Optional memory limit in bytes (0 = unlimited)
     max_memory_bytes: u64,
+    /// Real-time cumulative allocation counter (lock-free atomic)
+    /// Tracks net memory allocations via record_allocation/record_deallocation
+    actual_memory_bytes: AtomicU64,
 }
 
 impl MemoryTracker {
@@ -84,7 +91,33 @@ impl MemoryTracker {
             wal_buffer_bytes: AtomicU64::new(0),
             mmap_bytes: AtomicU64::new(0),
             max_memory_bytes,
+            actual_memory_bytes: AtomicU64::new(0),
         }
+    }
+
+    /// Record a memory allocation event (lock-free atomic)
+    ///
+    /// Call this at allocation sites (e.g., MemTable::insert, BlockCache::put)
+    /// to track actual memory usage in real time.
+    #[inline]
+    pub fn record_allocation(&self, bytes: u64) {
+        self.actual_memory_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Record a memory deallocation event (lock-free atomic)
+    ///
+    /// Call this when memory is freed (e.g., MemTable::clear, cache eviction)
+    #[inline]
+    pub fn record_deallocation(&self, bytes: u64) {
+        self.actual_memory_bytes.fetch_sub(bytes, Ordering::Relaxed);
+    }
+
+    /// Get the cumulative actual memory usage from allocation tracking
+    ///
+    /// This reflects the net result of all record_allocation/record_deallocation calls.
+    /// Use this for real-time memory monitoring instead of the per-component estimates.
+    pub fn get_actual_memory_bytes(&self) -> u64 {
+        self.actual_memory_bytes.load(Ordering::Relaxed)
     }
 
     /// Update block cache memory usage
@@ -124,11 +157,20 @@ impl MemoryTracker {
     }
 
     /// Check if memory limit is exceeded
+    ///
+    /// Uses actual_memory_bytes (from allocation tracking) if it is non-zero,
+    /// otherwise falls back to the sum of per-component estimates.
     pub fn is_memory_limit_exceeded(&self) -> bool {
         if self.max_memory_bytes == 0 {
             return false; // Unlimited
         }
-        self.get_usage().total_bytes() > self.max_memory_bytes
+        let actual = self.actual_memory_bytes.load(Ordering::Relaxed);
+        let used = if actual > 0 {
+            actual
+        } else {
+            self.get_usage().total_bytes()
+        };
+        used > self.max_memory_bytes
     }
 
     /// Get memory limit in bytes (0 = unlimited)
@@ -186,7 +228,7 @@ mod tests {
     fn test_memory_usage_summary() {
         let tracker = MemoryTracker::new(0);
         tracker.set_block_cache_bytes(1_000_000);
-        
+
         let usage = tracker.get_usage();
         let summary = usage.summary();
         assert!(summary.contains("Memory Usage"));
@@ -200,8 +242,62 @@ mod tests {
 
         // Budget of 10MB per segment, 10 segments max = 100MB
         assert!(tracker.is_dense_index_within_budget(10 * 1024 * 1024));
-        
+
         // Budget of 1MB per segment, 10 segments max = 10MB
-        assert!(!tracker.is_dense_index_within_budget(1 * 1024 * 1024));
+        assert!(!tracker.is_dense_index_within_budget(1024 * 1024));
+    }
+
+    #[test]
+    fn test_allocation_tracking_basic() {
+        let tracker = MemoryTracker::new(100 * 1024 * 1024);
+
+        assert_eq!(tracker.get_actual_memory_bytes(), 0);
+
+        tracker.record_allocation(1024);
+        assert_eq!(tracker.get_actual_memory_bytes(), 1024);
+
+        tracker.record_allocation(2048);
+        assert_eq!(tracker.get_actual_memory_bytes(), 3072);
+
+        tracker.record_deallocation(512);
+        assert_eq!(tracker.get_actual_memory_bytes(), 2560);
+    }
+
+    #[test]
+    fn test_allocation_tracking_limit_exceeded() {
+        let tracker = MemoryTracker::new(1024); // 1KB limit
+
+        tracker.record_allocation(2048);
+        assert!(tracker.is_memory_limit_exceeded());
+
+        tracker.record_deallocation(1500);
+        assert!(!tracker.is_memory_limit_exceeded());
+    }
+
+    #[test]
+    fn test_allocation_tracking_thread_safety() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let tracker = Arc::new(MemoryTracker::new(0));
+        let num_threads = 8;
+        let ops_per_thread = 1000;
+
+        let mut handles = Vec::new();
+        for _ in 0..num_threads {
+            let t = Arc::clone(&tracker);
+            handles.push(thread::spawn(move || {
+                for _ in 0..ops_per_thread {
+                    t.record_allocation(64);
+                    t.record_deallocation(32);
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let expected = (num_threads * ops_per_thread * 32) as u64;
+        assert_eq!(tracker.get_actual_memory_bytes(), expected);
     }
 }

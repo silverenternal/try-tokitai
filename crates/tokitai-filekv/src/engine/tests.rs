@@ -3,24 +3,24 @@
 //! Tests each engine independently plus cross-engine integration.
 
 #[cfg(test)]
-mod tests {
+mod engine_tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use crate::engine::{EngineState, ReadEngine, WriteEngine, CompactionEngine, LifecycleManager};
-    use crate::core::types::FileKVConfig;
-    use crate::core::types::FileKVStats;
-    use crate::core::memtable::MemTable;
     use crate::bloom::filter_cache::{BloomFilterCache, BloomFilterCacheConfig};
-    use crate::core::sparse_index::IndexManager;
-    use crate::ops::feature_flag::FeatureFlagController;
-    use crate::ops::memory_tracker::MemoryTracker;
     use crate::bloom::migration::MigrationController;
+    use crate::cache::UnifiedCacheManager;
     use crate::compaction::CompactionManager;
     use crate::core::flush::FlushTrigger;
-    use crate::io::StdFs;
+    use crate::core::memtable::MemTable;
+    use crate::core::sparse_index::IndexManager;
+    use crate::core::types::FileKVConfig;
+    use crate::core::types::FileKVStats;
     use crate::core::write_coalescer::{WriteBuffer, WriteBufferConfig};
-    use crate::cache::UnifiedCacheManager;
+    use crate::engine::{CompactionEngine, EngineState, LifecycleManager, ReadEngine, WriteEngine};
+    use crate::io::StdFs;
+    use crate::ops::feature_flag::FeatureFlagController;
+    use crate::ops::memory_tracker::MemoryTracker;
 
     /// Helper to create a minimal EngineState for testing with temp directories
     fn make_test_engine_state() -> Arc<EngineState> {
@@ -47,9 +47,7 @@ mod tests {
         ));
 
         // GAP-M5: Create UnifiedCacheManager for test engine state
-        let unified_cache = Arc::new(UnifiedCacheManager::new(
-            crate::cache::UnifiedCacheConfig::default(),
-        ));
+        let unified_cache = Arc::new(UnifiedCacheManager::new(crate::cache::UnifiedCacheConfig::default()));
         let block_cache = unified_cache.block_cache().clone();
 
         // ENG-007: Use builder pattern instead of 10+ parameter constructor
@@ -113,7 +111,10 @@ mod tests {
         );
 
         // Write to memtable directly
-        state.memtable_state.memtable.insert("test_key".to_string(), b"test_value");
+        state
+            .memtable_state
+            .memtable
+            .insert("test_key".to_string(), b"test_value");
 
         // Read via ReadEngine
         let (result, _cache_result) = read_engine.get("test_key").expect("get should not error");
@@ -218,13 +219,12 @@ mod tests {
     #[test]
     fn test_write_engine_put_basic() {
         let state = make_test_engine_state();
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
 
         let write_engine = WriteEngine::new(
             state.clone(),
             None, // no WAL for this test
+            None, // no WAL channel
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None, // no compressor
             None, // no async writer
@@ -235,7 +235,8 @@ mod tests {
         );
 
         // Write a KV pair with Immediate durability to bypass write buffer
-        write_engine.put_with_durability("key1", b"value1", crate::core::types::Durability::Immediate)
+        write_engine
+            .put_with_durability("key1", b"value1", crate::core::types::Durability::Immediate)
             .expect("put should succeed");
 
         // Verify via memtable (no flush needed with Immediate durability)
@@ -247,12 +248,11 @@ mod tests {
     #[test]
     fn test_write_engine_put_multiple() {
         let state = make_test_engine_state();
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
 
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -264,12 +264,22 @@ mod tests {
         );
 
         // Write multiple KV pairs with Immediate durability
-        write_engine.put_with_durability("alpha", b"one", crate::core::types::Durability::Immediate).expect("put should succeed");
-        write_engine.put_with_durability("beta", b"two", crate::core::types::Durability::Immediate).expect("put should succeed");
-        write_engine.put_with_durability("gamma", b"three", crate::core::types::Durability::Immediate).expect("put should succeed");
+        write_engine
+            .put_with_durability("alpha", b"one", crate::core::types::Durability::Immediate)
+            .expect("put should succeed");
+        write_engine
+            .put_with_durability("beta", b"two", crate::core::types::Durability::Immediate)
+            .expect("put should succeed");
+        write_engine
+            .put_with_durability("gamma", b"three", crate::core::types::Durability::Immediate)
+            .expect("put should succeed");
 
         // Verify all in memtable
-        let test_data: Vec<(&str, &[u8])> = vec![("alpha", b"one".as_slice()), ("beta", b"two".as_slice()), ("gamma", b"three".as_slice())];
+        let test_data: Vec<(&str, &[u8])> = vec![
+            ("alpha", b"one".as_slice()),
+            ("beta", b"two".as_slice()),
+            ("gamma", b"three".as_slice()),
+        ];
         for (key, expected) in &test_data {
             let (val, _, deleted) = state.memtable_state.memtable.get(key).expect("key should exist");
             assert!(!deleted);
@@ -280,12 +290,11 @@ mod tests {
     #[test]
     fn test_write_engine_delete() {
         let state = make_test_engine_state();
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
 
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -297,25 +306,29 @@ mod tests {
         );
 
         // Write then delete with Immediate durability
-        write_engine.put_with_durability("delete_me", b"temp", crate::core::types::Durability::Immediate)
+        write_engine
+            .put_with_durability("delete_me", b"temp", crate::core::types::Durability::Immediate)
             .expect("put should succeed");
         write_engine.delete("delete_me").expect("delete should succeed");
 
         // Delete creates a tombstone (empty value)
-        let (val, _, deleted) = state.memtable_state.memtable.get("delete_me").expect("key should exist");
+        let (val, _, deleted) = state
+            .memtable_state
+            .memtable
+            .get("delete_me")
+            .expect("key should exist");
         // Tombstone = empty value
-        assert!(val.map_or(true, |v| v.is_empty()) || deleted);
+        assert!(val.is_none_or(|v| v.is_empty()) || deleted);
     }
 
     #[test]
     fn test_write_engine_put_batch() {
         let state = make_test_engine_state();
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
 
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -335,7 +348,11 @@ mod tests {
         write_engine.put_batch(&entries).expect("batch put should succeed");
 
         // Verify all
-        let test_entries: Vec<(&str, &[u8])> = vec![("batch1", b"val1".as_slice()), ("batch2", b"val2".as_slice()), ("batch3", b"val3".as_slice())];
+        let test_entries: Vec<(&str, &[u8])> = vec![
+            ("batch1", b"val1".as_slice()),
+            ("batch2", b"val2".as_slice()),
+            ("batch3", b"val3".as_slice()),
+        ];
         for (key, expected) in &test_entries {
             let (val, _, deleted) = state.memtable_state.memtable.get(key).expect("key should exist");
             assert!(!deleted);
@@ -346,12 +363,11 @@ mod tests {
     #[test]
     fn test_write_engine_stats() {
         let state = make_test_engine_state();
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
 
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -363,7 +379,8 @@ mod tests {
         );
 
         // Use Immediate durability to bypass write buffer and write directly to memtable
-        write_engine.put_with_durability("stat_key", b"stat_val", crate::core::types::Durability::Immediate)
+        write_engine
+            .put_with_durability("stat_key", b"stat_val", crate::core::types::Durability::Immediate)
             .expect("put should succeed");
 
         let stats = write_engine.get_stats();
@@ -378,14 +395,10 @@ mod tests {
         let state = make_test_engine_state();
         let compaction_config = crate::compaction::CompactionConfig::default();
 
-        let compaction_engine = CompactionEngine::new(
-            state.clone(),
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state.clone(), compaction_config, None);
 
         // Basic check - engine created successfully
-        assert!(compaction_engine.compaction_manager().lock().should_run_compaction());
+        assert!(compaction_engine.compaction_manager().should_run_compaction());
     }
 
     #[test]
@@ -393,11 +406,7 @@ mod tests {
         let state = make_test_engine_state();
         let compaction_config = crate::compaction::CompactionConfig::default();
 
-        let compaction_engine = CompactionEngine::new(
-            state.clone(),
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state.clone(), compaction_config, None);
 
         // No segments, run_compaction should return default stats
         let result = compaction_engine.run_compaction(|_| {
@@ -415,11 +424,7 @@ mod tests {
         let state = make_test_engine_state();
         let compaction_config = crate::compaction::CompactionConfig::default();
 
-        let compaction_engine = CompactionEngine::new(
-            state.clone(),
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state.clone(), compaction_config, None);
 
         // No segments, maybe_run_compaction should succeed
         let result = compaction_engine.maybe_run_compaction();
@@ -429,15 +434,13 @@ mod tests {
     #[test]
     fn test_compaction_engine_record_write() {
         let state = make_test_engine_state();
-        let mut compaction_config = crate::compaction::CompactionConfig::default();
-        compaction_config.check_interval = 5; // Trigger every 5 writes for testing
-        compaction_config.auto_compact = true;
+        let compaction_config = crate::compaction::CompactionConfig {
+            check_interval: 5, // Trigger every 5 writes for testing
+            auto_compact: true,
+            ..Default::default()
+        };
 
-        let compaction_engine = CompactionEngine::new(
-            state,
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state, compaction_config, None);
 
         // The compaction engine has its own internal CompactionManager with the config.
         // record_write uses fetch_add which returns OLD value.
@@ -457,8 +460,8 @@ mod tests {
     /// Verifies no panics, deadlocks, or segment conflicts
     #[test]
     fn test_concurrent_compaction_no_data_loss() {
-        use std::thread;
         use std::sync::atomic::AtomicUsize;
+        use std::thread;
 
         let state = make_test_engine_state();
 
@@ -468,11 +471,7 @@ mod tests {
             ..Default::default()
         };
 
-        let compaction_engine = CompactionEngine::new(
-            state.clone(),
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state.clone(), compaction_config, None);
 
         let success_count = Arc::new(AtomicUsize::new(0));
         let num_threads: usize = 2;
@@ -498,14 +497,18 @@ mod tests {
 
         // Verify no panics or deadlocks (test completes)
         let successes = success_count.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(successes <= num_threads, "At most {} threads should succeed", num_threads);
+        assert!(
+            successes <= num_threads,
+            "At most {} threads should succeed",
+            num_threads
+        );
     }
 
     /// Test: COMP-006 - Concurrent compaction runs verify all complete
     #[test]
     fn test_concurrent_multiple_compaction_runs() {
-        use std::thread;
         use std::sync::atomic::AtomicUsize;
+        use std::thread;
 
         let state = make_test_engine_state();
 
@@ -515,11 +518,7 @@ mod tests {
             ..Default::default()
         };
 
-        let compaction_engine = CompactionEngine::new(
-            state.clone(),
-            compaction_config,
-            None,
-        );
+        let compaction_engine = CompactionEngine::new(state.clone(), compaction_config, None);
 
         let completed_count = Arc::new(AtomicUsize::new(0));
         let num_threads: usize = 3;
@@ -575,9 +574,8 @@ mod tests {
     fn test_lifecycle_manager_timeout_config() {
         let state = make_test_engine_state();
         let checkpoint_manager = parking_lot::Mutex::new(
-            crate::checkpoint::IncrementalCheckpointManager::new(
-                &state.config.checkpoint_dir,
-            ).expect("create checkpoint manager"),
+            crate::checkpoint::IncrementalCheckpointManager::new(&state.config.checkpoint_dir)
+                .expect("create checkpoint manager"),
         );
 
         let lifecycle = LifecycleManager::new(
@@ -589,9 +587,7 @@ mod tests {
             crate::ops::timeout_control::TimeoutConfig::default(),
             None,
             FlushTrigger::new(),
-            Arc::new(
-                CompactionManager::new(crate::compaction::CompactionConfig::default()),
-            ),
+            Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default())),
         );
 
         // Check default timeout config
@@ -618,9 +614,8 @@ mod tests {
     fn test_lifecycle_manager_timeout_stats() {
         let state = make_test_engine_state();
         let checkpoint_manager = parking_lot::Mutex::new(
-            crate::checkpoint::IncrementalCheckpointManager::new(
-                &state.config.checkpoint_dir,
-            ).expect("create checkpoint manager"),
+            crate::checkpoint::IncrementalCheckpointManager::new(&state.config.checkpoint_dir)
+                .expect("create checkpoint manager"),
         );
 
         let lifecycle = LifecycleManager::new(
@@ -632,9 +627,7 @@ mod tests {
             crate::ops::timeout_control::TimeoutConfig::default(),
             None,
             FlushTrigger::new(),
-            Arc::new(
-                CompactionManager::new(crate::compaction::CompactionConfig::default()),
-            ),
+            Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default())),
         );
 
         // Initial stats should be zero
@@ -655,11 +648,10 @@ mod tests {
         let state = make_test_engine_state();
 
         // Create WriteEngine
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -687,7 +679,12 @@ mod tests {
         );
 
         // Write via WriteEngine (use Immediate to bypass buffer)
-        write_engine.put_with_durability("integration_key", b"integration_value", crate::core::types::Durability::Immediate)
+        write_engine
+            .put_with_durability(
+                "integration_key",
+                b"integration_value",
+                crate::core::types::Durability::Immediate,
+            )
             .expect("put should succeed");
 
         // Read via ReadEngine
@@ -701,11 +698,10 @@ mod tests {
         let state = make_test_engine_state();
 
         // Create WriteEngine
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -753,11 +749,10 @@ mod tests {
         let state = make_test_engine_state();
 
         // Create WriteEngine
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -785,7 +780,8 @@ mod tests {
         );
 
         // Write then delete (use Immediate to bypass buffer)
-        write_engine.put_with_durability("del_key", b"del_val", crate::core::types::Durability::Immediate)
+        write_engine
+            .put_with_durability("del_key", b"del_val", crate::core::types::Durability::Immediate)
             .expect("put should succeed");
         let (result, _cache_result) = read_engine.get("del_key").expect("get should not error");
         assert!(result.is_some());
@@ -796,8 +792,10 @@ mod tests {
         let (result, _cache_result) = read_engine.get("del_key").expect("get should not error");
         // Delete writes empty value; memtable.get returns (Some(empty), _, false) or (None, _, true)
         // Either way, the key is effectively deleted
-        assert!(result.as_ref().map_or(true, |v| v.is_empty()) || result.is_none(),
-            "deleted key should return None or empty value");
+        assert!(
+            result.as_ref().is_none_or(|v| v.is_empty()) || result.is_none(),
+            "deleted key should return None or empty value"
+        );
     }
 
     #[test]
@@ -805,11 +803,10 @@ mod tests {
         let state = make_test_engine_state();
 
         // Create WriteEngine
-        let compaction_manager = Arc::new(
-            CompactionManager::new(crate::compaction::CompactionConfig::default()),
-        );
+        let compaction_manager = Arc::new(CompactionManager::new(crate::compaction::CompactionConfig::default()));
         let write_engine = WriteEngine::new(
             state.clone(),
+            None,
             None,
             Arc::new(WriteBuffer::new(WriteBufferConfig::default())),
             None,
@@ -836,15 +833,31 @@ mod tests {
             None, // compressor (S2-1)
         );
 
-        let write_count_before = state.stats_state.stats.write_count.load(std::sync::atomic::Ordering::Relaxed);
-        let read_count_before = state.stats_state.stats.read_count.load(std::sync::atomic::Ordering::Relaxed);
+        let write_count_before = state
+            .stats_state
+            .stats
+            .write_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let read_count_before = state
+            .stats_state
+            .stats
+            .read_count
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         // Write and read
         write_engine.put("stats_key", b"stats_val").expect("put should succeed");
         let _ = read_engine.get("stats_key").expect("get should not error");
 
-        let write_count_after = state.stats_state.stats.write_count.load(std::sync::atomic::Ordering::Relaxed);
-        let read_count_after = state.stats_state.stats.read_count.load(std::sync::atomic::Ordering::Relaxed);
+        let write_count_after = state
+            .stats_state
+            .stats
+            .write_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let read_count_after = state
+            .stats_state
+            .stats
+            .read_count
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         assert!(write_count_after > write_count_before, "write count should increment");
         assert!(read_count_after > read_count_before, "read count should increment");
@@ -855,7 +868,7 @@ mod tests {
     #[cfg(feature = "async-io")]
     mod async_io_tests {
         use super::*;
-        use crate::ops::async_io::{AsyncWriter, AsyncIoConfig};
+        use crate::ops::async_io::{AsyncIoConfig, AsyncWriter};
         use tokio::time::{timeout, Duration};
 
         #[tokio::test]
@@ -867,19 +880,22 @@ mod tests {
                 std::fs::create_dir_all(&temp_dir).ok();
 
                 let async_config = AsyncIoConfig::default();
-                let async_writer = AsyncWriter::new(async_config, temp_dir.clone())
-                    .expect("create async writer");
+                let async_writer = AsyncWriter::new(async_config, temp_dir.clone()).expect("create async writer");
 
                 // Test async segment write
                 let data = bytes::Bytes::from(b"test async data".to_vec());
-                let result = async_writer.write_segment(1, 0, data.clone()).await
+                let result = async_writer
+                    .write_segment(1, 0, data.clone())
+                    .await
                     .expect("async segment write should succeed");
                 assert!(result.success);
                 assert_eq!(result.bytes_written, 15);
 
                 // Test async WAL write
                 let wal_data = bytes::Bytes::from(b"wal entry".to_vec());
-                let wal_result = async_writer.write_wal(wal_data, false).await
+                let wal_result = async_writer
+                    .write_wal(wal_data, false)
+                    .await
                     .expect("async WAL write should succeed");
                 assert!(wal_result.success);
 
@@ -887,9 +903,14 @@ mod tests {
                 let sync_result = tokio::task::spawn_blocking(move || {
                     let sync_data = bytes::Bytes::from(b"sync bridge data".to_vec());
                     async_writer.write_segment_sync(2, 0, sync_data)
-                }).await.expect("spawn_blocking should succeed").expect("sync bridge should succeed");
+                })
+                .await
+                .expect("spawn_blocking should succeed")
+                .expect("sync bridge should succeed");
                 assert!(sync_result.success);
-            }).await.expect("Async test timed out after 30s");
+            })
+            .await
+            .expect("Async test timed out after 30s");
         }
 
         #[tokio::test]
@@ -900,8 +921,8 @@ mod tests {
                 std::fs::create_dir_all(&temp_dir).ok();
 
                 let async_config = AsyncIoConfig::default();
-                let async_writer = Arc::new(AsyncWriter::new(async_config, temp_dir.clone())
-                    .expect("create async writer"));
+                let async_writer =
+                    Arc::new(AsyncWriter::new(async_config, temp_dir.clone()).expect("create async writer"));
 
                 // Concurrent async writes
                 let mut handles = Vec::new();
@@ -925,7 +946,9 @@ mod tests {
                 let stats = async_writer.stats();
                 assert_eq!(stats.total_writes, 10);
                 assert_eq!(stats.successful_writes, 10);
-            }).await.expect("Async test timed out after 30s");
+            })
+            .await
+            .expect("Async test timed out after 30s");
         }
     }
 }

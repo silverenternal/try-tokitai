@@ -5,12 +5,15 @@
 //! - Durability guarantees (Buffered vs Immediate)
 //! - Batch WAL recovery after crash
 
-use std::sync::Arc;
-use std::fs;
-use tempfile::TempDir;
-use crate::{FileKV, FileKVConfig, core::write_coalescer::{WriteBuffer, WriteBufferConfig}};
-use crate::io::StdFs;
 use crate::core::types::Durability;
+use crate::io::StdFs;
+use crate::{
+    core::write_coalescer::{WriteBuffer, WriteBufferConfig},
+    FileKV, FileKVConfig,
+};
+use std::fs;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 /// Helper to create test config
 fn test_config() -> (TempDir, FileKVConfig) {
@@ -29,6 +32,7 @@ fn test_config() -> (TempDir, FileKVConfig) {
             max_entries: 100_000,
             max_memory_bytes: 64 * 1024 * 1024,
             shards: 32,
+            ..Default::default()
         },
         segment_dir: segment_dir.clone(),
         enable_wal: true,
@@ -55,9 +59,13 @@ fn test_config() -> (TempDir, FileKVConfig) {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: false,
             streaming_compaction_enabled: true,
-            write_amplification_threshold: 3.0, // OPT-003: Default WA threshold
-            max_background_compaction_threads: 1, // Disabled for tests
+            write_amplification_threshold: 3.0,        // OPT-003: Default WA threshold
+            max_background_compaction_threads: 1,      // Disabled for tests
             l0_size_bytes_threshold: 64 * 1024 * 1024, // OPT-003: Default L0 size trigger
+            // OPT-006: STCS for L0 defaults
+            l0_compaction_strategy: crate::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         segment_preallocate_size: 0,
         wal_max_size_bytes: 100 * 1024 * 1024,
@@ -81,7 +89,13 @@ fn test_config() -> (TempDir, FileKVConfig) {
         enable_adaptive_bloom_cache: true,
         enable_zone_map_pruning: true,
         enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
+        enable_multi_level_cache: true,
+        l2_cache_max_bytes: 4 * 1024 * 1024 * 1024,
+        l2_to_l1_threshold: 5,
+        enable_wal_channel: false,
+        wal_channel_interval_ms: 2,
+        wal_channel_max_entries: 1000,
+        wal_channel_capacity: 10_000,
         fs: Arc::new(StdFs),
         block_size: 8192,
         block_compression: crate::core::types::BlockCompressionConfig::default(),
@@ -110,9 +124,8 @@ fn test_write_buffer_size_threshold_triggers_flush() {
             format!("key_{}", i),
             vec![0u8; 20], // 20 bytes per write
         );
-        if result.is_some() {
+        if let Some(batch) = result {
             flush_triggered = true;
-            let batch = result.unwrap();
             assert!(!batch.is_empty());
             assert!(batch.len() <= 20);
             break;
@@ -126,7 +139,7 @@ fn test_write_buffer_size_threshold_triggers_flush() {
 fn test_write_buffer_time_window_triggers_flush() {
     // Test that write buffer flushes when time window is exceeded
     let config = WriteBufferConfig {
-        time_window_us: 1000, // 1ms time window
+        time_window_us: 1000,              // 1ms time window
         size_threshold_bytes: 1024 * 1024, // Large size threshold
     };
     let buffer = WriteBuffer::new(config);
@@ -151,10 +164,7 @@ fn test_write_buffer_force_flush_returns_all_pending() {
 
     // Add several writes
     for i in 0..10 {
-        buffer.add(
-            format!("key_{}", i),
-            format!("value_{}", i).into_bytes(),
-        );
+        buffer.add(format!("key_{}", i), format!("value_{}", i).into_bytes());
     }
 
     assert_eq!(buffer.pending_count(), 10);
@@ -215,7 +225,8 @@ fn test_durability_buffered_write() {
             &format!("key_{}", i),
             &format!("value_{}", i).into_bytes(),
             Durability::Buffered,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Verify data is readable (may still be in buffer or already flushed)
@@ -242,7 +253,8 @@ fn test_durability_immediate_write() {
             &format!("key_{}", i),
             &format!("value_{}", i).into_bytes(),
             Durability::Immediate,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // All data should be in memtable immediately
@@ -275,7 +287,8 @@ fn test_durability_immediate_survives_restart() {
                 &format!("key_{}", i),
                 &format!("value_{}", i).into_bytes(),
                 Durability::Immediate,
-            ).unwrap();
+            )
+            .unwrap();
         }
         // Don't flush memtable - data should be in WAL
     }
@@ -307,10 +320,14 @@ fn test_mixed_durability_writes() {
     let kv = FileKV::open(config).unwrap();
 
     // Mix of Buffered and Immediate writes
-    kv.put_with_durability("buffered_1", b"value1", Durability::Buffered).unwrap();
-    kv.put_with_durability("immediate_1", b"value1", Durability::Immediate).unwrap();
-    kv.put_with_durability("buffered_2", b"value2", Durability::Buffered).unwrap();
-    kv.put_with_durability("immediate_2", b"value2", Durability::Immediate).unwrap();
+    kv.put_with_durability("buffered_1", b"value1", Durability::Buffered)
+        .unwrap();
+    kv.put_with_durability("immediate_1", b"value1", Durability::Immediate)
+        .unwrap();
+    kv.put_with_durability("buffered_2", b"value2", Durability::Buffered)
+        .unwrap();
+    kv.put_with_durability("immediate_2", b"value2", Durability::Immediate)
+        .unwrap();
 
     // Flush to ensure all data is in memtable/segments
     kv.flush_memtable().unwrap();
@@ -343,10 +360,8 @@ fn test_batch_wal_recovery_after_crash() {
 
         // Add writes (buffered)
         for i in 0..20 {
-            kv.put(
-                &format!("key_{}", i),
-                &format!("value_{}", i).into_bytes(),
-            ).unwrap();
+            kv.put(&format!("key_{}", i), &format!("value_{}", i).into_bytes())
+                .unwrap();
         }
 
         // Flush memtable to ensure WAL has entries
@@ -391,7 +406,7 @@ fn test_wal_batch_atomic_write() {
         ("key_8", b"value_8"),
         ("key_9", b"value_9"),
     ];
-    
+
     kv.put_batch(&entries).unwrap();
 
     // All or nothing: either all keys present or none
@@ -422,10 +437,8 @@ fn test_flush_memtable_drains_write_buffer() {
 
     // Add writes to buffer
     for i in 0..10 {
-        kv.put(
-            &format!("key_{}", i),
-            &format!("value_{}", i).into_bytes(),
-        ).unwrap();
+        kv.put(&format!("key_{}", i), &format!("value_{}", i).into_bytes())
+            .unwrap();
     }
 
     let _pending_before = kv.write_coalescer_ref().pending_count();

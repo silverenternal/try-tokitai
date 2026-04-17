@@ -39,18 +39,27 @@ pub struct CacheUsageReport {
 impl std::fmt::Display for CacheUsageReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Cache Usage Report:")?;
-        writeln!(f, "  Total: {:.1}MB / {:.1}MB ({:.1}%)",
+        writeln!(
+            f,
+            "  Total: {:.1}MB / {:.1}MB ({:.1}%)",
             self.total_used as f64 / 1024.0 / 1024.0,
             self.total_budget as f64 / 1024.0 / 1024.0,
-            self.usage_percent)?;
-        writeln!(f, "  BlockCache: {:.1}MB / {:.1}MB (hit rate: {:.1}%)",
+            self.usage_percent
+        )?;
+        writeln!(
+            f,
+            "  BlockCache: {:.1}MB / {:.1}MB (hit rate: {:.1}%)",
             self.block_cache_used as f64 / 1024.0 / 1024.0,
             self.block_cache_max as f64 / 1024.0 / 1024.0,
-            self.block_cache_hit_rate * 100.0)?;
-        writeln!(f, "  BloomFilter: {:.1}MB / {:.1}MB (hit rate: {:.1}%)",
+            self.block_cache_hit_rate * 100.0
+        )?;
+        writeln!(
+            f,
+            "  BloomFilter: {:.1}MB / {:.1}MB (hit rate: {:.1}%)",
             self.bloom_filter_used as f64 / 1024.0 / 1024.0,
             self.bloom_filter_max as f64 / 1024.0 / 1024.0,
-            self.bloom_filter_hit_rate * 100.0)
+            self.bloom_filter_hit_rate * 100.0
+        )
     }
 }
 

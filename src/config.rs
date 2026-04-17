@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// AI 配置
 #[derive(Debug, Deserialize, Clone)]
@@ -98,7 +98,11 @@ pub struct SearchConfig {
 }
 
 fn default_engines() -> Vec<String> {
-    vec!["google".to_string(), "bing".to_string(), "duckduckgo".to_string()]
+    vec![
+        "google".to_string(),
+        "bing".to_string(),
+        "duckduckgo".to_string(),
+    ]
 }
 
 fn default_cache_capacity() -> u64 {
@@ -129,7 +133,6 @@ pub struct DownloadConfig {
     pub default_dir: Option<String>,
 }
 
-
 /// 用户工具配置（工作目录、下载目录等）
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
@@ -140,7 +143,6 @@ pub struct UserToolsConfig {
     /// 默认下载目录
     pub download_dir: Option<String>,
 }
-
 
 /// 上下文存储配置
 #[derive(Debug, Deserialize, Clone)]
@@ -252,7 +254,8 @@ impl Config {
     /// 优先级：配置 > 当前目录
     #[allow(dead_code)]
     pub fn get_workspace_dir(&self) -> PathBuf {
-        self.user_tools.workspace_dir
+        self.user_tools
+            .workspace_dir
             .as_ref()
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
@@ -443,13 +446,22 @@ mod tests {
         assert_eq!(config.context.recommend_limit, 5);
 
         // 搜索配置
-        assert_eq!(config.search.searxng_url, Some("https://searx.example.org".to_string()));
+        assert_eq!(
+            config.search.searxng_url,
+            Some("https://searx.example.org".to_string())
+        );
         assert_eq!(config.search.engines, vec!["duckduckgo", "bing"]);
         assert_eq!(config.search.cache_capacity, 200);
 
         // 用户工具配置
-        assert_eq!(config.user_tools.workspace_dir, Some("/home/user/projects".to_string()));
-        assert_eq!(config.user_tools.download_dir, Some("/home/user/downloads".to_string()));
+        assert_eq!(
+            config.user_tools.workspace_dir,
+            Some("/home/user/projects".to_string())
+        );
+        assert_eq!(
+            config.user_tools.download_dir,
+            Some("/home/user/downloads".to_string())
+        );
     }
 
     #[test]
@@ -488,7 +500,7 @@ mod tests {
     #[test]
     fn test_config_load_nonexistent_file() {
         let config = Config::load(Some(PathBuf::from("/nonexistent/config.toml"))).unwrap();
-        
+
         // 应该返回默认配置
         assert_eq!(config.ai.model, "qwen3.5:397b");
     }
@@ -518,14 +530,17 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(config.get_workspace_dir(), PathBuf::from("/custom/workspace"));
+        assert_eq!(
+            config.get_workspace_dir(),
+            PathBuf::from("/custom/workspace")
+        );
     }
 
     #[test]
     fn test_get_workspace_dir_fallback_to_current() {
         let config = Config::default();
         let workspace = config.get_workspace_dir();
-        
+
         // 应该返回当前目录
         assert!(workspace.is_absolute() || workspace == PathBuf::from("."));
     }
@@ -540,7 +555,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(config.get_download_dir(), PathBuf::from("/custom/downloads"));
+        assert_eq!(
+            config.get_download_dir(),
+            PathBuf::from("/custom/downloads")
+        );
     }
 
     #[test]
@@ -548,7 +566,7 @@ mod tests {
         // 这个测试依赖于 dirs crate 的行为
         let config = Config::default();
         let download_dir = config.get_download_dir();
-        
+
         // 应该是系统下载目录或 ./downloads
         if let Some(system_download) = dirs::download_dir() {
             assert_eq!(download_dir, system_download);
@@ -668,7 +686,7 @@ mod tests {
     fn test_config_debug() {
         let config = Config::default();
         let debug_str = format!("{:?}", config);
-        
+
         assert!(debug_str.contains("Config"));
         assert!(debug_str.contains("ai:"));
         assert!(debug_str.contains("context:"));

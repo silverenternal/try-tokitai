@@ -11,11 +11,11 @@
 //! - 典型延迟：10-50ms
 //! - 所有操作均为只读
 
-use tokitai::tool;
 use serde_json::json;
 use std::sync::Arc;
+use tokitai::tool;
 
-use super::backend::{ProcessBackend, create_backend};
+use super::backend::{create_backend, ProcessBackend};
 use super::config;
 
 /// 系统监控工具集
@@ -84,7 +84,9 @@ impl SystemMonitor {
     /// ## 性能
     /// - 典型延迟：10-30ms
     pub fn get_system_resources(&self) -> Result<String, String> {
-        let info = self.backend.get_system_resources()
+        let info = self
+            .backend
+            .get_system_resources()
             .map_err(|e| e.to_string())?;
 
         Ok(json!({
@@ -114,7 +116,8 @@ impl SystemMonitor {
                 },
                 "uptime_secs": info.uptime_secs,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取系统基本信息
@@ -168,7 +171,8 @@ impl SystemMonitor {
                 "hostname": hostname,
                 "user": user,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取 CPU 核心数
@@ -190,7 +194,8 @@ impl SystemMonitor {
             "data": {
                 "cores": cores
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取系统负载平均值
@@ -220,7 +225,8 @@ impl SystemMonitor {
                         "5m": loadavg[1],
                         "15m": loadavg[2],
                     }
-                }).to_string());
+                })
+                .to_string());
             }
         }
 
@@ -273,7 +279,8 @@ impl SystemMonitor {
                     "cached_mb": cached.map(|v| v / 1024),
                     "used_mb": (total - free) / 1024,
                 }
-            }).to_string())
+            })
+            .to_string())
         }
 
         #[cfg(target_os = "macos")]
@@ -294,7 +301,8 @@ impl SystemMonitor {
                     "total_mb": total,
                     "note": "macOS 详细内存信息需要额外计算"
                 }
-            }).to_string())
+            })
+            .to_string())
         }
 
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -363,7 +371,8 @@ impl SystemMonitor {
                 "available_gb": parse_size(parts[3]),
                 "usage_percent": parts[4].trim_end_matches('%').parse::<f32>().unwrap_or(0.0),
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取系统运行时间
@@ -380,7 +389,8 @@ impl SystemMonitor {
             let uptime = fs::read_to_string("/proc/uptime")
                 .map_err(|e| format!("读取运行时间失败：{}", e))?;
 
-            let secs = uptime.split_whitespace()
+            let secs = uptime
+                .split_whitespace()
                 .next()
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
@@ -391,7 +401,8 @@ impl SystemMonitor {
                     "secs": secs as u64,
                     "human": format_duration(secs as u64),
                 }
-            }).to_string())
+            })
+            .to_string())
         }
 
         #[cfg(target_os = "macos")]
@@ -408,7 +419,8 @@ impl SystemMonitor {
                     "raw": uptime_str.trim().to_string(),
                     "note": "macOS 精确运行时间需要解析 boottime 结构"
                 }
-            }).to_string())
+            })
+            .to_string())
         }
 
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -430,10 +442,11 @@ impl SystemMonitor {
     /// ## 性能
     /// - 典型延迟：50-200ms（取决于 PATH 中的目录数）
     pub fn list_available_commands(&self, limit: Option<usize>) -> Result<String, String> {
-        let limit = limit.unwrap_or(config::DEFAULT_COMMANDS_LIMIT).min(config::MAX_COMMANDS_LIMIT);
+        let limit = limit
+            .unwrap_or(config::DEFAULT_COMMANDS_LIMIT)
+            .min(config::MAX_COMMANDS_LIMIT);
 
-        let paths = std::env::var("PATH")
-            .map_err(|e| format!("获取 PATH 失败：{}", e))?;
+        let paths = std::env::var("PATH").map_err(|e| format!("获取 PATH 失败：{}", e))?;
 
         let mut commands = Vec::new();
 
@@ -468,7 +481,8 @@ impl SystemMonitor {
                 "total": commands.len(),
                 "limit": limit,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 检查命令是否可用
@@ -504,7 +518,8 @@ impl SystemMonitor {
                     "path": path,
                     "command": command,
                 }
-            }).to_string())
+            })
+            .to_string())
         } else {
             Ok(json!({
                 "success": true,
@@ -513,7 +528,8 @@ impl SystemMonitor {
                     "command": command,
                     "message": "命令未找到",
                 }
-            }).to_string())
+            })
+            .to_string())
         }
     }
 
@@ -528,7 +544,8 @@ impl SystemMonitor {
                 "description": config::SYSTEM_MONITOR_METADATA.description,
                 "version": config::SYSTEM_MONITOR_METADATA.version,
             }
-        }).to_string())
+        })
+        .to_string())
     }
 }
 
@@ -541,7 +558,10 @@ fn format_duration(secs: u64) -> String {
     let remaining_secs = secs % 60;
 
     if days > 0 {
-        format!("{} 天 {} 小时 {} 分钟 {} 秒", days, hours, mins, remaining_secs)
+        format!(
+            "{} 天 {} 小时 {} 分钟 {} 秒",
+            days, hours, mins, remaining_secs
+        )
     } else if hours > 0 {
         format!("{} 小时 {} 分钟 {} 秒", hours, mins, remaining_secs)
     } else if mins > 0 {
@@ -591,7 +611,8 @@ impl SystemMonitor {
                         "5m": parts[1].parse::<f64>().unwrap_or(0.0),
                         "15m": parts[2].parse::<f64>().unwrap_or(0.0),
                     }
-                }).to_string());
+                })
+                .to_string());
             }
         }
 
@@ -679,7 +700,9 @@ mod tests {
 
         // 测试包含非法字符的命令
         assert!(monitor.check_command("ls /; rm -rf".to_string()).is_err());
-        assert!(monitor.check_command("cat /etc/passwd".to_string()).is_err());
+        assert!(monitor
+            .check_command("cat /etc/passwd".to_string())
+            .is_err());
     }
 
     #[test]

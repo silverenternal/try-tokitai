@@ -1,7 +1,7 @@
 //! (c) Compaction consistency verification
 
 use tempfile::TempDir;
-use tokitai_filekv::{FileKV, FileKVConfig, CompactionConfig};
+use tokitai_filekv::{CompactionConfig, FileKV, FileKVConfig};
 
 fn create_test_config_with_compaction(temp_dir: &TempDir) -> FileKVConfig {
     FileKVConfig {
@@ -23,6 +23,12 @@ fn create_test_config_with_compaction(temp_dir: &TempDir) -> FileKVConfig {
             l0_file_count_threshold: 4,
             parallel_compaction_enabled: false,
             streaming_compaction_enabled: true,
+            write_amplification_threshold: 3.0,
+            max_background_compaction_threads: 1,
+            l0_size_bytes_threshold: 64 * 1024 * 1024,
+            l0_compaction_strategy: tokitai_filekv::compaction::CompactionStrategy::Leveled,
+            l0_stcs_min_segments: 3,
+            l0_stcs_size_ratio: 2.0,
         },
         ..Default::default()
     }
@@ -46,7 +52,11 @@ fn test_compaction_preserves_all_data() {
     }
 
     let segments_before = kv.segments().load().len();
-    assert!(segments_before >= 3, "Should have >= 3 segments, got {}", segments_before);
+    assert!(
+        segments_before >= 3,
+        "Should have >= 3 segments, got {}",
+        segments_before
+    );
 
     // Run compaction
     let _compaction_stats = kv.run_compaction().expect("compaction failed");
@@ -63,7 +73,7 @@ fn test_compaction_preserves_all_data() {
     for i in 0..num_keys {
         let key = format!("key_{:04}", i);
         let expected = format!("batch4_value{}", i);
-        let val = kv.get(&key).expect(&format!("get failed for {}", key));
+        let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
         assert_eq!(
             val.as_deref(),
             Some(expected.as_bytes()),
@@ -103,7 +113,7 @@ fn test_compaction_with_overlapping_writes() {
     for i in 0..10 {
         let key = format!("key_{}", i);
         let expected = format!("round2_key{}", i);
-        let val = kv.get(&key).expect(&format!("get failed for {}", key));
+        let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
         assert_eq!(
             val.as_deref(),
             Some(expected.as_bytes()),
@@ -117,7 +127,7 @@ fn test_compaction_with_overlapping_writes() {
         for i in 0..10 {
             let key = format!("unique_round{}_key{}", round, i);
             let expected = format!("unique_value_round{}_key{}", round, i);
-            let val = kv.get(&key).expect(&format!("get failed for {}", key));
+            let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
             assert_eq!(
                 val.as_deref(),
                 Some(expected.as_bytes()),
@@ -151,7 +161,8 @@ fn test_compaction_with_deletes() {
     // More writes after delete
     for i in 10..20 {
         let key = format!("key_{}", i);
-        kv.put(&key, format!("updated_value_{}", i).as_bytes()).expect("put failed");
+        kv.put(&key, format!("updated_value_{}", i).as_bytes())
+            .expect("put failed");
     }
     kv.flush_memtable().expect("flush failed");
 
@@ -162,7 +173,7 @@ fn test_compaction_with_deletes() {
     // depending on compaction implementation
     for i in 0..10 {
         let key = format!("key_{}", i);
-        let val = kv.get(&key).expect(&format!("get failed for {}", key));
+        let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
         // After compaction, deleted keys may have empty value or may still have original value
         // depending on how tombstones are handled
         let _ = val; // Just verify get succeeds
@@ -172,7 +183,7 @@ fn test_compaction_with_deletes() {
     for i in 10..20 {
         let key = format!("key_{}", i);
         let expected = format!("updated_value_{}", i);
-        let val = kv.get(&key).expect(&format!("get failed for {}", key));
+        let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
         assert_eq!(
             val.as_deref(),
             Some(expected.as_bytes()),

@@ -45,25 +45,13 @@ pub type Result<T> = std::result::Result<T, FatalError>;
 #[derive(Debug, Clone)]
 pub enum AsyncWriteOp {
     /// Write data to segment file
-    SegmentWrite {
-        segment_id: u64,
-        offset: u64,
-        data: Bytes,
-    },
+    SegmentWrite { segment_id: u64, offset: u64, data: Bytes },
     /// Write WAL entry
-    WalWrite {
-        data: Bytes,
-        sync: bool,
-    },
+    WalWrite { data: Bytes, sync: bool },
     /// Flush and sync file
-    Flush {
-        path: PathBuf,
-    },
+    Flush { path: PathBuf },
     /// Create/open segment file
-    CreateSegment {
-        segment_id: u64,
-        preallocate_bytes: u64,
-    },
+    CreateSegment { segment_id: u64, preallocate_bytes: u64 },
 }
 
 /// Result of an async write operation
@@ -218,24 +206,25 @@ impl FileHandleCache {
 
         if let Some(pos) = pos {
             // Move to front (LRU)
-            let writer = self.writers.remove(pos)
-                .ok_or_else(|| FatalError::Corruption(
-                    "Writer disappeared from cache".to_string()
-                ))?;
+            let writer = self
+                .writers
+                .remove(pos)
+                .ok_or_else(|| FatalError::Corruption("Writer disappeared from cache".to_string()))?;
             self.writers.push_front(writer);
-            Ok(&mut self.writers.front_mut().ok_or_else(|| FatalError::Corruption(
-                "Writer cache is empty after push_front".to_string()
-            ))?.1)
+            Ok(&mut self
+                .writers
+                .front_mut()
+                .ok_or_else(|| FatalError::Corruption("Writer cache is empty after push_front".to_string()))?
+                .1)
         } else {
             // Need to open new file
             let path = base_dir.join(format!("segment_{:010}.dat", segment_id));
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .map_err(|e| FatalError::Io(
-                    std::io::Error::new(e.kind(), format!("Failed to open segment file: {:?}: {}", path, e))
-                ))?;
+            let file = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| {
+                FatalError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to open segment file: {:?}: {}", path, e),
+                ))
+            })?;
 
             let writer = BufWriter::new(file);
             self.writers.push_front((segment_id, writer));
@@ -245,18 +234,23 @@ impl FileHandleCache {
                 self.writers.pop_back();
             }
 
-            Ok(&mut self.writers.front_mut().ok_or_else(|| FatalError::Corruption(
-                "Writer cache is empty after push_front".to_string()
-            ))?.1)
+            Ok(&mut self
+                .writers
+                .front_mut()
+                .ok_or_else(|| FatalError::Corruption("Writer cache is empty after push_front".to_string()))?
+                .1)
         }
     }
 
     /// Flush and close all cached writers
     fn flush_all(&mut self) -> Result<()> {
         while let Some((segment_id, mut writer)) = self.writers.pop_front() {
-            writer.flush().map_err(|e| FatalError::Io(
-                std::io::Error::new(e.kind(), format!("Failed to flush segment {}: {}", segment_id, e))
-            ))?;
+            writer.flush().map_err(|e| {
+                FatalError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to flush segment {}: {}", segment_id, e),
+                ))
+            })?;
         }
         Ok(())
     }
@@ -310,7 +304,8 @@ impl AsyncWriter {
                 semaphore_clone,
                 file_handles_clone,
                 base_dir_clone,
-            ).await;
+            )
+            .await;
         });
 
         Ok(Self {
@@ -354,9 +349,7 @@ impl AsyncWriter {
             // Flatten the nested Result
             let result: Result<AsyncWriteResult> = match spawn_result {
                 Ok(r) => r,
-                Err(e) => Err(FatalError::Corruption(format!(
-                    "Spawn blocking error: {}", e
-                ))),
+                Err(e) => Err(FatalError::Corruption(format!("Spawn blocking error: {}", e))),
             };
 
             let duration_us = start.elapsed().as_micros() as u64;
@@ -375,8 +368,8 @@ impl AsyncWriter {
                 // Update latency stats - only count successful writes
                 if result.is_ok() {
                     let latency_sum = stats.avg_write_latency_us * (stats.successful_writes as f64);
-                    stats.avg_write_latency_us = (latency_sum + duration_us as f64)
-                        / ((stats.successful_writes + 1) as f64);
+                    stats.avg_write_latency_us =
+                        (latency_sum + duration_us as f64) / ((stats.successful_writes + 1) as f64);
 
                     // Simple P99 estimation (would need proper histogram in production)
                     stats.p99_write_latency_us = stats.avg_write_latency_us * 1.5;
@@ -406,18 +399,28 @@ impl AsyncWriter {
         base_dir: &Path,
     ) -> Result<AsyncWriteResult> {
         match op {
-            AsyncWriteOp::SegmentWrite { segment_id, offset, data } => {
+            AsyncWriteOp::SegmentWrite {
+                segment_id,
+                offset,
+                data,
+            } => {
                 let mut handles = file_handles.lock();
                 let writer = handles.get_or_create_writer(segment_id, base_dir)?;
 
                 // Seek to offset
                 writer.seek(SeekFrom::Start(offset)).map_err(|e| {
-                    FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to seek in segment {}: {}", segment_id, e)))
+                    FatalError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to seek in segment {}: {}", segment_id, e),
+                    ))
                 })?;
 
                 // Write data
                 writer.write_all(&data).map_err(|e| {
-                    FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to write to segment {}: {}", segment_id, e)))
+                    FatalError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to write to segment {}: {}", segment_id, e),
+                    ))
                 })?;
 
                 Ok(AsyncWriteResult {
@@ -434,18 +437,18 @@ impl AsyncWriter {
                     .create(true)
                     .append(true)
                     .open(&wal_path)
-                    .map_err(|e| FatalError::Io(
-                        std::io::Error::new(e.kind(), format!("Failed to open WAL file: {}", e))
-                    ))?;
+                    .map_err(|e| {
+                        FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to open WAL file: {}", e)))
+                    })?;
 
-                file.write_all(&data).map_err(|e| FatalError::Io(
-                    std::io::Error::new(e.kind(), format!("Failed to write to WAL: {}", e))
-                ))?;
+                file.write_all(&data).map_err(|e| {
+                    FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to write to WAL: {}", e)))
+                })?;
 
                 if sync {
-                    file.sync_all().map_err(|e| FatalError::Io(
-                        std::io::Error::new(e.kind(), format!("Failed to sync WAL: {}", e))
-                    ))?;
+                    file.sync_all().map_err(|e| {
+                        FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to sync WAL: {}", e)))
+                    })?;
                 }
 
                 Ok(AsyncWriteResult {
@@ -458,16 +461,19 @@ impl AsyncWriter {
             }
             AsyncWriteOp::Flush { path } => {
                 // Open, flush, and sync file
-                let file = OpenOptions::new()
-                    .write(true)
-                    .open(&path)
-                    .map_err(|e| FatalError::Io(
-                        std::io::Error::new(e.kind(), format!("Failed to open file for flush: {:?}: {}", path, e))
-                    ))?;
+                let file = OpenOptions::new().write(true).open(&path).map_err(|e| {
+                    FatalError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to open file for flush: {:?}: {}", path, e),
+                    ))
+                })?;
 
-                file.sync_all().map_err(|e| FatalError::Io(
-                    std::io::Error::new(e.kind(), format!("Failed to sync file: {:?}: {}", path, e))
-                ))?;
+                file.sync_all().map_err(|e| {
+                    FatalError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to sync file: {:?}: {}", path, e),
+                    ))
+                })?;
 
                 Ok(AsyncWriteResult {
                     op_id: 0,
@@ -477,20 +483,29 @@ impl AsyncWriter {
                     error: None,
                 })
             }
-            AsyncWriteOp::CreateSegment { segment_id, preallocate_bytes } => {
+            AsyncWriteOp::CreateSegment {
+                segment_id,
+                preallocate_bytes,
+            } => {
                 let path = base_dir.join(format!("segment_{:010}.dat", segment_id));
                 let file = OpenOptions::new()
                     .create(true)
                     .write(true)
                     .truncate(true)
                     .open(&path)
-                    .map_err(|e| FatalError::Io(
-                        std::io::Error::new(e.kind(), format!("Failed to create segment file: {:?}: {}", path, e))
-                    ))?;
+                    .map_err(|e| {
+                        FatalError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("Failed to create segment file: {:?}: {}", path, e),
+                        ))
+                    })?;
 
                 // Pre-allocate space
                 file.set_len(preallocate_bytes).map_err(|e| {
-                    FatalError::Io(std::io::Error::new(e.kind(), format!("Failed to preallocate segment {}: {}", segment_id, e)))
+                    FatalError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to preallocate segment {}: {}", segment_id, e),
+                    ))
                 })?;
 
                 Ok(AsyncWriteResult {
@@ -507,21 +522,16 @@ impl AsyncWriter {
     /// Submit an async write operation
     pub async fn write(&self, op: AsyncWriteOp) -> Result<AsyncWriteResult> {
         if !self.config.enabled {
-            return Err(FatalError::Corruption(
-                "Async I/O is disabled".to_string()
-            ));
+            return Err(FatalError::Corruption("Async I/O is disabled".to_string()));
         }
 
         let op_id = self.op_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        self.write_tx.send(WriteMessage {
-            op,
-            response_tx,
-            op_id,
-        }).await.map_err(|e| FatalError::Corruption(format!(
-            "Failed to send write operation: {}", e
-        )))?;
+        self.write_tx
+            .send(WriteMessage { op, response_tx, op_id })
+            .await
+            .map_err(|e| FatalError::Corruption(format!("Failed to send write operation: {}", e)))?;
 
         // Update in-flight counter
         {
@@ -530,14 +540,15 @@ impl AsyncWriter {
         }
 
         // Wait for response with timeout
-        let result = tokio::time::timeout(
-            Duration::from_millis(self.config.write_timeout_ms),
-            response_rx
-        ).await
-        .map_err(|_| FatalError::Corruption(format!(
-            "Write operation timed out after {}ms", self.config.write_timeout_ms
-        )))?
-        .map_err(|_| FatalError::Corruption("Worker task failed".to_string()))?;
+        let result = tokio::time::timeout(Duration::from_millis(self.config.write_timeout_ms), response_rx)
+            .await
+            .map_err(|_| {
+                FatalError::Corruption(format!(
+                    "Write operation timed out after {}ms",
+                    self.config.write_timeout_ms
+                ))
+            })?
+            .map_err(|_| FatalError::Corruption("Worker task failed".to_string()))?;
 
         // Update in-flight counter and stats
         {
@@ -554,17 +565,13 @@ impl AsyncWriter {
     }
 
     /// Submit a segment write operation
-    pub async fn write_segment(
-        &self,
-        segment_id: u64,
-        offset: u64,
-        data: Bytes,
-    ) -> Result<AsyncWriteResult> {
+    pub async fn write_segment(&self, segment_id: u64, offset: u64, data: Bytes) -> Result<AsyncWriteResult> {
         self.write(AsyncWriteOp::SegmentWrite {
             segment_id,
             offset,
             data,
-        }).await
+        })
+        .await
     }
 
     /// Submit a WAL write operation
@@ -578,15 +585,12 @@ impl AsyncWriter {
     }
 
     /// Create a new segment file with pre-allocation
-    pub async fn create_segment(
-        &self,
-        segment_id: u64,
-        preallocate_bytes: u64,
-    ) -> Result<AsyncWriteResult> {
+    pub async fn create_segment(&self, segment_id: u64, preallocate_bytes: u64) -> Result<AsyncWriteResult> {
         self.write(AsyncWriteOp::CreateSegment {
             segment_id,
             preallocate_bytes,
-        }).await
+        })
+        .await
     }
 
     /// Get current statistics
@@ -602,11 +606,9 @@ impl AsyncWriter {
     /// Flush and close all cached file handles
     pub async fn flush_all(&self) -> Result<()> {
         let file_handles = Arc::clone(&self.file_handles);
-        spawn_blocking(move || {
-            file_handles.lock().flush_all()
-        })
-        .await
-        .map_err(|e| FatalError::Corruption(format!("Flush failed: {}", e)))?
+        spawn_blocking(move || file_handles.lock().flush_all())
+            .await
+            .map_err(|e| FatalError::Corruption(format!("Flush failed: {}", e)))?
     }
 
     /// Check if async I/O is enabled
@@ -642,13 +644,11 @@ impl AsyncWriter {
             // operations we're waiting on.
             let handle = self.runtime_handle.clone();
             std::thread::scope(|s| {
-                let result = s.spawn(|| {
-                    handle.block_on(fut)
-                }).join();
+                let result = s.spawn(|| handle.block_on(fut)).join();
                 match result {
                     Ok(v) => Ok(v),
                     Err(_) => Err(FatalError::Corruption(
-                        "Sync bridge: spawned thread panicked".to_string()
+                        "Sync bridge: spawned thread panicked".to_string(),
                     )),
                 }
             })
@@ -666,12 +666,7 @@ impl AsyncWriter {
     /// # MAJ-006: Deadlock Safety
     /// If called from within a Tokio runtime, this method uses `spawn_blocking`
     /// internally to avoid deadlock. Prefer `write_segment()` in async contexts.
-    pub fn write_segment_sync(
-        &self,
-        segment_id: u64,
-        offset: u64,
-        data: Bytes,
-    ) -> Result<AsyncWriteResult> {
+    pub fn write_segment_sync(&self, segment_id: u64, offset: u64, data: Bytes) -> Result<AsyncWriteResult> {
         self.block_on_sync(self.write_segment(segment_id, offset, data))?
     }
 
@@ -704,11 +699,7 @@ impl AsyncWriter {
     /// # MAJ-006: Deadlock Safety
     /// If called from within a Tokio runtime, this method uses `spawn_blocking`
     /// internally to avoid deadlock.
-    pub fn create_segment_sync(
-        &self,
-        segment_id: u64,
-        preallocate_bytes: u64,
-    ) -> Result<AsyncWriteResult> {
+    pub fn create_segment_sync(&self, segment_id: u64, preallocate_bytes: u64) -> Result<AsyncWriteResult> {
         self.block_on_sync(self.create_segment(segment_id, preallocate_bytes))?
     }
 
@@ -758,10 +749,10 @@ mod tests {
     #[tokio::test]
     async fn test_async_segment_write() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         let data = Bytes::from(b"test data".to_vec());
         let result = writer.write_segment(1, 0, data.clone()).await.unwrap();
-        
+
         assert!(result.success);
         assert_eq!(result.bytes_written, 9);
     }
@@ -769,10 +760,10 @@ mod tests {
     #[tokio::test]
     async fn test_async_wal_write() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         let data = Bytes::from(b"wal entry".to_vec());
         let result = writer.write_wal(data.clone(), false).await.unwrap();
-        
+
         assert!(result.success);
         assert_eq!(result.bytes_written, 9);
     }
@@ -780,11 +771,11 @@ mod tests {
     #[tokio::test]
     async fn test_async_flush() {
         let (writer, temp_dir) = create_test_async_writer();
-        
+
         // Create a file first
         let file_path = temp_dir.path().join("test.dat");
         File::create(&file_path).unwrap();
-        
+
         let result = writer.flush(file_path).await.unwrap();
         assert!(result.success);
     }
@@ -792,9 +783,9 @@ mod tests {
     #[tokio::test]
     async fn test_async_create_segment() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         let result = writer.create_segment(1, 1024 * 1024).await.unwrap();
-        
+
         assert!(result.success);
         assert_eq!(result.bytes_written, 1024 * 1024);
     }
@@ -802,15 +793,15 @@ mod tests {
     #[tokio::test]
     async fn test_async_stats() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         // Initial stats should be empty
         let stats = writer.stats();
         assert_eq!(stats.total_writes, 0);
-        
+
         // Do a write
         let data = Bytes::from(b"test".to_vec());
         let _ = writer.write_segment(1, 0, data).await.unwrap();
-        
+
         // Stats should be updated
         let stats = writer.stats();
         assert_eq!(stats.total_writes, 1);
@@ -821,23 +812,23 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_writes() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         let mut handles = Vec::new();
         for i in 0..10 {
             let data = Bytes::from(format!("data {}", i).into_bytes());
             let handle = writer.write_segment(i % 3, i * 10, data);
             handles.push(handle);
         }
-        
+
         let results = futures::future::join_all(handles).await;
-        
+
         // All should succeed
         for result in results {
             assert!(result.is_ok());
             let r = result.unwrap();
             assert!(r.success);
         }
-        
+
         // Stats should reflect all writes
         let stats = writer.stats();
         assert_eq!(stats.total_writes, 10);
@@ -847,14 +838,14 @@ mod tests {
     #[tokio::test]
     async fn test_write_coalescing_disabled() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         // With coalescing disabled, each write is independent
         let data1 = Bytes::from(b"write1".to_vec());
         let data2 = Bytes::from(b"write2".to_vec());
-        
+
         let r1 = writer.write_segment(1, 0, data1).await.unwrap();
         let r2 = writer.write_segment(1, 10, data2).await.unwrap();
-        
+
         assert!(r1.success);
         assert!(r2.success);
     }
@@ -862,16 +853,16 @@ mod tests {
     #[tokio::test]
     async fn test_prometheus_metrics() {
         let (writer, _temp_dir) = create_test_async_writer();
-        
+
         // Do some writes
         for i in 0..5 {
             let data = Bytes::from(format!("data {}", i).into_bytes());
             let _ = writer.write_segment(i % 2, i * 10, data).await.unwrap();
         }
-        
+
         let stats = writer.stats();
         let metrics = stats.to_prometheus();
-        
+
         assert!(metrics.contains("tokitai_async_writes_total 5"));
         assert!(metrics.contains("tokitai_async_writes_success_total 5"));
         assert!(metrics.contains("tokitai_async_bytes_written_total"));
@@ -924,7 +915,9 @@ mod tests {
             let (writer, _temp_dir) = create_test_async_writer();
             let data = Bytes::from(b"test data".to_vec());
             writer.write_segment_sync(1, 0, data)
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let result = result.unwrap();
         assert!(result.success);
@@ -937,7 +930,9 @@ mod tests {
             let (writer, _temp_dir) = create_test_async_writer();
             let data = Bytes::from(b"wal entry".to_vec());
             writer.write_wal_sync(data, false)
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let result = result.unwrap();
         assert!(result.success);
@@ -951,7 +946,9 @@ mod tests {
             let file_path = temp_dir.path().join("test.dat");
             File::create(&file_path).unwrap();
             writer.flush_sync(file_path)
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let result = result.unwrap();
         assert!(result.success);
@@ -962,7 +959,9 @@ mod tests {
         let result = tokio::task::spawn_blocking(|| {
             let (writer, _temp_dir) = create_test_async_writer();
             writer.create_segment_sync(1, 1024 * 1024)
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let result = result.unwrap();
         assert!(result.success);

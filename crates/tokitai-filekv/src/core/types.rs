@@ -6,15 +6,15 @@
 //! - FileKVStats: Statistics counters
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::cache::block_cache::BlockCacheConfig;
 use crate::compaction::CompactionConfig;
-use crate::core::memtable::MemTableConfig;
-use crate::ops::audit_log::AuditLogConfig;
 use crate::compression::dictionary::DictionaryCompressionConfig;
+use crate::core::memtable::MemTableConfig;
 use crate::io::{FileKVFileSystem, StdFs};
+use crate::ops::audit_log::AuditLogConfig;
 
 /// Block compression mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -116,12 +116,12 @@ pub enum WalSyncMode {
     /// - 数据持久化保证：100%
     /// - 写入延迟：基准
     Immediate,
-    
+
     /// 批量 fsync - 折中方案
     /// - 数据持久化保证：~99%（系统崩溃可能丢少量数据）
     /// - 写入延迟：2-3x 提升
     Batch,
-    
+
     /// 依赖操作系统刷新 - 最快，可能丢数据
     /// - 数据持久化保证：~90%（断电可能丢数据）
     /// - 写入延迟：5-10x 提升
@@ -143,6 +143,20 @@ pub enum Durability {
     /// - 优点：数据立即持久化，崩溃恢复无丢失
     /// - 缺点：吞吐较低，每次写入都有fsync开销
     Immediate,
+}
+
+/// P3-001: I/O 模式
+///
+/// 控制写入操作使用的 I/O 路径
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IoMode {
+    /// 同步 I/O（默认）：阻塞当前线程直到写入完成
+    #[default]
+    Sync,
+    /// 异步 I/O：通过 AsyncWriter 非阻塞写入磁盘
+    /// - 需要在 tokio runtime 中运行
+    /// - 适合高并发写入场景
+    Async,
 }
 
 /// 激进优化配置
@@ -222,7 +236,7 @@ pub struct AggressiveConfig {
     /// - 成本：索引大小增加 3-4x（每个 entry 多 8-12 字节）
     /// - 推荐：内存充足且读取密集场景开启
     pub dense_index_enabled: bool,
-    
+
     /// 预读倍数
     /// - 收益：顺序读取吞吐量提升 2-4x
     /// - 成本：额外磁盘 IO（可能浪费带宽）
@@ -231,23 +245,23 @@ pub struct AggressiveConfig {
     /// - 4-8 = 激进预读（读取后续多个 blocks）
     /// - 推荐：顺序读取场景设置为 2-4
     pub readahead_multiplier: u32,
-    
+
     /// WAL 同步策略
     /// - 推荐：关键数据用 Immediate，缓存用 Lazy
     pub wal_sync_mode: WalSyncMode,
-    
+
     /// BlockCache 内存上限
     /// - 收益：更大的缓存 = 更高的命中率
     /// - 成本：内存占用
     /// - 推荐：64MB - 4GB（根据可用内存调整）
     pub cache_max_memory_bytes: usize,
-    
+
     /// 持久 mmap（只读模式）
     /// - 收益：读取延迟降低 80-90%（避免重复 mmap 创建）
     /// - 成本：文件句柄占用
     /// - 推荐：读取密集场景开启
     pub persistent_mmap_enabled: bool,
-    
+
     /// 全内存 Block 索引
     /// - 收益：读取延迟接近 RocksDB（全内存索引）
     /// - 成本：高内存占用（~100MB-1GB）
@@ -297,7 +311,7 @@ impl AggressiveConfig {
             in_memory_block_index_enabled: false,
         }
     }
-    
+
     /// 平衡模式 - 性能与安全折中
     ///
     /// 批量 fsync 降低写入延迟，开启密集索引和持久 mmap，在数据安全和性能
@@ -326,7 +340,7 @@ impl AggressiveConfig {
             in_memory_block_index_enabled: false,
         }
     }
-    
+
     /// 性能模式 - 读取速度优先
     ///
     /// 开启全内存块索引和 4x 预读，读取延迟接近内存级别。
@@ -355,7 +369,7 @@ impl AggressiveConfig {
             in_memory_block_index_enabled: true,
         }
     }
-    
+
     /// 极限模式 - 不计代价追求性能
     ///
     /// 使用 [`WalSyncMode::Lazy`] 依赖操作系统刷新，8x 激进预读，
@@ -389,23 +403,23 @@ impl AggressiveConfig {
             in_memory_block_index_enabled: true,
         }
     }
-    
+
     /// 估算内存占用
     pub fn estimated_memory_usage(&self, estimated_entries: usize) -> MemoryUsageEstimate {
         let mut total = 0usize;
         let mut breakdown = Vec::new();
-        
+
         // BlockCache
         total += self.cache_max_memory_bytes;
         breakdown.push(("BlockCache", self.cache_max_memory_bytes));
-        
+
         // DenseIndex: 每个 entry 约 20 字节（segment_id, offset, key_len, len, checksum）
         if self.dense_index_enabled {
             let index_size = estimated_entries * 20;
             total += index_size;
             breakdown.push(("DenseIndex", index_size));
         }
-        
+
         // In-memory block index: 每个 block 约 100 字节
         if self.in_memory_block_index_enabled {
             // 假设平均每 block 4KB，每个 entry 100 字节
@@ -414,7 +428,7 @@ impl AggressiveConfig {
             total += index_size;
             breakdown.push(("BlockIndex", index_size));
         }
-        
+
         MemoryUsageEstimate {
             total_bytes: total,
             breakdown,
@@ -501,21 +515,57 @@ impl ValuePointer {
     /// 从字节反序列化 - 包含 key_len
     pub fn from_bytes(buf: &[u8; 28]) -> anyhow::Result<Self> {
         Ok(Self {
-            segment_id: u64::from_le_bytes(buf[0..8].try_into().map_err(|e| anyhow::anyhow!("Invalid segment_id bytes: {}", e))?),
-            offset: u64::from_le_bytes(buf[8..16].try_into().map_err(|e| anyhow::anyhow!("Invalid offset bytes: {}", e))?),
-            key_len: u32::from_le_bytes(buf[16..20].try_into().map_err(|e| anyhow::anyhow!("Invalid key_len bytes: {}", e))?),
-            len: u32::from_le_bytes(buf[20..24].try_into().map_err(|e| anyhow::anyhow!("Invalid len bytes: {}", e))?),
-            checksum: u32::from_le_bytes(buf[24..28].try_into().map_err(|e| anyhow::anyhow!("Invalid checksum bytes: {}", e))?),
+            segment_id: u64::from_le_bytes(
+                buf[0..8]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid segment_id bytes: {}", e))?,
+            ),
+            offset: u64::from_le_bytes(
+                buf[8..16]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid offset bytes: {}", e))?,
+            ),
+            key_len: u32::from_le_bytes(
+                buf[16..20]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid key_len bytes: {}", e))?,
+            ),
+            len: u32::from_le_bytes(
+                buf[20..24]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid len bytes: {}", e))?,
+            ),
+            checksum: u32::from_le_bytes(
+                buf[24..28]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid checksum bytes: {}", e))?,
+            ),
         })
     }
 
     /// 从字节反序列化（旧格式，24 字节，不含 key_len）- 向后兼容
     pub fn from_bytes_legacy(buf: &[u8; 24]) -> anyhow::Result<Self> {
         Ok(Self {
-            segment_id: u64::from_le_bytes(buf[0..8].try_into().map_err(|e| anyhow::anyhow!("Invalid segment_id bytes: {}", e))?),
-            offset: u64::from_le_bytes(buf[8..16].try_into().map_err(|e| anyhow::anyhow!("Invalid offset bytes: {}", e))?),
-            len: u32::from_le_bytes(buf[16..20].try_into().map_err(|e| anyhow::anyhow!("Invalid len bytes: {}", e))?),
-            checksum: u32::from_le_bytes(buf[20..24].try_into().map_err(|e| anyhow::anyhow!("Invalid checksum bytes: {}", e))?),
+            segment_id: u64::from_le_bytes(
+                buf[0..8]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid segment_id bytes: {}", e))?,
+            ),
+            offset: u64::from_le_bytes(
+                buf[8..16]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid offset bytes: {}", e))?,
+            ),
+            len: u32::from_le_bytes(
+                buf[16..20]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid len bytes: {}", e))?,
+            ),
+            checksum: u32::from_le_bytes(
+                buf[20..24]
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("Invalid checksum bytes: {}", e))?,
+            ),
             key_len: 0, // 旧格式不包含 key_len
         })
     }
@@ -611,8 +661,36 @@ pub struct FileKVConfig {
     pub enable_zone_map_pruning: bool,
     /// INNO-002: Enable sequential prefetching (default: true)
     pub enable_sequential_prefetch: bool,
-    /// GAP-M5: Enable background cache rebalance thread (default: true in production, tests should disable)
-    pub enable_background_cache_rebalance: bool,
+    /// OPT-007: Enable multi-level cache (L1 + L2 mmap cache) (default: true)
+    ///
+    /// When enabled, evicted hot entries from L1 (BlockCache) can be demoted to L2,
+    /// and frequently accessed L2 entries can be promoted back to L1.
+    pub enable_multi_level_cache: bool,
+    /// OPT-007: L2 cache maximum size in bytes (default: 4GB)
+    ///
+    /// L2 cache uses mmap-backed files, so memory usage is only metadata (~100MB max).
+    pub l2_cache_max_bytes: u64,
+    /// OPT-007: L2 access count threshold for L1 promotion (default: 5)
+    ///
+    /// When an L2 entry is accessed at least this many times, it will be promoted
+    /// back to L1 cache on the next read from storage.
+    pub l2_to_l1_threshold: u32,
+    /// OPT-007: Enable WAL channel batching (default: false)
+    ///
+    /// When enabled, writes are submitted to an mpsc channel and batched
+    /// by a background thread before writing to WAL. Reduces fsync overhead
+    /// and improves write throughput.
+    pub enable_wal_channel: bool,
+    /// OPT-007: WAL channel batch interval in milliseconds (default: 2ms)
+    ///
+    /// Time window to collect writes before flushing to WAL.
+    pub wal_channel_interval_ms: u64,
+    /// OPT-007: Maximum entries per WAL channel batch (default: 1000)
+    pub wal_channel_max_entries: usize,
+    /// OPT-007: WAL channel capacity (default: 10000)
+    ///
+    /// Maximum pending submissions before applying backpressure.
+    pub wal_channel_capacity: usize,
     /// Phase 1: Filesystem abstraction (default: StdFs)
     pub fs: Arc<dyn FileKVFileSystem>,
 }
@@ -736,7 +814,10 @@ impl FileKVConfig {
                     if !parent.exists() {
                         warnings.push(format!("{} parent directory does not exist: {:?}", name, parent));
                     } else if !parent.is_dir() {
-                        errors.push(FileKVConfigError::InvalidPath(format!("{} parent is not a directory", name)));
+                        errors.push(FileKVConfigError::InvalidPath(format!(
+                            "{} parent is not a directory",
+                            name
+                        )));
                     } else {
                         let test_file = parent.join(".write_test");
                         match std::fs::File::create(&test_file) {
@@ -779,14 +860,16 @@ impl FileKVConfig {
             Ok(())
         } else {
             // P0-003 FIX: Use expect() with clear error message instead of unwrap()
-            Err(validation.errors.into_iter().next().expect(
-                "Validation reported errors but none were found - this is a bug in validate()"
-            ))
+            Err(validation
+                .errors
+                .into_iter()
+                .next()
+                .expect("Validation reported errors but none were found - this is a bug in validate()"))
         }
     }
-    
+
     /// 保守模式配置 - 数据安全优先
-    /// 
+    ///
     /// 适用于：金融、医疗等对数据持久化要求极高的场景
     /// - WAL 同步：每次写入都 fsync
     /// - 缓存：64MB
@@ -798,9 +881,9 @@ impl FileKVConfig {
             ..Default::default()
         }
     }
-    
+
     /// 平衡模式配置 - 性能与安全折中
-    /// 
+    ///
     /// 适用于：大多数生产环境
     /// - WAL 同步：批量 fsync
     /// - 缓存：256MB
@@ -812,9 +895,9 @@ impl FileKVConfig {
             ..Default::default()
         }
     }
-    
+
     /// 性能模式配置 - 读取速度优先
-    /// 
+    ///
     /// 适用于：AI 上下文、会话存储等读取密集场景
     /// - WAL 同步：批量 fsync
     /// - 缓存：1GB
@@ -827,9 +910,9 @@ impl FileKVConfig {
             ..Default::default()
         }
     }
-    
+
     /// 极限模式配置 - 不计代价追求性能
-    /// 
+    ///
     /// 适用于：缓存、临时数据等可丢失场景
     /// - WAL 同步：Lazy（依赖操作系统）
     /// - 缓存：4GB
@@ -885,8 +968,15 @@ impl Default for FileKVConfig {
             // INNO-002: Zone Map pruning and prefetching enabled by default
             enable_zone_map_pruning: true,
             enable_sequential_prefetch: true,
-            // GAP-M5: Background cache rebalance disabled by default (tests don't need it, production can enable)
-            enable_background_cache_rebalance: false,
+            // OPT-007: Multi-level cache enabled by default
+            enable_multi_level_cache: true,
+            l2_cache_max_bytes: 4 * 1024 * 1024 * 1024, // 4GB
+            l2_to_l1_threshold: 5,
+            // OPT-007: WAL channel batching disabled by default (backward compatible)
+            enable_wal_channel: false,
+            wal_channel_interval_ms: 2,
+            wal_channel_max_entries: 1000,
+            wal_channel_capacity: 10_000,
             // Phase 1: Default to StdFs
             fs: Arc::new(StdFs),
         }
@@ -1001,7 +1091,11 @@ impl FileKVStats {
     pub fn snapshot(&self) -> FileKVStatsSnapshot {
         let uncompressed = self.uncompressed_bytes.load(Ordering::Relaxed) as f64;
         let compressed = self.compressed_bytes.load(Ordering::Relaxed) as f64;
-        let ratio = if uncompressed > 0.0 { compressed / uncompressed } else { 1.0 };
+        let ratio = if uncompressed > 0.0 {
+            compressed / uncompressed
+        } else {
+            1.0
+        };
 
         // Calculate amplification factors
         let user_bytes = self.user_bytes_written.load(Ordering::Relaxed);
@@ -1009,14 +1103,26 @@ impl FileKVStats {
         let index_bytes = self.index_bytes_written.load(Ordering::Relaxed);
         let segment_bytes = self.segment_bytes_written.load(Ordering::Relaxed);
         let total_written = user_bytes + wal_bytes + index_bytes + segment_bytes;
-        let waf = if user_bytes > 0 { total_written as f64 / user_bytes as f64 } else { 1.0 };
+        let waf = if user_bytes > 0 {
+            total_written as f64 / user_bytes as f64
+        } else {
+            1.0
+        };
 
         let read_ops = self.read_io_operations.load(Ordering::Relaxed);
         let read_count = self.read_count.load(Ordering::Relaxed);
-        let raf = if read_count > 0 { read_ops as f64 / read_count as f64 } else { 1.0 };
+        let raf = if read_count > 0 {
+            read_ops as f64 / read_count as f64
+        } else {
+            1.0
+        };
 
         let total_size = self.total_size_bytes.load(Ordering::Relaxed);
-        let saf = if user_bytes > 0 { total_size as f64 / user_bytes as f64 } else { 1.0 };
+        let saf = if user_bytes > 0 {
+            total_size as f64 / user_bytes as f64
+        } else {
+            1.0
+        };
 
         FileKVStatsSnapshot {
             memtable_size: self.memtable_size.load(Ordering::Relaxed),
@@ -1124,11 +1230,11 @@ mod tests {
     fn test_memory_usage_estimate() {
         let config = AggressiveConfig::performance();
         let estimate = config.estimated_memory_usage(1_000_000);
-        
+
         // Should have at least BlockCache
         assert!(estimate.total_bytes > 0);
         assert!(!estimate.breakdown.is_empty());
-        
+
         // Verify display format
         let display = format!("{}", estimate);
         assert!(display.contains("Total:"));

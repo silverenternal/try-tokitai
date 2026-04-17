@@ -22,9 +22,8 @@ fn make_test_kv() -> (FileKV, TempDir) {
         segment_dir: temp_dir.path().join("segments"),
         wal_dir: temp_dir.path().join("wal"),
         index_dir: temp_dir.path().join("index"),
-        enable_wal: false,  // Disable WAL for faster tests
-        enable_background_flush: false,  // Disable background flush
-        enable_background_cache_rebalance: false,  // Disable background cache rebalance
+        enable_wal: false,              // Disable WAL for faster tests
+        enable_background_flush: false, // Disable background flush
         ..Default::default()
     };
     let kv = FileKV::open(config).expect("failed to open FileKV");
@@ -34,8 +33,8 @@ fn make_test_kv() -> (FileKV, TempDir) {
 /// Strategy for generating random key-value pairs
 fn kv_strategy() -> impl Strategy<Value = (String, Vec<u8>)> {
     (
-        "[a-z]{1,8}",    // keys: 1-8 lowercase letters
-        prop::collection::vec(1u8..=255, 1..64),  // values: 1-64 random bytes (non-empty)
+        "[a-z]{1,8}",                            // keys: 1-8 lowercase letters
+        prop::collection::vec(1u8..=255, 1..64), // values: 1-64 random bytes (non-empty)
     )
 }
 
@@ -361,7 +360,6 @@ proptest! {
             index_dir: temp_dir.path().join("index"),
             enable_wal: false,
             enable_background_flush: false,
-            enable_background_cache_rebalance: false,
             ..Default::default()
         };
 

@@ -18,10 +18,10 @@ use ::bloom::BloomFilter;
 use ::bloom::ASMS;
 use tracing::debug;
 
+use super::custom_bloom::CustomBloom;
 use crate::core::error::FatalError;
 use crate::BLOOM_MAGIC;
 use crate::DEFAULT_BLOOM_FPR;
-use super::custom_bloom::CustomBloom;
 
 /// Result type for bloom operations
 pub type Result<T> = std::result::Result<T, FatalError>;
@@ -106,7 +106,11 @@ impl BloomManager {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    tracing::warn!("Bloom filter file for segment {} corrupted: {}. Will rebuild.", seg_id, e);
+                    tracing::warn!(
+                        "Bloom filter file for segment {} corrupted: {}. Will rebuild.",
+                        seg_id,
+                        e
+                    );
                 }
             }
 
@@ -116,7 +120,11 @@ impl BloomManager {
             let (bloom, keys) = match self.build_bloom_for_segment(provider, seg_id) {
                 Ok(result) => result,
                 Err(e) => {
-                    tracing::error!("Segment {} failed integrity check, skipping bloom rebuild: {}", seg_id, e);
+                    tracing::error!(
+                        "Segment {} failed integrity check, skipping bloom rebuild: {}",
+                        seg_id,
+                        e
+                    );
                     skipped_count += 1;
                     continue;
                 }
@@ -135,7 +143,9 @@ impl BloomManager {
 
         tracing::info!(
             "Bloom filter rebuild complete: loaded={}, rebuilt={}, skipped={}",
-            loaded_count, rebuilt_count, skipped_count
+            loaded_count,
+            rebuilt_count,
+            skipped_count
         );
         Ok(rebuilt_count)
     }
@@ -150,7 +160,11 @@ impl BloomManager {
         segment_id: u64,
         keys: &[String],
     ) -> Result<()> {
-        tracing::debug!("Building bloom filter for segment {} using {} keys from memory", segment_id, keys.len());
+        tracing::debug!(
+            "Building bloom filter for segment {} using {} keys from memory",
+            segment_id,
+            keys.len()
+        );
 
         let mut bloom = BloomFilter::with_rate(self.config.default_fpr, keys.len().max(10000) as u32);
 
@@ -203,19 +217,11 @@ pub const CURRENT_BLOOM_VERSION: u32 = 2;
 /// Save bloom filter atomically using temp file + rename (v2 format)
 ///
 /// V2 format includes num_bits and num_hashes metadata for faster reconstruction.
-pub fn save_bloom_filter_atomic(
-    index_dir: &Path,
-    segment_id: u64,
-    bloom: &BloomFilter,
-    keys: &[String],
-) -> Result<()> {
+pub fn save_bloom_filter_atomic(index_dir: &Path, segment_id: u64, bloom: &BloomFilter, keys: &[String]) -> Result<()> {
     let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
     let temp_path = index_dir.join(format!("bloom_{:06}.tmp", segment_id));
 
-    let mut file = BufWriter::new(
-        File::create(&temp_path)
-            .map_err(FatalError::Io)?
-    );
+    let mut file = BufWriter::new(File::create(&temp_path).map_err(FatalError::Io)?);
 
     // Write header: magic + version (v2)
     file.write_all(&BLOOM_MAGIC.to_le_bytes())?;
@@ -239,29 +245,26 @@ pub fn save_bloom_filter_atomic(
     }
 
     file.flush()?;
-    file.get_ref().sync_all()
-        .map_err(FatalError::Io)?;
+    file.get_ref().sync_all().map_err(FatalError::Io)?;
     drop(file);
 
-    fs::rename(&temp_path, &bloom_path)
-        .map_err(FatalError::Io)?;
+    fs::rename(&temp_path, &bloom_path).map_err(FatalError::Io)?;
 
     if let Ok(dir) = File::open(index_dir) {
         let _ = dir.sync_all();
     }
 
-    debug!("Atomically saved bloom filter v2 with {} keys, {} bits, {} hashes for segment {} to {:?}",
-                         num_keys, num_bits, num_hashes, segment_id, bloom_path);
+    debug!(
+        "Atomically saved bloom filter v2 with {} keys, {} bits, {} hashes for segment {} to {:?}",
+        num_keys, num_bits, num_hashes, segment_id, bloom_path
+    );
     Ok(())
 }
 
 /// Load bloom filter from disk (supports v1 and v2 formats)
 ///
 /// V2 format is faster to load as it includes pre-computed num_bits and num_hashes.
-pub fn load_bloom_filter(
-    index_dir: &Path,
-    segment_id: u64,
-) -> Result<Option<(BloomFilter, Vec<String>)>> {
+pub fn load_bloom_filter(index_dir: &Path, segment_id: u64) -> Result<Option<(BloomFilter, Vec<String>)>> {
     let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
 
     if !bloom_path.exists() {
@@ -304,7 +307,10 @@ pub fn load_bloom_filter(
 
         (Some(num_bits), Some(num_hashes), num_keys)
     } else {
-        return Err(FatalError::Corruption(format!("Unsupported bloom version: {}", version)));
+        return Err(FatalError::Corruption(format!(
+            "Unsupported bloom version: {}",
+            version
+        )));
     };
 
     // Read keys
@@ -341,10 +347,7 @@ pub fn load_bloom_filter(
 }
 
 /// Check if bloom filter exists for a segment
-pub fn bloom_filter_exists(
-    index_dir: &Path,
-    segment_id: u64,
-) -> bool {
+pub fn bloom_filter_exists(index_dir: &Path, segment_id: u64) -> bool {
     index_dir.join(format!("bloom_{:06}.bin", segment_id)).exists()
 }
 
@@ -352,22 +355,13 @@ pub fn bloom_filter_exists(
 ///
 /// V3 format enables fast loading without reconstruction:
 /// [magic 4B][version 4B][num_bits 4B][num_hashes 4B][bitset_bytes]
-pub fn save_bloom_filter_v3(
-    index_dir: &Path,
-    segment_id: u64,
-    bloom: &BloomFilter,
-    keys: &[String],
-) -> Result<()> {
+pub fn save_bloom_filter_v3(index_dir: &Path, segment_id: u64, bloom: &BloomFilter, keys: &[String]) -> Result<()> {
     let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
     let temp_path = index_dir.join(format!("bloom_{:06}.v3tmp", segment_id));
 
     // Convert from bloom crate to CustomBloom by rebuilding from keys
     // (bloom crate uses RandomState which is incompatible with our deterministic XXH3)
-    let custom_bloom = CustomBloom::from_keys(
-        keys,
-        bloom.num_bits(),
-        DEFAULT_BLOOM_FPR as f64,
-    );
+    let custom_bloom = CustomBloom::from_keys(keys, bloom.num_bits(), DEFAULT_BLOOM_FPR as f64);
 
     // Save to temp file first
     custom_bloom.save_to_file(&temp_path)?;
@@ -390,14 +384,35 @@ pub fn save_bloom_filter_v3(
     Ok(())
 }
 
+/// Save CustomBloom directly in V3 format (no legacy BloomFilter needed)
+pub fn save_custom_bloom_v3(index_dir: &Path, segment_id: u64, custom_bloom: &CustomBloom) -> Result<()> {
+    let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
+    let temp_path = index_dir.join(format!("bloom_{:06}.v3tmp", segment_id));
+
+    custom_bloom.save_to_file(&temp_path)?;
+
+    fs::rename(&temp_path, &bloom_path).map_err(FatalError::Io)?;
+
+    if let Ok(dir) = File::open(index_dir) {
+        let _ = dir.sync_all();
+    }
+
+    debug!(
+        "Saved custom bloom filter v3 for segment {} with {} bits, {} hashes, {} bytes",
+        segment_id,
+        custom_bloom.num_bits(),
+        custom_bloom.num_hashes(),
+        custom_bloom.to_bytes().len()
+    );
+
+    Ok(())
+}
+
 /// Load bloom filter from V3 format (fast, no reconstruction needed)
 ///
 /// Returns None if file doesn't exist or is not V3 format.
 /// Falls back to V1/V2 loading if magic number doesn't match.
-pub fn load_bloom_filter_v3(
-    index_dir: &Path,
-    segment_id: u64,
-) -> Result<Option<CustomBloom>> {
+pub fn load_bloom_filter_v3(index_dir: &Path, segment_id: u64) -> Result<Option<CustomBloom>> {
     let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
 
     if !bloom_path.exists() {
@@ -425,10 +440,7 @@ pub fn load_bloom_filter_v3(
 ///
 /// Reads old format, converts to V3, saves back.
 /// This is a one-time migration that eliminates keys-list storage.
-pub fn migrate_to_v3(
-    index_dir: &Path,
-    segment_id: u64,
-) -> Result<bool> {
+pub fn migrate_to_v3(index_dir: &Path, segment_id: u64) -> Result<bool> {
     let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
 
     if !bloom_path.exists() {
@@ -458,11 +470,54 @@ pub fn migrate_to_v3(
     }
 }
 
+/// Load CustomBloom with automatic V1/V2 to V3 migration
+///
+/// This is the preferred loader for CustomBloomCache:
+/// 1. Tries to load V3 format first (fast, direct bitset load)
+/// 2. If V3 not found, tries V1/V2 format
+/// 3. If V1/V2 found, migrates to V3 automatically
+/// 4. Returns the loaded CustomBloom (from V3)
+pub fn load_custom_bloom_with_migration(index_dir: &Path, segment_id: u64) -> Result<Option<CustomBloom>> {
+    let bloom_path = index_dir.join(format!("bloom_{:06}.bin", segment_id));
+
+    if !bloom_path.exists() {
+        return Ok(None);
+    }
+
+    // Step 1: Try loading V3 format first
+    if let Ok(Some(custom_bloom)) = CustomBloom::load_from_file(&bloom_path) {
+        debug!("Loaded v3 bloom filter for segment {} (direct bitset load)", segment_id);
+        return Ok(Some(custom_bloom));
+    }
+
+    // Step 2: V3 not found, try migrating V1/V2 to V3
+    let migrated = migrate_to_v3(index_dir, segment_id)?;
+    if migrated {
+        debug!(
+            "Migrated bloom filter for segment {} from V1/V2 to V3 during load",
+            segment_id
+        );
+    }
+
+    // Step 3: Try loading V3 again (either original or newly migrated)
+    match CustomBloom::load_from_file(&bloom_path) {
+        Ok(Some(custom_bloom)) => {
+            debug!("Loaded v3 bloom filter for segment {} after migration", segment_id);
+            Ok(Some(custom_bloom))
+        }
+        Ok(None) => {
+            // Not V3 format and migration failed - return None
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::bloom::CustomBloom;
+    use std::collections::HashMap;
     use std::sync::Mutex;
 
     // Mock BloomSegmentProvider for testing
@@ -532,10 +587,13 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let mut provider = MockProvider::new(temp_dir.clone());
-        provider.add_segment(1, vec![
-            ("key1".to_string(), b"value1".to_vec()),
-            ("key2".to_string(), b"value2".to_vec()),
-        ]);
+        provider.add_segment(
+            1,
+            vec![
+                ("key1".to_string(), b"value1".to_vec()),
+                ("key2".to_string(), b"value2".to_vec()),
+            ],
+        );
 
         let manager = BloomManager::new(BloomConfig::default());
 
@@ -559,14 +617,20 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let mut provider = MockProvider::new(temp_dir.clone());
-        provider.add_segment(1, vec![
-            ("key1".to_string(), b"value1".to_vec()),
-            ("key2".to_string(), b"value2".to_vec()),
-        ]);
-        provider.add_segment(2, vec![
-            ("key3".to_string(), b"value3".to_vec()),
-            ("key4".to_string(), b"value4".to_vec()),
-        ]);
+        provider.add_segment(
+            1,
+            vec![
+                ("key1".to_string(), b"value1".to_vec()),
+                ("key2".to_string(), b"value2".to_vec()),
+            ],
+        );
+        provider.add_segment(
+            2,
+            vec![
+                ("key3".to_string(), b"value3".to_vec()),
+                ("key4".to_string(), b"value4".to_vec()),
+            ],
+        );
 
         let manager = BloomManager::new(BloomConfig::default());
         let result = manager.rebuild_all(&provider);
@@ -635,6 +699,162 @@ mod tests {
         // Try migrating again - should return false (already V3)
         let migrated_again = migrate_to_v3(&temp_dir, 1).unwrap();
         assert!(!migrated_again);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_custom_bloom_with_migration_v3_direct() {
+        let temp_dir = std::env::temp_dir().join("filekv_bloom_custom_load_v3");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create and save as V3 directly
+        let mut custom_bloom = CustomBloom::with_capacity(100, 0.01);
+        custom_bloom.insert(b"key1");
+        custom_bloom.insert(b"key2");
+        custom_bloom.save_to_file(&temp_dir.join("bloom_000001.bin")).unwrap();
+
+        // Load with automatic migration function
+        let loaded = load_custom_bloom_with_migration(&temp_dir, 1).unwrap();
+        assert!(loaded.is_some());
+
+        let bloom = loaded.unwrap();
+        assert!(bloom.contains(b"key1"));
+        assert!(bloom.contains(b"key2"));
+        assert!(!bloom.contains(b"key3"));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_custom_bloom_with_migration_from_v2() {
+        let temp_dir = std::env::temp_dir().join("filekv_bloom_custom_load_v2_migration");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create and save as V2
+        let mut bloom = BloomFilter::with_rate(0.01, 100);
+        bloom.insert(&"test_key".to_string());
+        let keys = vec!["test_key".to_string()];
+        save_bloom_filter_atomic(&temp_dir, 1, &bloom, &keys).unwrap();
+
+        // Load with automatic migration function - should migrate to V3
+        let loaded = load_custom_bloom_with_migration(&temp_dir, 1).unwrap();
+        assert!(loaded.is_some());
+
+        let custom_bloom = loaded.unwrap();
+        assert!(custom_bloom.contains(b"test_key"));
+        assert!(!custom_bloom.contains(b"nonexistent"));
+
+        // Verify file is now V3 format
+        let bloom_path = temp_dir.join("bloom_000001.bin");
+        let mut file = File::open(&bloom_path).unwrap();
+        let mut magic_buf = [0u8; 4];
+        file.read_exact(&mut magic_buf).unwrap();
+        let magic = u32::from_le_bytes(magic_buf);
+        assert_eq!(
+            magic,
+            super::super::custom_bloom::CUSTOM_BLOOM_MAGIC,
+            "Should be V3 format after migration"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_custom_bloom_nonexistent_file() {
+        let temp_dir = std::env::temp_dir().join("filekv_bloom_custom_nonexistent");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Try to load non-existent bloom
+        let loaded = load_custom_bloom_with_migration(&temp_dir, 999).unwrap();
+        assert!(loaded.is_none());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_custom_bloom_fpr_accuracy() {
+        // Test FPR accuracy with different configurations
+        let test_cases = vec![
+            (1000, 0.01),   // 1000 items, 1% target
+            (10000, 0.01),  // 10000 items, 1% target
+            (10000, 0.001), // 10000 items, 0.1% target
+        ];
+
+        for (num_items, target_fpr) in test_cases {
+            let mut bloom = CustomBloom::with_capacity(num_items, target_fpr);
+
+            // Insert items
+            for i in 0..num_items {
+                bloom.insert(format!("item_{}", i).as_bytes());
+            }
+
+            // Test false positive rate
+            let mut false_positives = 0;
+            let test_count = 10000;
+
+            for i in num_items..(num_items + test_count) {
+                if bloom.contains(format!("item_{}", i).as_bytes()) {
+                    false_positives += 1;
+                }
+            }
+
+            let actual_fpr = false_positives as f64 / test_count as f64;
+
+            // Actual FPR should be reasonably close to target (within 5x for statistical variance)
+            assert!(
+                actual_fpr < target_fpr * 5.0,
+                "FPR for {} items at target {:.4}: actual {:.4} exceeds target * 5",
+                num_items,
+                target_fpr,
+                actual_fpr
+            );
+
+            println!(
+                "FPR test: {} items, target={:.4}, actual={:.4} ({} false positives)",
+                num_items, target_fpr, actual_fpr, false_positives
+            );
+        }
+    }
+
+    #[test]
+    fn test_custom_bloom_save_load_roundtrip_large() {
+        let temp_dir = std::env::temp_dir().join("filekv_bloom_custom_roundtrip_large");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let num_items = 50000;
+        let path = temp_dir.join("large_bloom.bin");
+
+        // Create and save large bloom filter
+        let mut original = CustomBloom::with_capacity(num_items, 0.01);
+        for i in 0..num_items {
+            original.insert(format!("key_{}", i).as_bytes());
+        }
+
+        original.save_to_file(&path).unwrap();
+
+        // Load
+        let loaded = CustomBloom::load_from_file(&path).unwrap().expect("Should load");
+
+        // Verify bitset identity
+        assert_eq!(original, loaded, "Roundtrip should preserve bitset exactly");
+
+        // Verify all keys still work
+        for i in (0..num_items).step_by(100) {
+            assert!(
+                loaded.contains(format!("key_{}", i).as_bytes()),
+                "Key {} should be found",
+                i
+            );
+        }
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);

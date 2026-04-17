@@ -6,16 +6,14 @@
 //! - 合并算法性能对比
 //! - 缓存命中率
 
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::path::PathBuf;
 use std::time::Instant;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 
 use ai_assistant::context::{
-    ParallelContextManager, ParallelContextManagerConfig,
-    BranchState, MergeStrategy,
-    AdvancedMerger, ContentDeduplicator,
-    ContentAddressableStorage, CompressionConfig,
-    BloomConflictDetector, ThreeWayMerger,
+    AdvancedMerger, BloomConflictDetector, BranchState, CompressionConfig,
+    ContentAddressableStorage, ContentDeduplicator, MergeStrategy, ParallelContextManager,
+    ParallelContextManagerConfig, ThreeWayMerger,
 };
 
 /// 创建测试用的平行上下文管理器
@@ -162,10 +160,7 @@ fn bench_diff3_merge(c: &mut Criterion) {
             |b, &lines| {
                 b.iter(|| {
                     let temp_dir = tempfile::tempdir().unwrap();
-                    let merger = AdvancedMerger::new(
-                        &temp_dir.path(),
-                        &temp_dir.path(),
-                    ).unwrap();
+                    let merger = AdvancedMerger::new(&temp_dir.path(), &temp_dir.path()).unwrap();
 
                     // 生成测试内容
                     let base = generate_test_content(lines, 0);
@@ -186,18 +181,14 @@ fn bench_lcs_computation(c: &mut Criterion) {
     let mut group = c.benchmark_group("LCS Computation");
 
     for &size in &[10, 50, 100, 200, 500] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &size,
-            |b, &n| {
-                let a: Vec<usize> = (0..n).collect();
-                let b: Vec<usize> = (0..n).step_by(2).collect();
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &n| {
+            let a: Vec<usize> = (0..n).collect();
+            let b: Vec<usize> = (0..n).step_by(2).collect();
 
-                b.iter(|| {
-                    black_box(AdvancedMerger::compute_lcs(&a, &b));
-                });
-            },
-        );
+            b.iter(|| {
+                black_box(AdvancedMerger::compute_lcs(&a, &b));
+            });
+        });
     }
 
     group.finish();
@@ -321,7 +312,8 @@ fn bench_bloom_conflict_detection(c: &mut Criterion) {
                         std::fs::write(
                             source_layer.join(format!("file_{}.txt", i)),
                             format!("content_{}", i),
-                        ).unwrap();
+                        )
+                        .unwrap();
 
                         // 50% 的文件有冲突
                         let target_content = if i % 2 == 0 {
@@ -332,14 +324,13 @@ fn bench_bloom_conflict_detection(c: &mut Criterion) {
                         std::fs::write(
                             target_layer.join(format!("file_{}.txt", i)),
                             target_content,
-                        ).unwrap();
+                        )
+                        .unwrap();
                     }
 
-                    black_box(BloomConflictDetector::new(
-                        &source_dir,
-                        &target_dir,
-                        "short-term",
-                    ).unwrap());
+                    black_box(
+                        BloomConflictDetector::new(&source_dir, &target_dir, "short-term").unwrap(),
+                    );
                 });
             },
         );
@@ -366,13 +357,15 @@ fn bench_merge_comparison(c: &mut Criterion) {
             let merger = ai_assistant::context::merge::Merger::new(
                 &temp_dir.path().join("branches"),
                 &temp_dir.path().join("merge_logs"),
-            ).unwrap();
+            )
+            .unwrap();
 
             black_box(merger.merge(
                 &source_branch,
                 &target_branch,
                 MergeStrategy::SelectiveMerge,
-            )).unwrap();
+            ))
+            .unwrap();
         });
     });
 
@@ -392,11 +385,7 @@ fn bench_merge_comparison(c: &mut Criterion) {
 
             let merger = ThreeWayMerger::new(&temp_dir.path().join("three_way")).unwrap();
 
-            black_box(merger.merge(
-                &source_branch,
-                &target_branch,
-                &base_branch,
-            )).unwrap();
+            black_box(merger.merge(&source_branch, &target_branch, &base_branch)).unwrap();
         });
     });
 

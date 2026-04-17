@@ -371,10 +371,7 @@ mod tests {
         );
 
         // 测试审查类
-        assert_eq!(
-            switcher.identify_role("审查这段代码"),
-            AgentRole::Reviewer
-        );
+        assert_eq!(switcher.identify_role("审查这段代码"), AgentRole::Reviewer);
 
         // 测试调研类
         assert_eq!(
@@ -397,7 +394,7 @@ mod tests {
         let result = switcher.switch_role("执行实现代码");
         assert_eq!(result.new_role, AgentRole::Executor);
         assert!(result.need_reload_tools);
-        
+
         // 测试研究员任务
         let mut switcher = RoleSwitcher::new();
         let result = switcher.switch_role("搜索信息收集资料");
@@ -412,15 +409,9 @@ mod tests {
         assert_eq!(switcher.current_role(), &AgentRole::Planner);
 
         // 手动覆盖后，自动识别应该被忽略
-        assert_eq!(
-            switcher.identify_role("搜索信息"),
-            AgentRole::Planner
-        );
+        assert_eq!(switcher.identify_role("搜索信息"), AgentRole::Planner);
 
         switcher.clear_override();
-        assert_eq!(
-            switcher.identify_role("搜索信息"),
-            AgentRole::Researcher
-        );
+        assert_eq!(switcher.identify_role("搜索信息"), AgentRole::Researcher);
     }
 }

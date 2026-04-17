@@ -35,10 +35,7 @@ pub enum CheckpointEntry {
         timestamp: u64,
     },
     /// Entry deleted
-    Delete {
-        key: String,
-        timestamp: u64,
-    },
+    Delete { key: String, timestamp: u64 },
     /// Entry modified (value changed)
     Modify {
         key: String,

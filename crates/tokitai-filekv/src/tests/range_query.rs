@@ -4,24 +4,29 @@
 //! selectivities and document I/O savings from pruning.
 
 use crate::core::config::FileKVConfig;
-use crate::query::scan::RangeScanConfig;
+use crate::core::memtable::MemTableConfig;
 use crate::query::pruner::RangeQueryPruner;
-use crate::query::zone_map::{ZoneMapIndex, ZoneMapEntry};
+use crate::query::scan::RangeScanConfig;
+use crate::query::zone_map::{ZoneMapEntry, ZoneMapIndex};
 use crate::FileKV;
 use tempfile::TempDir;
 
 /// Create a test FileKV instance with predictable data distribution
 fn create_kv_with_data(num_entries: usize, value_size: usize) -> (FileKV, TempDir) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let mut config = FileKVConfig::default();
-    config.segment_dir = temp_dir.path().join("segments");
-    config.index_dir = temp_dir.path().join("index");
-    config.wal_dir = temp_dir.path().join("wal");
-    config.checkpoint_dir = temp_dir.path().join("checkpoint");
-    // Low flush threshold to create multiple segments
-    config.memtable.flush_threshold_bytes = 64 * 1024; // 64KB
-    config.memtable.max_entries = 100;
-    config.enable_wal = false;
+    let config = FileKVConfig {
+        segment_dir: temp_dir.path().join("segments"),
+        index_dir: temp_dir.path().join("index"),
+        wal_dir: temp_dir.path().join("wal"),
+        checkpoint_dir: temp_dir.path().join("checkpoint"),
+        memtable: MemTableConfig {
+            flush_threshold_bytes: 64 * 1024,
+            max_entries: 100,
+            ..Default::default()
+        },
+        enable_wal: false,
+        ..Default::default()
+    };
 
     let kv = FileKV::open(config).expect("Failed to open FileKV");
 
@@ -211,12 +216,12 @@ fn test_pruning_ratio_vs_selectivity() {
 
     // Define test ranges with different selectivities
     let test_cases = vec![
-        ("key_000000", "key_000009", 10),    // Very high selectivity (0.01)
-        ("key_000000", "key_000049", 50),    // High selectivity (0.05)
-        ("key_000000", "key_000099", 100),   // Medium selectivity (0.10)
-        ("key_000000", "key_000249", 250),   // Low selectivity (0.25)
-        ("key_000000", "key_000499", 500),   // Very low selectivity (0.50)
-        ("key_000000", "key_000999", 1000),  // Minimal selectivity (1.0)
+        ("key_000000", "key_000009", 10),   // Very high selectivity (0.01)
+        ("key_000000", "key_000049", 50),   // High selectivity (0.05)
+        ("key_000000", "key_000099", 100),  // Medium selectivity (0.10)
+        ("key_000000", "key_000249", 250),  // Low selectivity (0.25)
+        ("key_000000", "key_000499", 500),  // Very low selectivity (0.50)
+        ("key_000000", "key_000999", 1000), // Minimal selectivity (1.0)
     ];
 
     let mut results: Vec<(f64, f64, usize)> = Vec::new();
@@ -243,7 +248,11 @@ fn test_pruning_ratio_vs_selectivity() {
 
         results.push((selectivity, blocks_scanned as f64, count));
 
-        assert_eq!(count, *expected_count, "Expected {} entries, got {}", expected_count, count);
+        assert_eq!(
+            count, *expected_count,
+            "Expected {} entries, got {}",
+            expected_count, count
+        );
     }
 
     // Print results for analysis
@@ -260,8 +269,10 @@ fn test_pruning_ratio_vs_selectivity() {
         assert!(
             results[i].1 >= results[i - 1].1 - 1.0, // Allow small variance due to block boundaries
             "Higher selectivity should scan more blocks: sel={:.2} blocks={:.0}, sel={:.2} blocks={:.0}",
-            results[i].0, results[i].1,
-            results[i - 1].0, results[i - 1].1
+            results[i].0,
+            results[i].1,
+            results[i - 1].0,
+            results[i - 1].1
         );
     }
 }
@@ -306,7 +317,11 @@ fn test_range_query_pruner_integration() {
     let stats = pruner.stats();
     // Note: Empty queries (no overlap) may or may not record stats depending on implementation
     // We assert at least 4 queries were recorded (the overlapping ones)
-    assert!(stats.total_queries >= 4, "Expected at least 4 queries, got {}", stats.total_queries);
+    assert!(
+        stats.total_queries >= 4,
+        "Expected at least 4 queries, got {}",
+        stats.total_queries
+    );
     assert!(stats.total_blocks > 0);
     // At least some blocks should be scanned or pruned
     assert!(stats.blocks_scanned > 0 || stats.blocks_pruned > 0);
@@ -330,9 +345,9 @@ fn test_pruning_disabled_vs_enabled_comparison() {
 
     // Test multiple ranges with pruning on and off
     let ranges = vec![
-        ("key_000050", "key_000060"),   // 11 entries
-        ("key_000100", "key_000150"),   // 51 entries
-        ("key_000200", "key_000300"),   // 101 entries
+        ("key_000050", "key_000060"), // 11 entries
+        ("key_000100", "key_000150"), // 51 entries
+        ("key_000200", "key_000300"), // 101 entries
     ];
 
     for (start, end) in ranges {
@@ -392,15 +407,19 @@ fn test_pruning_disabled_vs_enabled_comparison() {
 #[test]
 fn test_range_query_multiple_segments() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let mut config = FileKVConfig::default();
-    config.segment_dir = temp_dir.path().join("segments");
-    config.index_dir = temp_dir.path().join("index");
-    config.wal_dir = temp_dir.path().join("wal");
-    config.checkpoint_dir = temp_dir.path().join("checkpoint");
-    // Very low flush threshold to create many segments
-    config.memtable.flush_threshold_bytes = 64 * 1024;
-    config.memtable.max_entries = 100; // Minimum allowed is 100
-    config.enable_wal = false;
+    let config = FileKVConfig {
+        segment_dir: temp_dir.path().join("segments"),
+        index_dir: temp_dir.path().join("index"),
+        wal_dir: temp_dir.path().join("wal"),
+        checkpoint_dir: temp_dir.path().join("checkpoint"),
+        memtable: MemTableConfig {
+            flush_threshold_bytes: 64 * 1024,
+            max_entries: 100,
+            ..Default::default()
+        },
+        enable_wal: false,
+        ..Default::default()
+    };
 
     let kv = FileKV::open(config).expect("Failed to open FileKV");
 
@@ -446,7 +465,12 @@ fn test_range_query_multiple_segments() {
 
     // Should find 251 entries (25 to 275 inclusive)
     assert_eq!(count, 251, "Expected 251 entries, got {}", count);
-    assert_eq!(keys_found.len(), 251, "Expected 251 unique keys, got {}", keys_found.len());
+    assert_eq!(
+        keys_found.len(),
+        251,
+        "Expected 251 unique keys, got {}",
+        keys_found.len()
+    );
 
     // Verify all keys are in the expected range
     for key in &keys_found {
@@ -534,13 +558,7 @@ fn test_zone_map_block_pruning_in_get() {
     let (kv, _temp_dir) = create_kv_with_data(500, 64);
 
     // Test point lookups that should succeed
-    let test_keys = vec![
-        "key_000050",
-        "key_000100",
-        "key_000200",
-        "key_000300",
-        "key_000400",
-    ];
+    let test_keys = vec!["key_000050", "key_000100", "key_000200", "key_000300", "key_000400"];
 
     for key in &test_keys {
         let result = kv.get(key).expect("get should succeed");
@@ -625,9 +643,7 @@ fn test_zone_map_point_query_range() {
     let blocks = pruner.find_blocks_to_scan(&zone_map, "aaa", "aaa");
     assert_eq!(blocks.len(), 0, "Key before first block should match no blocks");
 
-    println!(
-        "Point query Zone Map: tested 5 point queries, all correctly identified single blocks or none"
-    );
+    println!("Point query Zone Map: tested 5 point queries, all correctly identified single blocks or none");
 }
 
 /// Test: get() uses Zone Map block-level pruning for point queries (S1-3 acceptance test)
@@ -638,19 +654,22 @@ fn test_zone_map_point_query_range() {
 fn test_get_uses_zone_map_pruning() {
     // Create a FileKV instance
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut config = FileKVConfig::default();
-    config.segment_dir = temp_dir.path().join("segments");
-    config.index_dir = temp_dir.path().join("index");
-    config.wal_dir = temp_dir.path().join("wal");
-    config.checkpoint_dir = temp_dir.path().join("checkpoint");
-    config.enable_zone_map_pruning = true;
-    config.enable_bloom = false; // Disable bloom to isolate Zone Map behavior
-    config.enable_wal = false;
+    let config = FileKVConfig {
+        segment_dir: temp_dir.path().join("segments"),
+        index_dir: temp_dir.path().join("index"),
+        wal_dir: temp_dir.path().join("wal"),
+        checkpoint_dir: temp_dir.path().join("checkpoint"),
+        enable_zone_map_pruning: true,
+        enable_bloom: false,
+        enable_wal: false,
+        ..Default::default()
+    };
 
     let kv = FileKV::open(config).expect("Failed to open FileKV");
 
     // Insert data that spans multiple blocks
-    for i in 0..100 {  // Reduced from 500
+    for i in 0..100 {
+        // Reduced from 500
         let key = format!("pruning_key_{:05}", i);
         let value = format!("value_{:05}", i);
         kv.put(&key, value.as_bytes()).expect("put should succeed");

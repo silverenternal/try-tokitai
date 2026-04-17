@@ -87,7 +87,15 @@ impl ImplementationPlan {
     }
 
     /// 添加步骤
-    pub fn add_step(&mut self, description: String, tools: Vec<String>, expected_output: String, dependencies: Vec<String>, estimated_minutes: u32, risk_level: RiskLevel) {
+    pub fn add_step(
+        &mut self,
+        description: String,
+        tools: Vec<String>,
+        expected_output: String,
+        dependencies: Vec<String>,
+        estimated_minutes: u32,
+        risk_level: RiskLevel,
+    ) {
         self.steps.push(PlanStep {
             id: format!("step_{}", self.steps.len() + 1),
             description,
@@ -114,12 +122,12 @@ impl ImplementationPlan {
 
     /// 获取下一步（依赖已完成的步骤）
     pub fn next_step(&self, completed_step_ids: &[String]) -> Option<&PlanStep> {
-        self.steps
-            .iter()
-            .find(|s| {
-                !completed_step_ids.contains(&s.id) &&
-                s.dependencies.iter().all(|dep| completed_step_ids.contains(dep))
-            })
+        self.steps.iter().find(|s| {
+            !completed_step_ids.contains(&s.id)
+                && s.dependencies
+                    .iter()
+                    .all(|dep| completed_step_ids.contains(dep))
+        })
     }
 }
 
@@ -135,7 +143,7 @@ impl PlannerAgent {
     /// 创建新的规划 Agent
     pub fn new(storage_dir: PathBuf) -> Result<Self, PlannerError> {
         fs::create_dir_all(&storage_dir)?;
-        
+
         let mut agent = Self {
             storage_dir,
             plans: vec![],
@@ -154,13 +162,18 @@ impl PlannerAgent {
     }
 
     /// 从 LLM 响应解析并创建计划
-    pub fn parse_and_create_plan(&mut self, goal: String, llm_response: &str) -> Result<&ImplementationPlan, PlannerError> {
+    pub fn parse_and_create_plan(
+        &mut self,
+        goal: String,
+        llm_response: &str,
+    ) -> Result<&ImplementationPlan, PlannerError> {
         // 尝试解析 LLM 生成的 JSON 计划
-        let plan: ImplementationPlan = serde_json::from_str(llm_response)
-            .or_else(|_| -> Result<ImplementationPlan, PlannerError> {
+        let plan: ImplementationPlan = serde_json::from_str(llm_response).or_else(
+            |_| -> Result<ImplementationPlan, PlannerError> {
                 // 如果解析失败，创建基础计划
                 Ok(ImplementationPlan::new(goal))
-            })?;
+            },
+        )?;
 
         self.plans.push(plan);
         self.save_plans()?;
@@ -180,7 +193,14 @@ impl PlannerAgent {
         risk_level: RiskLevel,
     ) -> Result<(), PlannerError> {
         if let Some(plan) = self.plans.iter_mut().find(|p| p.id == plan_id) {
-            plan.add_step(description, tools, expected_output, dependencies, estimated_minutes, risk_level);
+            plan.add_step(
+                description,
+                tools,
+                expected_output,
+                dependencies,
+                estimated_minutes,
+                risk_level,
+            );
             self.save_plans()?;
         }
         Ok(())
@@ -233,7 +253,7 @@ mod tests {
     #[test]
     fn test_plan_steps() {
         let mut plan = ImplementationPlan::new("改进错误处理".to_string());
-        
+
         plan.add_step(
             "调研 Rust 错误处理最佳实践".to_string(),
             vec!["web_search".to_string()],

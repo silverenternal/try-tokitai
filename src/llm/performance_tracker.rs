@@ -2,9 +2,9 @@
 //!
 //! Tracks latency, success rates, and other performance metrics for each model.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Task type classification
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -204,7 +204,8 @@ impl PerformanceTracker {
     /// Get the best performing model by success rate
     pub fn get_best_by_success_rate(&self) -> Option<(String, f64)> {
         let models = self.models.read();
-        models.iter()
+        models
+            .iter()
             .filter(|(_, stats)| stats.total_calls > 0)
             .max_by(|a, b| a.1.success_rate().partial_cmp(&b.1.success_rate()).unwrap())
             .map(|(key, stats)| (key.clone(), stats.success_rate()))
@@ -213,7 +214,8 @@ impl PerformanceTracker {
     /// Get the fastest model by average latency
     pub fn get_fastest(&self) -> Option<(String, f64)> {
         let models = self.models.read();
-        models.iter()
+        models
+            .iter()
             .filter(|(_, stats)| stats.latency_samples > 0)
             .min_by(|a, b| a.1.avg_latency_ms.partial_cmp(&b.1.avg_latency_ms).unwrap())
             .map(|(key, stats)| (key.clone(), stats.avg_latency_ms))
@@ -293,18 +295,19 @@ impl TaskModelMapping {
         }
 
         // Among candidates, pick the one with best historical performance
-        let best = candidates.iter()
-            .max_by(|a, b| {
-                let key_a = format!("{}/{}", a.provider, a.model_name);
-                let key_b = format!("{}/{}", b.provider, b.model_name);
-                let stats_a = tracker.get_model_stats(&key_a);
-                let stats_b = tracker.get_model_stats(&key_b);
-                
-                // Weight: 60% success rate, 40% latency
-                let score_a = stats_a.success_rate() * 0.6 + (1.0 - stats_a.avg_latency_ms / 10000.0) * 0.4;
-                let score_b = stats_b.success_rate() * 0.6 + (1.0 - stats_b.avg_latency_ms / 10000.0) * 0.4;
-                score_a.partial_cmp(&score_b).unwrap()
-            });
+        let best = candidates.iter().max_by(|a, b| {
+            let key_a = format!("{}/{}", a.provider, a.model_name);
+            let key_b = format!("{}/{}", b.provider, b.model_name);
+            let stats_a = tracker.get_model_stats(&key_a);
+            let stats_b = tracker.get_model_stats(&key_b);
+
+            // Weight: 60% success rate, 40% latency
+            let score_a =
+                stats_a.success_rate() * 0.6 + (1.0 - stats_a.avg_latency_ms / 10000.0) * 0.4;
+            let score_b =
+                stats_b.success_rate() * 0.6 + (1.0 - stats_b.avg_latency_ms / 10000.0) * 0.4;
+            score_a.partial_cmp(&score_b).unwrap()
+        });
 
         best.map(|m| format!("{}/{}", m.provider, m.model_name))
     }

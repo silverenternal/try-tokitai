@@ -1,10 +1,10 @@
 //! WAL recovery tests for FileKV
 
-use crate::*;
-use crate::core::wal::{WalManager, WalOperation, load_wal_entries};
+use crate::core::wal::{load_wal_entries, WalManager, WalOperation};
 use crate::io::StdFs;
-use tempfile::TempDir;
+use crate::*;
 use std::sync::Arc;
+use tempfile::TempDir;
 
 /// Test that WAL entries are replayed after opening
 #[test]
@@ -46,9 +46,18 @@ fn test_wal_recovery_basic() {
     assert!(result2.is_some(), "key2 should be recovered from WAL");
     assert!(result3.is_some(), "key3 should be recovered from WAL");
 
-    assert_eq!(result1.expect("recovered key1 should be Some").as_ref(), b"value1".as_ref());
-    assert_eq!(result2.expect("recovered key2 should be Some").as_ref(), b"value2".as_ref());
-    assert_eq!(result3.expect("recovered key3 should be Some").as_ref(), b"value3".as_ref());
+    assert_eq!(
+        result1.expect("recovered key1 should be Some").as_ref(),
+        b"value1".as_ref()
+    );
+    assert_eq!(
+        result2.expect("recovered key2 should be Some").as_ref(),
+        b"value2".as_ref()
+    );
+    assert_eq!(
+        result3.expect("recovered key3 should be Some").as_ref(),
+        b"value3".as_ref()
+    );
 }
 
 /// Test WAL recovery with mixed insertions and flush
@@ -93,8 +102,14 @@ fn test_wal_recovery_after_flush() {
     assert!(result_w1.is_some(), "wal1 should be recovered from WAL");
     assert!(result_w2.is_some(), "wal2 should be recovered from WAL");
 
-    assert_eq!(result_f1.expect("flushed1 should be Some").as_ref(), b"flushed_value1".as_ref());
-    assert_eq!(result_f2.expect("flushed2 should be Some").as_ref(), b"flushed_value2".as_ref());
+    assert_eq!(
+        result_f1.expect("flushed1 should be Some").as_ref(),
+        b"flushed_value1".as_ref()
+    );
+    assert_eq!(
+        result_f2.expect("flushed2 should be Some").as_ref(),
+        b"flushed_value2".as_ref()
+    );
     assert_eq!(result_w1.expect("wal1 should be Some").as_ref(), b"wal_value1".as_ref());
     assert_eq!(result_w2.expect("wal2 should be Some").as_ref(), b"wal_value2".as_ref());
 }
@@ -155,8 +170,10 @@ fn test_flush_atomic_rename() {
     let kv = FileKV::open(config.clone()).expect("Failed to open FileKV store");
 
     // Insert enough entries to trigger a flush
-    for i in 0..30 {  // Reduced from 100
-        kv.put(&format!("key_{}", i), &format!("value_{}", i).into_bytes()).expect(&format!("Failed to put key_{}", i));
+    for i in 0..30 {
+        // Reduced from 100
+        kv.put(&format!("key_{}", i), &format!("value_{}", i).into_bytes())
+            .unwrap_or_else(|_| panic!("Failed to put key_{}", i));
     }
 
     // Flush memtable
@@ -167,7 +184,11 @@ fn test_flush_atomic_rename() {
         let entry = entry.expect("Failed to read directory entry");
         let name = entry.file_name();
         let name_str = name.to_str().expect("Failed to convert filename to string");
-        assert!(!name_str.starts_with(".segment_"), "No temp files should exist: {}", name_str);
+        assert!(
+            !name_str.starts_with(".segment_"),
+            "No temp files should exist: {}",
+            name_str
+        );
     }
 
     // Verify segment file exists and is readable
@@ -232,12 +253,7 @@ fn test_wal_sync_mode_lazy_small_writes_buffered() {
     let wal_files: Vec<_> = std::fs::read_dir(&wal_dir)
         .expect("Failed to read WAL directory")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("log")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
     // WAL 文件应该存在（因为 open_file 被调用了），但内容可能未完全刷新
@@ -258,15 +274,9 @@ fn test_wal_sync_mode_lazy_flush_on_drop() {
 
     // 创建并写入数据
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         // 写入少量数据
         for i in 0..5 {
@@ -285,18 +295,10 @@ fn test_wal_sync_mode_lazy_flush_on_drop() {
     let wal_files: Vec<_> = std::fs::read_dir(&wal_dir)
         .expect("Failed to read WAL directory")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("log")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
-    assert!(
-        !wal_files.is_empty(),
-        "WAL file should exist after drop"
-    );
+    assert!(!wal_files.is_empty(), "WAL file should exist after drop");
 
     // 验证文件内容非空（数据已被 flush）
     for file in &wal_files {
@@ -308,15 +310,8 @@ fn test_wal_sync_mode_lazy_flush_on_drop() {
     }
 
     // 创建新的 WalManager 读取相同目录，验证可以恢复数据
-    let wal2 = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create second WalManager");
+    let wal2 = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create second WalManager");
 
     let entries = wal2.read_entries().expect("Failed to read WAL entries");
     assert!(
@@ -337,15 +332,9 @@ fn test_wal_sync_mode_lazy_auto_flush_on_buffer_threshold() {
 
     // Write and then drop to ensure file handle is closed
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         // 写入大量数据，超过 32KB 缓冲区阈值
         // 每个 WAL entry 序列化后约 100-200 字节，写入 300 条确保超过 32KB
@@ -363,18 +352,10 @@ fn test_wal_sync_mode_lazy_auto_flush_on_buffer_threshold() {
     let wal_files: Vec<_> = std::fs::read_dir(&wal_dir)
         .expect("Failed to read WAL directory")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("log")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
-    assert!(
-        !wal_files.is_empty(),
-        "WAL file should exist after large writes"
-    );
+    assert!(!wal_files.is_empty(), "WAL file should exist after large writes");
 
     for file in &wal_files {
         let metadata = std::fs::metadata(file.path()).expect("Failed to get file metadata");
@@ -400,15 +381,9 @@ fn test_wal_sync_mode_lazy_crash_recovery() {
 
     // 创建并写入数据
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         // 写入数据
         for i in 0..10 {
@@ -428,15 +403,8 @@ fn test_wal_sync_mode_lazy_crash_recovery() {
 
     // 重新打开并验证数据
     // 注意：不需要 sleep，因为 Drop 已经确保数据写入文件系统缓存
-    let wal = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create recovery WalManager");
+    let wal = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create recovery WalManager");
 
     let entries = wal.read_entries().expect("Failed to read WAL entries");
     assert!(
@@ -449,12 +417,7 @@ fn test_wal_sync_mode_lazy_crash_recovery() {
     let wal_files: Vec<_> = std::fs::read_dir(&wal_dir)
         .expect("Failed to read WAL directory")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("log")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
     assert!(!wal_files.is_empty(), "WAL file should exist");
@@ -492,15 +455,9 @@ fn test_wal_lazy_partial_write_crash_recovery() {
 
     // Write entries and drop without explicit flush (simulates crash)
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         for i in 0..total_entries {
             let op = WalOperation::Add {
@@ -516,15 +473,8 @@ fn test_wal_lazy_partial_write_crash_recovery() {
     }
 
     // Recovery: read back entries
-    let wal = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create recovery WalManager");
+    let wal = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create recovery WalManager");
 
     let entries = wal.read_entries().expect("Failed to read WAL entries");
     let recovered_count = entries.len();
@@ -540,7 +490,8 @@ fn test_wal_lazy_partial_write_crash_recovery() {
     assert!(
         recovered_count >= total_entries,
         "Should recover at least {} entries, got {} (loss rate: {:.4}%)",
-        total_entries, recovered_count,
+        total_entries,
+        recovered_count,
         loss_rate * 100.0
     );
 
@@ -562,15 +513,9 @@ fn test_wal_lazy_duplicate_recovery() {
 
     // Phase 1: Write entries
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         for i in 0..8 {
             let op = WalOperation::Add {
@@ -583,31 +528,19 @@ fn test_wal_lazy_duplicate_recovery() {
     }
 
     // Phase 2: First recovery
-    let wal1 = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create first recovery WalManager");
+    let wal1 = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create first recovery WalManager");
 
     let entries1 = wal1.read_entries().expect("Failed to read WAL entries");
     let count1 = entries1.len();
 
     // Phase 3: Second recovery (fresh WalManager, same directory)
-    let wal2 = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create second recovery WalManager");
+    let wal2 = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create second recovery WalManager");
 
-    let entries2 = wal2.read_entries().expect("Failed to read WAL entries on second recovery");
+    let entries2 = wal2
+        .read_entries()
+        .expect("Failed to read WAL entries on second recovery");
     let count2 = entries2.len();
 
     // Verify: both recoveries should return the same count
@@ -618,14 +551,20 @@ fn test_wal_lazy_duplicate_recovery() {
     );
 
     // Verify: entry sessions should be identical (no duplicates)
-    let sessions1: Vec<&str> = entries1.iter().map(|e| match &e.operation {
-        WalOperation::Add { session, .. } => session.as_str(),
-        _ => "",
-    }).collect();
-    let sessions2: Vec<&str> = entries2.iter().map(|e| match &e.operation {
-        WalOperation::Add { session, .. } => session.as_str(),
-        _ => "",
-    }).collect();
+    let sessions1: Vec<&str> = entries1
+        .iter()
+        .map(|e| match &e.operation {
+            WalOperation::Add { session, .. } => session.as_str(),
+            _ => "",
+        })
+        .collect();
+    let sessions2: Vec<&str> = entries2
+        .iter()
+        .map(|e| match &e.operation {
+            WalOperation::Add { session, .. } => session.as_str(),
+            _ => "",
+        })
+        .collect();
     assert_eq!(
         sessions1, sessions2,
         "Recovered sessions should be identical across recoveries"
@@ -644,19 +583,15 @@ fn test_wal_lazy_disk_full_simulation() {
     let wal_dir = std::path::PathBuf::from("/wal");
 
     // Create WAL directory in MemFs
-    mem_fs.create_dir_all(&wal_dir).expect("Failed to create WAL dir in MemFs");
+    mem_fs
+        .create_dir_all(&wal_dir)
+        .expect("Failed to create WAL dir in MemFs");
 
     // Write entries to MemFs with Lazy mode and verify recovery in same session
     {
-        let mut wal = WalManager::new_with_config(
-            mem_fs.clone(),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager with MemFs");
+        let mut wal =
+            WalManager::new_with_config(mem_fs.clone(), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager with MemFs");
 
         for i in 0..20 {
             let op = WalOperation::Add {
@@ -701,16 +636,14 @@ fn test_wal_lazy_disk_full_simulation() {
     }
 
     // Verify files exist in MemFs after drop (flush on drop)
-    let wal_files: Vec<_> = mem_fs.read_dir(&wal_dir)
+    let wal_files: Vec<_> = mem_fs
+        .read_dir(&wal_dir)
         .expect("Failed to read WAL dir in MemFs after drop")
         .into_iter()
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
-    assert!(
-        !wal_files.is_empty(),
-        "WAL files should exist in MemFs after drop"
-    );
+    assert!(!wal_files.is_empty(), "WAL files should exist in MemFs after drop");
 }
 
 /// TEST-004(d): Mixed put/delete recovery in Lazy mode
@@ -724,15 +657,9 @@ fn test_wal_lazy_mixed_add_delete_recovery() {
 
     // Write mixed add/delete entries
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         // Add keys 0-4
         for i in 0..5 {
@@ -765,15 +692,8 @@ fn test_wal_lazy_mixed_add_delete_recovery() {
     }
 
     // Recovery: read back entries
-    let wal = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create recovery WalManager");
+    let wal = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create recovery WalManager");
 
     let entries = wal.read_entries().expect("Failed to read WAL entries");
 
@@ -826,15 +746,9 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
 
     // Phase 1: Write first batch of entries
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         for i in 0..15 {
             let op = WalOperation::Add {
@@ -849,15 +763,9 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
 
     // Phase 2: Write second batch (simulating discontinuous sequence)
     {
-        let mut wal = WalManager::new_with_config(
-            Arc::new(StdFs),
-            &wal_dir,
-            true,
-            64 * 1024 * 1024,
-            10,
-            WalSyncMode::Lazy,
-        )
-        .expect("Failed to create WalManager");
+        let mut wal =
+            WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+                .expect("Failed to create WalManager");
 
         // Write entries with a gap in naming (simulates sequence discontinuity)
         for i in 20..30 {
@@ -872,15 +780,8 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
     }
 
     // Phase 3: Recovery - read all entries from both batches
-    let wal = WalManager::new_with_config(
-        Arc::new(StdFs),
-        &wal_dir,
-        true,
-        64 * 1024 * 1024,
-        10,
-        WalSyncMode::Lazy,
-    )
-    .expect("Failed to create recovery WalManager");
+    let wal = WalManager::new_with_config(Arc::new(StdFs), &wal_dir, true, 64 * 1024 * 1024, 10, WalSyncMode::Lazy)
+        .expect("Failed to create recovery WalManager");
 
     let entries = wal.read_entries().expect("Failed to read WAL entries");
 
@@ -909,7 +810,11 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
 
     println!(
         "Discontinuous sequence recovery: batch1={}, batch2={}, total={}/{}, loss_rate={:.4}%",
-        batch1_count, batch2_count, total_recovered, total_expected, loss_rate * 100.0
+        batch1_count,
+        batch2_count,
+        total_recovered,
+        total_expected,
+        loss_rate * 100.0
     );
 
     // Verify batch1 entries recovered
@@ -937,12 +842,7 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
     let wal_files: Vec<_> = std::fs::read_dir(&wal_dir)
         .expect("Failed to read WAL directory")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("log")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("log"))
         .collect();
 
     assert!(!wal_files.is_empty(), "WAL files should exist");
@@ -951,13 +851,14 @@ fn test_wal_lazy_discontinuous_sequence_recovery() {
     for file in &wal_files {
         let file_data = std::fs::read(file.path()).expect("Failed to read WAL file");
         if let Ok(entries) = load_wal_entries(&file_data) {
-            file_entry_count += entries.len() as usize;
+            file_entry_count += entries.len();
         }
     }
 
     assert!(
         file_entry_count >= total_expected,
         "Should find at least {} valid entries in WAL files, got {}",
-        total_expected, file_entry_count
+        total_expected,
+        file_entry_count
     );
 }

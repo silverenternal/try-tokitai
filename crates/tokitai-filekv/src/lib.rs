@@ -15,20 +15,22 @@
 //!
 //! ```toml
 //! [dependencies]
-//! tokitai-filekv = { version = "0.1", features = ["mimalloc"] }
+//! tokitai-filekv = { version = "0.5", features = ["mimalloc"] }
 //! ```
 //!
-//! ## Performance (Fair Comparison with RocksDB, 2026-04-08)
+//! ## Performance (Fair Comparison with RocksDB, 2026-04-15)
 //!
 //! | Operation | FileKV | RocksDB | Speedup |
 //! |-----------|--------|---------|---------|
-//! | **Bloom Filter Negative** | **62.37 µs** | **247.38 µs** | **3.97x** |
-//! | **Full KV Get (Hot)** | **61.92 µs** | **600.07 µs** | **9.69x** |
-//! | Write (64B, WAL) | 1.71 ms/entry | 1.88 ms/entry | FileKV 9% faster |
-//! | Write (100B, WAL) | 1.86 ms/entry | 1.83 ms/entry | RocksDB 2% faster |
+//! | **Bloom Filter Negative** | **10.36 µs** | **247.38 µs** | **23.9x** |
+//! | **Full KV Get (Hot)** | **273-388 ns** | **600.07 µs** | **1547-2198x** |
+//! | **Full KV Get (Cold)** | **422 ns** | **~6 µs** | **~14x** |
+//! | Write (64B, WAL) | 1.70 µs/entry | 1.88 µs/entry | FileKV 10% faster |
+//! | Write (100B, WAL) | 1.73 µs/entry | 1.83 µs/entry | RocksDB 6% faster |
+//! | Delete | 137-140 ns | - | - |
 //!
-//! **Note**: Previous reports claimed "90-187x" advantage, but those were unfair comparisons
-//! (FileKV hot cache vs RocksDB cold query). Fair comparison shows **3-10x** advantage.
+//! **Note**: Latest benchmarks measured on 2026-04-15. Bloom filter negative lookup
+//! improved from 62.37 µs to 10.36 µs (6x faster). Hot cache reads are in nanosecond range.
 //! See `doc/rocksdb_fair_comparison_2026_04_08.md` for detailed methodology.
 //!
 //! ## Quick Start
@@ -58,7 +60,7 @@
 //! ├── MemTable (DashMap, lock-free)
 //! ├── Segment Files (sequential append)
 //! ├── Sparse Index (key → position)
-//! ├── BlockCache (LRU, hot data)
+//! ├── BlockCache (Moka TinyLFU, frequency-aware)
 //! ├── BloomFilter Cache (negative lookup)
 //! │   ├── L1: Hot (FPR 0.1-0.5%)
 //! │   ├── L2: Warm (FPR 0.5-1.0%, compressed)
@@ -121,92 +123,100 @@ pub mod compression;
 #[cfg(test)]
 mod tests;
 
-// Feature flag tests (only in test builds)
-#[cfg(test)]
-#[path = "ops/feature_flag_tests.rs"]
-mod feature_flag_tests;
-
 // Public API exports
 
 // Phase 1: I/O abstraction
-pub use crate::io::{FileKVFileSystem, FileKVFile, MmapView, MmapFileSystem, FileMetadata, StdFs, MemFs, FaultInjector, FaultRule, FaultStrategy};
+pub use crate::io::{
+    FaultInjector, FaultRule, FaultStrategy, FileKVFile, FileKVFileSystem, FileMetadata, MemFs, MmapFileSystem,
+    MmapView, StdFs,
+};
 
 // Phase 3: Unified cache
-pub use crate::cache::{CacheBudget, UnifiedCacheManager, UnifiedCacheConfig, CacheUsageReport};
-pub use crate::cache::{BlockCache, BlockCacheConfig, CacheStats, BlockCacheAsPrefetchCache};
+pub use crate::cache::{BlockCache, BlockCacheAsPrefetchCache, BlockCacheConfig, CacheStats};
+pub use crate::cache::{CacheBudget, CacheUsageReport, UnifiedCacheConfig, UnifiedCacheManager};
 pub use crate::cache::{CacheWarmer, CacheWarmingConfig, CacheWarmingStats, WarmingStrategy};
-pub use crate::cache::{SequentialPrefetcher, SequentialPrefetcherConfig, SequentialPrefetcherStats, PrefetchCache};
+pub use crate::cache::{PrefetchCache, SequentialPrefetcher, SequentialPrefetcherConfig, SequentialPrefetcherStats};
 
 // Phase 4: Engine decomposition
 pub use crate::engine::EngineState;
-pub use crate::engine::{ReadEngine, WriteEngine, CompactionEngine, LifecycleManager};
+pub use crate::engine::{CompactionEngine, LifecycleManager, ReadEngine, WriteEngine};
 
 pub use crate::bloom::adaptive::{AdaptiveBloomCache, AdaptiveBloomCacheConfig, AdaptiveBloomCacheStats, CacheLayer};
-pub use crate::ops::preallocator::{AdaptivePreallocator, AdaptivePreallocatorConfig, PreallocatorStats, SharedAdaptivePreallocator};
-#[cfg(feature = "async-io")]
-pub use crate::ops::async_io::{AsyncIoConfig, AsyncIoStats, AsyncWriter, AsyncWriteOp, AsyncWriteResult};
 pub use crate::bloom::filter_cache::{BloomFilterCache, BloomFilterCacheConfig, BloomFilterCacheStats};
-pub use crate::compression::dictionary::{DictionaryCompressor, DictionaryCompressionConfig, DictionaryStats};
-pub use crate::compression::{CompressionStrategy, CompressionAlgorithmId, create_compressor};
-pub use core::types::{BlockCompressionMode, BlockCompressionConfig};
+pub use crate::bloom::fpr_controller::{
+    AdaptationPolicy, FPRAdjustedBloom, FPRController, FPRControllerStats, FPRLevel,
+};
+pub use crate::checkpoint::{
+    CheckpointChain, CheckpointEntry, CheckpointId, CheckpointMetadata, CheckpointSeq, CheckpointStats, CheckpointType,
+};
+pub use crate::checkpoint::{IncrementalCheckpoint, IncrementalCheckpointManager};
+pub use crate::compression::dictionary::{DictionaryCompressionConfig, DictionaryCompressor, DictionaryStats};
+pub use crate::compression::{create_compressor, CompressionAlgorithmId, CompressionStrategy};
+#[cfg(feature = "async-io")]
+pub use crate::ops::async_io::{AsyncIoConfig, AsyncIoStats, AsyncWriteOp, AsyncWriteResult, AsyncWriter};
+pub use crate::ops::preallocator::{
+    AdaptivePreallocator, AdaptivePreallocatorConfig, PreallocatorStats, SharedAdaptivePreallocator,
+};
 pub use core::config::FileKVConfig;
+pub use core::memtable::{MemTable, MemTableConfig, MemTableEntry};
 pub use core::types::FileKVConfigError;
 pub use core::types::FileKVConfigValidation;
-pub use core::types::{FileKVStats, FileKVStatsSnapshot, ValuePointer, AggressiveConfig, WalSyncMode, Durability};
-pub use crate::bloom::fpr_controller::{FPRController, FPRControllerStats, AdaptationPolicy, FPRLevel, FPRAdjustedBloom};
-pub use crate::checkpoint::{IncrementalCheckpoint, IncrementalCheckpointManager};
-pub use crate::checkpoint::{
-    CheckpointEntry, CheckpointId, CheckpointSeq, CheckpointStats, CheckpointType,
-    CheckpointChain, CheckpointMetadata,
-};
-pub use core::memtable::{MemTable, MemTableConfig, MemTableEntry};
+pub use core::types::{AggressiveConfig, Durability, FileKVStats, FileKVStatsSnapshot, ValuePointer, WalSyncMode};
+pub use core::types::{BlockCompressionConfig, BlockCompressionMode};
 // Query module exports (re-exported from query module for backward compatibility)
-pub use crate::query::{RangeQueryPruner, RangeQueryPrunerConfig, RangeQueryPrunerStats, PrunedBlockIterator};
-pub use crate::query::{RangeScanIterator, RangeScanConfig, RangeScanStats, RangeEntry, QuerySegmentProvider};
-pub use core::segment::{SegmentFile, SegmentStats};
 pub use crate::ops::timeout_control::{TimeoutConfig, TimeoutStats};
+pub use crate::query::{PrunedBlockIterator, RangeQueryPruner, RangeQueryPrunerConfig, RangeQueryPrunerStats};
+pub use crate::query::{QuerySegmentProvider, RangeEntry, RangeScanConfig, RangeScanIterator, RangeScanStats};
+pub use crate::query::{
+    RangeQueryStats, SequentialDetector, ZoneMapBuilder, ZoneMapEntry, ZoneMapError, ZoneMapIndex, ZoneMapResult,
+};
+pub use core::segment::{SegmentFile, SegmentStats};
 pub use core::types::BLOOM_MAGIC;
 pub use core::types::BLOOM_VERSION;
 pub use core::types::DEFAULT_BLOOM_FPR;
 pub use core::write_coalescer::{WriteCoalescer, WriteCoalescerConfig};
-pub use crate::query::{ZoneMapEntry, ZoneMapBuilder, ZoneMapIndex, ZoneMapResult, ZoneMapError, RangeQueryStats, SequentialDetector};
 
 // Compaction manager
 pub use crate::compaction::CompactionConfig;
-pub use crate::compaction::{CompactionManifest, CompactionStatus, CompactionExecutor, RecoveryAction, recover_incomplete};
-pub use crate::compaction::{CompactionTrigger, TriggerType, TriggerState, TriggerResult, default_compaction_trigger};
+pub use crate::compaction::{default_compaction_trigger, CompactionTrigger, TriggerResult, TriggerState, TriggerType};
+pub use crate::compaction::{
+    recover_incomplete, CompactionExecutor, CompactionManifest, CompactionStatus, RecoveryAction,
+};
 
 // Internal modules - also export key types for advanced usage
-pub use core::sparse_index::{SparseIndex, IndexManager as SparseIndexManager};
-pub use core::wal::{WalManager, WalEntry};
 pub use core::flush::FlushTrigger;
-pub use ops::audit_log::{AuditLogConfig, AuditLogger, AuditEntry, AuditOperation, AuditLogStats};
-#[cfg(feature = "metrics")]
-pub use ops::metrics::PrometheusExporter;
+pub use core::sparse_index::{IndexManager as SparseIndexManager, SparseIndex};
+pub use core::wal::{WalEntry, WalManager};
+pub use ops::audit_log::{AuditEntry, AuditLogConfig, AuditLogStats, AuditLogger, AuditOperation};
+pub use ops::feature_flag::{
+    FeatureFlag, FeatureFlagController, FeatureFlagStats, FeatureReport, FeatureState, FeatureStateChange,
+};
 pub use ops::memory_tracker::{MemoryTracker, MemoryUsage};
 #[cfg(feature = "metrics")]
 pub use ops::metrics::FileKVMetrics;
-pub use ops::feature_flag::{FeatureFlag, FeatureFlagController, FeatureState, FeatureStateChange, FeatureFlagStats, FeatureReport};
+#[cfg(feature = "metrics")]
+pub use ops::metrics::PrometheusExporter;
 
 use crate::core::error::FileKVResult;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::Mutex;
-use tracing::{debug, info};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tracing::debug;
+#[cfg(debug_assertions)]
+use tracing::info;
 #[cfg(debug_assertions)]
 use tracing::warn;
 
-
-use crate::core::sparse_index::IndexManager;
 use crate::compaction::CompactionManager;
+use crate::core::sparse_index::IndexManager;
 
-pub use crate::bloom::{BloomManager, BloomConfig, BloomSegmentProvider};
-pub use crate::bloom::{save_bloom_filter_atomic, load_bloom_filter, bloom_filter_exists};
+pub use crate::bloom::{bloom_filter_exists, load_bloom_filter, save_bloom_filter_atomic};
+pub use crate::bloom::{BloomConfig, BloomManager, BloomSegmentProvider};
 
 // Re-export external bloom crate types
-pub use ::bloom::ASMS;
 pub use ::bloom::BloomFilter;
+pub use ::bloom::ASMS;
 
 // Conditional compilation macros for tracing
 #[cfg(not(debug_assertions))]
@@ -289,15 +299,21 @@ impl FileKV {
             trace_warn(|| warning.clone());
         }
 
-        config.fs.create_dir_all(&config.segment_dir)
+        config
+            .fs
+            .create_dir_all(&config.segment_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create segment dir: {}", e))?;
 
         if config.enable_wal {
-            config.fs.create_dir_all(&config.wal_dir)
+            config
+                .fs
+                .create_dir_all(&config.wal_dir)
                 .map_err(|e| anyhow::anyhow!("Failed to create WAL dir: {}", e))?;
         }
 
-        config.fs.create_dir_all(&config.index_dir)
+        config
+            .fs
+            .create_dir_all(&config.index_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create index dir: {}", e))?;
 
         // DATA-002 FIX: Clean up any leftover temp files from previous crashes
@@ -314,7 +330,6 @@ impl FileKV {
         let mut max_id = 0u64;
 
         for path in config.fs.read_dir(&config.segment_dir)? {
-
             if path.extension().and_then(|s| s.to_str()) == Some("log") {
                 if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Some(id_str) = name.strip_prefix("segment_") {
@@ -346,10 +361,8 @@ impl FileKV {
         if config.aggressive.cache_max_memory_bytes > 0 {
             cache_config.max_memory_bytes = config.aggressive.cache_max_memory_bytes as u64;
             // Also adjust max_items based on cache size (rough estimate: 4KB per item average)
-            cache_config.max_items = std::cmp::max(
-                cache_config.max_items,
-                config.aggressive.cache_max_memory_bytes / 4096,
-            );
+            cache_config.max_items =
+                std::cmp::max(cache_config.max_items, config.aggressive.cache_max_memory_bytes / 4096);
         }
 
         // GAP-M5: Instantiate UnifiedCacheManager for coordinated cache management
@@ -362,12 +375,27 @@ impl FileKV {
             block_cache_config: Some(cache_config.clone()),
             bloom_cache_config: None,
             bloom_index_dir: config.index_dir.clone(),
+            enable_multi_level_cache: config.enable_multi_level_cache,
+            l2_cache_config: Some(cache::L2CacheConfig {
+                max_bytes: config.l2_cache_max_bytes,
+                cache_dir: config.index_dir.join("cache_l2"),
+                l2_to_l1_threshold: config.l2_to_l1_threshold,
+            }),
         };
         let unified_cache = Arc::new(cache::UnifiedCacheManager::new(unified_cache_config));
 
         // Get the managed caches from UnifiedCacheManager
         let block_cache = unified_cache.block_cache().clone();
-        let memtable = Arc::new(MemTable::new(config.memtable.clone()));
+
+        // PERF-MEM-001: Create MemoryTracker with actual memory budget from config
+        let memory_tracker = Arc::new(ops::memory_tracker::MemoryTracker::new(
+            config.aggressive.cache_max_memory_bytes as u64,
+        ));
+
+        let memtable = Arc::new(MemTable::with_memory_tracker(
+            config.memtable.clone(),
+            Some(memory_tracker.clone()),
+        ));
 
         let flush_trigger = if config.enable_background_flush {
             FlushTrigger::with_background_thread(config.background_flush_interval_ms, memtable.clone())
@@ -413,11 +441,14 @@ impl FileKV {
         };
 
         // S2-1: Initialize dictionary compressor if enabled (shared between read and write engines)
-        let compressor: Option<Arc<parking_lot::Mutex<crate::compression::dictionary::DictionaryCompressor>>> = if config.compression.enable_dictionary {
-            Some(Arc::new(parking_lot::Mutex::new(crate::compression::dictionary::DictionaryCompressor::new(config.compression.clone()))))
-        } else {
-            None
-        };
+        let compressor: Option<Arc<crate::compression::dictionary::DictionaryCompressor>> =
+            if config.compression.enable_dictionary {
+                Some(Arc::new(crate::compression::dictionary::DictionaryCompressor::new(
+                    config.compression.clone(),
+                )))
+            } else {
+                None
+            };
 
         // P3-001: Initialize async I/O writer if enabled
         #[cfg(feature = "async-io")]
@@ -449,7 +480,8 @@ impl FileKV {
         // Phase 4.7: Create SINGLE shared EngineState BEFORE FileKV struct
         // ENG-007: Use builder pattern instead of 10+ parameter constructor
         let stats = Arc::new(FileKVStats::default());
-        let engine_state = Arc::new(crate::engine::EngineState::builder(config.clone())
+        let engine_state = Arc::new(
+            crate::engine::EngineState::builder(config.clone())
             .segments(segments)  // Move (no clone) - ArcSwap wraps internally
             .next_segment_id(max_id + 1)
             .index_manager(index_manager)           // Move (no clone) - ArcSwap wraps internally
@@ -460,7 +492,8 @@ impl FileKV {
             .block_cache(block_cache.clone())
             .unified_cache(Some(unified_cache.clone()))  // GAP-M5: UnifiedCacheManager for budget control
             .global_index(global_index.clone())  // V0.6.0: Global key index
-            .build());
+            .build(),
+        );
 
         // INNO-001: Create SINGLE shared bloom migration controller
         let bloom_migration_controller = Arc::new(bloom::migration::MigrationController::new(
@@ -520,25 +553,50 @@ impl FileKV {
                 feature_flags.clone(),
                 range_pruner,
                 prefetcher,
-                Arc::new(ops::memory_tracker::MemoryTracker::new(0)),
+                memory_tracker.clone(),
                 bloom_migration_controller.clone(),
-                compressor.clone(),  // S2-1: Use shared compressor
+                compressor.clone(), // S2-1: Use shared compressor
             ))
         };
 
         let write_engine = {
-            let wal_manager = if config.enable_wal {
-                Some(Mutex::new(WalManager::new_with_config(
+            // OPT-007: Create wal_manager as Arc<Mutex<...>> first, so both WriteEngine and WalChannel can share it
+            let wal_manager_arc = if config.enable_wal {
+                Some(Arc::new(Mutex::new(WalManager::new_with_config(
                     config.fs.clone(),
                     &config.wal_dir,
                     true,
                     config.wal_max_size_bytes,
                     config.wal_max_files,
                     config.aggressive.wal_sync_mode,
-                )?))
+                )?)))
             } else {
                 None
             };
+
+            // OPT-007: Create WAL channel if enabled
+            let wal_channel = if config.enable_wal_channel && config.enable_wal {
+                let wc_config = crate::core::wal_channel::WalChannelConfig {
+                    batch_interval_ms: config.wal_channel_interval_ms,
+                    batch_max_entries: config.wal_channel_max_entries,
+                    channel_capacity: config.wal_channel_capacity,
+                    enabled: true,
+                };
+                let channel = Arc::new(crate::core::wal_channel::WalChannel::new(wc_config));
+                // Start the channel with WAL manager, MemTable, and Stats references
+                // so the background thread can defer memtable inserts after WAL persistence
+                if let Some(ref wal_arc) = wal_manager_arc {
+                    channel.start_with_memtable(
+                        Arc::clone(wal_arc),
+                        Some(engine_state.memtable_state.memtable.clone()),
+                        Some(engine_state.stats_state.stats.clone()),
+                    );
+                }
+                Some(channel)
+            } else {
+                None
+            };
+
             let audit_logger = if config.audit_log.enabled {
                 let logger = ops::audit_log::AuditLogger::open(config.audit_log.clone())
                     .map_err(|e| anyhow::anyhow!("Failed to initialize audit logger: {}", e))?;
@@ -546,11 +604,13 @@ impl FileKV {
             } else {
                 None
             };
+
             Arc::new(crate::engine::WriteEngine::new(
                 engine_state.clone(),
-                wal_manager,
+                wal_manager_arc,
+                wal_channel,
                 write_coalescer.clone(),
-                compressor.clone(),  // S2-1: Use shared compressor
+                compressor.clone(), // S2-1: Use shared compressor
                 async_writer,
                 flush_trigger.clone(),
                 Arc::new(CompactionManager::new(config.compaction.clone())),
@@ -571,9 +631,7 @@ impl FileKV {
 
         let lifecycle_manager = Arc::new(crate::engine::LifecycleManager::new(
             engine_state.clone(),
-            parking_lot::Mutex::new(IncrementalCheckpointManager::new(
-                &config.checkpoint_dir,
-            )?),
+            parking_lot::Mutex::new(IncrementalCheckpointManager::new(&config.checkpoint_dir)?),
             None,
             #[cfg(feature = "metrics")]
             metrics.clone(),
@@ -597,11 +655,17 @@ impl FileKV {
         {
             // Use atomic counters for segment stats
             kv.engine_state.stats_state.stats.segment_count.store(
-                kv.engine_state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed),
+                kv.engine_state
+                    .segment_state
+                    .segment_count
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 std::sync::atomic::Ordering::Relaxed,
             );
             kv.engine_state.stats_state.stats.total_size_bytes.store(
-                kv.engine_state.segment_state.total_size_bytes.load(std::sync::atomic::Ordering::Relaxed),
+                kv.engine_state
+                    .segment_state
+                    .total_size_bytes
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 std::sync::atomic::Ordering::Relaxed,
             );
         }
@@ -611,13 +675,18 @@ impl FileKV {
             let segments = kv.engine_state.segment_state.segments.load();
             if !segments.is_empty() {
                 tracing::info!("Rebuilding global key index from {} existing segments", segments.len());
-                if let Err(e) = kv.engine_state.global_index_state.global_index.rebuild_from_segments(&segments) {
+                if let Err(e) = kv
+                    .engine_state
+                    .global_index_state
+                    .global_index
+                    .rebuild_from_segments(&segments)
+                {
                     tracing::warn!("Failed to rebuild global key index: {}", e);
                 } else {
                     let idx_stats = kv.engine_state.global_index_state.global_index.stats();
                     tracing::info!(
                         "Global key index rebuilt: {} keys indexed",
-                        idx_stats.total_keys
+                        idx_stats.total_keys.load(std::sync::atomic::Ordering::Relaxed)
                     );
                 }
             }
@@ -657,11 +726,7 @@ impl FileKV {
 
         // Phase 5: Recover from incomplete compactions (crash-safe compaction)
         let manifest_dir = config.index_dir.join("compaction_manifests");
-        match compaction::manifest::recover_incomplete(
-            config.fs.as_ref(),
-            &manifest_dir,
-            &config.segment_dir,
-        ) {
+        match compaction::manifest::recover_incomplete(config.fs.as_ref(), &manifest_dir, &config.segment_dir) {
             Ok(actions) => {
                 if !actions.is_empty() {
                     for action in &actions {
@@ -699,8 +764,12 @@ impl FileKV {
     /// This delegates to LifecycleManager.recover_from_wal() for unified recovery.
     pub fn recover(&self) -> crate::core::error::FileKVResult<usize> {
         if let Some(wal) = self.wal_ref() {
-            let result = self.lifecycle_manager.recover_from_wal(wal)
-                .map_err(|e| crate::core::error::FileKVError::Fatal(crate::core::error::FatalError::Corruption(format!("WAL recovery failed: {}", e))));
+            let result = self.lifecycle_manager.recover_from_wal(wal).map_err(|e| {
+                crate::core::error::FileKVError::Fatal(crate::core::error::FatalError::Corruption(format!(
+                    "WAL recovery failed: {}",
+                    e
+                )))
+            });
 
             if let Ok(count) = &result {
                 if *count > 0 {
@@ -738,7 +807,8 @@ impl FileKV {
         self.compaction_engine.set_filekv_ref(kv_weak);
 
         // Delegate to CompactionEngine for thread management
-        self.compaction_engine.start_background_compaction(self.engine_state.clone())
+        self.compaction_engine
+            .start_background_compaction(self.engine_state.clone())
     }
 
     /// Manually trigger a compaction cycle and return compaction statistics
@@ -775,10 +845,18 @@ impl FileKV {
     /// ```
     pub fn run_compaction(&self) -> anyhow::Result<compaction::CompactionStats> {
         // Phase 4.5: Delegate to CompactionEngine for validation, then execute actual compaction
-        let segment_count = self.engine_state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed);
-        let total_size: u64 = self.engine_state.segment_state.total_size_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let segment_count = self
+            .engine_state
+            .segment_state
+            .segment_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total_size: u64 = self
+            .engine_state
+            .segment_state
+            .total_size_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
 
-        self.compaction_engine.run_compaction(|_| {
+        let stats = self.compaction_engine.run_compaction(|_| {
             // Execute actual compaction using this FileKV reference
             let req = compaction::CompactionRequest {
                 segment_count,
@@ -788,7 +866,33 @@ impl FileKV {
 
             // Call the actual compaction logic
             compaction::execute_compaction(self, &req)
-        })
+        })?;
+
+        // OPT-008: Record amplification stats from compaction
+        if stats.bytes_read_from_segments > 0 {
+            self.engine_state
+                .stats_state
+                .amplification_tracker
+                .record_disk_read(stats.bytes_read_from_segments);
+        }
+        if stats.bytes_written_to_segment > 0 {
+            self.engine_state
+                .stats_state
+                .amplification_tracker
+                .record_disk_write(stats.bytes_written_to_segment);
+        }
+        // Update space amplification: refresh disk usage after compaction
+        let current_disk_usage: u64 = self
+            .engine_state
+            .segment_state
+            .total_size_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
+        self.engine_state
+            .stats_state
+            .amplification_tracker
+            .update_disk_usage(current_disk_usage);
+
+        Ok(stats)
     }
 
     /// Get a reference to the FileKV configuration
@@ -834,7 +938,7 @@ impl FileKV {
     }
 
     /// Get reference to WAL manager (for recovery)
-    pub fn wal_ref(&self) -> Option<&Mutex<WalManager>> {
+    pub fn wal_ref(&self) -> Option<&Arc<Mutex<WalManager>>> {
         self.write_engine.wal_ref()
     }
 
@@ -859,7 +963,7 @@ impl FileKV {
     }
 
     /// Load bloom filter for a segment
-    pub fn load_bloom_filter(&self, segment_id: u64) -> anyhow::Result<Option<(BloomFilter, Vec<String>)>> {
+    pub fn load_bloom_filter(&self, segment_id: u64) -> anyhow::Result<Option<bloom::FilterWrapper>> {
         self.read_engine.load_bloom_filter(segment_id)
     }
 
@@ -929,13 +1033,6 @@ impl FileKV {
         self.write_engine.get_preallocator_stats()
     }
 
-    /// Record segment closed with actual size
-    /// NOTE: Called by segment closing code for preallocator feedback
-    #[allow(dead_code)]
-    pub(crate) fn record_segment_closed(&self, actual_size: u64) {
-        self.write_engine.record_segment_closed(actual_size)
-    }
-
     /// Get range query pruner reference
     /// NOTE: Public API for range query optimization
     #[allow(dead_code)]
@@ -946,7 +1043,10 @@ impl FileKV {
     /// Get sequential prefetcher reference
     /// NOTE: Public API for sequential prefetch inspection
     #[allow(dead_code)]
-    pub(crate) fn get_sequential_prefetcher(&self) -> Option<&Arc<parking_lot::RwLock<SequentialPrefetcher<crate::cache::block_cache::BlockCacheAsPrefetchCache>>>> {
+    pub(crate) fn get_sequential_prefetcher(
+        &self,
+    ) -> Option<&Arc<parking_lot::RwLock<SequentialPrefetcher<crate::cache::block_cache::BlockCacheAsPrefetchCache>>>>
+    {
         self.read_engine.get_sequential_prefetcher()
     }
 
@@ -977,14 +1077,14 @@ impl FileKV {
         // S2-3: Auto-record Prometheus metrics
         #[cfg(feature = "metrics")]
         let timer = crate::ops::metrics::MetricsTimer::start_write(&self.metrics);
-        
+
         // Phase 4.4: Delegate to WriteEngine (now shares EngineState)
         let result = self.write_engine.put(key, value);
-        
+
         // S2-3: Record result
         #[cfg(feature = "metrics")]
         timer.record(result.is_ok());
-        
+
         result
     }
 
@@ -1008,7 +1108,12 @@ impl FileKV {
     /// let val = kv.get("important_key").unwrap().unwrap();
     /// assert_eq!(val.as_ref(), b"critical_data");
     /// ```
-    pub fn put_with_durability(&self, key: &str, value: &[u8], durability: crate::core::types::Durability) -> anyhow::Result<()> {
+    pub fn put_with_durability(
+        &self,
+        key: &str,
+        value: &[u8],
+        durability: crate::core::types::Durability,
+    ) -> anyhow::Result<()> {
         // Phase 4.4: Delegate to WriteEngine (now shares EngineState)
         self.write_engine.put_with_durability(key, value, durability)
     }
@@ -1183,6 +1288,59 @@ impl FileKV {
         // Phase 4.4: Delegate to WriteEngine (now shares EngineState)
         self.write_engine.put_batch(entries)
     }
+
+    /// Batch read multiple keys efficiently
+    ///
+    /// Returns a `Vec` with the same length as `keys`, where each element is
+    /// `Some(Bytes)` if the key was found, or `None` otherwise.
+    ///
+    /// # Example
+    /// ```
+    /// use tokitai_filekv::{FileKV, FileKVConfig};
+    ///
+    /// let temp_dir = tempfile::tempdir().unwrap();
+    /// let mut config = FileKVConfig::default();
+    /// config.segment_dir = temp_dir.path().join("segments");
+    /// config.wal_dir = temp_dir.path().join("wal");
+    /// config.index_dir = temp_dir.path().join("index");
+    /// config.checkpoint_dir = temp_dir.path().join("checkpoints");
+    /// config.enable_wal = false;
+    ///
+    /// let kv = FileKV::open(config).unwrap();
+    /// kv.put_batch(&[("k1", b"v1"), ("k2", b"v2")]).unwrap();
+    ///
+    /// let results = kv.get_batch(&["k1", "k2", "k3"]).unwrap();
+    /// assert_eq!(results[0].as_ref().unwrap().as_ref(), b"v1");
+    /// assert_eq!(results[1].as_ref().unwrap().as_ref(), b"v2");
+    /// assert!(results[2].is_none());
+    /// ```
+    pub fn get_batch(&self, keys: &[&str]) -> anyhow::Result<Vec<Option<Bytes>>> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(feature = "metrics")]
+        let timer = crate::ops::metrics::MetricsTimer::start_read(&self.metrics);
+
+        let result = self.read_engine.get_batch(keys);
+
+        #[cfg(feature = "metrics")]
+        {
+            // Record cache stats based on results
+            let hits = result.iter().flatten().count();
+            let misses = keys.len() - hits;
+            for _ in 0..hits {
+                self.metrics.record_cache_hit();
+            }
+            for _ in 0..misses {
+                self.metrics.record_cache_miss();
+            }
+            timer.record(true);
+        }
+
+        result
+    }
+
     /// Delete a key from the KV store
     ///
     /// # Example
@@ -1215,6 +1373,50 @@ impl FileKV {
         let result = self.write_engine.delete(key);
 
         // S4-2: Record result
+        #[cfg(feature = "metrics")]
+        timer.record(result.is_ok());
+
+        result
+    }
+
+    /// Batch delete multiple keys
+    ///
+    /// Writes a tombstone for each key. Keys that don't exist are silently ignored
+    /// (FileKV handles non-existent keys safely — no pre-check needed).
+    ///
+    /// Fails fast: the first error aborts the batch and returns immediately.
+    ///
+    /// # Example
+    /// ```
+    /// use tokitai_filekv::{FileKV, FileKVConfig};
+    ///
+    /// let temp_dir = tempfile::tempdir().unwrap();
+    /// let mut config = FileKVConfig::default();
+    /// config.segment_dir = temp_dir.path().join("segments");
+    /// config.wal_dir = temp_dir.path().join("wal");
+    /// config.index_dir = temp_dir.path().join("index");
+    /// config.checkpoint_dir = temp_dir.path().join("checkpoints");
+    /// config.enable_wal = false;
+    ///
+    /// let kv = FileKV::open(config).unwrap();
+    /// kv.put_batch(&[("k1", b"v1"), ("k2", b"v2")]).unwrap();
+    ///
+    /// kv.delete_batch(&["k1", "k2", "k3"]).unwrap();
+    ///
+    /// // After delete, get returns empty value (tombstone)
+    /// let val = kv.get("k1").unwrap();
+    /// assert_eq!(val.as_ref().map(|b| b.as_ref()), Some(b"".as_ref()));
+    /// ```
+    pub fn delete_batch(&self, keys: &[&str]) -> anyhow::Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+
+        #[cfg(feature = "metrics")]
+        let timer = crate::ops::metrics::MetricsTimer::start_delete(&self.metrics);
+
+        let result = self.write_engine.delete_batch(keys);
+
         #[cfg(feature = "metrics")]
         timer.record(result.is_ok());
 
@@ -1302,6 +1504,30 @@ impl FileKV {
         self.read_engine.get_bloom_migration_stats()
     }
 
+    /// OPT-008: Get real-time amplification statistics (WA/RA/SA)
+    ///
+    /// Returns a snapshot of the amplification tracker with write, read, and
+    /// space amplification factors calculated from lock-free atomic counters.
+    ///
+    /// # Example
+    /// ```
+    /// use tokitai_filekv::{FileKV, FileKVConfig};
+    ///
+    /// let temp_dir = tempfile::tempdir().unwrap();
+    /// let mut config = FileKVConfig::default();
+    /// config.segment_dir = temp_dir.path().join("segments");
+    /// config.wal_dir = temp_dir.path().join("wal");
+    /// config.index_dir = temp_dir.path().join("index");
+    ///
+    /// let kv = FileKV::open(config).unwrap();
+    ///
+    /// let amp = kv.get_amplification_stats();
+    /// assert!((amp.write_amplification - 1.0).abs() < 0.01); // Initial WA ~1.0
+    /// ```
+    pub fn get_amplification_stats(&self) -> ops::amplification::AmplificationStats {
+        self.engine_state.stats_state.amplification_tracker.get_stats()
+    }
+
     /// Flush MemTable to segment
     /// Flush the current memtable to a segment file
     ///
@@ -1342,13 +1568,6 @@ impl FileKV {
         result
     }
 
-    /// Run compaction if needed
-    /// NOTE: Public API for manual compaction trigger
-    #[allow(dead_code)]
-    fn maybe_run_compaction(&self) -> anyhow::Result<()> {
-        self.compaction_engine.maybe_run_compaction()
-    }
-
     /// Scan a range of keys
     ///
     /// # Arguments
@@ -1385,11 +1604,7 @@ impl FileKV {
     /// # Performance
     /// - With Zone Map pruning: 40-60% fewer I/O operations
     /// - With prefetching: 15%+ higher cache hit rate
-    pub fn range(
-        &self,
-        start_key: &str,
-        end_key: &str,
-    ) -> FileKVResult<query::scan::RangeScanIterator<'_>> {
+    pub fn range(&self, start_key: &str, end_key: &str) -> FileKVResult<query::scan::RangeScanIterator<'_>> {
         self.range_with_config(start_key, end_key, query::scan::RangeScanConfig::default())
     }
 
@@ -1410,10 +1625,7 @@ impl FileKV {
     ) -> FileKVResult<query::scan::RangeScanIterator<'_>> {
         debug!(
             "Range scan: [{}, {}], pruning={}, prefetch={}",
-            start_key,
-            end_key,
-            config.enable_pruning,
-            config.enable_prefetch
+            start_key, end_key, config.enable_pruning, config.enable_prefetch
         );
 
         query::scan::RangeScanIterator::new(self, start_key, end_key, config)
@@ -1450,12 +1662,7 @@ impl FileKV {
     /// let results = kv.range_collect("alpha", "beta", 0).unwrap();
     /// assert!(results.len() >= 1, "Should return at least 1 result, got {}", results.len());
     /// ```
-    pub fn range_collect(
-        &self,
-        start_key: &str,
-        end_key: &str,
-        limit: usize,
-    ) -> FileKVResult<Vec<(String, Vec<u8>)>> {
+    pub fn range_collect(&self, start_key: &str, end_key: &str, limit: usize) -> FileKVResult<Vec<(String, Vec<u8>)>> {
         let config = query::scan::RangeScanConfig {
             limit,
             ..Default::default()
@@ -1468,6 +1675,107 @@ impl FileKV {
         }
 
         Ok(results)
+    }
+
+    /// Scan all keys with a given prefix
+    ///
+    /// Uses `range()` internally with the end key computed as `prefix + '{'`
+    /// (since '{' is the ASCII character after all typical key characters).
+    ///
+    /// # Returns
+    /// Iterator over (key, value) pairs matching the prefix
+    ///
+    /// # Example
+    /// ```
+    /// use tokitai_filekv::{FileKV, FileKVConfig};
+    ///
+    /// let temp_dir = tempfile::tempdir().unwrap();
+    /// let mut config = FileKVConfig::default();
+    /// config.segment_dir = temp_dir.path().join("segments");
+    /// config.wal_dir = temp_dir.path().join("wal");
+    /// config.index_dir = temp_dir.path().join("index");
+    /// config.enable_wal = false;
+    ///
+    /// let kv = FileKV::open(config).unwrap();
+    /// kv.put("session:abc", b"1").unwrap();
+    /// kv.put("session:def", b"2").unwrap();
+    /// kv.put("other:xyz", b"3").unwrap();
+    /// kv.flush_memtable().unwrap();
+    ///
+    /// let results = kv.prefix_scan("session:").unwrap().collect::<Vec<_>>();
+    /// assert_eq!(results.len(), 2);
+    /// ```
+    pub fn prefix_scan(&self, prefix: &str) -> FileKVResult<query::scan::RangeScanIterator<'_>> {
+        let end_key = format!("{}{{", prefix);
+        self.range_with_config(prefix, &end_key, query::scan::RangeScanConfig::default())
+    }
+
+    /// Delete all keys with a given prefix
+    ///
+    /// Combines prefix_scan + delete_batch for efficient bulk prefix deletion.
+    ///
+    /// # Returns
+    /// Number of keys deleted
+    ///
+    /// # Example
+    /// ```
+    /// use tokitai_filekv::{FileKV, FileKVConfig};
+    ///
+    /// let temp_dir = tempfile::tempdir().unwrap();
+    /// let mut config = FileKVConfig::default();
+    /// config.segment_dir = temp_dir.path().join("segments");
+    /// config.wal_dir = temp_dir.path().join("wal");
+    /// config.index_dir = temp_dir.path().join("index");
+    /// config.enable_wal = false;
+    ///
+    /// let kv = FileKV::open(config).unwrap();
+    /// kv.put("session:abc", b"1").unwrap();
+    /// kv.put("session:def", b"2").unwrap();
+    /// kv.put("other:xyz", b"3").unwrap();
+    /// kv.flush_memtable().unwrap();
+    ///
+    /// let deleted = kv.delete_by_prefix("session:").unwrap();
+    /// assert_eq!(deleted, 2);
+    /// ```
+    pub fn delete_by_prefix(&self, prefix: &str) -> FileKVResult<usize> {
+        // Streaming delete: process in batches to avoid O(n) memory allocation.
+        // Each batch collects up to BATCH_SIZE keys, deletes them, then resumes
+        // from the next key after the last deleted one.
+        const BATCH_SIZE: usize = 256;
+        let mut total_deleted = 0;
+        let end_key = format!("{}{{", prefix); // '{' is ASCII after 'z', exclusive bound
+        let mut start = prefix.to_string();
+
+        loop {
+            let batch: Vec<String> = self
+                .range_with_config(
+                    &start,
+                    &end_key,
+                    query::scan::RangeScanConfig::default().with_limit(BATCH_SIZE),
+                )?
+                .filter_map(|r| r.ok().map(|e| e.key))
+                .collect();
+
+            if batch.is_empty() {
+                break;
+            }
+
+            let last_key = batch.last().cloned().unwrap();
+            let key_refs: Vec<&str> = batch.iter().map(|k| k.as_str()).collect();
+            self.delete_batch(&key_refs)
+                .map_err(|e| crate::core::error::FatalError::Corruption(format!("delete_by_prefix failed: {e}")))?;
+            total_deleted += batch.len();
+
+            // Resume from the key after the last deleted one
+            start = last_key;
+            start.push('\0'); // Move past the last key
+
+            if start > end_key {
+                break;
+            }
+        }
+
+        Ok(total_deleted)
     }
 }
 

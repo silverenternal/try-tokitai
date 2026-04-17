@@ -5,98 +5,88 @@
 //! 2. 丰富的错误上下文：提供修复建议
 //! 3. 可序列化：支持错误信息传递给 AI
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
 
 /// 张量操作错误类型
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
 pub enum TensorError {
     /// 形状不匹配错误
     #[error("Shape mismatch: {message}")]
-    ShapeMismatch {
-        message: String,
-    },
+    ShapeMismatch { message: String },
 
     /// 无效维度错误
     #[error("Invalid dimension {dim}: {message}")]
-    InvalidDimension {
-        dim: i32,
-        message: String,
-    },
+    InvalidDimension { dim: i32, message: String },
 
     /// 数据类型不支持错误
     #[error("Unsupported dtype: {message}")]
-    UnsupportedDType {
-        message: String,
-    },
+    UnsupportedDType { message: String },
 
     /// 广播错误
     #[error("Broadcast failed: {message}")]
-    BroadcastError {
-        message: String,
-    },
+    BroadcastError { message: String },
 
     /// 索引越界错误
     #[error("Index out of bounds: {message}")]
-    IndexOutOfBounds {
-        message: String,
-    },
+    IndexOutOfBounds { message: String },
 
     /// 除零错误
     #[error("Division by zero: {message}")]
-    DivisionByZero {
-        message: String,
-    },
+    DivisionByZero { message: String },
 
     /// 数值溢出错误
     #[error("Numeric overflow: {message}")]
-    NumericOverflow {
-        message: String,
-    },
+    NumericOverflow { message: String },
 
     /// 设备错误（如 CUDA 不可用）
     #[error("Device error: {message}")]
-    DeviceError {
-        message: String,
-    },
+    DeviceError { message: String },
 
     /// 内存不足错误
     #[error("Out of memory: {message}")]
-    OutOfMemory {
-        message: String,
-    },
+    OutOfMemory { message: String },
 
     /// 通用错误（用于未分类的错误）
     #[error("Tensor operation failed: {message}")]
-    Other {
-        message: String,
-    },
+    Other { message: String },
 }
 
 impl TensorError {
     /// 创建形状不匹配错误
     pub fn shape_mismatch(msg: impl Into<String>) -> Self {
-        Self::ShapeMismatch { message: msg.into() }
+        Self::ShapeMismatch {
+            message: msg.into(),
+        }
     }
 
     /// 创建无效维度错误
     pub fn invalid_dim(dim: i32, msg: impl Into<String>) -> Self {
-        Self::InvalidDimension { dim, message: msg.into() }
+        Self::InvalidDimension {
+            dim,
+            message: msg.into(),
+        }
     }
 
     /// 创建广播错误
     pub fn broadcast_error(msg: impl Into<String>) -> Self {
-        Self::BroadcastError { message: msg.into() }
+        Self::BroadcastError {
+            message: msg.into(),
+        }
     }
 
     /// 创建索引越界错误
     pub fn index_out_of_bounds(msg: impl Into<String>) -> Self {
-        Self::IndexOutOfBounds { message: msg.into() }
+        Self::IndexOutOfBounds {
+            message: msg.into(),
+        }
     }
 
     /// 创建通用错误
     pub fn other(msg: impl Into<String>) -> Self {
-        Self::Other { message: msg.into() }
+        Self::Other {
+            message: msg.into(),
+        }
     }
 
     /// 获取错误修复建议（AI 友好）

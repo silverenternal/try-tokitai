@@ -11,19 +11,18 @@
 //! - `intervention_protocol`: 用户干预协议（PEND-003）
 
 pub mod context_optimizer;
+pub mod intervention_protocol;
+pub mod model_command;
+pub mod orchestrator;
 pub mod role_switcher;
 pub mod workflow;
 pub mod workflow_loader;
-pub mod orchestrator;
-pub mod intervention_protocol;
-pub mod model_command;
 
-pub use orchestrator::Orchestrator;
-pub use role_switcher::{AgentRole, RoleSwitcher, RoleSwitchResult};
 pub use context_optimizer::{ContextMessage, ContextOptimizer, MessageType, OptimizerConfig};
+pub use orchestrator::Orchestrator;
+pub use role_switcher::{AgentRole, RoleSwitchResult, RoleSwitcher};
 #[allow(unused_imports)]
 pub use workflow::{
-    Workflow, WorkflowEngine, Stage, Step, StepStatus, StageStatus, WorkflowStatus,
-    DeclarativeWorkflow, DeclarativeWorkflowStep, RetryConfig,
-    ErrorHandler, ErrorStrategy, templates,
+    templates, DeclarativeWorkflow, DeclarativeWorkflowStep, ErrorHandler, ErrorStrategy,
+    RetryConfig, Stage, StageStatus, Step, StepStatus, Workflow, WorkflowEngine, WorkflowStatus,
 };

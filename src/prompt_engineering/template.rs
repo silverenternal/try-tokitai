@@ -192,14 +192,8 @@ mod tests {
             default: None,
         };
 
-        let template = PromptTemplate::new(
-            "test_id",
-            "Test",
-            "Planner",
-            "Prompt",
-            "1.0.0",
-        )
-        .with_variable(var);
+        let template =
+            PromptTemplate::new("test_id", "Test", "Planner", "Prompt", "1.0.0").with_variable(var);
 
         assert!(template.has_variable("tools"));
         assert!(!template.has_variable("nonexistent"));

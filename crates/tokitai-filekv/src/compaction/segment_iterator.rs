@@ -4,12 +4,12 @@
 //! Used by the MergeIterator to read segments during compaction without
 //! loading all data into memory.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use bytes::Bytes;
-use crate::core::segment::SegmentFile;
-use crate::core::error::FatalError;
 use super::merge_iterator::KVIterator;
+use crate::core::error::FatalError;
+use crate::core::segment::SegmentFile;
+use bytes::Bytes;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Streaming iterator over a single segment's key-value pairs
 ///
@@ -96,14 +96,11 @@ impl SegmentIterator {
         let data = self.mmap_data.as_ref()?;
 
         while self.pos + 4 <= self.file_size {
-
             // Read key length
             if self.pos + 4 > self.file_size {
                 break;
             }
-            let key_len = u32::from_le_bytes(
-                data[self.pos..self.pos + 4].try_into().ok()?
-            ) as usize;
+            let key_len = u32::from_le_bytes(data[self.pos..self.pos + 4].try_into().ok()?) as usize;
             self.pos += 4;
 
             // Read key
@@ -124,9 +121,7 @@ impl SegmentIterator {
             if self.pos + 4 > self.file_size {
                 break;
             }
-            let value_len = u32::from_le_bytes(
-                data[self.pos..self.pos + 4].try_into().ok()?
-            ) as usize;
+            let value_len = u32::from_le_bytes(data[self.pos..self.pos + 4].try_into().ok()?) as usize;
             self.pos += 4;
 
             // Read value
@@ -207,9 +202,9 @@ impl SegmentIteratorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::io::memfs::MemFs;
     use crate::io::FileKVFileSystem;
+    use std::sync::Arc;
 
     #[test]
     fn test_segment_iterator_basic() {
@@ -218,19 +213,7 @@ mod tests {
         let path = std::path::Path::new("/test/segment_1.log");
         fs.create_dir_all(path.parent().unwrap()).unwrap();
 
-        let segment = Arc::new(
-            SegmentFile::create(
-                fs.clone(),
-                1,
-                0,
-                path,
-                0,
-                false,
-                0,
-                false,
-            )
-            .unwrap()
-        );
+        let segment = Arc::new(SegmentFile::create(fs.clone(), 1, 0, path, 0, false, 0, false).unwrap());
 
         // Write some entries
         segment.append("key_a", b"value_a").unwrap();
@@ -256,19 +239,7 @@ mod tests {
         let path = std::path::Path::new("/test/segment_2.log");
         fs.create_dir_all(path.parent().unwrap()).unwrap();
 
-        let segment = Arc::new(
-            SegmentFile::create(
-                fs.clone(),
-                2,
-                0,
-                path,
-                0,
-                false,
-                0,
-                false,
-            )
-            .unwrap()
-        );
+        let segment = Arc::new(SegmentFile::create(fs.clone(), 2, 0, path, 0, false, 0, false).unwrap());
 
         segment.append("key_a", b"value_a").unwrap();
         segment.append("key_b", b"").unwrap(); // Tombstone
@@ -292,19 +263,7 @@ mod tests {
         let path = std::path::Path::new("/test/segment_tomb.log");
         fs.create_dir_all(path.parent().unwrap()).unwrap();
 
-        let segment = Arc::new(
-            SegmentFile::create(
-                fs.clone(),
-                10,
-                0,
-                path,
-                0,
-                false,
-                0,
-                false,
-            )
-            .unwrap()
-        );
+        let segment = Arc::new(SegmentFile::create(fs.clone(), 10, 0, path, 0, false, 0, false).unwrap());
 
         segment.append("key_a", b"value_a").unwrap();
         segment.append("key_b", b"").unwrap(); // Tombstone
@@ -331,19 +290,7 @@ mod tests {
         let path = std::path::Path::new("/test/segment_shared.log");
         fs.create_dir_all(path.parent().unwrap()).unwrap();
 
-        let segment = Arc::new(
-            SegmentFile::create(
-                fs.clone(),
-                11,
-                0,
-                path,
-                0,
-                false,
-                0,
-                false,
-            )
-            .unwrap()
-        );
+        let segment = Arc::new(SegmentFile::create(fs.clone(), 11, 0, path, 0, false, 0, false).unwrap());
 
         segment.append("a", b"1").unwrap();
         segment.append("b", b"").unwrap(); // Tombstone
@@ -368,19 +315,7 @@ mod tests {
         let path = std::path::Path::new("/test/segment_3.log");
         fs.create_dir_all(path.parent().unwrap()).unwrap();
 
-        let segment = Arc::new(
-            SegmentFile::create(
-                fs.clone(),
-                3,
-                0,
-                path,
-                0,
-                false,
-                0,
-                false,
-            )
-            .unwrap()
-        );
+        let segment = Arc::new(SegmentFile::create(fs.clone(), 3, 0, path, 0, false, 0, false).unwrap());
 
         segment.append("key_a", b"value_a").unwrap();
         segment.append("key_b", b"value_b").unwrap();

@@ -15,10 +15,7 @@
 //! - `HTTPWrapper`: Remote HTTP services/REST APIs
 //! - `ScriptWrapper`: Script files (.sh, .py, .js)
 
-use crate::external_process::metadata::{
-    ExternalToolMetadata,
-    ToolExecutionResult,
-};
+use crate::external_process::metadata::{ExternalToolMetadata, ToolExecutionResult};
 use anyhow::Result;
 use serde_json::Value;
 
@@ -160,7 +157,7 @@ pub trait ExternalTool: Send + Sync {
 
 /// Helper functions for JSON Schema validation
 pub mod validation {
-    use anyhow::{Context, Result, bail};
+    use anyhow::{bail, Context, Result};
     use serde_json::Value;
 
     /// Validate input against a JSON schema
@@ -190,10 +187,12 @@ pub mod validation {
     }
 
     /// Validate object schema
-    fn validate_object_schema(input: &Value, schema: &serde_json::Map<String, Value>) -> Result<()> {
+    fn validate_object_schema(
+        input: &Value,
+        schema: &serde_json::Map<String, Value>,
+    ) -> Result<()> {
         // Check if input is an object
-        let input_obj = input.as_object()
-            .context("Input must be a JSON object")?;
+        let input_obj = input.as_object().context("Input must be a JSON object")?;
 
         // Check required fields
         if let Some(required) = schema.get("required") {
@@ -252,7 +251,8 @@ pub mod validation {
 
     /// Extract string from JSON value
     pub fn extract_string(value: &Value, field: &str) -> Result<String> {
-        value.get(field)
+        value
+            .get(field)
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .with_context(|| format!("Field '{}' must be a string", field))
@@ -260,19 +260,24 @@ pub mod validation {
 
     /// Extract optional string from JSON value
     pub fn extract_optional_string(value: &Value, field: &str) -> Option<String> {
-        value.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+        value
+            .get(field)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 
     /// Extract integer from JSON value
     pub fn extract_integer(value: &Value, field: &str) -> Result<i64> {
-        value.get(field)
+        value
+            .get(field)
             .and_then(|v| v.as_i64())
             .with_context(|| format!("Field '{}' must be an integer", field))
     }
 
     /// Extract boolean from JSON value
     pub fn extract_boolean(value: &Value, field: &str) -> Result<bool> {
-        value.get(field)
+        value
+            .get(field)
             .and_then(|v| v.as_bool())
             .with_context(|| format!("Field '{}' must be a boolean", field))
     }
@@ -317,7 +322,10 @@ mod tests {
 
         let result = validation::validate_json_schema(&input, &schema);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing required field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing required field"));
     }
 
     #[test]

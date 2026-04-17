@@ -92,7 +92,7 @@ impl SequentialPrefetcherStats {
 /// Abstracts the cache implementation for prefetching
 pub trait PrefetchCache: Send + Sync {
     /// Prefetch a block into cache
-    /// 
+    ///
     /// # Arguments
     /// * `segment_id` - The segment containing the block
     /// * `block_id` - The block ID within the segment
@@ -108,7 +108,7 @@ pub trait PrefetchCache: Send + Sync {
 /// Sequential Prefetcher
 ///
 /// Detects sequential access patterns and prefetches adjacent blocks
-/// 
+///
 /// GAP-C4: Added per-segment tracking for correct block prefetch
 pub struct SequentialPrefetcher<C: PrefetchCache> {
     /// Configuration
@@ -263,8 +263,10 @@ impl<C: PrefetchCache> SequentialPrefetcher<C> {
         let last_prefetched = self.last_prefetched_block.load(Ordering::Relaxed);
         if last_prefetched > 0 && block_id > last_prefetched {
             self.stats.record_prefetch(false);
-            debug!("Prefetch miss: accessed block {} after prefetching up to {}", 
-                   block_id, last_prefetched);
+            debug!(
+                "Prefetch miss: accessed block {} after prefetching up to {}",
+                block_id, last_prefetched
+            );
         }
     }
 
@@ -314,6 +316,13 @@ pub struct SimpleBlockCache {
 }
 
 #[cfg(test)]
+impl Default for SimpleBlockCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl SimpleBlockCache {
     pub fn new() -> Self {
         Self {
@@ -327,9 +336,9 @@ impl PrefetchCache for SimpleBlockCache {
     fn prefetch(&self, segment_id: u64, block_id: u64) -> bool {
         let mut cache = self.cache.lock();
         let key = (segment_id, block_id);
-        if !cache.contains_key(&key) {
+        if let std::collections::hash_map::Entry::Vacant(e) = cache.entry(key) {
             // Simulate prefetch by storing a dummy value
-            cache.insert(key, Arc::new(()));
+            e.insert(Arc::new(()));
             true
         } else {
             false

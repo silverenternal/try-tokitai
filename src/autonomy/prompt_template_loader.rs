@@ -11,7 +11,7 @@
 
 #![allow(dead_code)]
 //! let causal_template = loader.load("causal_analysis")?;
-//! 
+//!
 //! // 渲染模板（替换变量）
 //! let rendered = loader.render(&causal_template, &[
 //!     ("task_history", "..."),
@@ -19,11 +19,11 @@
 //! ])?;
 //! ```
 
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
 /// Prompt 模板加载器
 pub struct PromptTemplateLoader {
@@ -37,11 +37,11 @@ impl PromptTemplateLoader {
     /// 创建新的加载器
     pub fn new<P: AsRef<Path>>(template_dir: P) -> Result<Self> {
         let template_dir = template_dir.as_ref().to_path_buf();
-        
+
         if !template_dir.exists() {
             warn!("模板目录不存在：{:?}，将使用内置模板", template_dir);
         }
-        
+
         Ok(Self {
             template_dir,
             cache: HashMap::new(),
@@ -58,11 +58,11 @@ impl PromptTemplateLoader {
 
         // 从文件加载
         let template_path = self.template_dir.join(format!("{}.txt", name));
-        
+
         if template_path.exists() {
             let content = fs::read_to_string(&template_path)
                 .with_context(|| format!("读取模板文件失败：{:?}", template_path))?;
-            
+
             debug!("加载模板：{:?}", template_path);
             self.cache.insert(name.to_string(), content.clone());
             Ok(content)
@@ -76,13 +76,13 @@ impl PromptTemplateLoader {
     /// 渲染模板（替换变量）
     pub fn render(&self, template: &str, variables: &[(&str, &str)]) -> Result<String> {
         let mut rendered = template.to_string();
-        
+
         for (key, value) in variables {
             // 支持 {{key}} 和 {key} 两种格式
             rendered = rendered.replace(&format!("{{{{{}}}}}", key), value);
             rendered = rendered.replace(&format!("{{{}}}", key), value);
         }
-        
+
         Ok(rendered)
     }
 
@@ -95,7 +95,7 @@ impl PromptTemplateLoader {
     /// 重新加载所有模板（热重载）
     pub fn reload_all(&mut self) -> Result<()> {
         self.clear_cache();
-        
+
         if !self.template_dir.exists() {
             return Ok(());
         }
@@ -104,14 +104,14 @@ impl PromptTemplateLoader {
         for entry in fs::read_dir(&self.template_dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("txt") {
                 if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                     let _ = self.load(name);
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -146,8 +146,8 @@ impl Default for PromptTemplateLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_create_loader() {
@@ -168,12 +168,11 @@ mod tests {
     fn test_render_template() {
         let loader = PromptTemplateLoader::default();
         let template = "Hello {{name}}, welcome to {{place}}!";
-        
-        let rendered = loader.render(template, &[
-            ("name", "Alice"),
-            ("place", "Tokitai"),
-        ]).unwrap();
-        
+
+        let rendered = loader
+            .render(template, &[("name", "Alice"), ("place", "Tokitai")])
+            .unwrap();
+
         assert_eq!(rendered, "Hello Alice, welcome to Tokitai!");
     }
 
@@ -184,15 +183,15 @@ mod tests {
         fs::write(&template_path, "Test content").unwrap();
 
         let mut loader = PromptTemplateLoader::new(temp_dir.path()).unwrap();
-        
+
         // 首次加载
         let content1 = loader.load("test").unwrap();
         assert_eq!(content1, "Test content");
-        
+
         // 缓存命中
         let content2 = loader.load("test").unwrap();
         assert_eq!(content2, "Test content");
-        
+
         // 清除缓存
         loader.clear_cache();
         assert_eq!(loader.cache.len(), 0);
@@ -201,17 +200,17 @@ mod tests {
     #[test]
     fn test_reload_all() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // 创建多个模板文件
         fs::write(temp_dir.path().join("template1.txt"), "Content 1").unwrap();
         fs::write(temp_dir.path().join("template2.txt"), "Content 2").unwrap();
 
         let mut loader = PromptTemplateLoader::new(temp_dir.path()).unwrap();
-        
+
         // 重新加载所有
         let result = loader.reload_all();
         assert!(result.is_ok());
-        
+
         // 验证缓存
         let stats = loader.get_cache_stats();
         assert!(stats["cache_size"] >= 2);

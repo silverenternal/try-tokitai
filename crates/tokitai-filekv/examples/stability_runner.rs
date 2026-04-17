@@ -9,30 +9,36 @@
 //! Example:
 //!   cargo run --release --example stability_runner 3600  # 1 hour
 
+use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::env;
 
 use tokitai_filekv::{FileKV, FileKVConfig};
 
 fn main() -> anyhow::Result<()> {
-    let duration_secs: u64 = env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(300); // Default: 5 minutes
+    let duration_secs: u64 = env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(300); // Default: 5 minutes
 
     println!("=== FileKV Stability Runner ===");
-    println!("Duration: {}s ({:.1} minutes)", duration_secs, duration_secs as f64 / 60.0);
+    println!(
+        "Duration: {}s ({:.1} minutes)",
+        duration_secs,
+        duration_secs as f64 / 60.0
+    );
     println!();
 
     let temp_dir = tempfile::tempdir()?;
-    let mut config = FileKVConfig::default();
-    config.segment_dir = temp_dir.path().join("segments");
-    config.wal_dir = temp_dir.path().join("wal");
-    config.index_dir = temp_dir.path().join("index");
-    config.enable_wal = true;
-    config.aggressive.wal_sync_mode = tokitai_filekv::WalSyncMode::Batch;
+    let config = FileKVConfig {
+        segment_dir: temp_dir.path().join("segments"),
+        wal_dir: temp_dir.path().join("wal"),
+        index_dir: temp_dir.path().join("index"),
+        enable_wal: true,
+        aggressive: tokitai_filekv::AggressiveConfig {
+            wal_sync_mode: tokitai_filekv::WalSyncMode::Batch,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let kv = FileKV::open(config)?;
     let kv = Arc::new(kv);
@@ -69,7 +75,7 @@ fn main() -> anyhow::Result<()> {
             writer_puts.fetch_add(100, Ordering::Relaxed);
 
             // Flush every 1000 puts
-            if writer_puts.load(Ordering::Relaxed) % 1000 == 0 {
+            if writer_puts.load(Ordering::Relaxed).is_multiple_of(1000) {
                 if let Err(e) = writer_kv.flush_memtable() {
                     eprintln!("Flush error: {}", e);
                 }
@@ -98,8 +104,12 @@ fn main() -> anyhow::Result<()> {
                 let key_idx = i % current_keys;
                 let key = format!("key_{}", key_idx);
                 match reader_kv.get(&key) {
-                    Ok(Some(_)) => { reader_gets.fetch_add(1, Ordering::Relaxed); }
-                    Ok(None) => { reader_gets.fetch_add(1, Ordering::Relaxed); }
+                    Ok(Some(_)) => {
+                        reader_gets.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(None) => {
+                        reader_gets.fetch_add(1, Ordering::Relaxed);
+                    }
                     Err(e) => {
                         reader_errors.fetch_add(1, Ordering::Relaxed);
                         eprintln!("Get error: {}", e);
@@ -189,7 +199,10 @@ fn main() -> anyhow::Result<()> {
     println!("Total gets:    {}", gets);
     println!("Total deletes: {}", deletes);
     println!("Total errors:  {}", errors);
-    println!("Ops/sec:       {:.0}", (puts + gets + deletes) as f64 / elapsed.as_secs_f64());
+    println!(
+        "Ops/sec:       {:.0}",
+        (puts + gets + deletes) as f64 / elapsed.as_secs_f64()
+    );
 
     if errors > 0 {
         println!("STATUS: FAILED ({} errors)", errors);

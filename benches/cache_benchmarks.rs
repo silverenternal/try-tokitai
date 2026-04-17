@@ -2,8 +2,8 @@
 //!
 //! 测试 LRU 分支缓存和祖先链缓存的性能提升
 
+use ai_assistant::context::{AncestorCache, BranchCache, ContextBranch};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use ai_assistant::context::{BranchCache, AncestorCache, ContextBranch};
 use std::collections::HashMap;
 use tempfile::TempDir;
 
@@ -57,9 +57,7 @@ fn bench_branch_access_with_cache(c: &mut Criterion) {
     }
 
     group.bench_function("with_cache_hit", |b| {
-        b.iter(|| {
-            cache.get(black_box("branch-25"))
-        })
+        b.iter(|| cache.get(black_box("branch-25")))
     });
 
     group.bench_function("with_cache_miss", |b| {
@@ -76,7 +74,7 @@ fn bench_branch_access_with_cache(c: &mut Criterion) {
 /// 基准测试：混合缓存命中率
 fn bench_branch_access_mixed(c: &mut Criterion) {
     let mut group = c.benchmark_group("branch_access_mixed");
-    
+
     let cache = BranchCache::new(50);
 
     // 预加载 50 个分支
@@ -105,7 +103,7 @@ fn bench_branch_access_mixed(c: &mut Criterion) {
 /// 基准测试：无缓存的祖先链查询
 fn bench_ancestor_query_no_cache(c: &mut Criterion) {
     let mut group = c.benchmark_group("ancestor_query");
-    
+
     // 创建深层分支层次：main <- f1 <- f2 <- ... <- f50
     let mut parent_map = HashMap::new();
     parent_map.insert("f0".to_string(), "main".to_string());
@@ -143,7 +141,7 @@ fn bench_ancestor_query_no_cache(c: &mut Criterion) {
 /// 基准测试：有缓存的祖先链查询
 fn bench_ancestor_query_with_cache(c: &mut Criterion) {
     let mut group = c.benchmark_group("ancestor_query");
-    
+
     // 创建分支层次
     let mut parent_map = HashMap::new();
     parent_map.insert("f0".to_string(), "main".to_string());
@@ -163,9 +161,7 @@ fn bench_ancestor_query_with_cache(c: &mut Criterion) {
     cache.get_ancestors("f50", &loader);
 
     group.bench_function("with_cache_hit", |b| {
-        b.iter(|| {
-            cache.get_ancestors(black_box("f50"), &loader)
-        })
+        b.iter(|| cache.get_ancestors(black_box("f50"), &loader))
     });
 
     group.finish();
@@ -174,7 +170,7 @@ fn bench_ancestor_query_with_cache(c: &mut Criterion) {
 /// 基准测试：后代查询性能
 fn bench_is_descendant_query(c: &mut Criterion) {
     let mut group = c.benchmark_group("is_descendant_query");
-    
+
     let mut parent_map = HashMap::new();
     parent_map.insert("f0".to_string(), "main".to_string());
     for i in 1..=100 {
@@ -182,9 +178,7 @@ fn bench_is_descendant_query(c: &mut Criterion) {
     }
     parent_map.insert("main".to_string(), "".to_string());
 
-    let loader = |id: &str| -> Option<String> {
-        parent_map.get(id).cloned()
-    };
+    let loader = |id: &str| -> Option<String> { parent_map.get(id).cloned() };
 
     let cache = AncestorCache::new();
 
@@ -194,13 +188,7 @@ fn bench_is_descendant_query(c: &mut Criterion) {
     }
 
     group.bench_function("cached_is_descendant", |b| {
-        b.iter(|| {
-            cache.is_descendant_of(
-                black_box("f100"),
-                black_box("main"),
-                &loader,
-            )
-        })
+        b.iter(|| cache.is_descendant_of(black_box("f100"), black_box("main"), &loader))
     });
 
     group.finish();
@@ -209,7 +197,7 @@ fn bench_is_descendant_query(c: &mut Criterion) {
 /// 基准测试：公共祖先查找
 fn bench_common_ancestor_query(c: &mut Criterion) {
     let mut group = c.benchmark_group("common_ancestor_query");
-    
+
     // 创建树状结构
     // main <- feature-a <- sub-a1
     //      <- feature-b <- sub-b1
@@ -220,9 +208,7 @@ fn bench_common_ancestor_query(c: &mut Criterion) {
     parent_map.insert("sub-b1".to_string(), "feature-b".to_string());
     parent_map.insert("main".to_string(), "".to_string());
 
-    let loader = |id: &str| -> Option<String> {
-        parent_map.get(id).cloned()
-    };
+    let loader = |id: &str| -> Option<String> { parent_map.get(id).cloned() };
 
     let cache = AncestorCache::new();
 
@@ -232,12 +218,7 @@ fn bench_common_ancestor_query(c: &mut Criterion) {
 
     group.bench_function("cached_common_ancestor", |b| {
         b.iter(|| {
-            cache.find_common_ancestor(
-                black_box("sub-a1"),
-                black_box("sub-b1"),
-                &loader,
-                "main",
-            )
+            cache.find_common_ancestor(black_box("sub-a1"), black_box("sub-b1"), &loader, "main")
         })
     });
 
@@ -247,7 +228,7 @@ fn bench_common_ancestor_query(c: &mut Criterion) {
 /// 基准测试：缓存统计
 fn bench_cache_stats(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_operations");
-    
+
     let cache = BranchCache::new(100);
 
     // 插入 100 个分支
@@ -261,11 +242,7 @@ fn bench_cache_stats(c: &mut Criterion) {
         cache.get(&format!("branch-{}", i));
     }
 
-    group.bench_function("get_stats", |b| {
-        b.iter(|| {
-            cache.stats()
-        })
-    });
+    group.bench_function("get_stats", |b| b.iter(|| cache.stats()));
 
     group.finish();
 }
@@ -273,7 +250,7 @@ fn bench_cache_stats(c: &mut Criterion) {
 /// 基准测试：LRU 驱逐性能
 fn bench_lru_eviction(c: &mut Criterion) {
     let mut group = c.benchmark_group("lru_eviction");
-    
+
     let cache = BranchCache::new(50);
 
     // 填满缓存

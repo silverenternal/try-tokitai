@@ -10,9 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::manifest::{
-    CompactionManifest, RecoveryAction, recover_incomplete,
-};
+use super::manifest::{recover_incomplete, CompactionManifest, RecoveryAction};
 use crate::io::{FileKVFileSystem, MemFs};
 
 /// Scenario 1: Crash BEFORE manifest write
@@ -30,7 +28,10 @@ fn test_crash_before_manifest_write() {
     // Recovery should find nothing to clean up
     let actions = recover_incomplete(fs.as_ref(), &manifest_dir, &segment_dir).unwrap();
 
-    assert!(actions.is_empty(), "No manifest should exist, no recovery action expected");
+    assert!(
+        actions.is_empty(),
+        "No manifest should exist, no recovery action expected"
+    );
 }
 
 /// Scenario 2: Crash AFTER manifest write, BEFORE any output written
@@ -47,8 +48,8 @@ fn test_crash_after_manifest_write_before_output() {
     // Write manifest (simulating successful prepare)
     let manifest = CompactionManifest::new(
         100,
-        vec![1, 2, 3],  // Input segments
-        vec![10],       // Planned output
+        vec![1, 2, 3], // Input segments
+        vec![10],      // Planned output
         1,
     );
     manifest.write_atomic(fs.as_ref(), &manifest_dir, 100).unwrap();
@@ -103,8 +104,8 @@ fn test_crash_during_output_write_partial_output() {
     // Write manifest
     let manifest = CompactionManifest::new(
         200,
-        vec![5, 6],     // Input segments
-        vec![20, 21],   // Planned outputs (2 outputs)
+        vec![5, 6],   // Input segments
+        vec![20, 21], // Planned outputs (2 outputs)
         1,
     );
     manifest.write_atomic(fs.as_ref(), &manifest_dir, 200).unwrap();
@@ -142,7 +143,10 @@ fn test_crash_during_output_write_partial_output() {
     }
 
     // Verify partial output deleted
-    assert!(!fs.file_exists(&output_path_20), "Partial output segment_20 should be deleted");
+    assert!(
+        !fs.file_exists(&output_path_20),
+        "Partial output segment_20 should be deleted"
+    );
     assert!(!fs.file_exists(&dense_idx_20), "Partial dense index should be deleted");
 
     // Verify input segments preserved
@@ -166,8 +170,8 @@ fn test_crash_after_output_write_before_commit() {
     // Write manifest
     let manifest = CompactionManifest::new(
         300,
-        vec![7, 8],     // Input segments
-        vec![30, 31],   // Output segments (2 outputs)
+        vec![7, 8],   // Input segments
+        vec![30, 31], // Output segments (2 outputs)
         1,
     );
     manifest.write_atomic(fs.as_ref(), &manifest_dir, 300).unwrap();
@@ -243,8 +247,8 @@ fn test_crash_during_input_deletion_partial() {
     // Simulate: compaction completed and committed, manifest marked Completed
     let mut manifest = CompactionManifest::new(
         400,
-        vec![40, 41],   // Input segments (already deleted before crash)
-        vec![50],       // Output segment
+        vec![40, 41], // Input segments (already deleted before crash)
+        vec![50],     // Output segment
         1,
     );
     manifest.mark_completed();
@@ -269,7 +273,10 @@ fn test_crash_during_input_deletion_partial() {
 
     // Verify manifest cleaned up
     let manifest_path = manifest_dir.join("compaction_400.manifest");
-    assert!(!fs.file_exists(&manifest_path), "Completed manifest should be cleaned up");
+    assert!(
+        !fs.file_exists(&manifest_path),
+        "Completed manifest should be cleaned up"
+    );
 }
 
 /// Bonus Test: Multiple incomplete compactions
@@ -284,12 +291,7 @@ fn test_multiple_incomplete_compactions() {
 
     // Write 3 incomplete manifests
     for i in 1..=3 {
-        let manifest = CompactionManifest::new(
-            i * 100,
-            vec![i],
-            vec![i * 10],
-            0,
-        );
+        let manifest = CompactionManifest::new(i * 100, vec![i], vec![i * 10], 0);
         manifest.write_atomic(fs.as_ref(), &manifest_dir, i * 100).unwrap();
 
         // Create partial output
@@ -321,13 +323,21 @@ fn test_multiple_incomplete_compactions() {
     // Verify all outputs deleted
     for i in 1..=3 {
         let output_path = segment_dir.join(format!("segment_{}.log", i * 10));
-        assert!(!fs.file_exists(&output_path), "Output segment {} should be deleted", i * 10);
+        assert!(
+            !fs.file_exists(&output_path),
+            "Output segment {} should be deleted",
+            i * 10
+        );
     }
 
     // Verify all manifests cleaned up
     for i in 1..=3 {
         let manifest_path = manifest_dir.join(format!("compaction_{}.manifest", i * 100));
-        assert!(!fs.file_exists(&manifest_path), "Manifest {} should be cleaned up", i * 100);
+        assert!(
+            !fs.file_exists(&manifest_path),
+            "Manifest {} should be cleaned up",
+            i * 100
+        );
     }
 }
 

@@ -20,9 +20,9 @@
 
 #![allow(dead_code)]
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 /// 因果分析请求
@@ -226,7 +226,8 @@ fn get_default_few_shot_examples() -> Vec<FewShotExample> {
 
 3. 真正的工具缺口：
    - batch_download: 根据 URL 模式批量下载文件
-"#.to_string(),
+"#
+            .to_string(),
             identified_gap: IdentifiedGap {
                 gap_type: "missing_tool".to_string(),
                 description: "缺少批量下载文件的工具".to_string(),
@@ -270,12 +271,14 @@ fn get_default_few_shot_examples() -> Vec<FewShotExample> {
 
 3. 真正的工具缺口：
    - json_query: 使用路径表达式查询 JSON 数据
-"#.to_string(),
+"#
+            .to_string(),
             identified_gap: IdentifiedGap {
                 gap_type: "insufficient_capability".to_string(),
                 description: "缺少便捷的 JSON 查询工具".to_string(),
                 suggested_name: Some("json_query".to_string()),
-                suggested_functionality: "使用路径表达式（如$.data.items[0].name）查询 JSON 数据".to_string(),
+                suggested_functionality: "使用路径表达式（如$.data.items[0].name）查询 JSON 数据"
+                    .to_string(),
                 input_schema: Some(serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -308,7 +311,7 @@ fn get_default_few_shot_examples() -> Vec<FewShotExample> {
 pub trait LLMClient: Send + Sync {
     /// 发送聊天请求并获取响应
     async fn chat(&self, prompt: &str) -> Result<String>;
-    
+
     /// 发送带 JSON Schema 约束的聊天请求
     async fn chat_with_schema(&self, prompt: &str, schema: &serde_json::Value) -> Result<String>;
 }
@@ -463,14 +466,18 @@ impl PromptGapDetector {
             return Ok(Vec::new());
         }
 
-        info!("开始因果推理缺口检测，分析{}个任务...", self.task_history.len());
+        info!(
+            "开始因果推理缺口检测，分析{}个任务...",
+            self.task_history.len()
+        );
 
         // 1. 构建 Prompt
         let prompt = self.build_causal_prompt();
 
         // 2. LLM 推理（带 JSON Schema 约束）
         let schema = self.get_response_schema();
-        let mut response_text = self.llm_client
+        let mut response_text = self
+            .llm_client
             .chat_with_schema(&prompt, &schema)
             .await
             .context("LLM 推理失败")?;
@@ -481,8 +488,7 @@ impl PromptGapDetector {
             Err(e) => {
                 warn!("首次解析失败：{}，尝试修复...", e);
                 response_text = self.fix_json_response(&response_text).await?;
-                serde_json::from_str(&response_text)
-                    .context("修复后仍无法解析 JSON")?
+                serde_json::from_str(&response_text).context("修复后仍无法解析 JSON")?
             }
         };
 
@@ -490,10 +496,12 @@ impl PromptGapDetector {
         self.validator.validate_response(&response)?;
 
         // 5. 过滤低置信度缺口
-        let filtered_gaps: Vec<_> = response.identified_gaps
+        let filtered_gaps: Vec<_> = response
+            .identified_gaps
             .iter()
             .filter(|gap| {
-                gap.causal_evidence.iter()
+                gap.causal_evidence
+                    .iter()
                     .any(|e| e.is_causal && e.confidence >= self.config.min_confidence_threshold)
             })
             .cloned()
@@ -511,13 +519,17 @@ impl PromptGapDetector {
     /// 构建因果推理 Prompt
     fn build_causal_prompt(&self) -> String {
         // 格式化任务历史
-        let task_history_str = self.task_history.iter()
+        let task_history_str = self
+            .task_history
+            .iter()
             .map(|t| self.format_task_record(t))
             .collect::<Vec<_>>()
             .join("\n\n");
 
         // 格式化 Few-Shot 示例
-        let few_shot_str = self.few_shot_examples.iter()
+        let few_shot_str = self
+            .few_shot_examples
+            .iter()
             .take(2)
             .map(|e| self.format_few_shot_example(e))
             .collect::<Vec<_>>()
@@ -531,7 +543,9 @@ impl PromptGapDetector {
     /// 格式化任务记录
     fn format_task_record(&self, task: &CausalAnalysisRequest) -> String {
         let status = if task.success { "成功" } else { "失败" };
-        let satisfaction = task.user_satisfaction.map_or("未知".to_string(), |s| format!("{}/5", s));
+        let satisfaction = task
+            .user_satisfaction
+            .map_or("未知".to_string(), |s| format!("{}/5", s));
 
         format!(
             r#"### 任务 {}
@@ -546,7 +560,9 @@ impl PromptGapDetector {
             task.used_tools.join(", "),
             satisfaction,
             task.execution_time_ms,
-            task.failure_reason.as_ref().map_or(String::new(), |r| format!("\n- **失败原因**: {}", r)),
+            task.failure_reason
+                .as_ref()
+                .map_or(String::new(), |r| format!("\n- **失败原因**: {}", r)),
         )
     }
 
@@ -646,10 +662,14 @@ impl PromptGapDetector {
     pub fn get_task_stats(&self) -> TaskStats {
         let total = self.task_history.len() as u32;
         let failed = self.task_history.iter().filter(|t| !t.success).count() as u32;
-        let low_sat = self.task_history.iter()
+        let low_sat = self
+            .task_history
+            .iter()
             .filter(|t| t.user_satisfaction.is_some_and(|s| s <= 2))
             .count() as u32;
-        let inefficient = self.task_history.iter()
+        let inefficient = self
+            .task_history
+            .iter()
             .filter(|t| t.execution_time_ms > 5000)
             .count() as u32;
 
@@ -699,7 +719,11 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        async fn chat_with_schema(&self, _prompt: &str, _schema: &serde_json::Value) -> Result<String> {
+        async fn chat_with_schema(
+            &self,
+            _prompt: &str,
+            _schema: &serde_json::Value,
+        ) -> Result<String> {
             Ok(self.response.clone())
         }
     }

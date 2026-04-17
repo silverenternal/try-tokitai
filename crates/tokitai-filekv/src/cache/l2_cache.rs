@@ -177,7 +177,11 @@ impl L2CacheFile {
 
     /// Get used bytes from header
     fn get_used_bytes(&self) -> u64 {
-        u64::from_le_bytes(self.mmap[16..24].try_into().unwrap())
+        u64::from_le_bytes(
+            self.mmap[16..24]
+                .try_into()
+                .expect("L2Cache: mmap too short or corrupted for used_bytes header"),
+        )
     }
 
     /// Set used bytes in header
@@ -187,18 +191,16 @@ impl L2CacheFile {
 
     /// Get entry count from header
     fn get_entry_count(&self) -> u64 {
-        u64::from_le_bytes(self.mmap[24..32].try_into().unwrap())
+        u64::from_le_bytes(
+            self.mmap[24..32]
+                .try_into()
+                .expect("L2Cache: mmap too short or corrupted for entry_count header"),
+        )
     }
 
     /// Set entry count in header
     fn set_entry_count(&mut self, count: u64) {
         self.mmap[24..32].copy_from_slice(&count.to_le_bytes());
-    }
-
-    /// Get eviction cursor from header
-    #[allow(dead_code)]
-    fn get_eviction_cursor(&self) -> u64 {
-        u64::from_le_bytes(self.mmap[32..40].try_into().unwrap())
     }
 
     /// Set eviction cursor in header

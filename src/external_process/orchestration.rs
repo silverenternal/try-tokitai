@@ -31,7 +31,7 @@
 
 use crate::external_process::metadata::ToolExecutionResult;
 use crate::external_process::wrapper::ExternalTool;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -158,8 +158,7 @@ pub struct Workflow {
 }
 
 /// Error handling strategy
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnErrorStrategy {
     /// Stop workflow on first error
     #[default]
@@ -169,7 +168,6 @@ pub enum OnErrorStrategy {
     /// Retry failed steps
     Retry { max_retries: u32 },
 }
-
 
 /// Workflow builder
 pub struct WorkflowBuilder {
@@ -217,8 +215,13 @@ impl WorkflowBuilder {
     }
 
     /// Add output mapping
-    pub fn output_mapping(mut self, step_id: impl Into<String>, output_path: impl Into<String>) -> Self {
-        self.output_mapping.insert(step_id.into(), output_path.into());
+    pub fn output_mapping(
+        mut self,
+        step_id: impl Into<String>,
+        output_path: impl Into<String>,
+    ) -> Self {
+        self.output_mapping
+            .insert(step_id.into(), output_path.into());
         self
     }
 
@@ -304,14 +307,15 @@ impl WorkflowExecutor {
         for step in &self.workflow.steps {
             // Check dependencies
             let deps_satisfied = step.depends_on.iter().all(|dep| {
-                step_outputs.get(dep).map(|v| {
-                    v.get("success").and_then(|s| s.as_bool()).unwrap_or(false)
-                }).unwrap_or(false)
+                step_outputs
+                    .get(dep)
+                    .map(|v| v.get("success").and_then(|s| s.as_bool()).unwrap_or(false))
+                    .unwrap_or(false)
             });
 
             if !deps_satisfied {
                 warn!("Step {} dependencies not satisfied, skipping", step.id);
-                
+
                 match self.workflow.on_error {
                     OnErrorStrategy::Continue => continue,
                     OnErrorStrategy::Stop => {
@@ -348,7 +352,7 @@ impl WorkflowExecutor {
                         "output": tool_result.output,
                         "stdout": tool_result.stdout,
                         "stderr": tool_result.stderr,
-                    })
+                    }),
                 );
             }
 
@@ -396,7 +400,9 @@ impl WorkflowExecutor {
         workflow_input: &Value,
         step_outputs: &HashMap<String, Value>,
     ) -> Result<StepResult> {
-        let tool = self.tools.get(&step.tool_name)
+        let tool = self
+            .tools
+            .get(&step.tool_name)
             .with_context(|| format!("Tool '{}' not found", step.tool_name))?;
 
         let start_time = std::time::Instant::now();
@@ -425,7 +431,10 @@ impl WorkflowExecutor {
             }
 
             if attempts <= step.retry_count {
-                debug!("Step {} failed, retrying ({}/{})", step.id, attempts, step.retry_count);
+                debug!(
+                    "Step {} failed, retrying ({}/{})",
+                    step.id, attempts, step.retry_count
+                );
             }
         }
 
@@ -443,7 +452,7 @@ impl WorkflowExecutor {
                     tool_result: Some(tool_result),
                     error,
                 })
-            },
+            }
             Some(Err(e)) => Ok(StepResult {
                 step_id: step.id.clone(),
                 tool_name: step.tool_name.clone(),
@@ -491,22 +500,23 @@ impl WorkflowExecutor {
                 // Simple variable substitution: {{input.field}} or {{step_id.output}}
                 let result = s.clone();
                 let result = result.replace("{{input}}", &workflow_input.to_string());
-                
+
                 // Replace step outputs
                 let mut final_result = result;
                 for (step_id, output) in step_outputs {
-                    final_result = final_result.replace(
-                        &format!("{{{{{}}}}}", step_id),
-                        &output.to_string()
-                    );
+                    final_result =
+                        final_result.replace(&format!("{{{{{}}}}}", step_id), &output.to_string());
                 }
-                
+
                 Ok(Value::String(final_result))
             }
             Value::Object(obj) => {
                 let mut new_obj = serde_json::Map::new();
                 for (k, v) in obj {
-                    new_obj.insert(k.clone(), self.substitute_variables(v, workflow_input, step_outputs)?);
+                    new_obj.insert(
+                        k.clone(),
+                        self.substitute_variables(v, workflow_input, step_outputs)?,
+                    );
                 }
                 Ok(Value::Object(new_obj))
             }
@@ -571,16 +581,15 @@ impl WorkflowExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::external_process::process_wrapper::ProcessWrapperBuilder;
     use crate::external_process::metadata::schema_helpers;
+    use crate::external_process::process_wrapper::ProcessWrapperBuilder;
 
     #[test]
     fn test_workflow_builder() {
         let workflow = WorkflowBuilder::new("test_workflow")
             .description("Test workflow")
             .step(WorkflowStep::new("step1", "tool1"))
-            .step(WorkflowStep::new("step2", "tool2")
-                .depends_on(&["step1"]))
+            .step(WorkflowStep::new("step2", "tool2").depends_on(&["step1"]))
             .domain("test")
             .tag("workflow")
             .build();
@@ -614,19 +623,20 @@ mod tests {
         let echo_tool = ProcessWrapperBuilder::new("echo_test", "echo")
             .description("Echo test")
             .args(vec!["{{message}}".to_string()])
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("message", "Message", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "message", "Message", true,
+            )]))
             .domain("test")
             .build();
 
         // Create workflow
         let workflow = WorkflowBuilder::new("echo_workflow")
             .description("Echo workflow")
-            .step(WorkflowStep::new("echo", "echo_test")
-                .with_input_template(serde_json::json!({
+            .step(
+                WorkflowStep::new("echo", "echo_test").with_input_template(serde_json::json!({
                     "message": "Hello Workflow"
-                })))
+                })),
+            )
             .domain("test")
             .build();
 

@@ -243,6 +243,30 @@ try-tokitai/
 
 ---
 
+## 📦 Crates
+
+本项目包含两个 Rust crates：
+
+| Crate | 描述 | 状态 |
+|-------|------|------|
+| **tokitai-context** | Git 风格的 AI 对话上下文管理系统 | ✅ 完成 |
+| **tokitai-filekv** | 高性能纯文件 KV 存储引擎（独立 crate） | ✅ 完成 |
+
+### tokitai-filekv
+
+**独立 Crate**: [`tokitai-filekv`](https://crates.io/crates/tokitai-filekv) - 源自 tokitai-context 的存储引擎模块，现已独立为可复用的通用 KV 存储库。
+
+**性能表现** (公平对比 RocksDB):
+- Bloom Filter 负向查询：**3.97x** 更快
+- 全 KV Get (热点缓存)：**9.69x** 更快
+- 写入 (64B, WAL): 9% 更快
+
+**测试状态**: 119/119 测试通过，0 编译警告
+
+详细文档见 [crates/tokitai-filekv/README.md](crates/tokitai-filekv/README.md)。
+
+---
+
 ## 📈 Phase 1 完成状态
 
 ✅ **MP-001**: 多模型支持（6 提供商 + 智能路由 + /model 命令）

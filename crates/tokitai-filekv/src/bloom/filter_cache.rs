@@ -15,14 +15,56 @@
 //! - Faster startup time (no need to load all filters at startup)
 //! - Automatic memory management with configurable limits
 
+use dashmap::DashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
-use dashmap::DashMap;
 use tracing::{debug, info};
 
+use super::custom_bloom::CustomBloom;
 use crate::core::error::FileKVResult;
 use ::bloom::{BloomFilter, ASMS};
+
+/// OPT-002: Unified wrapper for bloom filters in filter cache
+/// Supports both legacy ::bloom::BloomFilter and high-performance CustomBloom (V3 format).
+pub enum FilterWrapper {
+    /// Legacy bloom filter (V1/V2 format)
+    Bloom(BloomFilter),
+    /// Custom bloom filter (V3 format, uses deterministic XXH3 hashing)
+    Custom(CustomBloom),
+}
+
+impl std::fmt::Debug for FilterWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterWrapper::Bloom(_) => f.debug_tuple("Bloom").field(&"<bloom::BloomFilter>").finish(),
+            FilterWrapper::Custom(cb) => f.debug_tuple("Custom").field(cb).finish(),
+        }
+    }
+}
+
+impl FilterWrapper {
+    /// Check if a key might be in the filter
+    pub fn contains(&self, key: &str) -> bool {
+        match self {
+            FilterWrapper::Bloom(bf) => bf.contains(&key.to_string()),
+            FilterWrapper::Custom(cb) => cb.contains(key.as_bytes()),
+        }
+    }
+
+    /// Estimate memory size for the wrapped filter
+    pub fn estimate_memory_size(&self) -> usize {
+        match self {
+            FilterWrapper::Bloom(bf) => {
+                let num_bits = bf.num_bits();
+                let bitvec_bytes = num_bits.div_ceil(8);
+                let bitvec_aligned = (bitvec_bytes + 7) & !7;
+                bitvec_aligned + 64
+            }
+            FilterWrapper::Custom(cb) => cb.memory_usage(),
+        }
+    }
+}
 
 /// CLOCK algorithm cache entry
 ///
@@ -202,26 +244,6 @@ impl ClockShard {
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
     }
-
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.count.load(Ordering::Relaxed)
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.count.load(Ordering::Relaxed) == 0
-    }
-
-    #[allow(dead_code)]
-    fn hits(&self) -> u64 {
-        self.hits.load(Ordering::Relaxed)
-    }
-
-    #[allow(dead_code)]
-    fn misses(&self) -> u64 {
-        self.misses.load(Ordering::Relaxed)
-    }
 }
 
 /// Sharded CLOCK cache for bloom filters
@@ -243,9 +265,7 @@ impl ShardedClockCache {
     fn new(capacity: usize, num_shards: usize) -> Self {
         debug_assert!(num_shards.is_power_of_two(), "num_shards must be power of 2");
         let shard_capacity = (capacity / num_shards).max(1);
-        let shards = (0..num_shards)
-            .map(|_| ClockShard::new(shard_capacity))
-            .collect();
+        let shards = (0..num_shards).map(|_| ClockShard::new(shard_capacity)).collect();
 
         Self {
             shards,
@@ -281,26 +301,6 @@ impl ShardedClockCache {
         for shard in &self.shards {
             shard.clear();
         }
-    }
-
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.shards.iter().map(|s| s.len()).sum()
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.shards.iter().all(|s| s.is_empty())
-    }
-
-    #[allow(dead_code)]
-    fn hits(&self) -> u64 {
-        self.shards.iter().map(|s| s.hits()).sum()
-    }
-
-    #[allow(dead_code)]
-    fn misses(&self) -> u64 {
-        self.shards.iter().map(|s| s.misses()).sum()
     }
 
     /// Evict one entry from any shard. Returns the evicted key if any.
@@ -372,26 +372,21 @@ impl BloomFilterCacheStats {
 }
 
 /// Cached bloom filter with metadata (wrapped in Arc for sharing)
+///
+/// OPT-002: Uses FilterWrapper to support both legacy BloomFilter and CustomBloom.
 struct CachedBloomFilter {
-    /// The bloom filter (Arc-wrapped for sharing)
-    filter: Arc<BloomFilter>,
+    /// The bloom filter (wrapped in FilterWrapper for unified interface)
+    filter: Arc<FilterWrapper>,
     /// Estimated memory size of the filter (bytes)
     memory_size: usize,
-    /// Segment ID this filter belongs to (used for cache invalidation)
-    #[allow(dead_code)]
-    segment_id: u64,
 }
 
 impl CachedBloomFilter {
-    fn new(filter: BloomFilter, segment_id: u64) -> Self {
-        // Estimate memory size: Bloom filter uses ~10 bits per element
-        // Plus overhead for the filter structure
-        // Note: bloom filter crate doesn't expose size, so we estimate
-        let memory_size = 1024 * 10; // ~10KB per filter estimate
+    fn new(filter: FilterWrapper) -> Self {
+        let memory_size = filter.estimate_memory_size();
 
         Self {
             filter: Arc::new(filter),
-            segment_id,
             memory_size,
         }
     }
@@ -408,9 +403,6 @@ pub struct BloomFilterCache {
     /// Dynamic max memory limit (can be adjusted at runtime via grow_max_memory/shrink_to_memory).
     /// When None, uses config.max_memory_bytes.
     dynamic_max_memory_bytes: parking_lot::Mutex<Option<usize>>,
-    /// Index directory where bloom filters are stored (used for loading filters)
-    #[allow(dead_code)]
-    index_dir: PathBuf,
     /// Statistics
     hits: AtomicU64,
     misses: AtomicU64,
@@ -421,7 +413,7 @@ pub struct BloomFilterCache {
 
 impl BloomFilterCache {
     /// Create a new bloom filter cache
-    pub fn new(config: BloomFilterCacheConfig, index_dir: PathBuf) -> Self {
+    pub fn new(config: BloomFilterCacheConfig, _index_dir: PathBuf) -> Self {
         const NUM_SHARDS: usize = 16;
         let clock_queue = Arc::new(ShardedClockCache::new(config.max_filters, NUM_SHARDS));
 
@@ -430,7 +422,6 @@ impl BloomFilterCache {
             clock_queue,
             config,
             dynamic_max_memory_bytes: parking_lot::Mutex::new(None),
-            index_dir,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             evictions: AtomicU64::new(0),
@@ -440,7 +431,14 @@ impl BloomFilterCache {
     }
 
     /// Get a bloom filter for a segment (loads on-demand if not cached)
-    pub fn get(&self, segment_id: u64, loader: &dyn Fn(u64) -> FileKVResult<Option<BloomFilter>>) -> FileKVResult<Option<Arc<BloomFilter>>> {
+    ///
+    /// OPT-002: Returns Arc<FilterWrapper> to support both legacy BloomFilter
+    /// and high-performance CustomBloom (V3 format).
+    pub fn get(
+        &self,
+        segment_id: u64,
+        loader: &dyn Fn(u64) -> FileKVResult<Option<FilterWrapper>>,
+    ) -> FileKVResult<Option<Arc<FilterWrapper>>> {
         // Check if filter is already cached
         if let Some(cached) = self.cache.get(&segment_id) {
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -475,20 +473,27 @@ impl BloomFilterCache {
     }
 
     /// Insert a bloom filter into the cache
-    pub fn insert(&self, segment_id: u64, filter: BloomFilter) {
+    ///
+    /// OPT-002: Accepts FilterWrapper to support both legacy and V3 formats.
+    pub fn insert(&self, segment_id: u64, filter: FilterWrapper) {
         self.cache_and_promote(segment_id, filter);
     }
 
     /// Check if a key exists in a segment's bloom filter (convenience method)
-    pub fn contains(&self, segment_id: u64, key: &str, loader: &dyn Fn(u64) -> FileKVResult<Option<BloomFilter>>) -> FileKVResult<Option<bool>> {
+    pub fn contains(
+        &self,
+        segment_id: u64,
+        key: &str,
+        loader: &dyn Fn(u64) -> FileKVResult<Option<FilterWrapper>>,
+    ) -> FileKVResult<Option<bool>> {
         match self.get(segment_id, loader)? {
-            Some(filter) => Ok(Some(filter.contains(&key))),
+            Some(filter) => Ok(Some(filter.contains(key))),
             None => Ok(None),
         }
     }
 
     /// Remove a bloom filter from the cache
-    pub fn remove(&self, segment_id: u64) -> Option<Arc<BloomFilter>> {
+    pub fn remove(&self, segment_id: u64) -> Option<Arc<FilterWrapper>> {
         if let Some((_, cached)) = self.cache.remove(&segment_id) {
             self.memory_used.fetch_sub(cached.memory_size, Ordering::Relaxed);
 
@@ -540,8 +545,10 @@ impl BloomFilterCache {
     }
 
     /// Cache a filter and update CLOCK queue (internal helper)
-    fn cache_and_promote(&self, segment_id: u64, filter: BloomFilter) {
-        let cached = CachedBloomFilter::new(filter, segment_id);
+    ///
+    /// OPT-002: Accepts FilterWrapper to support both legacy and V3 formats.
+    fn cache_and_promote(&self, segment_id: u64, filter: FilterWrapper) {
+        let cached = CachedBloomFilter::new(filter);
         let memory_delta = cached.memory_size;
 
         // Check memory limit and evict if necessary
@@ -602,7 +609,10 @@ impl BloomFilterCache {
         let current_memory = self.memory_used.load(Ordering::Relaxed);
 
         if current_memory <= target_memory_bytes {
-            debug!("BloomFilterCache: already within target memory ({} <= {}), no eviction needed", current_memory, target_memory_bytes);
+            debug!(
+                "BloomFilterCache: already within target memory ({} <= {}), no eviction needed",
+                current_memory, target_memory_bytes
+            );
             return 0;
         }
 
@@ -645,16 +655,21 @@ impl BloomFilterCache {
 }
 
 /// Helper to load a bloom filter from disk
-pub fn load_bloom_filter_from_disk(index_dir: &Path, segment_id: u64) -> FileKVResult<Option<BloomFilter>> {
+///
+/// OPT-002: Returns FilterWrapper to support both legacy BloomFilter and CustomBloom.
+pub fn load_bloom_filter_from_disk(index_dir: &Path, segment_id: u64) -> FileKVResult<Option<FilterWrapper>> {
     use super::migration::{BloomFilterMigrator, MigrationResult};
-    use tracing::{warn, info};
+    use tracing::{info, warn};
 
     let migrator = BloomFilterMigrator::new(index_dir.to_path_buf());
 
     match migrator.load_with_migration(segment_id) {
         Ok(Some((bloom, _keys, migration_result))) => {
             match migration_result {
-                MigrationResult::Migrated { from_version, to_version } => {
+                MigrationResult::Migrated {
+                    from_version,
+                    to_version,
+                } => {
                     info!(
                         "Migrated bloom filter for segment {} from v{} to v{}",
                         segment_id, from_version, to_version
@@ -675,7 +690,7 @@ pub fn load_bloom_filter_from_disk(index_dir: &Path, segment_id: u64) -> FileKVR
                 }
                 MigrationResult::NoMigrationNeeded => {}
             }
-            Ok(Some(bloom))
+            Ok(Some(FilterWrapper::Bloom(bloom)))
         }
         Ok(None) => Ok(None),
         Err(e) => Err(crate::core::error::FileKVError::from(e)),
@@ -707,13 +722,13 @@ mod tests {
         filter.insert(&"test_key".to_string());
 
         // Insert into cache
-        cache.insert(1, filter);
+        cache.insert(1, FilterWrapper::Bloom(filter));
 
         // Retrieve from cache
-        let loader = |_id: u64| -> FileKVResult<Option<BloomFilter>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<FilterWrapper>> { Ok(None) };
         let cached = cache.get(1, &loader).unwrap();
         assert!(cached.is_some());
-        assert!(cached.unwrap().contains(&"test_key".to_string()));
+        assert!(cached.unwrap().contains("test_key"));
     }
 
     #[test]
@@ -723,11 +738,11 @@ mod tests {
         let cache = BloomFilterCache::new(config, temp_dir.path().to_path_buf());
 
         // Simulate on-demand loading with a static response after first load
-        let loader = |id: u64| -> FileKVResult<Option<BloomFilter>> {
+        let loader = |id: u64| -> FileKVResult<Option<FilterWrapper>> {
             if id == 1 {
                 let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
                 filter.insert(&"loaded_key".to_string());
-                Ok(Some(filter))
+                Ok(Some(FilterWrapper::Bloom(filter)))
             } else {
                 Ok(None)
             }
@@ -736,7 +751,7 @@ mod tests {
         // First access (cache miss, should load)
         let result = cache.get(1, &loader).unwrap();
         assert!(result.is_some());
-        assert!(result.unwrap().contains(&"loaded_key".to_string()));
+        assert!(result.unwrap().contains("loaded_key"));
 
         // Second access (cache hit, should use cached)
         let result = cache.get(1, &loader).unwrap();
@@ -752,24 +767,25 @@ mod tests {
     #[test]
     fn test_bloom_filter_cache_eviction() {
         let temp_dir = TempDir::new().unwrap();
+        // Use a larger max_filters so sharding works properly (16 shards need at least 16 per shard for meaningful eviction)
         let config = BloomFilterCacheConfig {
-            max_filters: 3,
-            max_memory_bytes: 1024 * 10, // Small limit for testing
+            max_filters: 16,             // At least 1 per shard
+            max_memory_bytes: 1024 * 16, // 16KB - each filter ~1KB, so about 16 filters max
             on_demand_enabled: true,
         };
         let cache = BloomFilterCache::new(config, temp_dir.path().to_path_buf());
 
-        // Insert multiple filters
-        for i in 1..=5 {
+        // Insert many filters with sequential IDs (should distribute across shards and trigger eviction)
+        for i in 1..=100 {
             let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
             filter.insert(&format!("key_{}", i));
-            cache.insert(i, filter);
+            cache.insert(i, FilterWrapper::Bloom(filter));
         }
 
-        // Cache should have evicted some filters
+        // Cache should have evicted some filters (CLOCK queue should have triggered eviction)
         let stats = cache.stats();
-        assert!(stats.evictions > 0);
-        assert!(stats.filters_cached <= 3);
+        assert!(stats.evictions > 0, "Should have evictions, got {}", stats.evictions);
+        assert!(stats.filters_cached <= 16);
     }
 
     #[test]
@@ -780,9 +796,9 @@ mod tests {
 
         let mut filter = BloomFilter::with_rate(DEFAULT_BLOOM_FPR, 100);
         filter.insert(&"test".to_string());
-        cache.insert(1, filter);
+        cache.insert(1, FilterWrapper::Bloom(filter));
 
-        let loader = |_id: u64| -> FileKVResult<Option<BloomFilter>> { Ok(None) };
+        let loader = |_id: u64| -> FileKVResult<Option<FilterWrapper>> { Ok(None) };
 
         cache.get(1, &loader).unwrap(); // hit
         cache.get(1, &loader).unwrap(); // hit

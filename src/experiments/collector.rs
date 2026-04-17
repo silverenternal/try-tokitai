@@ -2,14 +2,12 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use tracing::info;
 
-use crate::experiments::{
-    TaskExecutionRecord, EvolutionCycleRecord, GroupSummary,
-};
+use crate::experiments::{EvolutionCycleRecord, GroupSummary, TaskExecutionRecord};
 
 /// Data collector for experiment metrics
 pub struct DataCollector {
@@ -22,10 +20,7 @@ pub struct DataCollector {
 impl DataCollector {
     /// Create a new data collector
     pub fn new(base_dir: PathBuf, group: String) -> Self {
-        Self {
-            base_dir,
-            group,
-        }
+        Self { base_dir, group }
     }
 
     /// Append a task execution record to the log file
@@ -35,7 +30,7 @@ impl DataCollector {
             .with_context(|| format!("Failed to create log directory: {:?}", log_dir))?;
 
         let log_file = log_dir.join("task_executions.jsonl");
-        
+
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -43,14 +38,12 @@ impl DataCollector {
             .with_context(|| format!("Failed to open log file: {:?}", log_file))?;
 
         let mut writer = BufWriter::new(file);
-        let line = serde_json::to_string(record)
-            .with_context(|| "Failed to serialize task record")?;
-        
-        writeln!(writer, "{}", line)
-            .with_context(|| "Failed to write task record")?;
-        
-        writer.flush()
-            .with_context(|| "Failed to flush writer")?;
+        let line =
+            serde_json::to_string(record).with_context(|| "Failed to serialize task record")?;
+
+        writeln!(writer, "{}", line).with_context(|| "Failed to write task record")?;
+
+        writer.flush().with_context(|| "Failed to flush writer")?;
 
         info!("Recorded task execution: {}", record.task_id);
         Ok(())
@@ -62,7 +55,7 @@ impl DataCollector {
         std::fs::create_dir_all(&log_dir)?;
 
         let log_file = log_dir.join("evolution_cycles.jsonl");
-        
+
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -70,7 +63,7 @@ impl DataCollector {
 
         let mut writer = BufWriter::new(file);
         let line = serde_json::to_string(record)?;
-        
+
         writeln!(writer, "{}", line)?;
         writer.flush()?;
 
@@ -84,7 +77,7 @@ impl DataCollector {
         std::fs::create_dir_all(&analysis_dir)?;
 
         let summary_file = analysis_dir.join(format!("{}_summary.json", self.group));
-        
+
         let file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -93,7 +86,7 @@ impl DataCollector {
 
         let mut writer = BufWriter::new(file);
         let json = serde_json::to_string_pretty(summary)?;
-        
+
         writeln!(writer, "{}", json)?;
         writer.flush()?;
 
@@ -104,7 +97,7 @@ impl DataCollector {
     /// Load all task records for a group
     pub fn load_task_records(&self) -> Result<Vec<TaskExecutionRecord>> {
         let log_dir = self.base_dir.join("logs").join(&self.group);
-        
+
         if !log_dir.exists() {
             return Ok(Vec::new());
         }
@@ -131,7 +124,7 @@ impl DataCollector {
     /// Load all evolution records for a group
     pub fn load_evolution_records(&self) -> Result<Vec<EvolutionCycleRecord>> {
         let log_dir = self.base_dir.join("logs").join(&self.group);
-        
+
         if !log_dir.exists() {
             return Ok(Vec::new());
         }
@@ -196,25 +189,50 @@ impl ExperimentMetrics {
     ) -> Self {
         let total_tasks = task_records.len() as u64;
         let successful_tasks = task_records.iter().filter(|r| r.success).count() as u64;
-        
+
         let total_tool_calls: u64 = task_records.iter().map(|r| r.total_tool_calls as u64).sum();
         let total_execution_time: u64 = task_records.iter().map(|r| r.execution_time_ms).sum();
-        let total_satisfaction: u64 = task_records.iter().map(|r| r.user_satisfaction as u64).sum();
+        let total_satisfaction: u64 = task_records
+            .iter()
+            .map(|r| r.user_satisfaction as u64)
+            .sum();
         let total_gaps: u64 = task_records.iter().map(|r| r.gaps_detected as u64).sum();
         let total_created: u64 = task_records.iter().map(|r| r.tools_created as u64).sum();
         let total_optimized: u64 = task_records.iter().map(|r| r.tools_optimized as u64).sum();
 
-        let total_api_calls: u64 = evolution_records.iter().map(|r| r.metrics.api_calls as u64).sum();
-        let total_api_cost: f64 = evolution_records.iter().map(|r| r.metrics.api_cost_usd as f64).sum();
+        let total_api_calls: u64 = evolution_records
+            .iter()
+            .map(|r| r.metrics.api_calls as u64)
+            .sum();
+        let total_api_cost: f64 = evolution_records
+            .iter()
+            .map(|r| r.metrics.api_cost_usd as f64)
+            .sum();
 
         Self {
             group: group.to_string(),
             total_tasks,
             successful_tasks,
-            success_rate: if total_tasks > 0 { successful_tasks as f64 / total_tasks as f64 } else { 0.0 },
-            avg_tool_calls: if total_tasks > 0 { total_tool_calls as f64 / total_tasks as f64 } else { 0.0 },
-            avg_execution_time_ms: if total_tasks > 0 { total_execution_time as f64 / total_tasks as f64 } else { 0.0 },
-            avg_satisfaction: if total_tasks > 0 { total_satisfaction as f64 / total_tasks as f64 } else { 0.0 },
+            success_rate: if total_tasks > 0 {
+                successful_tasks as f64 / total_tasks as f64
+            } else {
+                0.0
+            },
+            avg_tool_calls: if total_tasks > 0 {
+                total_tool_calls as f64 / total_tasks as f64
+            } else {
+                0.0
+            },
+            avg_execution_time_ms: if total_tasks > 0 {
+                total_execution_time as f64 / total_tasks as f64
+            } else {
+                0.0
+            },
+            avg_satisfaction: if total_tasks > 0 {
+                total_satisfaction as f64 / total_tasks as f64
+            } else {
+                0.0
+            },
             total_gaps_detected: total_gaps,
             total_tools_created: total_created,
             total_tools_optimized: total_optimized,
@@ -226,8 +244,7 @@ impl ExperimentMetrics {
 
     /// Save metrics to JSON file
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
-        let parent = path.parent()
-            .context("Invalid path")?;
+        let parent = path.parent().context("Invalid path")?;
         std::fs::create_dir_all(parent)?;
 
         let file = OpenOptions::new()

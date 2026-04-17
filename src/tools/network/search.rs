@@ -9,20 +9,20 @@
 //! - `config`: 配置和引擎管理
 //! - `search_error`: 搜索专用错误类型
 
-use std::time::Duration;
 use moka::sync::Cache;
+use std::time::Duration;
 use tokitai::tool;
 
-use crate::tools::network::{NetworkResult, ssrf_protection};
+use crate::tools::network::{ssrf_protection, NetworkResult};
 
 // 子模块
-pub mod types;
 pub mod config;
 pub mod search_error;
+pub mod types;
 
-pub use types::*;
 pub use config::*;
 pub use search_error::SearchError;
+pub use types::*;
 
 // ============================================================================
 // 搜索引擎实现 - DuckDuckGo
@@ -65,11 +65,7 @@ impl SearchEngine for DuckDuckGoEngine {
         let encoded_query = urlencoding::encode(query);
         let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .map_err(SearchError::Network)?;
+        let response = self.client.get(&url).send().map_err(SearchError::Network)?;
 
         let status = response.status().as_u16();
         if status != 200 {
@@ -88,8 +84,7 @@ impl SearchEngine for DuckDuckGoEngine {
             });
         }
 
-        let results = parse_duckduckgo_results(&body, limit)
-            .ok_or(SearchError::NoResults)?;
+        let results = parse_duckduckgo_results(&body, limit).ok_or(SearchError::NoResults)?;
 
         if results.is_empty() {
             return Err(SearchError::NoResults);
@@ -109,7 +104,8 @@ impl SearchEngine for DuckDuckGoEngine {
     fn record_success(&self, response_time_ms: f64) {
         let mut health = self.health.write();
         health.success_count += 1;
-        health.success_rate = health.success_count as f32 / (health.success_count + health.fail_count) as f32;
+        health.success_rate =
+            health.success_count as f32 / (health.success_count + health.fail_count) as f32;
         health.avg_response_time_ms = response_time_ms;
         health.last_check = std::time::Instant::now();
     }
@@ -117,7 +113,8 @@ impl SearchEngine for DuckDuckGoEngine {
     fn record_failure(&self) {
         let mut health = self.health.write();
         health.fail_count += 1;
-        health.success_rate = health.success_count as f32 / (health.success_count + health.fail_count) as f32;
+        health.success_rate =
+            health.success_count as f32 / (health.success_count + health.fail_count) as f32;
         health.last_check = std::time::Instant::now();
     }
 }
@@ -168,11 +165,7 @@ impl SearchEngine for SearxngEngine {
             self.url, encoded_query
         );
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .map_err(SearchError::Network)?;
+        let response = self.client.get(&url).send().map_err(SearchError::Network)?;
 
         let status = response.status().as_u16();
         if status != 200 {
@@ -182,9 +175,7 @@ impl SearchEngine for SearxngEngine {
             });
         }
 
-        let searxng_resp: SearxngResponse = response
-            .json()
-            .map_err(SearchError::Network)?;
+        let searxng_resp: SearxngResponse = response.json().map_err(SearchError::Network)?;
 
         let results: Vec<SearchResult> = searxng_resp
             .results
@@ -217,7 +208,8 @@ impl SearchEngine for SearxngEngine {
     fn record_success(&self, response_time_ms: f64) {
         let mut health = self.health.write();
         health.success_count += 1;
-        health.success_rate = health.success_count as f32 / (health.success_count + health.fail_count) as f32;
+        health.success_rate =
+            health.success_count as f32 / (health.success_count + health.fail_count) as f32;
         health.avg_response_time_ms = response_time_ms;
         health.last_check = std::time::Instant::now();
     }
@@ -225,7 +217,8 @@ impl SearchEngine for SearxngEngine {
     fn record_failure(&self) {
         let mut health = self.health.write();
         health.fail_count += 1;
-        health.success_rate = health.success_count as f32 / (health.success_count + health.fail_count) as f32;
+        health.success_rate =
+            health.success_count as f32 / (health.success_count + health.fail_count) as f32;
         health.last_check = std::time::Instant::now();
     }
 }
@@ -273,7 +266,9 @@ impl SearchTools {
     /// 返回 JSON 格式的搜索结果列表
     #[tool(default_limit = "null")]
     pub fn search_web(&self, query: String, limit: Option<usize>) -> NetworkResult<String> {
-        let limit = limit.unwrap_or(self.config.default_limit).min(self.config.max_limit);
+        let limit = limit
+            .unwrap_or(self.config.default_limit)
+            .min(self.config.max_limit);
 
         tracing::info!("🔍 搜索网页：{} (limit={})", query, limit);
 
@@ -292,7 +287,11 @@ impl SearchTools {
 
         match results {
             Ok(results) => {
-                tracing::info!("✅ 搜索成功，找到 {} 条结果 (耗时 {:.0}ms)", results.len(), elapsed.as_millis());
+                tracing::info!(
+                    "✅ 搜索成功，找到 {} 条结果 (耗时 {:.0}ms)",
+                    results.len(),
+                    elapsed.as_millis()
+                );
 
                 let response = SearchResponse::new(query.clone(), results);
 
@@ -325,8 +324,7 @@ impl SearchTools {
         // SSRF 验证
         ssrf_protection::validate_url(&url)?;
 
-        let response = self.client.get(&url)
-            .send()?;
+        let response = self.client.get(&url).send()?;
 
         let body = response.text()?;
         let text = extract_text_from_html(&body);
@@ -343,7 +341,9 @@ impl SearchTools {
     /// 返回 JSON 格式的论文列表
     #[tool(default_limit = "null")]
     pub fn search_arxiv(&self, query: String, limit: Option<usize>) -> NetworkResult<String> {
-        let limit = limit.unwrap_or(self.config.default_limit).min(self.config.max_limit);
+        let limit = limit
+            .unwrap_or(self.config.default_limit)
+            .min(self.config.max_limit);
 
         tracing::info!("📚 搜索 arXiv 论文：{} (limit={})", query, limit);
 
@@ -361,7 +361,8 @@ impl SearchTools {
             return Err(SearchError::ApiError {
                 status,
                 message: format!("arXiv API 返回错误状态：{}", status),
-            }.into());
+            }
+            .into());
         }
 
         let body = response.text()?;
@@ -414,7 +415,8 @@ impl SearchTools {
         tracing::error!("所有 SearXNG 图片实例不可用");
         Err(SearchError::EngineUnavailable {
             engine: "SearXNG Images".to_string(),
-        }.into())
+        }
+        .into())
     }
 
     /// 搜索新闻（使用 SearXNG news 引擎）
@@ -486,17 +488,20 @@ impl SearchTools {
             return Err(SearchError::ApiError {
                 status,
                 message: format!("维基百科 API 返回错误状态：{}", status),
-            }.into());
+            }
+            .into());
         }
 
         let json: WikipediaResponse = response.json()?;
 
-        let results: Vec<SearchResult> = json.query.search
+        let results: Vec<SearchResult> = json
+            .query
+            .search
             .into_iter()
             .map(|r| {
-                let wiki_url = r.url.unwrap_or_else(|| {
-                    format!("https://zh.wikipedia.org/wiki/{}", r.title)
-                });
+                let wiki_url = r
+                    .url
+                    .unwrap_or_else(|| format!("https://zh.wikipedia.org/wiki/{}", r.title));
                 SearchResult {
                     title: r.title,
                     url: wiki_url,
@@ -526,7 +531,11 @@ impl SearchTools {
 
     /// 搜索英文维基百科
     #[tool(default_limit = "5")]
-    pub fn search_wikipedia_en(&self, query: String, limit: Option<usize>) -> NetworkResult<String> {
+    pub fn search_wikipedia_en(
+        &self,
+        query: String,
+        limit: Option<usize>,
+    ) -> NetworkResult<String> {
         let limit = limit.unwrap_or(5).min(20);
 
         tracing::info!("📚 搜索英文维基百科：{} (limit={})", query, limit);
@@ -545,17 +554,20 @@ impl SearchTools {
             return Err(SearchError::ApiError {
                 status,
                 message: format!("维基百科 API 返回错误状态：{}", status),
-            }.into());
+            }
+            .into());
         }
 
         let json: WikipediaResponse = response.json()?;
 
-        let results: Vec<SearchResult> = json.query.search
+        let results: Vec<SearchResult> = json
+            .query
+            .search
             .into_iter()
             .map(|r| {
-                let wiki_url = r.url.unwrap_or_else(|| {
-                    format!("https://en.wikipedia.org/wiki/{}", r.title)
-                });
+                let wiki_url = r
+                    .url
+                    .unwrap_or_else(|| format!("https://en.wikipedia.org/wiki/{}", r.title));
                 SearchResult {
                     title: r.title,
                     url: wiki_url,
@@ -669,7 +681,11 @@ impl SearchTools {
     }
 
     /// 使用 SearXNG 搜索新闻
-    fn search_with_searxng_news(&self, _base_url: &str, url: &str) -> NetworkResult<Vec<SearchResult>> {
+    fn search_with_searxng_news(
+        &self,
+        _base_url: &str,
+        url: &str,
+    ) -> NetworkResult<Vec<SearchResult>> {
         let response = self.client.get(url).send()?;
 
         let status = response.status().as_u16();
@@ -677,7 +693,8 @@ impl SearchTools {
             return Err(SearchError::ApiError {
                 status,
                 message: "SearXNG 新闻 API 返回错误状态".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         let searxng_resp: SearxngResponse = response.json()?;
@@ -697,7 +714,12 @@ impl SearchTools {
     }
 
     /// 使用 SearXNG 搜索图片
-    fn search_with_searxng_images(&self, searxng_url: &str, query: &str, limit: usize) -> NetworkResult<Vec<ImageSearchResult>> {
+    fn search_with_searxng_images(
+        &self,
+        searxng_url: &str,
+        query: &str,
+        limit: usize,
+    ) -> NetworkResult<Vec<ImageSearchResult>> {
         let encoded_query = urlencoding::encode(query);
         let url = format!(
             "{}/search?q={}&format=json&categories=images",
@@ -711,7 +733,8 @@ impl SearchTools {
             return Err(SearchError::ApiError {
                 status,
                 message: "SearXNG 图片 API 返回错误状态".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         let searxng_resp: SearxngImageResponse = response.json()?;
@@ -869,12 +892,7 @@ fn parse_arxiv_results(xml: &str, limit: usize) -> NetworkResult<Vec<SearchResul
                         .unwrap_or(&id);
 
                     let summary = extract_xml_tag(&current_entry, "summary")
-                        .map(|s| {
-                            s.split_whitespace()
-                                .take(30)
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        })
+                        .map(|s| s.split_whitespace().take(30).collect::<Vec<_>>().join(" "))
                         .unwrap_or_else(|| "无摘要".to_string());
 
                     let url = format!("https://arxiv.org/abs/{}", arxiv_id);

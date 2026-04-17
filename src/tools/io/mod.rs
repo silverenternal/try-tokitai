@@ -1,13 +1,13 @@
-pub mod security;
 pub mod error;
-pub mod utils;
-pub mod types;
-pub mod file_ops;
-pub mod file_search;
 #[allow(dead_code)]
 pub mod file_cache;
+pub mod file_ops;
+pub mod file_search;
 pub mod pdf_tools;
 pub mod project_templates;
+pub mod security;
+pub mod types;
+pub mod utils;
 
 // 公开 API
 pub use file_ops::FileOperations;

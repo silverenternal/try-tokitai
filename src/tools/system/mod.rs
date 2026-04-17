@@ -19,18 +19,18 @@
 //! - 安全增强：白名单机制、敏感信息过滤、TOCTOU 修复
 //! - 配置管理：统一常量配置，便于调整
 
-pub mod error;
 pub mod backend;
-pub mod config;
-pub mod process_manager;
-pub mod system_monitor;
-pub mod system_commands;
 pub mod code_analyzer;
+pub mod config;
+pub mod error;
+pub mod process_manager;
+pub mod system_commands;
+pub mod system_monitor;
 
 // 重新导出主要工具类型
+pub use code_analyzer::CodeAnalyzer;
 pub use process_manager::ProcessManager;
 pub use system_commands::SystemCommands;
-pub use code_analyzer::CodeAnalyzer;
 
 // 为向后兼容，保留旧的工具箱名称（内部使用新实现）
 /// @deprecated 使用 ProcessManager 替代

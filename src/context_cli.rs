@@ -9,13 +9,10 @@
 //! - `tokitai ctx log [branch]` - 查看历史
 //! - `tokitai ctx time-travel <branch> <hash>` - 时间旅行
 
-use std::path::PathBuf;
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 
-use crate::context::{
-    ParallelContextManager, ParallelContextManagerConfig,
-    MergeStrategy,
-};
+use tokitai_context::{MergeStrategy, ParallelContextManager, ParallelContextManagerConfig};
 
 /// 处理平行上下文命令
 pub fn handle_context_command(args: &[String]) -> Result<()> {
@@ -189,10 +186,12 @@ fn handle_checkout_command(args: &[String], context_root: &PathBuf) -> Result<()
     let mut manager = create_manager(context_root)?;
 
     // 先查找分支
-    let branch = manager.get_branch(branch_name)
+    let branch = manager
+        .get_branch(branch_name)
         .or_else(|| {
             // 尝试通过分支名称查找（而非 branch_id）
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *branch_name)
                 .cloned()
@@ -226,9 +225,11 @@ fn handle_merge_command(args: &[String], context_root: &PathBuf) -> Result<()> {
     println!("🔀 合并 '{}' 到 '{}'...", source_branch, target_branch);
 
     // 查找源分支
-    let source = manager.get_branch(source_branch)
+    let source = manager
+        .get_branch(source_branch)
         .or_else(|| {
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *source_branch)
                 .cloned()
@@ -267,9 +268,11 @@ fn handle_abort_command(args: &[String], context_root: &PathBuf) -> Result<()> {
     let mut manager = create_manager(context_root)?;
 
     // 查找分支
-    let branch = manager.get_branch(branch_name)
+    let branch = manager
+        .get_branch(branch_name)
         .or_else(|| {
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *branch_name)
                 .cloned()
@@ -306,18 +309,22 @@ fn handle_diff_command(args: &[String], context_root: &PathBuf) -> Result<()> {
     let manager = create_manager(context_root)?;
 
     // 查找分支
-    let b1 = manager.get_branch(branch1)
+    let b1 = manager
+        .get_branch(branch1)
         .or_else(|| {
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *branch1)
                 .cloned()
         })
         .with_context(|| format!("分支不存在：{}", branch1))?;
 
-    let b2 = manager.get_branch(branch2)
+    let b2 = manager
+        .get_branch(branch2)
         .or_else(|| {
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *branch2)
                 .cloned()
@@ -361,7 +368,8 @@ fn handle_diff_command(args: &[String], context_root: &PathBuf) -> Result<()> {
         println!();
     }
 
-    let total_changes = diff.added_items.len() + diff.removed_items.len() + diff.modified_items.len();
+    let total_changes =
+        diff.added_items.len() + diff.removed_items.len() + diff.modified_items.len();
     if total_changes == 0 && diff.conflicts.is_empty() {
         println!("✅ 两个分支没有差异");
     }
@@ -376,9 +384,11 @@ fn handle_log_command(args: &[String], context_root: &PathBuf) -> Result<()> {
     let manager = create_manager(context_root)?;
 
     // 查找分支
-    let branch = manager.get_branch(branch_name)
+    let branch = manager
+        .get_branch(branch_name)
         .or_else(|| {
-            manager.list_branches()
+            manager
+                .list_branches()
                 .iter()
                 .find(|b| b.branch_name == *branch_name)
                 .cloned()
@@ -440,7 +450,10 @@ fn handle_status_command(context_root: &PathBuf) -> Result<()> {
     if let Some(branch) = current {
         println!("当前分支：{} ({})", branch.branch_name, branch.branch_id);
         println!("分支状态：{:?}", branch.state);
-        println!("创建时间：{}", branch.fork_point.format("%Y-%m-%d %H:%M:%S"));
+        println!(
+            "创建时间：{}",
+            branch.fork_point.format("%Y-%m-%d %H:%M:%S")
+        );
         println!("父分支：{}", branch.parent_branch);
         println!();
     }

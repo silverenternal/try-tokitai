@@ -11,14 +11,10 @@ mod common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 
-use common::{
-    setup_kv, warm_cache, flush_kv,
-    quick_bench_config,
-    bench_key, bench_value,
-};
+use common::{bench_key, bench_value, flush_kv, quick_bench_config, setup_kv, warm_cache};
 
 // ============================================================================
 // Cache Hit Benchmarks
@@ -121,7 +117,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
             let op_idx = op_counter.fetch_add(1, Ordering::Relaxed);
             let key = bench_key(op_idx % num_keys);
 
-            if op_idx % 5 == 0 {
+            if op_idx.is_multiple_of(5) {
                 // 20% writes
                 let new_value = bench_value(64);
                 black_box(kv.put(&key, &new_value)).unwrap();
@@ -139,10 +135,6 @@ fn bench_mixed_workload(c: &mut Criterion) {
 // Criterion main
 // ============================================================================
 
-criterion_group!(benches, 
-    bench_cache_hit, 
-    bench_cache_miss, 
-    bench_mixed_workload
-);
+criterion_group!(benches, bench_cache_hit, bench_cache_miss, bench_mixed_workload);
 
 criterion_main!(benches);

@@ -4,18 +4,17 @@
 //! - Zone Map-based block pruning
 //! - Sequential prefetching
 
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use std::time::Duration;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 use tempfile::TempDir;
 
-use tokitai_filekv::{FileKV, FileKVConfig, MemTableConfig, AggressiveConfig, RangeEntry};
 use tokitai_filekv::cache::block_cache::BlockCacheConfig;
-use tokitai_filekv::compression::DictionaryCompressionConfig;
 use tokitai_filekv::compaction::CompactionConfig;
-use tokitai_filekv::AuditLogConfig;
 use tokitai_filekv::core::types::BlockCompressionConfig;
 use tokitai_filekv::io::MemFs;
+use tokitai_filekv::AuditLogConfig;
+use tokitai_filekv::{AggressiveConfig, FileKV, FileKVConfig, MemTableConfig, RangeEntry};
 
 /// Create a test FileKV instance with INNO-002 enabled
 /// 可配置数据量和 segment 数量
@@ -38,38 +37,25 @@ fn create_test_kv_with_inno002(num_keys: usize, num_segments: usize) -> (FileKV,
         enable_wal: false,
         enable_bloom: true,
         enable_background_flush: false,
-        background_flush_interval_ms: 0,
-        segment_preallocate_size: 16 * 1024 * 1024,
         block_size: 8192,
         block_compression: BlockCompressionConfig::default(),
         memtable: MemTableConfig {
             flush_threshold_bytes: flush_threshold.max(64 * 1024) as usize, // 最小 64KB
             max_entries: 100000,
             max_memory_bytes: 64 * 1024 * 1024,
+            ..Default::default()
         },
         cache: BlockCacheConfig {
             max_memory_bytes: 128 * 1024 * 1024,
             max_items: 10000,
+            frequency_aware: false,
         },
         compaction: CompactionConfig::default(),
-        wal_max_size_bytes: 100 * 1024 * 1024,
-        wal_max_files: 5,
-        cache_warming_enabled: false,
-        compression: DictionaryCompressionConfig::default(),
-        async_io_enabled: false,
-        async_io_max_concurrent_writes: 4,
-        async_io_max_queue_depth: 1024,
-        async_io_write_timeout_ms: 5000,
-        async_io_enable_coalescing: false,
-        async_io_coalesce_window_ms: 10,
         checkpoint_dir: temp_dir.path().join("checkpoints"),
         audit_log: AuditLogConfig::default(),
         aggressive: AggressiveConfig::balanced(),
-        enable_adaptive_bloom_cache: true,
-        enable_zone_map_pruning: true,
-        enable_sequential_prefetch: true,
-        enable_background_cache_rebalance: false,
         fs: Arc::new(MemFs::new()),
+        ..Default::default()
     };
 
     let kv = FileKV::open(config).unwrap();
@@ -88,10 +74,7 @@ fn create_test_kv_with_inno002(num_keys: usize, num_segments: usize) -> (FileKV,
             })
             .collect();
 
-        let entries_ref: Vec<(&str, &[u8])> = entries
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_slice()))
-            .collect();
+        let entries_ref: Vec<(&str, &[u8])> = entries.iter().map(|(k, v)| (k.as_str(), v.as_slice())).collect();
 
         kv.put_batch(&entries_ref).unwrap();
         inserted = end;
@@ -132,10 +115,7 @@ fn bench_range_query(c: &mut Criterion) {
             let end_key = format!("key_{:08}", range_size - 1);
 
             group.bench_with_input(
-                BenchmarkId::new(
-                    format!("{}keys", num_keys),
-                    format!("range={}", range_size),
-                ),
+                BenchmarkId::new(format!("{}keys", num_keys), format!("range={}", range_size)),
                 &(start_key, end_key),
                 |b, (start, end)| {
                     b.iter(|| {

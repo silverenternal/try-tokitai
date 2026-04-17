@@ -5,8 +5,8 @@
 //! - 错误上下文（路径、操作类型等）
 //! - AI 友好的错误消息和建议
 
-use thiserror::Error;
 use serde_json::{json, Value};
+use thiserror::Error;
 
 /// IO 工具统一错误类型
 #[derive(Error, Debug, Clone)]
@@ -21,31 +21,19 @@ pub enum IoToolError {
 
     /// 文件不存在
     #[error("文件不存在：{path}")]
-    FileNotFound {
-        path: String,
-        suggestion: String,
-    },
+    FileNotFound { path: String, suggestion: String },
 
     /// 目录不存在
     #[error("目录不存在：{path}")]
-    DirNotFound {
-        path: String,
-        suggestion: String,
-    },
+    DirNotFound { path: String, suggestion: String },
 
     /// 不是文件
     #[error("路径不是文件：{path}")]
-    NotAFile {
-        path: String,
-        suggestion: String,
-    },
+    NotAFile { path: String, suggestion: String },
 
     /// 不是目录
     #[error("路径不是目录：{path}")]
-    NotADirectory {
-        path: String,
-        suggestion: String,
-    },
+    NotADirectory { path: String, suggestion: String },
 
     /// IO 操作失败
     #[error("IO 操作失败：{message}")]
@@ -66,10 +54,7 @@ pub enum IoToolError {
 
     /// 文件已存在
     #[error("文件/目录已存在：{path}")]
-    AlreadyExists {
-        path: String,
-        suggestion: String,
-    },
+    AlreadyExists { path: String, suggestion: String },
 
     /// 无效的编辑模式
     #[error("无效的编辑模式：{mode}")]
@@ -149,10 +134,7 @@ pub enum IoToolError {
 
     /// 符号链接循环
     #[error("检测到符号链接循环")]
-    SymlinkLoop {
-        path: String,
-        suggestion: String,
-    },
+    SymlinkLoop { path: String, suggestion: String },
 
     /// 权限不足
     #[error("权限不足：{message}")]
@@ -164,17 +146,18 @@ pub enum IoToolError {
 
     /// 内部错误（不应该发生）
     #[error("内部错误：{message}")]
-    Internal {
-        message: String,
-        suggestion: String,
-    },
+    Internal { message: String, suggestion: String },
 }
 
 impl IoToolError {
     /// 转换为 AI 友好的 JSON 响应
     pub fn to_value(&self) -> Value {
         let (code, context) = match self {
-            IoToolError::PathValidation { path, message, suggestion } => (
+            IoToolError::PathValidation {
+                path,
+                message,
+                suggestion,
+            } => (
                 "path_validation_failed",
                 json!({
                     "path": path,
@@ -210,7 +193,12 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::IoError { message, path, operation, suggestion } => (
+            IoToolError::IoError {
+                message,
+                path,
+                operation,
+                suggestion,
+            } => (
                 "io_error",
                 json!({
                     "path": path,
@@ -219,7 +207,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::DirCreationFailed { path, message, suggestion } => (
+            IoToolError::DirCreationFailed {
+                path,
+                message,
+                suggestion,
+            } => (
                 "directory_creation_failed",
                 json!({
                     "path": path,
@@ -234,7 +226,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::InvalidEditMode { mode, valid_modes, suggestion } => (
+            IoToolError::InvalidEditMode {
+                mode,
+                valid_modes,
+                suggestion,
+            } => (
                 "invalid_edit_mode",
                 json!({
                     "provided_mode": mode,
@@ -242,7 +238,13 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::TextNotFound { search_text, closest_line, closest_col, context, suggestion } => (
+            IoToolError::TextNotFound {
+                search_text,
+                closest_line,
+                closest_col,
+                context,
+                suggestion,
+            } => (
                 "text_not_found",
                 json!({
                     "search_text": search_text,
@@ -252,7 +254,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::MissingParameter { param_name, message, suggestion } => (
+            IoToolError::MissingParameter {
+                param_name,
+                message,
+                suggestion,
+            } => (
                 "missing_parameter",
                 json!({
                     "parameter": param_name,
@@ -260,7 +266,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::PatternTooLong { length, max_length, suggestion } => (
+            IoToolError::PatternTooLong {
+                length,
+                max_length,
+                suggestion,
+            } => (
                 "pattern_too_long",
                 json!({
                     "pattern_length": length,
@@ -268,7 +278,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::InvalidRegex { pattern, message, suggestion } => (
+            IoToolError::InvalidRegex {
+                pattern,
+                message,
+                suggestion,
+            } => (
                 "invalid_regex",
                 json!({
                     "pattern": pattern,
@@ -276,7 +290,12 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::PdfLoadFailed { path, message, file_size, suggestion } => (
+            IoToolError::PdfLoadFailed {
+                path,
+                message,
+                file_size,
+                suggestion,
+            } => (
                 "pdf_load_failed",
                 json!({
                     "path": path,
@@ -285,7 +304,12 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::InvalidFileType { path, expected_extension, actual_extension, suggestion } => (
+            IoToolError::InvalidFileType {
+                path,
+                expected_extension,
+                actual_extension,
+                suggestion,
+            } => (
                 "invalid_file_type",
                 json!({
                     "path": path,
@@ -294,7 +318,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::PathTooLong { length, max_length, suggestion } => (
+            IoToolError::PathTooLong {
+                length,
+                max_length,
+                suggestion,
+            } => (
                 "path_too_long",
                 json!({
                     "path_length": length,
@@ -302,7 +330,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::InvalidJson { input, message, suggestion } => (
+            IoToolError::InvalidJson {
+                input,
+                message,
+                suggestion,
+            } => (
                 "invalid_json",
                 json!({
                     "input": input,
@@ -317,7 +349,11 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::PermissionDenied { path, message, suggestion } => (
+            IoToolError::PermissionDenied {
+                path,
+                message,
+                suggestion,
+            } => (
                 "permission_denied",
                 json!({
                     "path": path,
@@ -325,7 +361,10 @@ impl IoToolError {
                     "suggestion": suggestion
                 }),
             ),
-            IoToolError::Internal { message, suggestion } => (
+            IoToolError::Internal {
+                message,
+                suggestion,
+            } => (
                 "internal_error",
                 json!({
                     "message": message,
@@ -397,10 +436,8 @@ mod tests {
 
     #[test]
     fn test_success_response() {
-        let response = IoToolError::success_response(
-            "read_file",
-            json!({"content": "hello", "size": 5}),
-        );
+        let response =
+            IoToolError::success_response("read_file", json!({"content": "hello", "size": 5}));
         assert_eq!(response["status"], "success");
         assert_eq!(response["operation"], "read_file");
     }

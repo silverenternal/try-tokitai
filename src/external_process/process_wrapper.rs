@@ -16,15 +16,11 @@
 //! - Stdout/stderr capture
 
 use crate::external_process::metadata::{
-    ExternalToolMetadata,
-    ExternalToolType,
-    ProcessConfig,
-    ToolExecutionResult,
-    RiskLevel,
+    ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel, ToolExecutionResult,
 };
-use crate::external_process::wrapper::{ExternalTool, validation};
+use crate::external_process::wrapper::{validation, ExternalTool};
 use crate::tool_matrix::matrix::ToolDefinition;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -222,8 +218,7 @@ impl ExternalTool for ProcessWrapper {
         }
 
         // Get input as object
-        let input_obj = input.as_object()
-            .context("Input must be a JSON object")?;
+        let input_obj = input.as_object().context("Input must be a JSON object")?;
 
         // Build command
         let cmd = self.build_command(input_obj)?;
@@ -237,7 +232,7 @@ impl ExternalTool for ProcessWrapper {
         match execution_result {
             Ok((stdout, stderr)) => {
                 debug!("Process executed successfully in {}ms", elapsed);
-                
+
                 // Try to parse stdout as JSON, otherwise return as text
                 let output = serde_json::from_str::<Value>(&stdout)
                     .unwrap_or_else(|_| Value::String(stdout.clone()));
@@ -259,8 +254,8 @@ impl ExternalTool for ProcessWrapper {
 
     fn to_tool_definition(&self) -> ToolDefinition {
         // Convert ExternalToolMetadata to ToolDefinition
-        use crate::tool_matrix::matrix::{ServiceMetadata, ServiceCategory};
-        
+        use crate::tool_matrix::matrix::{ServiceCategory, ServiceMetadata};
+
         // Map RiskLevel to string
         let risk_level_str = match self.metadata.risk_level {
             RiskLevel::Low => "safe",
@@ -421,13 +416,15 @@ impl ProcessWrapperBuilder {
 #[cfg(test)]
 pub fn create_test_echo_wrapper() -> ProcessWrapper {
     use crate::external_process::metadata::schema_helpers;
-    
+
     ProcessWrapperBuilder::new("echo_test", "echo")
         .description("Echo test tool")
         .args(vec!["{{message}}".to_string()])
-        .input_schema(schema_helpers::create_string_params_schema(vec![
-            ("message", "Message to echo", true),
-        ]))
+        .input_schema(schema_helpers::create_string_params_schema(vec![(
+            "message",
+            "Message to echo",
+            true,
+        )]))
         .domain("test")
         .tag("test")
         .tag("echo")
@@ -459,9 +456,11 @@ mod tests {
             .description("Sleep test tool")
             .args(vec!["{{duration}}".to_string()])
             .timeout(100) // 100ms timeout
-            .input_schema(schema_helpers::create_string_params_schema(vec![
-                ("duration", "Sleep duration in seconds", true),
-            ]))
+            .input_schema(schema_helpers::create_string_params_schema(vec![(
+                "duration",
+                "Sleep duration in seconds",
+                true,
+            )]))
             .domain("test")
             .build();
 
@@ -488,10 +487,11 @@ mod tests {
     #[test]
     fn test_arg_substitution() {
         let wrapper = create_test_echo_wrapper();
-        
-        let input = serde_json::Map::from_iter(vec![
-            ("message".to_string(), Value::String("test".to_string())),
-        ]);
+
+        let input = serde_json::Map::from_iter(vec![(
+            "message".to_string(),
+            Value::String("test".to_string()),
+        )]);
 
         let result = wrapper.substitute_arg("{{message}}", &input);
         assert_eq!(result, "test");
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn test_arg_substitution_multiple_vars() {
         let wrapper = create_test_echo_wrapper();
-        
+
         let input = serde_json::Map::from_iter(vec![
             ("name".to_string(), Value::String("Alice".to_string())),
             ("age".to_string(), Value::Number(30.into())),
@@ -514,7 +514,11 @@ mod tests {
     #[test]
     fn test_process_config_builder() {
         let config = ProcessConfig::new("git")
-            .with_args(vec!["commit".to_string(), "-m".to_string(), "{{message}}".to_string()])
+            .with_args(vec![
+                "commit".to_string(),
+                "-m".to_string(),
+                "{{message}}".to_string(),
+            ])
             .with_working_dir(PathBuf::from("/workspace"))
             .with_timeout(60000)
             .with_env("GIT_AUTHOR_NAME".to_string(), "AI".to_string());

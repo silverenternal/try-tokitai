@@ -5,9 +5,9 @@
 //! 2. 轻量级可克隆：内部使用 Arc 共享数据
 //! 3. AI 友好：提供完整的元数据和序列化支持
 
-use std::sync::Arc;
 use ndarray::ArrayD;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::error::{TensorError, TensorResult};
 
@@ -95,7 +95,7 @@ impl Shape {
     pub fn can_broadcast_to(&self, target: &Shape) -> bool {
         let src = self.dims();
         let tgt = target.dims();
-        
+
         // 目标形状维度不能少于源形状
         if tgt.len() < src.len() {
             return false;
@@ -105,7 +105,7 @@ impl Shape {
         for (i, &s) in src.iter().enumerate() {
             let offset = tgt.len() - src.len();
             let t = tgt[i + offset];
-            
+
             // 维度必须相同或源维度为 1
             if s != t && s != 1 {
                 return false;
@@ -196,10 +196,11 @@ impl Tensor {
 
     /// 从数据切片创建张量
     pub fn from_data(data: &[f64], shape: &[usize]) -> TensorResult<Self> {
-        let array = ArrayD::from_shape_vec(shape.to_vec(), data.to_vec())
-            .map_err(|e| TensorError::ShapeMismatch {
+        let array = ArrayD::from_shape_vec(shape.to_vec(), data.to_vec()).map_err(|e| {
+            TensorError::ShapeMismatch {
                 message: format!("Failed to create array from data: {}", e),
-            })?;
+            }
+        })?;
         Ok(Self::from_array(array))
     }
 
@@ -263,7 +264,9 @@ impl Tensor {
 
         match &*self.data {
             TensorData::Array(arr) => {
-                let array = arr.clone().into_shape_with_order(new_shape.to_vec())
+                let array = arr
+                    .clone()
+                    .into_shape_with_order(new_shape.to_vec())
                     .map_err(|e| TensorError::ShapeMismatch {
                         message: format!("Failed to reshape: {}", e),
                     })?;
@@ -285,7 +288,7 @@ impl Tensor {
             TensorData::Array(arr) => {
                 let shape = arr.shape();
                 let (m, n) = (shape[0], shape[1]);
-                
+
                 let mut result = ArrayD::zeros(vec![n, m]);
                 for i in 0..m {
                     for j in 0..n {
@@ -313,15 +316,15 @@ impl Serialize for Tensor {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        
+
         let mut state = serializer.serialize_struct("Tensor", 3)?;
         state.serialize_field("shape", &self.shape().dims())?;
         state.serialize_field("dtype", &self.dtype.as_str())?;
-        
+
         // 序列化数据
         let data = self.as_slice().unwrap_or(&[]);
         state.serialize_field("data", &data)?;
-        
+
         state.end()
     }
 }

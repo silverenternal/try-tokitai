@@ -161,16 +161,16 @@ impl WorkflowLoader {
     /// 从文件加载工作流
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<DeclarativeWorkflow> {
         let path = path.as_ref();
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("读取工作流文件失败：{:?}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("读取工作流文件失败：{:?}", path))?;
 
         Self::load_from_str(&content)
     }
 
     /// 从字符串加载工作流
     pub fn load_from_str(content: &str) -> Result<DeclarativeWorkflow> {
-        let toml_workflow: TomlWorkflow = toml::from_str(content)
-            .with_context(|| "解析 TOML 工作流失败")?;
+        let toml_workflow: TomlWorkflow =
+            toml::from_str(content).with_context(|| "解析 TOML 工作流失败")?;
 
         Ok(Self::convert_to_declarative(toml_workflow))
     }

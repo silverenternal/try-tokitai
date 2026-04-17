@@ -43,12 +43,12 @@
 // 允许未使用的代码，这些是热加载功能的基础设施
 #![allow(dead_code)]
 
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{info, debug, warn};
-use anyhow::{Result, Context, bail};
+use tracing::{debug, info, warn};
 
 /// TOML 工具定义
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,15 +203,18 @@ impl TomlToolDefinition {
         let definition: TomlToolDefinition = toml::from_str(&content)
             .with_context(|| format!("解析 TOML 工具定义失败：{:?}", path))?;
 
-        debug!("加载工具定义：{} v{}", definition.tool.name, definition.tool.version);
+        debug!(
+            "加载工具定义：{} v{}",
+            definition.tool.name, definition.tool.version
+        );
 
         Ok(definition)
     }
 
     /// 从 TOML 字符串解析工具定义
     pub fn from_str(toml_str: &str) -> Result<Self> {
-        let definition: TomlToolDefinition = toml::from_str(toml_str)
-            .with_context(|| "解析 TOML 工具定义失败")?;
+        let definition: TomlToolDefinition =
+            toml::from_str(toml_str).with_context(|| "解析 TOML 工具定义失败")?;
 
         Ok(definition)
     }
@@ -223,8 +226,14 @@ impl TomlToolDefinition {
 
         for param in &self.parameters {
             let mut prop = serde_json::Map::new();
-            prop.insert("type".to_string(), serde_json::json!(param.rust_type_to_json()));
-            prop.insert("description".to_string(), serde_json::json!(&param.description));
+            prop.insert(
+                "type".to_string(),
+                serde_json::json!(param.rust_type_to_json()),
+            );
+            prop.insert(
+                "description".to_string(),
+                serde_json::json!(&param.description),
+            );
 
             if let Some(default) = &param.default {
                 prop.insert("default".to_string(), default.clone());
@@ -347,12 +356,24 @@ impl TomlToolDefinition {
     fn is_valid_param_type(&self, param_type: &str) -> bool {
         matches!(
             param_type,
-            "string" | "String" |
-            "integer" | "i64" | "i32" | "u64" | "u32" |
-            "number" | "f64" | "f32" |
-            "boolean" | "bool" |
-            "array" | "Vec<String>" | "Vec<i64>" |
-            "object" | "serde_json::Value" | "Value"
+            "string"
+                | "String"
+                | "integer"
+                | "i64"
+                | "i32"
+                | "u64"
+                | "u32"
+                | "number"
+                | "f64"
+                | "f32"
+                | "boolean"
+                | "bool"
+                | "array"
+                | "Vec<String>"
+                | "Vec<i64>"
+                | "object"
+                | "serde_json::Value"
+                | "Value"
         )
     }
 }
@@ -409,7 +430,12 @@ impl TomlToolLoader {
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
-            .filter(|e| e.path().extension().map(|ext| ext == "toml").unwrap_or(false))
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "toml")
+                    .unwrap_or(false)
+            })
         {
             let path = entry.path().to_path_buf();
 
@@ -428,8 +454,12 @@ impl TomlToolLoader {
                             continue;
                         }
 
-                        info!("加载工具：{} v{}", definition.tool.name, definition.tool.version);
-                        self.loaded_tools.insert(definition.tool.name.clone(), definition);
+                        info!(
+                            "加载工具：{} v{}",
+                            definition.tool.name, definition.tool.version
+                        );
+                        self.loaded_tools
+                            .insert(definition.tool.name.clone(), definition);
                         self.file_timestamps.insert(path, modified);
                         loaded_count += 1;
                     }
@@ -449,7 +479,11 @@ impl TomlToolLoader {
     fn get_file_modified(&self, path: &Path) -> u64 {
         fs::metadata(path)
             .and_then(|m| m.modified())
-            .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+            .map(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            })
             .unwrap_or(0)
     }
 
@@ -484,7 +518,10 @@ impl TomlToolLoader {
             .filter(|t| {
                 t.tool.name.to_lowercase().contains(&query_lower)
                     || t.tool.description.to_lowercase().contains(&query_lower)
-                    || t.tool.tags.iter().any(|tag| tag.to_lowercase().contains(&query_lower))
+                    || t.tool
+                        .tags
+                        .iter()
+                        .any(|tag| tag.to_lowercase().contains(&query_lower))
             })
             .collect()
     }
@@ -629,7 +666,9 @@ description = "Count"
         // 创建测试工具文件
         let tool1_path = dir.path().join("search.toml");
         let mut tool1_file = fs::File::create(&tool1_path)?;
-        writeln!(tool1_file, r#"
+        writeln!(
+            tool1_file,
+            r#"
 [tool]
 name = "web_search"
 version = "1.0.0"
@@ -641,11 +680,14 @@ name = "query"
 type = "string"
 required = true
 description = "Search query"
-"#)?;
+"#
+        )?;
 
         let tool2_path = dir.path().join("file.toml");
         let mut tool2_file = fs::File::create(&tool2_path)?;
-        writeln!(tool2_file, r#"
+        writeln!(
+            tool2_file,
+            r#"
 [tool]
 name = "read_file"
 version = "2.0.0"
@@ -657,7 +699,8 @@ name = "path"
 type = "string"
 required = true
 description = "File path"
-"#)?;
+"#
+        )?;
 
         let mut loader = TomlToolLoader::new(dir.path())?;
 
@@ -677,7 +720,9 @@ description = "File path"
         // 测试热加载：修改文件
         std::thread::sleep(std::time::Duration::from_secs(1));
         let mut tool1_file = fs::File::create(&tool1_path)?;
-        writeln!(tool1_file, r#"
+        writeln!(
+            tool1_file,
+            r#"
 [tool]
 name = "web_search"
 version = "1.1.0"
@@ -689,7 +734,8 @@ name = "query"
 type = "string"
 required = true
 description = "Search query"
-"#)?;
+"#
+        )?;
 
         let reloaded = loader.reload()?;
         assert_eq!(reloaded, 1);

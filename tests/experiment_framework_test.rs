@@ -43,14 +43,14 @@ fn test_group_comparison() {
     // Test that different groups have different configurations
     let control = ExperimentGroup::Control;
     let full = ExperimentGroup::OursFull;
-    
+
     // Control should not have evolution, Full should
     assert!(!control.has_evolution());
     assert!(full.has_evolution());
-    
+
     // Verify log dir names are different
     assert_ne!(control.log_dir_name(), full.log_dir_name());
-    
+
     println!("Group comparison test passed!");
 }
 
@@ -58,13 +58,13 @@ fn test_group_comparison() {
 fn test_group_descriptions() {
     let control = ExperimentGroup::Control;
     let full = ExperimentGroup::OursFull;
-    
+
     // Verify descriptions are not empty
     assert!(!control.description().is_empty());
     assert!(!full.description().is_empty());
-    
+
     // Descriptions should be different
     assert_ne!(control.description(), full.description());
-    
+
     println!("Group descriptions test passed!");
 }

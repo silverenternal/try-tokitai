@@ -5,10 +5,10 @@
 //! - 性能衰减检测
 //! - 数据一致性验证
 
+use crate::FileKV;
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use parking_lot::Mutex;
-use crate::FileKV;
 
 /// Fixed RNG seed for reproducible stability tests in CI
 /// Change this seed if you want different random data but still reproducible runs
@@ -54,6 +54,7 @@ impl Default for StabilityTestConfig {
 
 /// 稳定性测试结果
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StabilityTestResult {
     /// 总写入次数
     pub total_writes: usize,
@@ -156,8 +157,10 @@ impl StabilityTester {
             }
 
             // 读取操作
-            if self.config.read_ratio > 0.0 && total_writes > 0
-                && STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<f64>()) < self.config.read_ratio {
+            if self.config.read_ratio > 0.0
+                && total_writes > 0
+                && STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<f64>()) < self.config.read_ratio
+            {
                 match self.do_read() {
                     Ok(latency_ns) => {
                         self.stats.lock().read_latencies.lock().push(latency_ns);
@@ -257,7 +260,10 @@ impl StabilityTester {
     }
 
     fn do_write(&self) -> Result<f64, Box<dyn std::error::Error>> {
-        let key = format!("stability_test_{}", STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<u64>()));
+        let key = format!(
+            "stability_test_{}",
+            STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<u64>())
+        );
         let value = vec![b'x'; self.config.write_size_bytes];
 
         let start = Instant::now();
@@ -268,7 +274,10 @@ impl StabilityTester {
     }
 
     fn do_read(&self) -> Result<f64, Box<dyn std::error::Error>> {
-        let key = format!("stability_test_{}", STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<u64>()));
+        let key = format!(
+            "stability_test_{}",
+            STABILITY_RNG.with(|rng| rng.borrow_mut().gen::<u64>())
+        );
 
         let start = Instant::now();
         let _ = self.filekv.get(&key);
@@ -316,13 +325,12 @@ impl StabilityTester {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::*;
+    use crate::cache::block_cache::BlockCacheConfig;
+    use crate::compaction::{CompactionConfig, CompactionStrategy};
     use crate::core::config::FileKVConfig;
     use crate::core::memtable::MemTableConfig;
-    use crate::cache::block_cache::BlockCacheConfig;
-    use crate::compaction::CompactionConfig;
     use crate::ops::audit_log::AuditLogConfig;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn setup_test_filekv() -> (tempfile::TempDir, Arc<FileKV>) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -340,6 +348,9 @@ mod tests {
                 max_entries: 100_000,
                 max_memory_bytes: 64 * 1024 * 1024,
                 shards: 32,
+                enable_async_flush: false,
+                max_immutable_memtables: 1,
+                immutable_flush_threshold_bytes: 4 * 1024 * 1024,
             },
             segment_dir,
             enable_wal: true,
@@ -359,16 +370,20 @@ mod tests {
                 check_interval: 100,
                 max_segment_size_bytes: 16 * 1024 * 1024,
                 target_segment_size_bytes: 8 * 1024 * 1024,
-                async_compaction_enabled: false, // Disabled for stability tests
+                async_compaction_enabled: false,   // Disabled for stability tests
                 leveled_compaction_enabled: false, // Disabled for stability tests
                 level_size_multiplier: 10,
                 max_level: 3,
                 l0_file_count_threshold: 4,
                 parallel_compaction_enabled: false, // Disabled for stability tests
                 streaming_compaction_enabled: true,
-                write_amplification_threshold: 3.0, // OPT-003: Default WA threshold
+                write_amplification_threshold: 3.0,   // OPT-003: Default WA threshold
                 max_background_compaction_threads: 1, // Disabled for stability tests
                 l0_size_bytes_threshold: 64 * 1024 * 1024, // OPT-003: Default L0 size trigger
+                // OPT-006: STCS for L0 defaults
+                l0_compaction_strategy: CompactionStrategy::Leveled,
+                l0_stcs_min_segments: 3,
+                l0_stcs_size_ratio: 2.0,
             },
             segment_preallocate_size: 16 * 1024 * 1024,
             wal_max_size_bytes: 100 * 1024 * 1024,
@@ -413,8 +428,16 @@ mod tests {
         // 验证测试结果
         assert!(result.consistency_check_passed, "Consistency check failed");
         assert!(result.total_writes > 0, "No writes completed");
-        assert!(result.memory_growth_percent < 50.0, "Memory growth too high: {:.2}%", result.memory_growth_percent);
-        assert!(result.performance_degradation_percent < 50.0, "Performance degradation too high: {:.2}%", result.performance_degradation_percent);
+        assert!(
+            result.memory_growth_percent < 50.0,
+            "Memory growth too high: {:.2}%",
+            result.memory_growth_percent
+        );
+        assert!(
+            result.performance_degradation_percent < 50.0,
+            "Performance degradation too high: {:.2}%",
+            result.performance_degradation_percent
+        );
     }
 
     #[test]
@@ -422,10 +445,10 @@ mod tests {
         let (_temp_dir, filekv) = setup_test_filekv();
 
         let config = StabilityTestConfig {
-            duration: Duration::from_secs(5),   // 5 秒快速测试（原 30 秒）
-            writes_per_second: 50,              // 降低频率（原 100）
-            write_size_bytes: 64,               // 减小写入大小（原 128）
-            read_ratio: 0.3,                    // 降低读取比例（原 0.5）
+            duration: Duration::from_secs(5), // 5 秒快速测试（原 30 秒）
+            writes_per_second: 50,            // 降低频率（原 100）
+            write_size_bytes: 64,             // 减小写入大小（原 128）
+            read_ratio: 0.3,                  // 降低读取比例（原 0.5）
             memory_check_interval: Duration::from_secs(2),
             performance_check_interval: Duration::from_secs(2),
         };
@@ -446,10 +469,10 @@ mod tests {
         let (_temp_dir, filekv) = setup_test_filekv();
 
         let config = StabilityTestConfig {
-            duration: Duration::from_secs(5),   // 5 秒快速测试（原 30 秒）
-            writes_per_second: 50,              // 降低频率（原 200）
+            duration: Duration::from_secs(5), // 5 秒快速测试（原 30 秒）
+            writes_per_second: 50,            // 降低频率（原 200）
             write_size_bytes: 64,
-            read_ratio: 0.2,                    // 降低读取比例（原 0.3）
+            read_ratio: 0.2, // 降低读取比例（原 0.3）
             memory_check_interval: Duration::from_secs(2),
             performance_check_interval: Duration::from_secs(2),
         };

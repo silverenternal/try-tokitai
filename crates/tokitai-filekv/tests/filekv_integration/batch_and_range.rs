@@ -31,7 +31,7 @@ fn test_batch_write_basic() {
 
     // Verify all batch entries are accessible
     for (key, expected) in &entries {
-        let val = kv.get(key).expect(&format!("get failed for {}", key));
+        let val = kv.get(key).unwrap_or_else(|_| panic!("get failed for {}", key));
         assert_eq!(
             val.as_deref(),
             Some(*expected),
@@ -67,7 +67,7 @@ fn test_batch_write_with_flush() {
         for i in 0..20 {
             let key = format!("batch{}_key{:03}", batch_num, i);
             let expected = format!("batch{}_value{:03}", batch_num, i);
-            let val = kv.get(&key).expect(&format!("get failed for {}", key));
+            let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
             assert_eq!(
                 val.as_deref(),
                 Some(expected.as_bytes()),
@@ -94,9 +94,7 @@ fn test_range_scan_iteration() {
     // Range scan using the public API
     let start = "key_0010";
     let end = "key_0020";
-    let results: Vec<_> = kv
-        .range_collect(start, end, 0)
-        .expect("range_scan failed");
+    let results: Vec<_> = kv.range_collect(start, end, 0).expect("range_scan failed");
 
     // Should return keys in range [key_0010, key_0020]
     assert!(!results.is_empty(), "Range scan should return results");
@@ -134,9 +132,7 @@ fn test_range_scan_with_prefix() {
     // Range scan for user: prefix
     let start = "user:";
     let end = "user;"; // ';' comes after ':' in ASCII
-    let results: Vec<_> = kv
-        .range_collect(start, end, 0)
-        .expect("range_scan failed");
+    let results: Vec<_> = kv.range_collect(start, end, 0).expect("range_scan failed");
 
     assert_eq!(results.len(), 20, "Should find 20 user keys");
 
@@ -204,7 +200,7 @@ fn test_large_batch_write() {
     for i in [0, 100, 500, 999].iter() {
         let key = format!("large_batch_key{:05}", i);
         let expected = format!("large_batch_value{:05}", i);
-        let val = kv.get(&key).expect(&format!("get failed for {}", key));
+        let val = kv.get(&key).unwrap_or_else(|_| panic!("get failed for {}", key));
         assert_eq!(val.as_deref(), Some(expected.as_bytes()));
     }
 

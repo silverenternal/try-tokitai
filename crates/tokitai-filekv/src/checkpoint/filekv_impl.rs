@@ -1,9 +1,9 @@
 //! Checkpoint operations for FileKV
 
-use std::collections::HashMap;
+use crate::checkpoint::{CheckpointEntry, CheckpointStats, IncrementalCheckpoint, IncrementalCheckpointManager};
 use crate::core::error::FatalError;
 use crate::FileKV;
-use crate::checkpoint::{IncrementalCheckpointManager, CheckpointEntry, CheckpointStats, IncrementalCheckpoint};
+use std::collections::HashMap;
 
 /// Result type for checkpoint operations
 pub type Result<T> = std::result::Result<T, FatalError>;
@@ -58,7 +58,8 @@ impl FileKV {
         }
 
         let mut manager = self.lifecycle_manager.checkpoint_manager().lock();
-        manager.create_full_checkpoint(&state, description)
+        manager
+            .create_full_checkpoint(&state, description)
             .map_err(|e| FatalError::Corruption(format!("Checkpoint creation failed: {}", e)))
     }
 
@@ -80,7 +81,8 @@ impl FileKV {
         description: Option<&str>,
     ) -> Result<String> {
         let mut manager = self.lifecycle_manager.checkpoint_manager().lock();
-        manager.create_incremental_checkpoint(changes, description)
+        manager
+            .create_incremental_checkpoint(changes, description)
             .map_err(|e| FatalError::Corruption(format!("Checkpoint creation failed: {}", e)))
     }
 
@@ -129,7 +131,8 @@ impl FileKV {
         }
 
         let mut manager = self.lifecycle_manager.checkpoint_manager().lock();
-        manager.create_incremental_checkpoint_with_auto_full(changes, Some(&state), description)
+        manager
+            .create_incremental_checkpoint_with_auto_full(changes, Some(&state), description)
             .map_err(|e| FatalError::Corruption(format!("Checkpoint creation failed: {}", e)))
     }
 
@@ -171,7 +174,8 @@ impl FileKV {
     pub fn restore_from_checkpoint(&self, checkpoint_id: &str) -> Result<HashMap<String, Vec<u8>>> {
         let manager = self.lifecycle_manager.checkpoint_manager().lock();
         let checkpoint_id_str = checkpoint_id.to_string();
-        manager.restore(&checkpoint_id_str)
+        manager
+            .restore(&checkpoint_id_str)
             .map_err(|e| FatalError::Corruption(format!("Checkpoint restore failed: {}", e)))
     }
 
@@ -227,7 +231,8 @@ impl FileKV {
     /// * `Err(ContextError)` - On compaction failure
     pub fn compact_checkpoints(&self, keep_last_n: usize) -> Result<usize> {
         let mut manager = self.lifecycle_manager.checkpoint_manager().lock();
-        manager.compact(keep_last_n)
+        manager
+            .compact(keep_last_n)
             .map_err(|e| FatalError::Corruption(format!("Checkpoint compaction failed: {}", e)))
     }
 

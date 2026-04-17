@@ -45,61 +45,132 @@ pub const MAX_CODE_SEARCH_LIMIT: usize = 200;
 
 /// 敏感环境变量模式
 pub const SENSITIVE_ENV_PATTERNS: &[&str] = &[
-    "PASSWORD", "PASSWD", "SECRET", "TOKEN", "API_KEY", "APIKEY",
-    "PRIVATE_KEY", "PRIVATEKEY", "CREDENTIAL", "CRED",
-    "AWS_SECRET", "AZURE_", "GCP_", "DATABASE_URL", "DB_PASS",
-    "ENCRYPTION_KEY", "SIGNING_KEY", "AUTH_TOKEN", "ACCESS_TOKEN",
-    "REFRESH_TOKEN", "SESSION_KEY",
+    "PASSWORD",
+    "PASSWD",
+    "SECRET",
+    "TOKEN",
+    "API_KEY",
+    "APIKEY",
+    "PRIVATE_KEY",
+    "PRIVATEKEY",
+    "CREDENTIAL",
+    "CRED",
+    "AWS_SECRET",
+    "AZURE_",
+    "GCP_",
+    "DATABASE_URL",
+    "DB_PASS",
+    "ENCRYPTION_KEY",
+    "SIGNING_KEY",
+    "AUTH_TOKEN",
+    "ACCESS_TOKEN",
+    "REFRESH_TOKEN",
+    "SESSION_KEY",
 ];
 
 /// 危险命令黑名单
 pub const DANGEROUS_COMMANDS: &[&str] = &[
     // 文件删除/破坏
-    "rm", "dd", "mkfs", "fdisk", "parted", "shred", "wipe",
+    "rm",
+    "dd",
+    "mkfs",
+    "fdisk",
+    "parted",
+    "shred",
+    "wipe",
     // 权限修改
-    "chmod", "chown", "chgrp",
+    "chmod",
+    "chown",
+    "chgrp",
     // 提权
-    "sudo", "su", "pkexec", "doas", "runas",
+    "sudo",
+    "su",
+    "pkexec",
+    "doas",
+    "runas",
     // 网络（可能泄露数据）
-    "wget", "curl", "nc", "netcat", "telnet", "ssh", "scp", "rsync",
+    "wget",
+    "curl",
+    "nc",
+    "netcat",
+    "telnet",
+    "ssh",
+    "scp",
+    "rsync",
     // 进程终止
-    "kill", "pkill", "killall", "xkill",
+    "kill",
+    "pkill",
+    "killall",
+    "xkill",
     // 系统控制
-    "shutdown", "reboot", "halt", "poweroff", "init", "systemctl", "service",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "init",
+    "systemctl",
+    "service",
     // 文件系统
-    "mount", "umount", "losetup", "mkswap", "swapon", "swapoff",
+    "mount",
+    "umount",
+    "losetup",
+    "mkswap",
+    "swapon",
+    "swapoff",
     // 防火墙/网络配置
-    "iptables", "firewall-cmd", "ufw", "nft", "ip", "ifconfig", "route",
+    "iptables",
+    "firewall-cmd",
+    "ufw",
+    "nft",
+    "ip",
+    "ifconfig",
+    "route",
     // 用户管理
-    "visudo", "passwd", "useradd", "userdel", "usermod", "groupadd", "groupdel", "groupmod",
+    "visudo",
+    "passwd",
+    "useradd",
+    "userdel",
+    "usermod",
+    "groupadd",
+    "groupdel",
+    "groupmod",
     // 设备/内核
-    "mkfifo", "mknod", "insmod", "rmmod", "modprobe",
+    "mkfifo",
+    "mknod",
+    "insmod",
+    "rmmod",
+    "modprobe",
     // NFS
-    "exportfs", "nfsstat",
+    "exportfs",
+    "nfsstat",
     // 包管理器（可能安装恶意软件）
-    "apt", "apt-get", "yum", "dnf", "pacman", "brew", "pip", "npm", "cargo",
+    "apt",
+    "apt-get",
+    "yum",
+    "dnf",
+    "pacman",
+    "brew",
+    "pip",
+    "npm",
+    "cargo",
     // 其他危险命令
-    "crontab", "at", "batch",
+    "crontab",
+    "at",
+    "batch",
 ];
 
 /// 安全命令白名单
 pub const WHITELISTED_COMMANDS: &[&str] = &[
     // 文件操作
-    "ls", "cat", "head", "tail", "wc", "file", "stat", "readlink", "realpath",
-    "basename", "dirname", "cp", "mv", "mkdir", "rmdir", "touch", "ln",
-    // 搜索工具
-    "grep", "find", "locate", "which", "whereis", "type",
-    // 文本处理
-    "awk", "sed", "cut", "sort", "uniq", "tr", "tee", "xargs", "paste",
-    "join", "comm", "diff", "patch",
-    // 系统信息
-    "pwd", "whoami", "id", "uname", "hostname", "date", "time", "cal", "uptime",
-    "ps", "pgrep", "top", "free", "df", "du", "lsof", "netstat", "ss",
-    // 其他安全命令
-    "echo", "printf", "true", "false", "sleep", "yes", "seq", "shuf",
-    // 压缩/解压
-    "tar", "gzip", "gunzip", "zip", "unzip", "xz", "unxz",
-    // 文档
+    "ls", "cat", "head", "tail", "wc", "file", "stat", "readlink", "realpath", "basename",
+    "dirname", "cp", "mv", "mkdir", "rmdir", "touch", "ln", // 搜索工具
+    "grep", "find", "locate", "which", "whereis", "type", // 文本处理
+    "awk", "sed", "cut", "sort", "uniq", "tr", "tee", "xargs", "paste", "join", "comm", "diff",
+    "patch", // 系统信息
+    "pwd", "whoami", "id", "uname", "hostname", "date", "time", "cal", "uptime", "ps", "pgrep",
+    "top", "free", "df", "du", "lsof", "netstat", "ss", // 其他安全命令
+    "echo", "printf", "true", "false", "sleep", "yes", "seq", "shuf", // 压缩/解压
+    "tar", "gzip", "gunzip", "zip", "unzip", "xz", "unxz", // 文档
     "man", "info", "whatis", "apropos",
 ];
 

@@ -20,14 +20,10 @@ mod common;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 
-use common::{
-    flush_kv, warm_cache,
-    quick_bench_config,
-    bench_key, bench_value,
-};
+use common::{bench_key, bench_value, flush_kv, quick_bench_config, warm_cache};
 
 // ============================================================================
 // Configuration Helpers
@@ -38,7 +34,7 @@ fn large_dataset_config(temp_dir: &TempDir) -> tokitai_filekv::FileKVConfig {
     let mut config = quick_bench_config(temp_dir);
     // Increase memtable flush threshold to reduce segment count
     config.memtable.flush_threshold_bytes = 4 * 1024 * 1024; // 4MB
-    // Increase cache size for better hit rates
+                                                             // Increase cache size for better hit rates
     config.cache.max_memory_bytes = 256 * 1024 * 1024; // 256MB
     config.cache.max_items = 100_000;
     config
@@ -49,11 +45,7 @@ fn large_dataset_config(temp_dir: &TempDir) -> tokitai_filekv::FileKVConfig {
 // ============================================================================
 
 fn bench_write_throughput(c: &mut Criterion) {
-    let data_sizes = [
-        ("10k", 10_000),
-        ("100k", 100_000),
-        ("1m", 1_000_000),
-    ];
+    let data_sizes = [("10k", 10_000), ("100k", 100_000), ("1m", 1_000_000)];
 
     for (label, num_keys) in data_sizes {
         let mut group = c.benchmark_group(format!("write_throughput_{}", label));
@@ -99,7 +91,7 @@ fn bench_read_latency_hot_cache(c: &mut Criterion) {
 
     for (label, num_keys) in data_sizes {
         let mut group = c.benchmark_group(format!("read_latency_hot_cache_{}", label));
-        group.sample_size(10);  // Reduced from 100 to avoid timeout
+        group.sample_size(10); // Reduced from 100 to avoid timeout
         group.measurement_time(Duration::from_secs(30));
 
         group.bench_function("random_read", |b| {
@@ -132,11 +124,7 @@ fn bench_read_latency_hot_cache(c: &mut Criterion) {
 }
 
 fn bench_read_latency_cold_cache(c: &mut Criterion) {
-    let data_sizes = [
-        ("10k", 10_000),
-        ("100k", 100_000),
-        ("1m", 1_000_000),
-    ];
+    let data_sizes = [("10k", 10_000), ("100k", 100_000), ("1m", 1_000_000)];
 
     for (label, num_keys) in data_sizes {
         let mut group = c.benchmark_group(format!("read_latency_cold_cache_{}", label));
@@ -145,7 +133,7 @@ fn bench_read_latency_cold_cache(c: &mut Criterion) {
 
         group.bench_function("cold_random_read", |b| {
             b.iter(|| {
-                // Each iteration: fresh KV, cold cache
+                // Each iteration: fresh KV, cold cache, measure single read
                 let temp_dir = TempDir::new().unwrap();
                 let config = large_dataset_config(&temp_dir);
                 let kv = tokitai_filekv::FileKV::open(config).unwrap();
@@ -158,11 +146,13 @@ fn bench_read_latency_cold_cache(c: &mut Criterion) {
                 }
                 flush_kv(&kv);
 
-                // Read a random key (cold cache)
-                let idx = 50_000 % num_keys; // Deterministic for reproducibility
+                // Read a single random key (cold cache) — timed
+                let idx = 50_000 % num_keys;
                 let key = bench_key(idx);
+                let start = Instant::now();
                 let result = kv.get(&key).unwrap();
-                black_box(result);
+                let elapsed = start.elapsed();
+                black_box((result, elapsed));
             });
         });
 
@@ -175,10 +165,7 @@ fn bench_read_latency_cold_cache(c: &mut Criterion) {
 // ============================================================================
 
 fn bench_sequential_read(c: &mut Criterion) {
-    let data_sizes = [
-        ("10k", 10_000),
-        ("100k", 100_000),
-    ];
+    let data_sizes = [("10k", 10_000), ("100k", 100_000)];
 
     for (label, num_keys) in data_sizes {
         let mut group = c.benchmark_group(format!("sequential_read_{}", label));
@@ -257,10 +244,7 @@ fn bench_resource_usage(c: &mut Criterion) {
 // ============================================================================
 
 fn bench_mixed_workload(c: &mut Criterion) {
-    let data_sizes = [
-        ("10k", 10_000),
-        ("100k", 100_000),
-    ];
+    let data_sizes = [("10k", 10_000), ("100k", 100_000)];
 
     for (label, num_keys) in data_sizes {
         let mut group = c.benchmark_group(format!("mixed_workload_{}", label));
@@ -274,7 +258,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
                 let config = large_dataset_config(&temp_dir);
                 let kv = tokitai_filekv::FileKV::open(config).unwrap();
 
-                // Pre-populate 50% of keys
+                // Pre-populate (setup, not timed by Criterion but part of each iteration)
                 for i in 0..num_keys / 2 {
                     let key = bench_key(i);
                     let value = bench_value(100);
@@ -282,11 +266,12 @@ fn bench_mixed_workload(c: &mut Criterion) {
                 }
                 flush_kv(&kv);
 
-                // Mixed workload: 80% reads, 20% writes
+                // Mixed workload: 80% reads, 20% writes — timed portion
                 let op_idx = AtomicUsize::new(0);
+                let start = Instant::now();
                 for _ in 0..1000 {
                     let idx = op_idx.fetch_add(1, Ordering::Relaxed);
-                    if idx % 5 == 0 {
+                    if idx.is_multiple_of(5) {
                         // Write (20%)
                         let key = bench_key(idx % num_keys);
                         let value = bench_value(100);
@@ -297,6 +282,9 @@ fn bench_mixed_workload(c: &mut Criterion) {
                         kv.get(&key).unwrap();
                     }
                 }
+                let elapsed = start.elapsed();
+
+                black_box(elapsed);
             });
         });
 

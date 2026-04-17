@@ -12,17 +12,31 @@
 //! ## 错误处理
 //! 使用类型安全的 `ProcessError` 枚举，支持调用方进行错误恢复
 
-use tokitai::tool;
 use std::sync::Arc;
+use tokitai::tool;
 
-use super::backend::{ProcessBackend, create_backend};
+use super::backend::{create_backend, ProcessBackend};
 
 /// 敏感环境变量前缀/关键词（用于过滤）
 const SENSITIVE_ENV_PATTERNS: &[&str] = &[
-    "PASSWORD", "PASSWD", "SECRET", "TOKEN", "API_KEY", "APIKEY",
-    "PRIVATE_KEY", "PRIVATEKEY", "CREDENTIAL", "CRED",
-    "AWS_SECRET", "AZURE_", "GCP_", "DATABASE_URL", "DB_PASS",
-    "ENCRYPTION_KEY", "SIGNING_KEY", "AUTH_TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "SECRET",
+    "TOKEN",
+    "API_KEY",
+    "APIKEY",
+    "PRIVATE_KEY",
+    "PRIVATEKEY",
+    "CREDENTIAL",
+    "CRED",
+    "AWS_SECRET",
+    "AZURE_",
+    "GCP_",
+    "DATABASE_URL",
+    "DB_PASS",
+    "ENCRYPTION_KEY",
+    "SIGNING_KEY",
+    "AUTH_TOKEN",
 ];
 
 /// 进程管理工具集
@@ -95,13 +109,13 @@ impl ProcessManager {
     pub fn list_processes(&self, limit: Option<usize>) -> Result<String, String> {
         let limit = limit.unwrap_or(20).min(100);
 
-        let processes = self.backend.list_processes(limit)
+        let processes = self
+            .backend
+            .list_processes(limit)
             .map_err(|e| e.to_string())?;
 
-        let process_list: Vec<serde_json::Value> = processes
-            .iter()
-            .map(|p| p.to_summary_json())
-            .collect();
+        let process_list: Vec<serde_json::Value> =
+            processes.iter().map(|p| p.to_summary_json()).collect();
 
         Ok(serde_json::json!({
             "success": true,
@@ -110,7 +124,8 @@ impl ProcessManager {
                 "limit": limit,
                 "processes": process_list
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 获取进程详细信息
@@ -132,13 +147,16 @@ impl ProcessManager {
     /// - 自动验证进程存在性和所有权
     /// - 单次系统调用完成验证 + 获取，避免 TOCTOU 竞争
     pub fn get_process_info(&self, pid: u32) -> Result<String, String> {
-        let info = self.backend.get_process_info(pid)
+        let info = self
+            .backend
+            .get_process_info(pid)
             .map_err(|e| e.to_string())?;
 
         Ok(serde_json::json!({
             "success": true,
             "data": info.to_json_value()
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 按名称搜索进程
@@ -164,13 +182,13 @@ impl ProcessManager {
 
         let limit = limit.unwrap_or(20).min(100);
 
-        let processes = self.backend.search_processes(&name, limit)
+        let processes = self
+            .backend
+            .search_processes(&name, limit)
             .map_err(|e| e.to_string())?;
 
-        let process_list: Vec<serde_json::Value> = processes
-            .iter()
-            .map(|p| p.to_summary_json())
-            .collect();
+        let process_list: Vec<serde_json::Value> =
+            processes.iter().map(|p| p.to_summary_json()).collect();
 
         let (found, message) = if processes.is_empty() {
             (false, "未找到匹配的进程")
@@ -187,7 +205,8 @@ impl ProcessManager {
                 "processes": process_list,
             },
             "message": if message.is_empty() { None } else { Some(message) }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 查看进程的打开文件
@@ -211,7 +230,9 @@ impl ProcessManager {
     pub fn get_process_files(&self, pid: u32, limit: Option<usize>) -> Result<String, String> {
         let limit = limit.unwrap_or(50).min(200);
 
-        let files = self.backend.get_process_files(pid, limit)
+        let files = self
+            .backend
+            .get_process_files(pid, limit)
             .map_err(|e| e.to_string())?;
 
         // 限制输出大小
@@ -245,7 +266,8 @@ impl ProcessManager {
                     "message": "输出过大，已截断",
                     "files": truncated_files
                 }
-            }).to_string());
+            })
+            .to_string());
         }
 
         Ok(serde_json::json!({
@@ -255,7 +277,8 @@ impl ProcessManager {
                 "count": files.len(),
                 "files": files
             }
-        }).to_string())
+        })
+        .to_string())
     }
 
     /// 查看进程的环境变量
@@ -276,7 +299,9 @@ impl ProcessManager {
     /// - 自动过滤包含 PASSWORD、SECRET、TOKEN 等关键词的敏感变量
     /// - 仅显示变量名，不显示值（安全模式）
     pub fn get_process_env(&self, pid: u32) -> Result<String, String> {
-        let env_vars = self.backend.get_process_env(pid)
+        let env_vars = self
+            .backend
+            .get_process_env(pid)
             .map_err(|e| e.to_string())?;
 
         // 过滤敏感变量并只保留变量名
@@ -294,7 +319,8 @@ impl ProcessManager {
                 "variables": filtered_vars
             },
             "note": "敏感环境变量已过滤，仅显示变量名"
-        }).to_string())
+        })
+        .to_string())
     }
 }
 
@@ -326,7 +352,9 @@ fn validate_search_pattern(pattern: &str) -> Result<(), String> {
 /// 检查是否为敏感环境变量
 fn is_sensitive_env(env_var: &str) -> bool {
     let upper = env_var.to_uppercase();
-    SENSITIVE_ENV_PATTERNS.iter().any(|pattern| upper.contains(pattern))
+    SENSITIVE_ENV_PATTERNS
+        .iter()
+        .any(|pattern| upper.contains(pattern))
 }
 
 #[cfg(test)]

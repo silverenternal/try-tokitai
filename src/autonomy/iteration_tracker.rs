@@ -90,15 +90,9 @@ pub enum IterationEvent {
         task_description: String,
     },
     /// 任务完成
-    TaskCompleted {
-        task_id: String,
-        result: String,
-    },
+    TaskCompleted { task_id: String, result: String },
     /// 任务失败
-    TaskFailed {
-        task_id: String,
-        error: String,
-    },
+    TaskFailed { task_id: String, error: String },
     /// 审查提交
     ReviewSubmitted {
         score: String,
@@ -106,23 +100,16 @@ pub enum IterationEvent {
         issues: Vec<String>,
     },
     /// 改进应用
-    RefinementApplied {
-        changes: Vec<String>,
-    },
+    RefinementApplied { changes: Vec<String> },
     /// 用户干预
     UserIntervention {
         action: String,
         details: Option<String>,
     },
     /// 迭代完成
-    IterationCompleted {
-        summary: String,
-        success: bool,
-    },
+    IterationCompleted { summary: String, success: bool },
     /// 迭代失败
-    IterationFailed {
-        reason: String,
-    },
+    IterationFailed { reason: String },
     /// 检查点
     Checkpoint {
         checkpoint_type: String,
@@ -231,7 +218,7 @@ impl IterationTracker {
     /// 创建新的迭代追踪器
     pub fn new(storage_dir: PathBuf) -> Result<Self, IterationTrackerError> {
         fs::create_dir_all(&storage_dir)?;
-        
+
         let mut tracker = Self {
             storage_dir,
             current_session: None,
@@ -245,7 +232,11 @@ impl IterationTracker {
     }
 
     /// 开始新的迭代
-    pub fn start_iteration(&mut self, goal: String, context: Option<String>) -> Result<&IterationSession, IterationTrackerError> {
+    pub fn start_iteration(
+        &mut self,
+        goal: String,
+        context: Option<String>,
+    ) -> Result<&IterationSession, IterationTrackerError> {
         let mut session = IterationSession::new(goal.clone());
         session.add_event(IterationEvent::IterationStarted {
             goal: goal.clone(),
@@ -265,16 +256,18 @@ impl IterationTracker {
         new_state: IterationState,
         reason: Option<String>,
     ) -> Result<(), IterationTrackerError> {
-        let session = self.current_session.as_mut()
-            .ok_or_else(|| IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string()))?;
+        let session = self.current_session.as_mut().ok_or_else(|| {
+            IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string())
+        })?;
 
         let old_state = session.current_state.clone();
-        
+
         // 验证状态转换合法性
         if !Self::is_valid_transition(&old_state, &new_state) {
-            return Err(IterationTrackerError::StateTransitionFailed(
-                format!("无效的状态转换：{} -> {}", old_state, new_state)
-            ));
+            return Err(IterationTrackerError::StateTransitionFailed(format!(
+                "无效的状态转换：{} -> {}",
+                old_state, new_state
+            )));
         }
 
         session.add_event(IterationEvent::StateChanged {
@@ -289,7 +282,11 @@ impl IterationTracker {
     }
 
     /// 记录任务开始
-    pub fn record_task_started(&mut self, task_id: String, task_description: String) -> Result<(), IterationTrackerError> {
+    pub fn record_task_started(
+        &mut self,
+        task_id: String,
+        task_description: String,
+    ) -> Result<(), IterationTrackerError> {
         if let Some(session) = self.current_session.as_mut() {
             session.add_event(IterationEvent::TaskStarted {
                 task_id,
@@ -301,31 +298,38 @@ impl IterationTracker {
     }
 
     /// 记录任务完成
-    pub fn record_task_completed(&mut self, task_id: String, result: String) -> Result<(), IterationTrackerError> {
+    pub fn record_task_completed(
+        &mut self,
+        task_id: String,
+        result: String,
+    ) -> Result<(), IterationTrackerError> {
         if let Some(session) = self.current_session.as_mut() {
-            session.add_event(IterationEvent::TaskCompleted {
-                task_id,
-                result,
-            });
+            session.add_event(IterationEvent::TaskCompleted { task_id, result });
             self.save_current()?;
         }
         Ok(())
     }
 
     /// 记录任务失败
-    pub fn record_task_failed(&mut self, task_id: String, error: String) -> Result<(), IterationTrackerError> {
+    pub fn record_task_failed(
+        &mut self,
+        task_id: String,
+        error: String,
+    ) -> Result<(), IterationTrackerError> {
         if let Some(session) = self.current_session.as_mut() {
-            session.add_event(IterationEvent::TaskFailed {
-                task_id,
-                error,
-            });
+            session.add_event(IterationEvent::TaskFailed { task_id, error });
             self.save_current()?;
         }
         Ok(())
     }
 
     /// 记录审查结果
-    pub fn record_review(&mut self, score: String, summary: String, issues: Vec<String>) -> Result<(), IterationTrackerError> {
+    pub fn record_review(
+        &mut self,
+        score: String,
+        summary: String,
+        issues: Vec<String>,
+    ) -> Result<(), IterationTrackerError> {
         if let Some(session) = self.current_session.as_mut() {
             session.add_event(IterationEvent::ReviewSubmitted {
                 score,
@@ -347,7 +351,11 @@ impl IterationTracker {
     }
 
     /// 记录用户干预
-    pub fn record_user_intervention(&mut self, action: String, details: Option<String>) -> Result<(), IterationTrackerError> {
+    pub fn record_user_intervention(
+        &mut self,
+        action: String,
+        details: Option<String>,
+    ) -> Result<(), IterationTrackerError> {
         if let Some(session) = self.current_session.as_mut() {
             session.add_event(IterationEvent::UserIntervention { action, details });
             self.save_current()?;
@@ -356,9 +364,14 @@ impl IterationTracker {
     }
 
     /// 完成迭代
-    pub fn complete_iteration(&mut self, summary: String, success: bool) -> Result<(), IterationTrackerError> {
-        let session = self.current_session.as_mut()
-            .ok_or_else(|| IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string()))?;
+    pub fn complete_iteration(
+        &mut self,
+        summary: String,
+        success: bool,
+    ) -> Result<(), IterationTrackerError> {
+        let session = self.current_session.as_mut().ok_or_else(|| {
+            IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string())
+        })?;
 
         session.add_event(IterationEvent::IterationCompleted {
             summary: summary.clone(),
@@ -385,10 +398,13 @@ impl IterationTracker {
 
     /// 失败迭代
     pub fn fail_iteration(&mut self, reason: String) -> Result<(), IterationTrackerError> {
-        let session = self.current_session.as_mut()
-            .ok_or_else(|| IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string()))?;
+        let session = self.current_session.as_mut().ok_or_else(|| {
+            IterationTrackerError::StateTransitionFailed("没有活跃的迭代会话".to_string())
+        })?;
 
-        session.add_event(IterationEvent::IterationFailed { reason: reason.clone() });
+        session.add_event(IterationEvent::IterationFailed {
+            reason: reason.clone(),
+        });
         session.summary = Some(format!("失败：{}", reason));
         session.success = Some(false);
         session.ended_at = Some(chrono::Utc::now().timestamp());
@@ -410,7 +426,10 @@ impl IterationTracker {
     }
 
     /// 恢复迭代
-    pub fn resume_iteration(&mut self, new_state: IterationState) -> Result<(), IterationTrackerError> {
+    pub fn resume_iteration(
+        &mut self,
+        new_state: IterationState,
+    ) -> Result<(), IterationTrackerError> {
         self.transition_state(new_state, Some("用户恢复迭代".to_string()))
     }
 
@@ -426,7 +445,9 @@ impl IterationTracker {
 
     /// 获取进度百分比
     pub fn progress(&self) -> Option<f64> {
-        self.current_session.as_ref().map(|s| s.progress_percentage())
+        self.current_session
+            .as_ref()
+            .map(|s| s.progress_percentage())
     }
 
     /// 获取历史迭代列表
@@ -459,7 +480,10 @@ impl IterationTracker {
     }
 
     /// 保存会话到历史
-    fn save_session_to_history(&self, session: &IterationSession) -> Result<(), IterationTrackerError> {
+    fn save_session_to_history(
+        &self,
+        session: &IterationSession,
+    ) -> Result<(), IterationTrackerError> {
         let session_path = self.storage_dir.join(format!("{}.json", session.id));
         let content = serde_json::to_string_pretty(session)?;
         fs::write(&session_path, content)?;
@@ -478,31 +502,58 @@ impl IterationTracker {
     fn is_valid_transition(from: &IterationState, to: &IterationState) -> bool {
         match from {
             IterationState::Initializing => {
-                matches!(to, IterationState::Researching | IterationState::Planning | IterationState::Failed)
+                matches!(
+                    to,
+                    IterationState::Researching | IterationState::Planning | IterationState::Failed
+                )
             }
             IterationState::Researching => {
-                matches!(to, IterationState::Planning | IterationState::Failed | IterationState::Paused)
+                matches!(
+                    to,
+                    IterationState::Planning | IterationState::Failed | IterationState::Paused
+                )
             }
             IterationState::Planning => {
-                matches!(to, IterationState::Executing | IterationState::Failed | IterationState::Paused)
+                matches!(
+                    to,
+                    IterationState::Executing | IterationState::Failed | IterationState::Paused
+                )
             }
             IterationState::Executing => {
-                matches!(to, IterationState::Reviewing | IterationState::Failed | IterationState::Paused)
+                matches!(
+                    to,
+                    IterationState::Reviewing | IterationState::Failed | IterationState::Paused
+                )
             }
             IterationState::Reviewing => {
-                matches!(to, IterationState::Refining | IterationState::Validating | IterationState::Failed | IterationState::Paused)
+                matches!(
+                    to,
+                    IterationState::Refining
+                        | IterationState::Validating
+                        | IterationState::Failed
+                        | IterationState::Paused
+                )
             }
             IterationState::Refining => {
-                matches!(to, IterationState::Executing | IterationState::Reviewing | IterationState::Failed)
+                matches!(
+                    to,
+                    IterationState::Executing | IterationState::Reviewing | IterationState::Failed
+                )
             }
             IterationState::Validating => {
-                matches!(to, IterationState::Completed | IterationState::Refining | IterationState::Failed)
+                matches!(
+                    to,
+                    IterationState::Completed | IterationState::Refining | IterationState::Failed
+                )
             }
             IterationState::Completed | IterationState::Failed => {
                 false // 终态
             }
             IterationState::Paused => {
-                matches!(to, IterationState::Executing | IterationState::Planning | IterationState::Failed)
+                matches!(
+                    to,
+                    IterationState::Executing | IterationState::Planning | IterationState::Failed
+                )
             }
         }
     }
@@ -524,15 +575,21 @@ mod tests {
         let (mut tracker, _temp_dir) = create_test_tracker();
 
         // 开始迭代
-        tracker.start_iteration("测试目标".to_string(), None).unwrap();
+        tracker
+            .start_iteration("测试目标".to_string(), None)
+            .unwrap();
         assert_eq!(tracker.current_state(), Some(&IterationState::Initializing));
 
         // 状态转换
-        tracker.transition_state(IterationState::Planning, None).unwrap();
+        tracker
+            .transition_state(IterationState::Planning, None)
+            .unwrap();
         assert_eq!(tracker.current_state(), Some(&IterationState::Planning));
 
         // 完成迭代
-        tracker.complete_iteration("测试完成".to_string(), true).unwrap();
+        tracker
+            .complete_iteration("测试完成".to_string(), true)
+            .unwrap();
         assert!(tracker.current_session().is_none());
     }
 
@@ -540,8 +597,10 @@ mod tests {
     fn test_invalid_transition() {
         let (mut tracker, _temp_dir) = create_test_tracker();
 
-        tracker.start_iteration("测试目标".to_string(), None).unwrap();
-        
+        tracker
+            .start_iteration("测试目标".to_string(), None)
+            .unwrap();
+
         // 尝试非法转换
         let result = tracker.transition_state(IterationState::Completed, None);
         assert!(result.is_err());
@@ -551,19 +610,31 @@ mod tests {
     fn test_progress_calculation() {
         let (mut tracker, _temp_dir) = create_test_tracker();
 
-        tracker.start_iteration("测试目标".to_string(), None).unwrap();
+        tracker
+            .start_iteration("测试目标".to_string(), None)
+            .unwrap();
         assert_eq!(tracker.progress(), Some(0.0));
 
         // 合法的状态转换
-        tracker.transition_state(IterationState::Planning, None).unwrap();
+        tracker
+            .transition_state(IterationState::Planning, None)
+            .unwrap();
         assert_eq!(tracker.progress(), Some(20.0));
 
-        tracker.transition_state(IterationState::Executing, None).unwrap();
+        tracker
+            .transition_state(IterationState::Executing, None)
+            .unwrap();
         assert_eq!(tracker.progress(), Some(50.0));
 
-        tracker.transition_state(IterationState::Reviewing, None).unwrap();
-        tracker.transition_state(IterationState::Validating, None).unwrap();
-        tracker.transition_state(IterationState::Completed, None).unwrap();
+        tracker
+            .transition_state(IterationState::Reviewing, None)
+            .unwrap();
+        tracker
+            .transition_state(IterationState::Validating, None)
+            .unwrap();
+        tracker
+            .transition_state(IterationState::Completed, None)
+            .unwrap();
         assert_eq!(tracker.progress(), Some(100.0));
     }
 }

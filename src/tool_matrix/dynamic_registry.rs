@@ -23,13 +23,13 @@
 
 use crate::tool_matrix::matrix::ToolDefinition;
 use crate::tool_matrix::registry::{ToolRegistry, ToolSource};
+use anyhow::{bail, Context, Result};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
-use anyhow::{Result, Context, bail};
 
 /// 动态工具元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,11 +110,7 @@ impl DynamicToolMetadata {
 
     /// 转换为 ToolDefinition
     pub fn to_tool_definition(&self, input_schema: &str) -> ToolDefinition {
-        let mut tool = ToolDefinition::new(
-            &self.name,
-            &self.description,
-            input_schema,
-        );
+        let mut tool = ToolDefinition::new(&self.name, &self.description, input_schema);
         tool.source = "dynamic".to_string();
         tool.metadata.version = self.version.clone();
         tool.metadata.dependencies = self.dependencies.clone();
@@ -136,10 +132,7 @@ pub struct DynamicToolRegistry {
 
 impl DynamicToolRegistry {
     /// 创建新的动态注册表
-    pub fn new<P: AsRef<Path>>(
-        tools_dir: P,
-        generated_dir: P,
-    ) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(tools_dir: P, generated_dir: P) -> Result<Self> {
         let tools_dir = tools_dir.as_ref().to_path_buf();
         let generated_dir = generated_dir.as_ref().to_path_buf();
 
@@ -205,15 +198,18 @@ impl DynamicToolRegistry {
 
     /// 加载单个工具元数据
     fn load_tool_metadata(&self, path: &Path) -> Result<DynamicToolMetadata> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("读取元数据文件失败：{:?}", path))?;
+        let content =
+            fs::read_to_string(path).with_context(|| format!("读取元数据文件失败：{:?}", path))?;
 
         let metadata: DynamicToolMetadata = serde_json::from_str(&content)
             .with_context(|| format!("解析元数据 JSON 失败：{:?}", path))?;
 
         // 验证签名（如果有）
         if metadata.signature.is_some() && !self.verify_signature(&metadata) {
-            warn!("工具签名验证失败：{} (版本：{})", metadata.name, metadata.version);
+            warn!(
+                "工具签名验证失败：{} (版本：{})",
+                metadata.name, metadata.version
+            );
             // 签名验证失败时，仍然加载但标记为未启用
             // 这样用户可以手动修复或重新生成签名
         }
@@ -243,12 +239,16 @@ impl DynamicToolRegistry {
         // 注册到基础注册表（直接注册，不指定工具箱）
         // 使用同步版本注册到 "utility" 工具箱，如果不存在则创建
         if self.base_registry.get_toolbox("utility").is_none() {
-            let utility_box = crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
+            let utility_box =
+                crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
             self.create_toolbox(utility_box)?;
         }
-        
-        self.base_registry
-            .register_tool_to_box_sync(tool_definition, "utility", ToolSource::Dynamic)?;
+
+        self.base_registry.register_tool_to_box_sync(
+            tool_definition,
+            "utility",
+            ToolSource::Dynamic,
+        )?;
 
         info!("动态工具注册成功：{}", tool_name);
 
@@ -283,8 +283,14 @@ impl DynamicToolRegistry {
     }
 
     /// 更新工具元数据
-    pub fn update_tool_metadata(&mut self, tool_name: &str, updater: impl FnOnce(&mut DynamicToolMetadata)) -> Result<()> {
-        let metadata = self.dynamic_tools.get_mut(tool_name)
+    pub fn update_tool_metadata(
+        &mut self,
+        tool_name: &str,
+        updater: impl FnOnce(&mut DynamicToolMetadata),
+    ) -> Result<()> {
+        let metadata = self
+            .dynamic_tools
+            .get_mut(tool_name)
             .ok_or_else(|| anyhow::anyhow!("工具不存在：{}", tool_name))?;
 
         updater(metadata);
@@ -406,12 +412,12 @@ impl DynamicToolRegistry {
 
         // 使用固定的密钥（生产环境应该从环境变量读取）
         let secret_key = b"tokitai_dynamic_tool_secret_key_2024";
-        
-        let mut mac = HmacSha256::new_from_slice(secret_key)
-            .expect("HMAC can take key of any size");
+
+        let mut mac =
+            HmacSha256::new_from_slice(secret_key).expect("HMAC can take key of any size");
         mac.update(tool_name.as_bytes());
         mac.update(version.as_bytes());
-        
+
         let result = mac.finalize();
         hex::encode(result.into_bytes())
     }
@@ -431,19 +437,22 @@ impl DynamicToolRegistry {
 
         // 使用固定的密钥（生产环境应该从环境变量读取）
         let secret_key = b"tokitai_dynamic_tool_secret_key_2024";
-        
-        let mut mac = HmacSha256::new_from_slice(secret_key)
-            .expect("HMAC can take key of any size");
+
+        let mut mac =
+            HmacSha256::new_from_slice(secret_key).expect("HMAC can take key of any size");
         mac.update(metadata.name.as_bytes());
         mac.update(metadata.version.as_bytes());
-        
+
         let result = mac.finalize();
         let expected = hex::encode(result.into_bytes());
 
         // 常量时间比较，防止时序攻击
-        signature.len() == expected.len() &&
-            signature.bytes().zip(expected.bytes())
-                .fold(0, |acc, (a, b)| acc | (a ^ b)) == 0
+        signature.len() == expected.len()
+            && signature
+                .bytes()
+                .zip(expected.bytes())
+                .fold(0, |acc, (a, b)| acc | (a ^ b))
+                == 0
     }
 
     /// 获取动态注册表统计信息
@@ -557,7 +566,9 @@ impl DynamicToolBuilder {
 
         // 保存测试代码
         if let Some(tests) = &self.tests {
-            let test_file = registry.generated_dir.join(format!("test_{}.rs", metadata.name));
+            let test_file = registry
+                .generated_dir
+                .join(format!("test_{}.rs", metadata.name));
             fs::write(&test_file, tests)?;
         }
 
@@ -598,7 +609,8 @@ mod tests {
         let mut registry = DynamicToolRegistry::new(tools_dir.path(), generated_dir.path())?;
 
         // 先创建工具箱
-        let toolbox = crate::tool_matrix::matrix::ToolBox::new("file_ops", "File Operations", "File tools");
+        let toolbox =
+            crate::tool_matrix::matrix::ToolBox::new("file_ops", "File Operations", "File tools");
         registry.create_toolbox(toolbox)?;
 
         let metadata = DynamicToolMetadata::new(
@@ -631,7 +643,8 @@ mod tests {
         let mut registry = DynamicToolRegistry::new(tools_dir.path(), generated_dir.path())?;
 
         // 先创建工具箱
-        let toolbox = crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
+        let toolbox =
+            crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
         registry.create_toolbox(toolbox)?;
 
         let builder = DynamicToolBuilder::new(
@@ -666,7 +679,8 @@ mod tests {
         let mut registry = DynamicToolRegistry::new(tools_dir.path(), generated_dir.path())?;
 
         // 先创建工具箱
-        let toolbox = crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
+        let toolbox =
+            crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
         registry.create_toolbox(toolbox)?;
 
         let metadata = DynamicToolMetadata::new(
@@ -699,7 +713,8 @@ mod tests {
         let mut registry = DynamicToolRegistry::new(tools_dir.path(), generated_dir.path())?;
 
         // 先创建工具箱
-        let toolbox = crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
+        let toolbox =
+            crate::tool_matrix::matrix::ToolBox::new("utility", "Utility", "Utility tools");
         registry.create_toolbox(toolbox)?;
 
         let metadata = DynamicToolMetadata::new(

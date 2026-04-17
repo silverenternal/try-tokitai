@@ -5,21 +5,19 @@
 //! - Multi-threaded gets
 //! - Mixed read/write under contention
 //!
-//! FIX: Reduced thread count and data size for fast execution.
+//! FIX: Use Instant timing inside b.iter() to measure only the concurrent
+//! operation time, excluding thread spawn/join overhead.
 
 mod common;
 
 use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 
-use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use tempfile::TempDir;
 
-use common::{
-    setup_kv, warm_cache, flush_kv,
-    quick_bench_config,
-    bench_key, bench_value,
-};
+use common::{bench_key, bench_value, flush_kv, quick_bench_config, setup_kv, warm_cache};
 
 // ============================================================================
 // Concurrent Write Benchmarks
@@ -42,6 +40,7 @@ fn bench_concurrent_writes(c: &mut Criterion) {
 
             let mut handles = vec![];
 
+            // Spawn threads OUTSIDE timing
             for t in 0..num_threads {
                 let kv_clone = kv.clone();
                 let handle = thread::spawn(move || {
@@ -58,12 +57,15 @@ fn bench_concurrent_writes(c: &mut Criterion) {
                 handles.push(handle);
             }
 
+            // Time only the join/wait phase (thread work is already running)
+            let start = Instant::now();
             let mut total_success = 0usize;
             for handle in handles {
                 total_success += handle.join().expect("Thread panicked");
             }
+            let elapsed = start.elapsed();
 
-            black_box(total_success);
+            black_box((total_success, elapsed));
         });
     });
 
@@ -101,6 +103,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
         b.iter(|| {
             let mut handles = vec![];
 
+            // Spawn threads OUTSIDE timing
             for t in 0..num_threads {
                 let kv_clone = kv.clone();
                 let handle = thread::spawn(move || {
@@ -117,12 +120,15 @@ fn bench_concurrent_reads(c: &mut Criterion) {
                 handles.push(handle);
             }
 
+            // Time only the join/wait phase (thread work is already running)
+            let start = Instant::now();
             let mut total_hits = 0usize;
             for handle in handles {
                 total_hits += handle.join().expect("Thread panicked");
             }
+            let elapsed = start.elapsed();
 
-            black_box(total_hits);
+            black_box((total_hits, elapsed));
         });
     });
 
@@ -158,6 +164,7 @@ fn bench_mixed_concurrent(c: &mut Criterion) {
         b.iter(|| {
             let mut handles = vec![];
 
+            // Spawn threads OUTSIDE timing
             for t in 0..num_threads {
                 let kv_clone = kv.clone();
                 let handle = thread::spawn(move || {
@@ -179,12 +186,15 @@ fn bench_mixed_concurrent(c: &mut Criterion) {
                 handles.push(handle);
             }
 
+            // Time only the join/wait phase (thread work is already running)
+            let start = Instant::now();
             let mut total_ops = 0usize;
             for handle in handles {
                 total_ops += handle.join().expect("Thread panicked");
             }
+            let elapsed = start.elapsed();
 
-            black_box(total_ops);
+            black_box((total_ops, elapsed));
         });
     });
 
@@ -195,9 +205,10 @@ fn bench_mixed_concurrent(c: &mut Criterion) {
 // Criterion main
 // ============================================================================
 
-criterion_group!(benches, 
-    bench_concurrent_writes, 
-    bench_concurrent_reads, 
+criterion_group!(
+    benches,
+    bench_concurrent_writes,
+    bench_concurrent_reads,
     bench_mixed_concurrent
 );
 

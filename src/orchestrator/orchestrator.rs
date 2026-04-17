@@ -2,16 +2,16 @@
 //!
 //! 整合角色切换、上下文优化和工作流引擎，提供统一的编排接口
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::TcpStream;
-use std::time::Duration;
 use std::sync::Arc;
-use parking_lot::RwLock;
+use std::time::Duration;
 
 use crate::orchestrator::{
-    ContextOptimizer, ContextMessage, OptimizerConfig,
-    RoleSwitcher, AgentRole, Workflow, WorkflowEngine,
+    AgentRole, ContextMessage, ContextOptimizer, OptimizerConfig, RoleSwitcher, Workflow,
+    WorkflowEngine,
 };
 use crate::provider_config::ProviderManager;
 
@@ -136,7 +136,8 @@ impl Orchestrator {
     /// 处理 AI 响应
     pub fn process_response(&mut self, response: &str) {
         if self.config.enable_context_optimization {
-            self.context_optimizer.add_assistant_message(response.to_string());
+            self.context_optimizer
+                .add_assistant_message(response.to_string());
         }
     }
 
@@ -150,7 +151,9 @@ impl Orchestrator {
                 .trim_start_matches("/role ")
                 .trim_start_matches("/switch ")
                 .trim();
-            return Some(OrchestratorCommand::SwitchRole(AgentRole::from_str(role_str)));
+            return Some(OrchestratorCommand::SwitchRole(AgentRole::from_str(
+                role_str,
+            )));
         }
 
         // 上下文优化命令
@@ -255,30 +258,16 @@ impl Orchestrator {
                         .collect(),
                 })
             }
-            OrchestratorCommand::Workflow(cmd) => {
-                self.handle_workflow_command(&cmd)
-            }
-            OrchestratorCommand::ShowHelp => {
-                CommandResult::Help(HelpInfo::default())
-            }
-            OrchestratorCommand::HealthCheck => {
-                self.execute_health_check()
-            }
-            OrchestratorCommand::Stats => {
-                self.execute_stats()
-            }
-            OrchestratorCommand::OptimizeCache => {
-                self.execute_optimize_cache()
-            }
-            OrchestratorCommand::Toolbox => {
-                CommandResult::Success("工具箱状态：请使用 AiAssistant::get_toolbox_stats() 获取详细信息".to_string())
-            }
-            OrchestratorCommand::SwitchProvider => {
-                self.execute_switch_provider()
-            }
-            OrchestratorCommand::ShowProviders => {
-                self.execute_show_providers()
-            }
+            OrchestratorCommand::Workflow(cmd) => self.handle_workflow_command(&cmd),
+            OrchestratorCommand::ShowHelp => CommandResult::Help(HelpInfo::default()),
+            OrchestratorCommand::HealthCheck => self.execute_health_check(),
+            OrchestratorCommand::Stats => self.execute_stats(),
+            OrchestratorCommand::OptimizeCache => self.execute_optimize_cache(),
+            OrchestratorCommand::Toolbox => CommandResult::Success(
+                "工具箱状态：请使用 AiAssistant::get_toolbox_stats() 获取详细信息".to_string(),
+            ),
+            OrchestratorCommand::SwitchProvider => self.execute_switch_provider(),
+            OrchestratorCommand::ShowProviders => self.execute_show_providers(),
         }
     }
 
@@ -333,7 +322,10 @@ impl Orchestrator {
         let status = if all_passed {
             format!("🏥 系统健康状态：✓ 所有检查通过\n\n{}", checks.join("\n"))
         } else {
-            format!("🏥 系统健康状态：⚠️ 部分检查未通过\n\n{}", checks.join("\n"))
+            format!(
+                "🏥 系统健康状态：⚠️ 部分检查未通过\n\n{}",
+                checks.join("\n")
+            )
         };
 
         CommandResult::Success(status)
@@ -444,10 +436,7 @@ impl Orchestrator {
         // 使用 df 命令检查磁盘空间（仅 Unix-like 系统）
         #[cfg(unix)]
         {
-            let output = Command::new("df")
-                .args(["-h", "."])
-                .output()
-                .ok();
+            let output = Command::new("df").args(["-h", "."]).output().ok();
 
             if let Some(out) = output {
                 if let Ok(text) = String::from_utf8(out.stdout) {
@@ -489,9 +478,11 @@ impl Orchestrator {
         use std::path::Path;
 
         let autonomy_dir = Path::new(".tokitai/autonomy");
-        
+
         if !autonomy_dir.exists() {
-            return CommandResult::Success("📊 自主进化统计：暂无数据（未找到 .tokitai/autonomy 目录）".to_string());
+            return CommandResult::Success(
+                "📊 自主进化统计：暂无数据（未找到 .tokitai/autonomy 目录）".to_string(),
+            );
         }
 
         let iterations_dir = autonomy_dir.join("iterations");
@@ -520,14 +511,18 @@ impl Orchestrator {
             if let Ok(entries) = fs::read_dir(&iterations_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("json") 
-                        && path.file_name().and_then(|s| s.to_str()) != Some("history.json") 
+                    if path.extension().and_then(|s| s.to_str()) == Some("json")
+                        && path.file_name().and_then(|s| s.to_str()) != Some("history.json")
                         && path.file_name().and_then(|s| s.to_str()) != Some("current.json")
                     {
                         if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(iteration) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Ok(iteration) =
+                                serde_json::from_str::<serde_json::Value>(&content)
+                            {
                                 // 统计成功/失败
-                                if let Some(success) = iteration.get("success").and_then(|v| v.as_bool()) {
+                                if let Some(success) =
+                                    iteration.get("success").and_then(|v| v.as_bool())
+                                {
                                     if success {
                                         successful += 1;
                                     } else {
@@ -544,14 +539,22 @@ impl Orchestrator {
                                 }
 
                                 // 统计事件
-                                if let Some(events) = iteration.get("events").and_then(|v| v.as_array()) {
+                                if let Some(events) =
+                                    iteration.get("events").and_then(|v| v.as_array())
+                                {
                                     for event in events {
-                                        if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
-                                            *tools_called.entry(event_type.to_string()).or_insert(0) += 1;
+                                        if let Some(event_type) =
+                                            event.get("type").and_then(|v| v.as_str())
+                                        {
+                                            *tools_called
+                                                .entry(event_type.to_string())
+                                                .or_insert(0) += 1;
 
                                             // 统计文件修改
                                             if event_type == "refinement_applied" {
-                                                if let Some(changes) = event.get("changes").and_then(|v| v.as_array()) {
+                                                if let Some(changes) =
+                                                    event.get("changes").and_then(|v| v.as_array())
+                                                {
                                                     files_modified += changes.len();
                                                 }
                                             }
@@ -588,12 +591,7 @@ impl Orchestrator {
              性能指标:\n\
              ├─ 平均迭代时长：{} 秒\n\
              └─ 文件修改次数：{}\n",
-            total_iterations,
-            successful,
-            success_rate,
-            failed,
-            avg_duration,
-            files_modified
+            total_iterations, successful, success_rate, failed, avg_duration, files_modified
         );
 
         // 添加工具调用统计
@@ -664,29 +662,27 @@ impl Orchestrator {
                 CommandResult::WorkflowList(WorkflowListInfo {
                     workflows: vec![
                         ("code_review".to_string(), "代码审查工作流".to_string()),
-                        ("task_decomposition".to_string(), "任务分解工作流".to_string()),
+                        (
+                            "task_decomposition".to_string(),
+                            "任务分解工作流".to_string(),
+                        ),
                     ],
                 })
             }
             "start code_review" | "start review" => {
                 self.start_workflow(crate::orchestrator::templates::create_code_review_workflow())
             }
-            "start task_decomposition" | "start decompose" => {
-                self.start_workflow(crate::orchestrator::templates::create_task_decomposition_workflow())
-            }
+            "start task_decomposition" | "start decompose" => self.start_workflow(
+                crate::orchestrator::templates::create_task_decomposition_workflow(),
+            ),
             "status" => {
                 if let Some(ref engine) = self.workflow_engine {
-                    CommandResult::Success(format!(
-                        "当前工作流状态：{:?}",
-                        engine.get_status()
-                    ))
+                    CommandResult::Success(format!("当前工作流状态：{:?}", engine.get_status()))
                 } else {
                     CommandResult::Success("当前没有活动的工作流".to_string())
                 }
             }
-            _ => {
-                CommandResult::Error(format!("未知的工作流命令：{}", cmd))
-            }
+            _ => CommandResult::Error(format!("未知的工作流命令：{}", cmd)),
         }
     }
 
@@ -705,14 +701,10 @@ impl Orchestrator {
                 self.workflow_engine = Some(engine);
                 CommandResult::Success(format!(
                     "工作流 '{}' 执行完成：完成 {} 个阶段，{} 个步骤",
-                    workflow_name,
-                    result.stages_completed,
-                    result.steps_completed
+                    workflow_name, result.stages_completed, result.steps_completed
                 ))
             }
-            Err(e) => {
-                CommandResult::Error(format!("工作流执行失败：{}", e))
-            }
+            Err(e) => CommandResult::Error(format!("工作流执行失败：{}", e)),
         }
     }
 
@@ -721,14 +713,14 @@ impl Orchestrator {
         if let Some(ref pm) = self.provider_manager {
             let mut pm = pm.write();
             let new_provider = pm.switch_to_next();
-            
+
             // 更新环境变量
             std::env::set_var("AI_API_URL", &new_provider.api_url);
             if let Some(ref key) = new_provider.api_key {
                 std::env::set_var("AI_API_KEY", key);
             }
             std::env::set_var("AI_MODEL", &new_provider.model);
-            
+
             CommandResult::ProviderInfo(ProviderInfo {
                 current_name: new_provider.name.clone(),
                 current_url: new_provider.api_url.clone(),
@@ -745,7 +737,7 @@ impl Orchestrator {
         if let Some(ref pm) = self.provider_manager {
             let pm = pm.read();
             let current = pm.current();
-            
+
             CommandResult::ProviderInfo(ProviderInfo {
                 current_name: current.name.clone(),
                 current_url: current.api_url.clone(),
@@ -771,7 +763,10 @@ impl Orchestrator {
             context_tokens: self.context_optimizer.current_tokens(),
             context_messages: self.context_optimizer.message_count(),
             in_workflow: self.workflow_engine.is_some(),
-            current_workflow_id: self.workflow_engine.as_ref().map(|e| e.get_workflow().id.clone()),
+            current_workflow_id: self
+                .workflow_engine
+                .as_ref()
+                .map(|e| e.get_workflow().id.clone()),
         }
     }
 
@@ -907,7 +902,10 @@ impl Default for HelpInfo {
     fn default() -> Self {
         Self {
             commands: vec![
-                ("/role <name>", "切换角色（planner/executor/reviewer/researcher）"),
+                (
+                    "/role <name>",
+                    "切换角色（planner/executor/reviewer/researcher）",
+                ),
                 ("/optimize", "优化上下文，减少 token 使用"),
                 ("/context", "显示上下文状态"),
                 ("/roles", "显示角色信息"),
@@ -930,15 +928,25 @@ impl CommandResult {
             CommandResult::Success(msg) => format!("✅ {}", msg),
             CommandResult::Error(msg) => format!("❌ {}", msg),
             CommandResult::ContextInfo(info) => {
-                let ContextInfo { tokens, messages, optimizations, tokens_saved } = info;
+                let ContextInfo {
+                    tokens,
+                    messages,
+                    optimizations,
+                    tokens_saved,
+                } = info;
                 format!(
                     "📊 上下文状态:\n  - Token 数：{}\n  - 消息数：{}\n  - 优化次数：{}\n  - 节省 Token：{}",
                     tokens, messages, optimizations, tokens_saved
                 )
             }
             CommandResult::RoleInfo(info) => {
-                let RoleInfo { current_role, current_description, history } = info;
-                let mut output = format!("🎭 当前角色：{} - {}\n", current_role, current_description);
+                let RoleInfo {
+                    current_role,
+                    current_description,
+                    history,
+                } = info;
+                let mut output =
+                    format!("🎭 当前角色：{} - {}\n", current_role, current_description);
                 if !history.is_empty() {
                     output.push_str(&format!("历史角色：{}", history.join(" → ")));
                 }
@@ -962,7 +970,12 @@ impl CommandResult {
                 output
             }
             CommandResult::ProviderInfo(info) => {
-                let ProviderInfo { current_name, current_url, current_model, all_providers } = info;
+                let ProviderInfo {
+                    current_name,
+                    current_url,
+                    current_model,
+                    all_providers,
+                } = info;
 
                 if all_providers.len() > 1 {
                     // 多供应商模式 - 简洁显示

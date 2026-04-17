@@ -4,15 +4,15 @@
 
 #![allow(dead_code)]
 
-use tokitai::tool;
-use tokitai::Value;
 use super::manager::PromptTemplateManager;
 use super::template::PromptTemplate;
-use std::sync::Arc;
+use chrono::Local;
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
-use chrono::Local;
+use tokitai::tool;
+use tokitai::Value;
 
 /// 模板渲染统计信息
 #[derive(Debug, Clone, Default)]
@@ -49,7 +49,7 @@ impl PromptTools {
     /// 创建新的提示词工具集
     pub fn new() -> Result<Self, String> {
         let manager = PromptTemplateManager::default();
-        
+
         Ok(Self {
             manager: Arc::new(RwLock::new(manager)),
             render_stats: Arc::new(RwLock::new(RenderStats::default())),
@@ -75,19 +75,23 @@ impl PromptTools {
     }
 
     /// 带统计的模板渲染
-    fn render_with_stats(&self, template: &PromptTemplate, variables: &Value) -> Result<String, String> {
+    fn render_with_stats(
+        &self,
+        template: &PromptTemplate,
+        variables: &Value,
+    ) -> Result<String, String> {
         let start = Instant::now();
-        
+
         let manager = self.manager.read();
         let result = manager.render(template, variables);
-        
+
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        
+
         {
             let mut stats = self.render_stats.write();
             stats.total_renders += 1;
             stats.last_render_time = Some(Local::now());
-            
+
             if result.is_ok() {
                 stats.successful_renders += 1;
             } else {
@@ -95,7 +99,7 @@ impl PromptTools {
             }
 
             let total_renders = stats.total_renders as f64;
-            stats.avg_render_time_ms = 
+            stats.avg_render_time_ms =
                 (stats.avg_render_time_ms * (total_renders - 1.0) + elapsed_ms) / total_renders;
 
             let template_key = format!("{}:{}", template.role, template.id);
@@ -110,15 +114,15 @@ impl PromptTools {
         let manager = self.manager.read();
         let mut loaded = Vec::new();
 
-        let roles = manager.get_all_roles()
-            .unwrap_or_else(|_| Vec::new());
+        let roles = manager.get_all_roles().unwrap_or_else(|_| Vec::new());
         for role in &roles {
             if manager.load_template(role).is_ok() {
                 loaded.push(format!("role:{}", role));
             }
         }
 
-        let tasks = manager.get_all_task_templates()
+        let tasks = manager
+            .get_all_task_templates()
             .unwrap_or_else(|_| Vec::new());
         for task in &tasks {
             if manager.load_task_template(task).is_ok() {
@@ -142,7 +146,8 @@ impl PromptTools {
     #[tool(description = "加载指定角色的提示词模板")]
     pub fn load_role_template(&self, role: String) -> Result<String, String> {
         let manager = self.manager.read();
-        let template = manager.load_template(&role)
+        let template = manager
+            .load_template(&role)
             .map_err(|e| format!("加载角色模板失败：{}", e))?;
         Ok(template.system_prompt)
     }
@@ -151,9 +156,11 @@ impl PromptTools {
     #[tool(description = "列出所有可用的提示词模板")]
     pub fn list_available_templates(&self) -> Result<Value, String> {
         let manager = self.manager.read();
-        
+
         let roles = manager.get_all_roles().unwrap_or_else(|_| Vec::new());
-        let tasks = manager.get_all_task_templates().unwrap_or_else(|_| Vec::new());
+        let tasks = manager
+            .get_all_task_templates()
+            .unwrap_or_else(|_| Vec::new());
 
         let role_details: Vec<Value> = roles
             .iter()
@@ -194,19 +201,25 @@ impl PromptTools {
     #[tool(description = "使用给定变量渲染角色模板")]
     pub fn render_template(&self, role: String, variables: Value) -> Result<String, String> {
         let manager = self.manager.read();
-        let template = manager.load_template(&role)
+        let template = manager
+            .load_template(&role)
             .map_err(|e| format!("加载模板失败：{}", role))?;
-        
+
         self.render_with_stats(&template, &variables)
     }
 
     /// 渲染任务模板
     #[tool(description = "使用给定变量渲染任务模板")]
-    pub fn render_task_template(&self, task_name: String, variables: Value) -> Result<String, String> {
+    pub fn render_task_template(
+        &self,
+        task_name: String,
+        variables: Value,
+    ) -> Result<String, String> {
         let manager = self.manager.read();
-        let template = manager.load_task_template(&task_name)
+        let template = manager
+            .load_task_template(&task_name)
             .map_err(|e| format!("加载任务模板失败：{}", task_name))?;
-        
+
         self.render_with_stats(&template, &variables)
     }
 
@@ -222,7 +235,8 @@ impl PromptTools {
     #[tool(description = "重新从文件加载指定模板")]
     pub fn reload_template(&self, role: String) -> Result<String, String> {
         let manager = self.manager.read();
-        manager.reload_template(&role)
+        manager
+            .reload_template(&role)
             .map_err(|e| format!("重新加载模板失败：{}", role))?;
         Ok(format!("模板已重新加载：{}", role))
     }
@@ -257,7 +271,9 @@ impl PromptTools {
     #[tool(description = "获取所有可用的任务模板名称列表")]
     pub fn get_all_task_templates(&self) -> Result<Value, String> {
         let manager = self.manager.read();
-        let tasks = manager.get_all_task_templates().unwrap_or_else(|_| Vec::new());
+        let tasks = manager
+            .get_all_task_templates()
+            .unwrap_or_else(|_| Vec::new());
         Ok(serde_json::json!(tasks))
     }
 }

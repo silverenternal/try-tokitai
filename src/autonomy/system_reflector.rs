@@ -10,11 +10,11 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::Result;
 
 /// 领域覆盖度
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,7 +181,7 @@ impl SystemReflector {
     /// 创建新的反射器
     pub fn new(data_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
-        
+
         let mut reflector = Self {
             data_dir,
             predefined_domains: Vec::new(),
@@ -189,10 +189,10 @@ impl SystemReflector {
             historical_reports: Vec::new(),
             config: ReflectorConfig::default(),
         };
-        
+
         // 初始化预定义领域
         reflector.initialize_predefined_domains();
-        
+
         Ok(reflector)
     }
 
@@ -291,22 +291,22 @@ impl SystemReflector {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         // 1. 分析领域覆盖度
         let domain_coverages = self.analyze_domain_coverage();
-        
+
         // 2. 计算工具分布
         let tool_distribution = self.calculate_tool_distribution();
-        
+
         // 3. 评估系统健康度
         let system_health = self.evaluate_system_health(&domain_coverages, &tool_distribution);
-        
+
         // 4. 生成改进建议
         let recommendations = self.generate_recommendations(&domain_coverages, &system_health);
-        
+
         // 5. 生成行动项
         let action_items = self.generate_action_items(&domain_coverages);
-        
+
         let report = SystemHealthReport {
             timestamp,
             system_health,
@@ -315,46 +315,63 @@ impl SystemReflector {
             recommendations,
             action_items,
         };
-        
+
         // 保存报告
         self.historical_reports.push(report.clone());
         self.save_report(&report)?;
-        
+
         Ok(report)
     }
 
     /// 分析领域覆盖度
     fn analyze_domain_coverage(&self) -> Vec<DomainCoverage> {
         let mut coverages = Vec::new();
-        
+
         for domain in &self.predefined_domains {
             // 统计该领域的工具
-            let domain_tools: Vec<_> = self.current_tools.iter()
-                .filter(|t| t.domain == domain.name || t.tags.iter().any(|tag| tag.contains(&domain.name)))
+            let domain_tools: Vec<_> = self
+                .current_tools
+                .iter()
+                .filter(|t| {
+                    t.domain == domain.name || t.tags.iter().any(|tag| tag.contains(&domain.name))
+                })
                 .collect();
-            
+
             let existing_count = domain_tools.len() as u32;
-            
+
             // 分析已覆盖的能力
-            let covered_capabilities: HashSet<_> = domain_tools.iter()
+            let covered_capabilities: HashSet<_> = domain_tools
+                .iter()
                 .flat_map(|t| {
-                    t.tags.iter()
+                    t.tags
+                        .iter()
                         .chain(std::iter::once(&t.description))
                         .cloned()
                 })
                 .collect();
-            
+
             // 找出缺失的能力
-            let missing_capabilities: Vec<_> = domain.required_capabilities.iter()
-                .filter(|cap| !covered_capabilities.iter().any(|c| c.contains(cap.as_str()) || cap.as_str().contains(c.as_str())))
+            let missing_capabilities: Vec<_> = domain
+                .required_capabilities
+                .iter()
+                .filter(|cap| {
+                    !covered_capabilities
+                        .iter()
+                        .any(|c| c.contains(cap.as_str()) || cap.as_str().contains(c.as_str()))
+                })
                 .cloned()
                 .collect();
-            
+
             // 计算覆盖度
             let total_caps = domain.required_capabilities.len() as f32;
-            let covered_caps = (domain.required_capabilities.len() - missing_capabilities.len()) as f32;
-            let coverage = if total_caps > 0.0 { covered_caps / total_caps } else { 1.0 };
-            
+            let covered_caps =
+                (domain.required_capabilities.len() - missing_capabilities.len()) as f32;
+            let coverage = if total_caps > 0.0 {
+                covered_caps / total_caps
+            } else {
+                1.0
+            };
+
             // 计算优先级
             let priority = if coverage < 0.3 {
                 9
@@ -365,7 +382,7 @@ impl SystemReflector {
             } else {
                 3
             };
-            
+
             coverages.push(DomainCoverage {
                 domain_name: domain.name.clone(),
                 coverage,
@@ -375,10 +392,10 @@ impl SystemReflector {
                 priority,
             });
         }
-        
+
         // 按优先级排序
         coverages.sort_by(|a, b| b.priority.cmp(&a.priority));
-        
+
         coverages
     }
 
@@ -392,16 +409,16 @@ impl SystemReflector {
             low_usage: 0,
             unused: 0,
         };
-        
+
         for tool in &self.current_tools {
             // 领域分布
             *domain_distribution.entry(tool.domain.clone()).or_insert(0) += 1;
-            
+
             // 标签分布
             for tag in &tool.tags {
                 *tag_distribution.entry(tag.clone()).or_insert(0) += 1;
             }
-            
+
             // 使用率分布
             if tool.usage_count > 100 {
                 usage_dist.high_usage += 1;
@@ -413,7 +430,7 @@ impl SystemReflector {
                 usage_dist.unused += 1;
             }
         }
-        
+
         ToolDistribution {
             total_tools: self.current_tools.len() as u32,
             domain_distribution,
@@ -423,12 +440,17 @@ impl SystemReflector {
     }
 
     /// 评估系统健康度
-    fn evaluate_system_health(&self, domain_coverages: &[DomainCoverage], distribution: &ToolDistribution) -> SystemHealth {
+    fn evaluate_system_health(
+        &self,
+        domain_coverages: &[DomainCoverage],
+        distribution: &ToolDistribution,
+    ) -> SystemHealth {
         // 领域覆盖评分
         let coverage_score = if domain_coverages.is_empty() {
             0.0
         } else {
-            domain_coverages.iter().map(|dc| dc.coverage).sum::<f32>() / domain_coverages.len() as f32
+            domain_coverages.iter().map(|dc| dc.coverage).sum::<f32>()
+                / domain_coverages.len() as f32
         };
 
         // 多样性评分（基于领域分布的均匀度）
@@ -436,7 +458,10 @@ impl SystemReflector {
 
         // 质量评分（基于使用率分布）
         let quality_score = if distribution.total_tools > 0 {
-            let active_ratio = (distribution.usage_distribution.high_usage + distribution.usage_distribution.medium_usage) as f32 / distribution.total_tools as f32;
+            let active_ratio = (distribution.usage_distribution.high_usage
+                + distribution.usage_distribution.medium_usage)
+                as f32
+                / distribution.total_tools as f32;
             active_ratio.min(1.0)
         } else {
             0.0
@@ -446,11 +471,15 @@ impl SystemReflector {
         let evolution_score = 1.0 - coverage_score; // 覆盖度越低，进化空间越大
 
         // 整体健康度
-        let overall_health = (coverage_score * 0.4 + diversity_score * 0.2 + quality_score * 0.3 + evolution_score * 0.1).min(1.0);
-        
+        let overall_health = (coverage_score * 0.4
+            + diversity_score * 0.2
+            + quality_score * 0.3
+            + evolution_score * 0.1)
+            .min(1.0);
+
         // 识别问题
         let mut issues = Vec::new();
-        
+
         if coverage_score < 0.5 {
             issues.push(SystemIssue {
                 issue_type: "low_coverage".to_string(),
@@ -459,7 +488,7 @@ impl SystemReflector {
                 suggested_fix: "优先补充缺失领域的工具".to_string(),
             });
         }
-        
+
         if diversity_score < 0.4 {
             issues.push(SystemIssue {
                 issue_type: "low_diversity".to_string(),
@@ -468,7 +497,7 @@ impl SystemReflector {
                 suggested_fix: "扩展不同领域的工具".to_string(),
             });
         }
-        
+
         if quality_score < 0.3 {
             issues.push(SystemIssue {
                 issue_type: "low_quality".to_string(),
@@ -477,7 +506,7 @@ impl SystemReflector {
                 suggested_fix: "优化现有工具或废弃低使用率工具".to_string(),
             });
         }
-        
+
         SystemHealth {
             overall_health,
             diversity_score,
@@ -493,14 +522,15 @@ impl SystemReflector {
         if domain_distribution.is_empty() {
             return 0.0;
         }
-        
+
         let total = domain_distribution.values().sum::<u32>() as f32;
         if total == 0.0 {
             return 0.0;
         }
-        
+
         // 计算熵
-        let entropy: f32 = domain_distribution.values()
+        let entropy: f32 = domain_distribution
+            .values()
             .map(|&count| {
                 let p = count as f32 / total;
                 if p > 0.0 {
@@ -510,7 +540,7 @@ impl SystemReflector {
                 }
             })
             .sum();
-        
+
         // 归一化到 0-1
         let max_entropy = (domain_distribution.len() as f32).ln();
         if max_entropy > 0.0 {
@@ -521,51 +551,63 @@ impl SystemReflector {
     }
 
     /// 生成改进建议
-    fn generate_recommendations(&self, domain_coverages: &[DomainCoverage], system_health: &SystemHealth) -> Vec<String> {
+    fn generate_recommendations(
+        &self,
+        domain_coverages: &[DomainCoverage],
+        system_health: &SystemHealth,
+    ) -> Vec<String> {
         let mut recommendations = Vec::new();
-        
+
         // 基于领域覆盖的建议
         for dc in domain_coverages {
             if dc.coverage < self.config.domain_coverage_threshold {
                 for missing in &dc.missing_capabilities {
                     recommendations.push(format!(
                         "在{}领域添加工具，提供{}能力（当前覆盖{:.1}%）",
-                        dc.domain_name, missing, dc.coverage * 100.0
+                        dc.domain_name,
+                        missing,
+                        dc.coverage * 100.0
                     ));
                 }
             }
         }
-        
+
         // 基于系统健康度的建议
         for issue in &system_health.issues {
             recommendations.push(format!("{}: {}", issue.issue_type, issue.description));
         }
-        
+
         recommendations
     }
 
     /// 生成行动项
     fn generate_action_items(&self, domain_coverages: &[DomainCoverage]) -> Vec<ActionItem> {
         let mut action_items = Vec::new();
-        
+
         for dc in domain_coverages.iter().take(3) {
             // 只处理优先级最高的 3 个领域
             if dc.priority >= 7 && dc.coverage < 0.5 {
                 action_items.push(ActionItem {
-                    description: format!("为{}领域开发{}个新工具", dc.domain_name, dc.recommended_tools - dc.existing_tools),
+                    description: format!(
+                        "为{}领域开发{}个新工具",
+                        dc.domain_name,
+                        dc.recommended_tools - dc.existing_tools
+                    ),
                     priority: dc.priority,
                     estimated_hours: ((dc.recommended_tools - dc.existing_tools) * 2) as u8,
                     related_domains: vec![dc.domain_name.clone()],
                 });
             }
         }
-        
+
         action_items
     }
 
     /// 保存报告
     fn save_report(&self, report: &SystemHealthReport) -> Result<()> {
-        let file_path = self.data_dir.join(format!("health_report_{}.json", report.timestamp));
+        let file_path = self
+            .data_dir
+            .join(format!("health_report_{}.json", report.timestamp));
         let json = serde_json::to_string_pretty(report)?;
         std::fs::write(&file_path, &json)?;
 
@@ -603,7 +645,7 @@ mod tests {
     fn test_health_report_generation() {
         let temp_dir = TempDir::new().unwrap();
         let mut reflector = SystemReflector::new(temp_dir.path().to_path_buf()).unwrap();
-        
+
         // 设置一些示例工具
         reflector.set_current_tools(vec![
             ToolInfo {
@@ -621,9 +663,9 @@ mod tests {
                 usage_count: 50,
             },
         ]);
-        
+
         let report = reflector.generate_health_report().unwrap();
-        
+
         assert!(report.system_health.overall_health > 0.0);
         assert!(!report.domain_coverages.is_empty());
         assert!(!report.recommendations.is_empty());

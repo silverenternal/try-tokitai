@@ -1,28 +1,28 @@
 #![recursion_limit = "256"]
 
-mod config;
 mod command_resolver;
+mod config;
 mod path_resolver;
 mod sandbox;
 mod tools;
-mod context;
-mod autonomy;
-mod observability;
-mod dialogue;
-mod prompt_engineering;
-mod tool_matrix;
-mod orchestrator;
-mod integration;
-mod provider_config;
-mod external_process;
+// Context is now a separate crate: tokitai-context
 mod assistant_common;
-mod cli_assistant;
 mod autonomous_assistant;
-mod experiments;
+mod autonomy;
+mod cli_assistant;
 mod context_cli;
+mod dialogue;
+mod experiments;
+mod external_process;
+mod integration;
 pub mod llm;
 pub mod mcp;
+mod observability;
+mod orchestrator;
+mod prompt_engineering;
+mod provider_config;
 pub mod tool_market;
+mod tool_matrix;
 pub mod tui;
 
 use anyhow::Result;
@@ -31,8 +31,8 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use assistant_common::AssistantConfig;
-use cli_assistant::CliAssistant;
 use autonomous_assistant::AutonomousAssistant;
+use cli_assistant::CliAssistant;
 
 // ============================================================================
 // Tokitai 双轨服务架构
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     let use_autonomous = args.iter().any(|arg| arg == "--autonomous" || arg == "-a");
     let use_mcp = args.iter().any(|arg| arg == "--mcp" || arg == "-m");
     let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
-    
+
     // 检查工具市场命令
     if args.len() >= 2 && args[1] == "tokitai" {
         return handle_tool_market_command(&args[2..]);
@@ -90,7 +90,8 @@ fn main() -> Result<()> {
     }
 
     // 解析 --project-path 参数
-    let project_path = args.iter()
+    let project_path = args
+        .iter()
         .position(|arg| arg == "--project-path" || arg == "-p")
         .and_then(|pos| args.get(pos + 1))
         .map(PathBuf::from);
@@ -117,7 +118,11 @@ fn main() -> Result<()> {
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim();
                 let value = value.trim();
-                if key.starts_with("PROVIDER_") || key.starts_with("AI_") || key == "PROVIDERS" || key == "SEARXNG_URL" {
+                if key.starts_with("PROVIDER_")
+                    || key.starts_with("AI_")
+                    || key == "PROVIDERS"
+                    || key == "SEARXNG_URL"
+                {
                     std::env::set_var(key, value);
                 }
             }
@@ -147,14 +152,13 @@ fn main() -> Result<()> {
     let api_url = std::env::var("AI_API_URL")
         .unwrap_or_else(|_| "https://ollama.com/v1/chat/completions".to_string());
     let api_key = std::env::var("AI_API_KEY").ok();
-    let model = std::env::var("AI_MODEL")
-        .unwrap_or_else(|_| {
-            if config.ai.model.is_empty() {
-                "qwen3.5:397b".to_string()
-            } else {
-                config.ai.model.clone()
-            }
-        });
+    let model = std::env::var("AI_MODEL").unwrap_or_else(|_| {
+        if config.ai.model.is_empty() {
+            "qwen3.5:397b".to_string()
+        } else {
+            config.ai.model.clone()
+        }
+    });
 
     // 检查配置（支持多供应商模式）
     let has_api_key = api_key.is_some() || std::env::var("PROVIDERS").is_ok();
@@ -211,12 +215,11 @@ fn main() -> Result<()> {
 
     // 如果指定了 --autonomous，启动自主进化模式
     if use_autonomous {
-        let project_root = project_path
-            .unwrap_or_else(|| {
-                std::env::current_dir()
-                    .map_err(|e| anyhow::anyhow!("获取当前目录失败：{}", e))
-                    .unwrap()
-            });
+        let project_root = project_path.unwrap_or_else(|| {
+            std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("获取当前目录失败：{}", e))
+                .unwrap()
+        });
 
         println!("🤖 启动自主进化模式");
         println!("═══════════════════════════");
@@ -234,14 +237,15 @@ fn main() -> Result<()> {
         std::env::set_current_dir(&project_root)
             .map_err(|e| anyhow::anyhow!("切换目录失败：{}", e))?;
 
-        println!("📂 工作目录：{}", std::env::current_dir().unwrap().display());
+        println!(
+            "📂 工作目录：{}",
+            std::env::current_dir().unwrap().display()
+        );
         println!();
 
         // 创建自主助手
-        let assistant = AutonomousAssistant::new(
-            config,
-            std::env::current_dir().unwrap(),
-        ).map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
+        let assistant = AutonomousAssistant::new(config, std::env::current_dir().unwrap())
+            .map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
 
         // 运行自主进化
         assistant.run_autonomous_evolution()?;
@@ -253,7 +257,8 @@ fn main() -> Result<()> {
     let mut assistant = CliAssistant::new(config)?;
 
     // 检查是否有命令行参数直接输入
-    let non_arg_args: Vec<String> = args.iter()
+    let non_arg_args: Vec<String> = args
+        .iter()
         .filter(|arg| !arg.starts_with('-'))
         .skip(1)
         .cloned()
@@ -288,7 +293,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tools::{FileOperations, CodeTools, SystemTools, SearchTools, DownloadTools};
+    use crate::tools::{CodeTools, DownloadTools, FileOperations, SearchTools, SystemTools};
     use tokitai::ToolProvider;
 
     #[test]
@@ -297,15 +302,21 @@ mod tests {
         let test_path = "/tmp/test_tokitai.txt";
         let test_content = "Hello, Tokitai!";
 
-        let write_result = file_ops.call_tool("write_file", &serde_json::json!({
-            "path": test_path,
-            "content": test_content
-        }));
+        let write_result = file_ops.call_tool(
+            "write_file",
+            &serde_json::json!({
+                "path": test_path,
+                "content": test_content
+            }),
+        );
         assert!(write_result.is_ok());
 
-        let read_result = file_ops.call_tool("read_file", &serde_json::json!({
-            "path": test_path
-        }));
+        let read_result = file_ops.call_tool(
+            "read_file",
+            &serde_json::json!({
+                "path": test_path
+            }),
+        );
         assert!(read_result.is_ok());
         assert!(read_result.unwrap().to_string().contains(test_content));
 
@@ -316,9 +327,12 @@ mod tests {
     fn test_file_operations_list_dir() {
         let file_ops = FileOperations::default();
 
-        let result = file_ops.call_tool("list_dir", &serde_json::json!({
-            "path": "."
-        }));
+        let result = file_ops.call_tool(
+            "list_dir",
+            &serde_json::json!({
+                "path": "."
+            }),
+        );
         assert!(result.is_ok());
     }
 
@@ -326,9 +340,12 @@ mod tests {
     fn test_code_tools_detect_language() {
         let code_tools = CodeTools::default();
 
-        let result = code_tools.call_tool("detect_language", &serde_json::json!({
-            "path": "src/main.rs"
-        }));
+        let result = code_tools.call_tool(
+            "detect_language",
+            &serde_json::json!({
+                "path": "src/main.rs"
+            }),
+        );
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.to_string().contains("Rust"));
@@ -361,7 +378,7 @@ mod tests {
 /// 处理工具市场命令
 fn handle_tool_market_command(args: &[String]) -> Result<()> {
     use tool_market::ToolMarket;
-    
+
     if args.is_empty() {
         println!("🛠️  Tokitai 工具市场");
         println!();
@@ -379,15 +396,15 @@ fn handle_tool_market_command(args: &[String]) -> Result<()> {
         println!("  cargo run -- tokitai install smart-search");
         return Ok(());
     }
-    
+
     let command = &args[0];
-    
+
     // 创建工具市场实例
     let market = ToolMarket::new(None)?;
-    
+
     // 创建 tokio 运行时执行异步操作
     let rt = tokio::runtime::Runtime::new()?;
-    
+
     match command.as_str() {
         "publish" => {
             if args.len() < 2 {
@@ -429,6 +446,6 @@ fn handle_tool_market_command(args: &[String]) -> Result<()> {
             eprintln!("运行 'cargo run -- tokitai' 查看帮助");
         }
     }
-    
+
     Ok(())
 }

@@ -5,13 +5,11 @@
 
 use std::any::Any;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Read, Write as IoWrite};
+use std::io::{Read, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::io::{
-    FileKVFile, FileKVFileSystem, FileMetadata, IoResult, MmapFileSystem, MmapView, read_dir_to_paths,
-};
+use crate::io::{read_dir_to_paths, FileKVFile, FileKVFileSystem, FileMetadata, IoResult, MmapFileSystem, MmapView};
 
 /// Standard filesystem implementation using std::fs
 #[derive(Debug, Clone, Copy, Default)]
@@ -90,9 +88,7 @@ impl MmapFileSystem for StdFs {
             .downcast_ref::<StdFile>()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Expected StdFile"))?;
 
-        let mmap = unsafe {
-            memmap2::MmapOptions::new().map(&std_file.0)?
-        };
+        let mmap = unsafe { memmap2::MmapOptions::new().map(&std_file.0)? };
         Ok(Arc::new(StdMmap(mmap)))
     }
 }
@@ -145,63 +141,5 @@ impl MmapView for StdMmap {
 
     fn len(&self) -> usize {
         self.0.len()
-    }
-}
-
-// ─── Convenience: BufWriter wrapper for StdFile ───
-
-/// BufWriter around a std::fs::File (useful for buffered writes)
-/// This wraps the underlying File directly, not through the trait.
-/// NOTE: Public API for buffered file operations
-#[allow(dead_code)]
-pub struct BufStdFile {
-    inner: BufWriter<File>,
-}
-
-impl BufStdFile {
-    #[allow(dead_code)]
-    pub fn new(file: File) -> Self {
-        Self {
-            inner: BufWriter::new(file),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn into_inner(self) -> std::io::Result<File> {
-        self.inner.into_inner().map_err(|e| e.into_error())
-    }
-}
-
-impl FileKVFile for BufStdFile {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        self.inner.get_mut().read(buf)
-    }
-
-    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        self.inner.get_mut().write(buf)
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.inner.write_all(buf)
-    }
-
-    fn flush(&mut self) -> IoResult<()> {
-        self.inner.flush()
-    }
-
-    fn sync_all(&self) -> IoResult<()> {
-        self.inner.get_ref().sync_all()
-    }
-
-    fn try_clone(&self) -> IoResult<Box<dyn FileKVFile>> {
-        Ok(Box::new(StdFile(self.inner.get_ref().try_clone()?)))
-    }
-
-    fn metadata(&self) -> IoResult<FileMetadata> {
-        self.inner.get_ref().metadata().map(|m| FileMetadata::new(m.len()))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

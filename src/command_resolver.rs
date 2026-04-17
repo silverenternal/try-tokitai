@@ -4,7 +4,7 @@
 //! - 扫描系统 PATH 中的可执行命令
 //! - 提供命令自动补全建议
 //! - 命令安全性检查
-//! 
+//!
 //! 安全机制：
 //! - 命令白名单优先（推荐）
 //! - 命令黑名单阻止
@@ -56,7 +56,7 @@ impl CommandResolver {
 
         // 初始化黑名单
         resolver.init_blacklist();
-        
+
         // 初始化默认白名单（安全命令）
         resolver.init_default_whitelist();
 
@@ -69,13 +69,10 @@ impl CommandResolver {
     /// 初始化默认白名单（只读安全命令）
     fn init_default_whitelist(&mut self) {
         let safe_commands = vec![
-            "ls", "dir", "pwd", "whoami", "hostname",
-            "echo", "cat", "head", "tail", "less", "more",
-            "grep", "egrep", "fgrep",
-            "find", "which", "whereis", "man",
-            "uname", "uptime", "date", "cal",
-            "df", "du", "free", "top", "ps",
-            "git", "cargo", "rustc", "npm", "node", "python", "python3",
+            "ls", "dir", "pwd", "whoami", "hostname", "echo", "cat", "head", "tail", "less",
+            "more", "grep", "egrep", "fgrep", "find", "which", "whereis", "man", "uname", "uptime",
+            "date", "cal", "df", "du", "free", "top", "ps", "git", "cargo", "rustc", "npm", "node",
+            "python", "python3",
         ];
         for cmd in safe_commands {
             self.whitelist.insert(cmd.to_string());
@@ -86,19 +83,47 @@ impl CommandResolver {
     fn init_blacklist(&mut self) {
         // 危险命令黑名单
         let dangerous_commands = vec![
-            "rm", "dd", "mkfs", "fdisk", "parted",
-            "chmod", "chown", "chgrp",
-            "sudo", "su", "pkexec", "doas",
-            "wget", "curl", "nc", "netcat",
-            "ssh", "scp", "rsync",
-            "kill", "pkill", "killall",
-            "shutdown", "reboot", "halt", "poweroff",
-            "mount", "umount",
-            "iptables", "firewall-cmd", "ufw",
-            "visudo", "passwd", "useradd", "userdel", "usermod",
-            "groupadd", "groupdel", "groupmod",
+            "rm",
+            "dd",
+            "mkfs",
+            "fdisk",
+            "parted",
+            "chmod",
+            "chown",
+            "chgrp",
+            "sudo",
+            "su",
+            "pkexec",
+            "doas",
+            "wget",
+            "curl",
+            "nc",
+            "netcat",
+            "ssh",
+            "scp",
+            "rsync",
+            "kill",
+            "pkill",
+            "killall",
+            "shutdown",
+            "reboot",
+            "halt",
+            "poweroff",
+            "mount",
+            "umount",
+            "iptables",
+            "firewall-cmd",
+            "ufw",
+            "visudo",
+            "passwd",
+            "useradd",
+            "userdel",
+            "usermod",
+            "groupadd",
+            "groupdel",
+            "groupmod",
         ];
-        
+
         for cmd in dangerous_commands {
             self.blacklist.insert(cmd.to_string());
         }
@@ -107,7 +132,7 @@ impl CommandResolver {
     /// 扫描系统 PATH 中的可用命令
     pub fn scan_available_commands(&mut self) {
         self.available_commands.clear();
-        
+
         // 获取 PATH 环境变量
         let paths = match env::var_os("PATH") {
             Some(val) => val,
@@ -116,13 +141,13 @@ impl CommandResolver {
                 return;
             }
         };
-        
+
         // 遍历 PATH 中的每个目录
         for path in env::split_paths(&paths) {
             if !path.exists() {
                 continue;
             }
-            
+
             // 读取目录内容
             let entries = match std::fs::read_dir(&path) {
                 Ok(entries) => entries,
@@ -131,10 +156,10 @@ impl CommandResolver {
                     continue;
                 }
             };
-            
+
             for entry in entries.flatten() {
                 let file_path = entry.path();
-                
+
                 // 检查是否是可执行文件
                 if self.is_executable_file(&file_path) {
                     if let Some(file_name) = file_path.file_name() {
@@ -148,7 +173,7 @@ impl CommandResolver {
                 }
             }
         }
-        
+
         debug!("扫描到 {} 个可用命令", self.available_commands.len());
     }
 
@@ -158,7 +183,7 @@ impl CommandResolver {
         if !path.is_file() {
             return false;
         }
-        
+
         // 检查是否有执行权限（Unix 系统）
         #[cfg(unix)]
         {
@@ -172,13 +197,16 @@ impl CommandResolver {
             }
             false
         }
-        
+
         #[cfg(windows)]
         {
             // Windows 检查文件扩展名
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy().to_lowercase();
-                return ext_str == "exe" || ext_str == "bat" || ext_str == "cmd" || ext_str == "com";
+                return ext_str == "exe"
+                    || ext_str == "bat"
+                    || ext_str == "cmd"
+                    || ext_str == "com";
             }
             false
         }
@@ -238,7 +266,7 @@ impl CommandResolver {
         self.available_commands
             .iter()
             .filter(|cmd| cmd.starts_with(prefix))
-            .take(20)  // 最多返回 20 个建议
+            .take(20) // 最多返回 20 个建议
             .cloned()
             .collect()
     }
@@ -293,7 +321,9 @@ impl CommandResolver {
     /// 检查命令是否包含 Shell 注入字符
     #[allow(dead_code)]
     fn contains_shell_injection_chars(command: &str) -> bool {
-        let dangerous_chars = [';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '\\', '\n', '\r'];
+        let dangerous_chars = [
+            ';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '\\', '\n', '\r',
+        ];
         command.chars().any(|c| dangerous_chars.contains(&c))
     }
 
@@ -313,10 +343,7 @@ impl CommandResolver {
     #[allow(dead_code)]
     pub fn get_command_help(&self, command: &str) -> Option<String> {
         // 尝试 --help
-        let output = Command::new(command)
-            .arg("--help")
-            .output()
-            .ok()?;
+        let output = Command::new(command).arg("--help").output().ok()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -325,10 +352,7 @@ impl CommandResolver {
         }
 
         // 尝试 -h
-        let output = Command::new(command)
-            .arg("-h")
-            .output()
-            .ok()?;
+        let output = Command::new(command).arg("-h").output().ok()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -343,7 +367,8 @@ impl CommandResolver {
     pub fn get_stats(&self) -> CommandStats {
         CommandStats {
             total_commands: self.available_commands.len(),
-            safe_commands: self.available_commands
+            safe_commands: self
+                .available_commands
                 .iter()
                 .filter(|cmd| !self.blacklist.contains(*cmd))
                 .count(),
@@ -403,7 +428,13 @@ mod tests {
         let resolver = CommandResolver::new();
         let suggestions = resolver.autocomplete("l");
         // 应该包含 ls, ln 等命令
-        assert!(!suggestions.is_empty() || resolver.available_commands.iter().all(|c| !c.starts_with('l')));
+        assert!(
+            !suggestions.is_empty()
+                || resolver
+                    .available_commands
+                    .iter()
+                    .all(|c| !c.starts_with('l'))
+        );
     }
 
     #[test]

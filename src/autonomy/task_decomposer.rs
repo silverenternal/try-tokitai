@@ -119,7 +119,11 @@ impl Task {
 
     /// 检查任务是否可执行（所有依赖已完成）
     pub fn is_ready(&self, completed_tasks: &HashSet<String>) -> bool {
-        self.dependencies.is_empty() || self.dependencies.iter().all(|dep| completed_tasks.contains(dep))
+        self.dependencies.is_empty()
+            || self
+                .dependencies
+                .iter()
+                .all(|dep| completed_tasks.contains(dep))
     }
 }
 
@@ -154,9 +158,7 @@ impl TaskGraph {
     pub fn get_ready_tasks(&self, completed_tasks: &HashSet<String>) -> Vec<&Task> {
         self.tasks
             .values()
-            .filter(|task| {
-                task.status == TaskStatus::Pending && task.is_ready(completed_tasks)
-            })
+            .filter(|task| task.status == TaskStatus::Pending && task.is_ready(completed_tasks))
             .collect()
     }
 
@@ -221,13 +223,17 @@ impl TaskGraph {
 
         for task_id in self.tasks.keys() {
             if !visited.contains(task_id) {
-                if let Some(cycle) = self.dfs_cycle(task_id, &mut visited, &mut rec_stack, &mut path) {
+                if let Some(cycle) =
+                    self.dfs_cycle(task_id, &mut visited, &mut rec_stack, &mut path)
+                {
                     return Ok(cycle);
                 }
             }
         }
 
-        Err(TaskDecomposerError::DependencyError("未检测到循环依赖".to_string()))
+        Err(TaskDecomposerError::DependencyError(
+            "未检测到循环依赖".to_string(),
+        ))
     }
 
     fn dfs_cycle(
@@ -263,10 +269,26 @@ impl TaskGraph {
     /// 获取任务进度统计
     pub fn get_progress(&self) -> TaskProgress {
         let total = self.tasks.len();
-        let completed = self.tasks.values().filter(|t| t.status == TaskStatus::Completed).count();
-        let failed = self.tasks.values().filter(|t| t.status == TaskStatus::Failed).count();
-        let in_progress = self.tasks.values().filter(|t| t.status == TaskStatus::InProgress).count();
-        let pending = self.tasks.values().filter(|t| t.status == TaskStatus::Pending).count();
+        let completed = self
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Completed)
+            .count();
+        let failed = self
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Failed)
+            .count();
+        let in_progress = self
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::InProgress)
+            .count();
+        let pending = self
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Pending)
+            .count();
 
         TaskProgress {
             total,
@@ -274,7 +296,11 @@ impl TaskGraph {
             failed,
             in_progress,
             pending,
-            percentage: if total > 0 { (completed as f64 / total as f64) * 100.0 } else { 0.0 },
+            percentage: if total > 0 {
+                (completed as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            },
         }
     }
 
@@ -342,7 +368,11 @@ impl TaskDecomposer {
     }
 
     /// 手动添加任务
-    pub fn add_task(&mut self, description: String, dependencies: Vec<String>) -> Result<&Task, TaskDecomposerError> {
+    pub fn add_task(
+        &mut self,
+        description: String,
+        dependencies: Vec<String>,
+    ) -> Result<&Task, TaskDecomposerError> {
         let task = Task::new(description, dependencies);
         let task_id = task.id.clone();
         self.task_graph.add_task(task);
@@ -351,7 +381,10 @@ impl TaskDecomposer {
     }
 
     /// 从 LLM 分解结果添加任务
-    pub fn add_decomposed_tasks(&mut self, tasks: Vec<DecomposedTask>) -> Result<(), TaskDecomposerError> {
+    pub fn add_decomposed_tasks(
+        &mut self,
+        tasks: Vec<DecomposedTask>,
+    ) -> Result<(), TaskDecomposerError> {
         self.task_graph = TaskGraph::new();
         for task_desc in tasks {
             let task = Task::new(task_desc.description, task_desc.dependencies);
@@ -373,7 +406,11 @@ impl TaskDecomposer {
     }
 
     /// 标记任务为完成
-    pub fn complete_task(&mut self, task_id: &str, result: String) -> Result<(), TaskDecomposerError> {
+    pub fn complete_task(
+        &mut self,
+        task_id: &str,
+        result: String,
+    ) -> Result<(), TaskDecomposerError> {
         if let Some(task) = self.task_graph.tasks.get_mut(task_id) {
             task.complete(result);
             self.save()?;
@@ -392,17 +429,15 @@ impl TaskDecomposer {
 
     /// 获取下一个可执行的任务
     pub fn get_next_task(&self) -> Option<&Task> {
-        let completed: HashSet<String> = self.task_graph
+        let completed: HashSet<String> = self
+            .task_graph
             .tasks
             .iter()
             .filter(|(_, t)| t.status == TaskStatus::Completed)
             .map(|(id, _)| id.clone())
             .collect();
 
-        self.task_graph
-            .get_ready_tasks(&completed)
-            .first()
-            .copied()
+        self.task_graph.get_ready_tasks(&completed).first().copied()
     }
 
     /// 获取任务图
@@ -456,14 +491,17 @@ mod tests {
     #[test]
     fn test_task_graph_topological_sort() {
         let mut graph = TaskGraph::new();
-        
+
         let mut t1 = Task::root("任务 1".to_string());
         t1.id = "t1".to_string();
-        
+
         let mut t2 = Task::new("任务 2".to_string(), vec!["t1".to_string()]);
         t2.id = "t2".to_string();
-        
-        let mut t3 = Task::new("任务 3".to_string(), vec!["t1".to_string(), "t2".to_string()]);
+
+        let mut t3 = Task::new(
+            "任务 3".to_string(),
+            vec!["t1".to_string(), "t2".to_string()],
+        );
         t3.id = "t3".to_string();
 
         graph.add_task(t1);
@@ -478,11 +516,11 @@ mod tests {
     #[test]
     fn test_task_progress() {
         let mut graph = TaskGraph::new();
-        
+
         let mut t1 = Task::root("任务 1".to_string());
         t1.id = "t1".to_string();
         t1.status = TaskStatus::Completed;
-        
+
         let mut t2 = Task::root("任务 2".to_string());
         t2.id = "t2".to_string();
         t2.status = TaskStatus::Pending;
@@ -499,11 +537,11 @@ mod tests {
     #[test]
     fn test_decomposer_persistence() {
         let (mut decomposer, _temp_dir) = create_test_decomposer();
-        
+
         // 添加任务
         decomposer.add_task("任务 1".to_string(), vec![]).unwrap();
         decomposer.add_task("任务 2".to_string(), vec![]).unwrap();
-        
+
         // 重新加载
         let loaded = TaskDecomposer::load(decomposer.storage_dir().to_path_buf()).unwrap();
         assert_eq!(loaded.task_graph().tasks.len(), 2);

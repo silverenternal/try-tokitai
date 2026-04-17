@@ -7,22 +7,23 @@
 //! - Adaptive segment preallocation
 //! - Leveled/size-tiered compaction strategy selection
 
-use std::sync::Arc;
-use std::sync::mpsc;
-use std::sync::Weak;
 use parking_lot::Mutex;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::sync::Weak;
 
-use crate::engine::EngineState;
-use crate::query::zone_map::ZoneMapEntry;
 use crate::compaction::{
+    trigger::{CompactionPriority, IoPressureTracker, WriteAmplificationAwareTrigger},
     CompactionConfig, CompactionManager, CompactionRequest, CompactionStats,
 };
+use crate::engine::EngineState;
+use crate::query::zone_map::ZoneMapEntry;
 
 /// Compaction engine for merging and cleaning up segments
 pub struct CompactionEngine {
     pub state: Arc<EngineState>,
-    /// Compaction manager for scheduling
-    compaction_manager: parking_lot::Mutex<CompactionManager>,
+    /// Compaction manager for scheduling (Arc for lock-free atomic access)
+    compaction_manager: Arc<CompactionManager>,
     /// Adaptive segment pre-allocator
     adaptive_preallocator: Option<Arc<crate::ops::preallocator::AdaptivePreallocator>>,
     /// Background compaction thread handles (wrapped in Mutex for interior mutability)
@@ -38,6 +39,10 @@ pub struct CompactionEngine {
     /// This avoids circular references while allowing access to FileKV methods.
     /// Wrapped in Mutex for interior mutability since CompactionEngine is behind Arc.
     kv_weak: Mutex<Option<Weak<crate::FileKV>>>,
+    /// OPT-003: WA-aware trigger for intelligent compaction decisions
+    wa_aware_trigger: Option<Arc<WriteAmplificationAwareTrigger>>,
+    /// OPT-003: I/O pressure tracker
+    io_pressure_tracker: Option<Arc<IoPressureTracker>>,
 }
 
 impl CompactionEngine {
@@ -58,14 +63,25 @@ impl CompactionEngine {
         // Override the manager's tx with our channel's tx
         compaction_manager.tx = tx.clone();
 
+        // OPT-003: Initialize WA-aware trigger and I/O pressure tracker
+        let io_pressure_tracker = Arc::new(IoPressureTracker::new(1000));
+        let wa_aware_trigger = Arc::new(WriteAmplificationAwareTrigger::with_defaults(
+            io_pressure_tracker.clone(),
+        ));
+
+        // Set the WA-aware trigger on the compaction manager
+        compaction_manager.set_wa_aware_trigger(wa_aware_trigger.clone());
+
         Self {
             state,
-            compaction_manager: parking_lot::Mutex::new(compaction_manager),
+            compaction_manager: Arc::new(compaction_manager),
             adaptive_preallocator,
             thread_handles: Mutex::new(Vec::new()),
             tx,
             rx: Mutex::new(rx),
             kv_weak: Mutex::new(None),
+            wa_aware_trigger: Some(wa_aware_trigger),
+            io_pressure_tracker: Some(io_pressure_tracker),
         }
     }
 
@@ -76,7 +92,7 @@ impl CompactionEngine {
     }
 
     /// Get compaction manager reference
-    pub fn compaction_manager(&self) -> &parking_lot::Mutex<CompactionManager> {
+    pub fn compaction_manager(&self) -> &Arc<CompactionManager> {
         &self.compaction_manager
     }
 
@@ -140,7 +156,7 @@ impl CompactionEngine {
                 .spawn(move || {
                     loop {
                         let req = {
-                            let lock = rx_clone.lock().unwrap();
+                            let lock = rx_clone.lock().expect("compaction channel mutex poisoned");
                             lock.recv()
                         };
 
@@ -159,6 +175,10 @@ impl CompactionEngine {
                                                 thread_idx, stats.segments_merged, stats.bytes_compacted,
                                                 stats.entries_removed, stats.tombstones_cleaned
                                             );
+                                            // OPT-003 FIX: Reset amplification counters after successful compaction
+                                            if stats.bytes_compacted > 0 {
+                                                kv.compaction_engine.compaction_manager().reset_amplification_counters();
+                                            }
                                         }
                                         Err(e) => {
                                             tracing::error!("[Async-{}] Compaction failed: {}", thread_idx, e);
@@ -192,17 +212,22 @@ impl CompactionEngine {
     /// should provide a callback that executes the actual compaction.
     pub fn run_compaction<F>(&self, executor: F) -> anyhow::Result<CompactionStats>
     where
-        F: FnOnce(&parking_lot::Mutex<CompactionManager>) -> anyhow::Result<CompactionStats>,
+        F: FnOnce(&Arc<CompactionManager>) -> anyhow::Result<CompactionStats>,
     {
         // Check if compaction is actually needed before executing
-        let segment_count = self.state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed);
+        let segment_count = self
+            .state
+            .segment_state
+            .segment_count
+            .load(std::sync::atomic::Ordering::Relaxed);
         let compaction_manager = &self.compaction_manager;
 
-        if segment_count < compaction_manager.lock().config().min_segments {
+        let min_segments = compaction_manager.config().min_segments;
+        if segment_count < min_segments {
             tracing::debug!(
                 "Skipping compaction: {} segments < min_segments threshold ({})",
                 segment_count,
-                compaction_manager.lock().config().min_segments
+                min_segments
             );
             return Ok(CompactionStats::default());
         }
@@ -215,56 +240,137 @@ impl CompactionEngine {
     ///
     /// GAP-C2 FIX: This method now actually executes compaction when kv_weak is available.
     /// OPT-003: Also checks write amplification factor and triggers compaction if WA > threshold.
+    /// OPT-006: L0 compaction has higher priority than L1/L2 compaction.
+    /// OPT-003: Uses WA-aware trigger for intelligent compaction decisions.
     pub fn maybe_run_compaction(&self) -> anyhow::Result<()> {
-        let segment_count = self.state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed);
-        let total_size = self.state.segment_state.total_size_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let segment_count = self
+            .state
+            .segment_state
+            .segment_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total_size = self
+            .state
+            .segment_state
+            .total_size_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
 
-        let compaction_mgr = self.compaction_manager.lock();
+        let compaction_mgr = self.compaction_manager.clone();
+        let config = compaction_mgr.config().clone();
 
         // OPT-003: Check if compaction should be triggered due to high write amplification
-        if compaction_mgr.should_compact_by_amplification() {
+        let wa_force = compaction_mgr.should_compact_by_amplification();
+        if wa_force {
             let wa = compaction_mgr.write_amplification_factor();
             tracing::info!(
                 "Write amplification trigger: WA = {:.2}x > {:.2}x threshold, forcing compaction",
-                wa, compaction_mgr.config().write_amplification_threshold
+                wa,
+                config.write_amplification_threshold
             );
-            drop(compaction_mgr);
-            // Proceed to trigger compaction below
-        } else if !compaction_mgr.request_compaction(segment_count, total_size) {
-            // No async compaction requested, release lock
-            drop(compaction_mgr);
-            return Ok(());
-        } else {
-            // Async compaction requested, release lock and return
-            tracing::debug!(
-                "Compaction request sent to background thread: {} segments",
-                segment_count
-            );
-            return Ok(());
         }
 
-        // Try async compaction first
-        if self.state.config.compaction.async_compaction_enabled
-            && self.compaction_manager.lock().request_compaction(segment_count, total_size) {
+        // OPT-003: WA-aware priority evaluation
+        let wa_aware_result = compaction_mgr.evaluate_wa_aware_priority();
+        let (wa_aware_should_compact, wa_aware_priority, wa_aware_should_pause) =
+            wa_aware_result.unwrap_or((false, CompactionPriority::None, false));
+
+        if wa_aware_should_compact {
+            tracing::info!(
+                "WA-aware compaction trigger: priority={:?}, wa_should_pause={}",
+                wa_aware_priority,
+                wa_aware_should_pause
+            );
+        }
+
+        // OPT-006: L0 compaction priority check
+        // Count L0 segments and check if L0 compaction should be prioritized
+        let l0_segment_count = {
+            let segments = self.state.segment_state.segments.load();
+            segments.iter().filter(|(_, seg)| seg.level == 0).count()
+        };
+
+        // OPT-003: Update L0 segment tracking
+        drop(compaction_mgr);
+        self.update_l0_segments(l0_segment_count, {
+            let segments = self.state.segment_state.segments.load();
+            segments
+                .iter()
+                .filter(|(_, seg)| seg.level == 0)
+                .map(|(_, seg)| seg.size())
+                .sum()
+        });
+        let compaction_mgr = self.compaction_manager.clone();
+
+        let l0_priority = l0_segment_count >= config.l0_file_count_threshold || {
+            let l0_total_size: u64 = {
+                let segments = self.state.segment_state.segments.load();
+                segments
+                    .iter()
+                    .filter(|(_, seg)| seg.level == 0)
+                    .map(|(_, seg)| seg.size())
+                    .sum()
+            };
+            l0_total_size >= config.l0_size_bytes_threshold
+        };
+
+        if l0_priority {
+            tracing::info!(
+                "L0 compaction priority: {} L0 segments (threshold: {})",
+                l0_segment_count,
+                config.l0_file_count_threshold
+            );
+        }
+
+        // If async compaction is enabled, send request to background thread
+        if self.state.config.compaction.async_compaction_enabled {
+            // OPT-006: For L0 priority, request L0-specific compaction
+            // OPT-003: Also consider WA-aware priority
+            let should_trigger =
+                wa_force || wa_aware_should_compact || l0_priority || compaction_mgr.should_run_compaction();
+
+            let sent = if should_trigger {
+                if l0_priority && config.l0_compaction_strategy == crate::compaction::CompactionStrategy::SizeTiered {
+                    // Send L0-specific compaction request
+                    compaction_mgr.request_level_compaction(l0_segment_count, total_size, 0)
+                } else {
+                    compaction_mgr.request_compaction(segment_count, total_size)
+                }
+            } else {
+                false
+            };
+            drop(compaction_mgr);
+
+            if sent {
                 tracing::debug!(
-                    "Compaction request sent to background thread: {} segments",
-                    segment_count
+                    "Compaction request sent to background thread: {} segments (wa_force={}, l0_priority={}, wa_aware={})",
+                    segment_count, wa_force, l0_priority, wa_aware_should_compact
                 );
                 return Ok(());
             }
 
+            // If request failed, fall through to synchronous compaction
+        } else {
+            drop(compaction_mgr);
+        }
+
         // Fallback to synchronous - execute actual compaction if we have FileKV reference
         if let Some(kv) = self.kv_weak.lock().as_ref().and_then(|w| w.upgrade()) {
-            tracing::debug!("Falling back to synchronous compaction");
+            tracing::debug!("Executing synchronous compaction");
+            // OPT-006: For L0 priority with STCS, request L0-specific compaction
+            let target_level =
+                if l0_priority && config.l0_compaction_strategy == crate::compaction::CompactionStrategy::SizeTiered {
+                    Some(0)
+                } else {
+                    None
+                };
             let req = crate::compaction::CompactionRequest {
                 segment_count,
                 total_size_bytes: total_size,
-                target_level: None,
+                target_level,
             };
             let stats = crate::compaction::execute_compaction(&*kv, &req)?;
             // OPT-003: Reset amplification counters after successful compaction
             if stats.bytes_compacted > 0 {
-                self.compaction_manager.lock().reset_amplification_counters();
+                self.compaction_manager.reset_amplification_counters();
             }
             return Ok(());
         }
@@ -276,7 +382,41 @@ impl CompactionEngine {
 
     /// Record a write and potentially trigger compaction
     pub fn record_write(&self) -> bool {
-        self.compaction_manager.lock().record_write()
+        self.compaction_manager.record_write()
+    }
+
+    /// OPT-003: Get WA-aware trigger reference
+    pub fn wa_aware_trigger(&self) -> Option<&Arc<WriteAmplificationAwareTrigger>> {
+        self.wa_aware_trigger.as_ref()
+    }
+
+    /// OPT-003: Get I/O pressure tracker reference
+    pub fn io_pressure_tracker(&self) -> Option<&Arc<IoPressureTracker>> {
+        self.io_pressure_tracker.as_ref()
+    }
+
+    /// OPT-003: Record write latency for I/O pressure monitoring
+    pub fn record_write_latency(&self, latency_us: u64) {
+        if let Some(ref tracker) = self.io_pressure_tracker {
+            tracker.record_write_complete(latency_us);
+        }
+    }
+
+    /// OPT-003: Record write start for I/O pressure monitoring
+    pub fn record_write_start(&self) {
+        if let Some(ref tracker) = self.io_pressure_tracker {
+            tracker.record_write_start();
+        }
+    }
+
+    /// OPT-003: Evaluate WA-aware compaction priority
+    pub fn evaluate_wa_aware_priority(&self) -> Option<(bool, CompactionPriority, bool)> {
+        self.compaction_manager.evaluate_wa_aware_priority()
+    }
+
+    /// OPT-003: Update L0 segment tracking
+    pub fn update_l0_segments(&self, count: usize, total_size_bytes: u64) {
+        self.compaction_manager.update_l0_segments(count, total_size_bytes);
     }
 }
 
@@ -293,8 +433,16 @@ impl crate::engine::traits::CompactionEngineAPI for CompactionEngine {
         // ENG-002 FIX: Support level-specific compaction.
         // When level is None, run compaction on all levels (default behavior).
         // When level is Some, only compact segments at that specific level.
-        let segment_count = self.state.segment_state.segment_count.load(std::sync::atomic::Ordering::Relaxed);
-        let total_size: u64 = self.state.segment_state.total_size_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let segment_count = self
+            .state
+            .segment_state
+            .segment_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total_size: u64 = self
+            .state
+            .segment_state
+            .total_size_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         // Try to execute compaction via FileKV reference
         if let Some(kv) = self.kv_weak.lock().as_ref().and_then(|w| w.upgrade()) {
@@ -324,10 +472,10 @@ impl crate::engine::traits::CompactionEngineAPI for CompactionEngine {
 
     fn get_stats(&self) -> crate::compaction::CompactionStats {
         // Return compaction manager stats
-        self.compaction_manager.lock().stats()
+        self.compaction_manager.stats()
     }
 
-    fn compaction_manager(&self) -> &parking_lot::Mutex<crate::compaction::CompactionManager> {
+    fn compaction_manager(&self) -> &Arc<crate::compaction::CompactionManager> {
         CompactionEngine::compaction_manager(self)
     }
 }

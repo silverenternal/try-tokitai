@@ -9,10 +9,10 @@
 
 #![allow(dead_code)]
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::Result;
 
 /// 工具调用事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,15 +131,15 @@ impl ToolCallVisualizer {
     pub fn new<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
         let data_dir = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir)?;
-        
+
         let mut visualizer = Self {
             data_dir,
             timelines: Vec::new(),
             config: VisualizerConfig::default(),
         };
-        
+
         visualizer.load_timelines().ok();
-        
+
         Ok(visualizer)
     }
 
@@ -149,9 +149,9 @@ impl ToolCallVisualizer {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let id = format!("timeline_{}", now);
-        
+
         let timeline = ToolTimeline {
             id: id.clone(),
             request_id: request_id.to_string(),
@@ -159,14 +159,14 @@ impl ToolCallVisualizer {
             created_at: now,
             updated_at: now,
         };
-        
+
         self.timelines.push(timeline);
-        
+
         // 清理旧时间线
         while self.timelines.len() > self.config.max_timelines {
             self.timelines.remove(0);
         }
-        
+
         id
     }
 
@@ -179,17 +179,19 @@ impl ToolCallVisualizer {
         decision_reason: Option<&str>,
         dependencies: Vec<String>,
     ) -> Result<String> {
-        let timeline = self.timelines.iter_mut()
+        let timeline = self
+            .timelines
+            .iter_mut()
             .find(|t| t.id == timeline_id)
             .ok_or_else(|| anyhow::anyhow!("Timeline not found: {}", timeline_id))?;
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let id = format!("call_{}_{}", tool_name, now);
-        
+
         let event = ToolCallEvent {
             id: id.clone(),
             tool_name: tool_name.to_string(),
@@ -203,10 +205,10 @@ impl ToolCallVisualizer {
             dependencies,
             request_id: Some(timeline.request_id.clone()),
         };
-        
+
         timeline.events.push(event);
         timeline.updated_at = now;
-        
+
         Ok(id)
     }
 
@@ -219,25 +221,29 @@ impl ToolCallVisualizer {
         result: Option<String>,
         error: Option<String>,
     ) -> Result<()> {
-        let timeline = self.timelines.iter_mut()
+        let timeline = self
+            .timelines
+            .iter_mut()
             .find(|t| t.id == timeline_id)
             .ok_or_else(|| anyhow::anyhow!("Timeline not found: {}", timeline_id))?;
-        
-        let event = timeline.events.iter_mut()
+
+        let event = timeline
+            .events
+            .iter_mut()
             .find(|e| e.id == event_id)
             .ok_or_else(|| anyhow::anyhow!("Event not found: {}", event_id))?;
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         event.status = status;
         event.result = result;
         event.error = error;
         event.end_time = Some(now);
         timeline.updated_at = now;
-        
+
         Ok(())
     }
 
@@ -249,13 +255,13 @@ impl ToolCallVisualizer {
     /// 获取依赖图
     pub fn get_dependency_graph(&self, timeline_id: &str) -> Option<DependencyGraph> {
         let timeline = self.get_timeline(timeline_id)?;
-        
+
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
-        
+
         for event in &timeline.events {
             let execution_time = event.end_time.map(|end| (end - event.start_time) * 1000);
-            
+
             nodes.push(DependencyNode {
                 node_id: event.id.clone(),
                 tool_name: event.tool_name.clone(),
@@ -263,12 +269,12 @@ impl ToolCallVisualizer {
                 status: event.status.clone(),
                 dependency_ids: event.dependencies.clone(),
             });
-            
+
             for dep in &event.dependencies {
                 edges.push((dep.clone(), event.id.clone()));
             }
         }
-        
+
         Some(DependencyGraph { nodes, edges })
     }
 
@@ -340,10 +346,10 @@ mod tests {
     fn test_timeline_creation() {
         let temp_dir = TempDir::new().unwrap();
         let mut visualizer = ToolCallVisualizer::new(temp_dir.path()).unwrap();
-        
+
         let timeline_id = visualizer.create_timeline("req_1");
         assert!(timeline_id.starts_with("timeline_"));
-        
+
         let timeline = visualizer.get_timeline(&timeline_id);
         assert!(timeline.is_some());
         assert_eq!(timeline.unwrap().request_id, "req_1");
@@ -353,17 +359,19 @@ mod tests {
     fn test_add_tool_call() {
         let temp_dir = TempDir::new().unwrap();
         let mut visualizer = ToolCallVisualizer::new(temp_dir.path()).unwrap();
-        
+
         let timeline_id = visualizer.create_timeline("req_1");
-        
-        let event_id = visualizer.add_tool_call(
-            &timeline_id,
-            "read_file",
-            Some(serde_json::json!({"path": "test.txt"})),
-            Some("Need to read the file"),
-            vec![],
-        ).unwrap();
-        
+
+        let event_id = visualizer
+            .add_tool_call(
+                &timeline_id,
+                "read_file",
+                Some(serde_json::json!({"path": "test.txt"})),
+                Some("Need to read the file"),
+                vec![],
+            )
+            .unwrap();
+
         let timeline = visualizer.get_timeline(&timeline_id);
         assert_eq!(timeline.unwrap().events.len(), 1);
         assert_eq!(timeline.unwrap().events[0].tool_name, "read_file");
@@ -373,27 +381,25 @@ mod tests {
     fn test_dependency_graph() {
         let temp_dir = TempDir::new().unwrap();
         let mut visualizer = ToolCallVisualizer::new(temp_dir.path()).unwrap();
-        
+
         let timeline_id = visualizer.create_timeline("req_1");
-        
+
         // 添加第一个工具调用
-        let event1_id = visualizer.add_tool_call(
-            &timeline_id,
-            "read_file",
-            None,
-            None,
-            vec![],
-        ).unwrap();
-        
+        let event1_id = visualizer
+            .add_tool_call(&timeline_id, "read_file", None, None, vec![])
+            .unwrap();
+
         // 添加依赖第一个工具调用的第二个工具
-        let _event2_id = visualizer.add_tool_call(
-            &timeline_id,
-            "analyze_file",
-            None,
-            None,
-            vec![event1_id.clone()],
-        ).unwrap();
-        
+        let _event2_id = visualizer
+            .add_tool_call(
+                &timeline_id,
+                "analyze_file",
+                None,
+                None,
+                vec![event1_id.clone()],
+            )
+            .unwrap();
+
         let graph = visualizer.get_dependency_graph(&timeline_id);
         assert!(graph.is_some());
         let graph = graph.unwrap();

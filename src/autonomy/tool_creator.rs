@@ -18,9 +18,9 @@
 
 #![allow(dead_code)]
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
 
 /// 工具创建请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +258,11 @@ mod tests {
             anyhow::bail!("工具名称不能为空");
         }
 
-        if !request.tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        if !request
+            .tool_name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_')
+        {
             anyhow::bail!("工具名称只能包含字母、数字和下划线");
         }
 
@@ -305,7 +309,11 @@ mod tests {
             code.push_str("pub struct Params {\n");
             for param in &request.parameters {
                 code.push_str(&format!("    /// {}\n", param.description));
-                code.push_str(&format!("    pub {}: {},\n", param.name, self.map_type_to_rust(&param.param_type)));
+                code.push_str(&format!(
+                    "    pub {}: {},\n",
+                    param.name,
+                    self.map_type_to_rust(&param.param_type)
+                ));
             }
             code.push_str("}\n\n");
         }
@@ -316,7 +324,9 @@ mod tests {
         code.push_str(&format!("    name = \"{}\",\n", request.tool_name));
         code.push_str(&format!("    description = \"{}\",\n", request.description));
         if !request.tags.is_empty() {
-            let tags_str = request.tags.iter()
+            let tags_str = request
+                .tags
+                .iter()
                 .map(|t| format!("\"{}\"", t))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -326,11 +336,17 @@ mod tests {
 
         // 函数签名
         if !request.parameters.is_empty() {
-            code.push_str(&format!("pub async fn {}(params: Params) -> Result<{}> {{\n",
-                request.tool_name, self.map_type_to_rust(&request.return_type)));
+            code.push_str(&format!(
+                "pub async fn {}(params: Params) -> Result<{}> {{\n",
+                request.tool_name,
+                self.map_type_to_rust(&request.return_type)
+            ));
         } else {
-            code.push_str(&format!("pub async fn {}() -> Result<{}> {{\n",
-                request.tool_name, self.map_type_to_rust(&request.return_type)));
+            code.push_str(&format!(
+                "pub async fn {}() -> Result<{}> {{\n",
+                request.tool_name,
+                self.map_type_to_rust(&request.return_type)
+            ));
         }
 
         // 函数体（带注释的占位符）
@@ -342,17 +358,25 @@ mod tests {
             code.push_str("    // 参数验证\n");
             for param in &request.parameters {
                 if param.required {
-                    code.push_str(&format!("    // - {}: 必需参数 - {}\n", param.name, param.description));
+                    code.push_str(&format!(
+                        "    // - {}: 必需参数 - {}\n",
+                        param.name, param.description
+                    ));
                 } else {
-                    code.push_str(&format!("    // - {}: 可选参数 (默认：{:?}) - {}\n", 
-                        param.name, param.default_value, param.description));
+                    code.push_str(&format!(
+                        "    // - {}: 可选参数 (默认：{:?}) - {}\n",
+                        param.name, param.default_value, param.description
+                    ));
                 }
             }
             code.push('\n');
         }
 
         // 实现代码占位符
-        code.push_str(&format!("    unimplemented!(\"Tool {} not yet implemented\")\n", request.tool_name));
+        code.push_str(&format!(
+            "    unimplemented!(\"Tool {} not yet implemented\")\n",
+            request.tool_name
+        ));
         code.push_str("}\n\n");
 
         // 测试模块
@@ -361,8 +385,11 @@ mod tests {
             code.push_str("mod tests {\n");
             code.push_str("    use super::*;\n\n");
             code.push_str("    #[tokio::test]\n");
-            code.push_str(&format!("    async fn test_{}_basic() {{\n", request.tool_name));
-            
+            code.push_str(&format!(
+                "    async fn test_{}_basic() {{\n",
+                request.tool_name
+            ));
+
             if !request.parameters.is_empty() {
                 code.push_str("        let params = Params {\n");
                 for param in &request.parameters {
@@ -376,11 +403,17 @@ mod tests {
                     code.push_str(&format!("            {}: {},\n", param.name, default_val));
                 }
                 code.push_str("        };\n");
-                code.push_str(&format!("        let result = {}(params).await;\n", request.tool_name));
+                code.push_str(&format!(
+                    "        let result = {}(params).await;\n",
+                    request.tool_name
+                ));
             } else {
-                code.push_str(&format!("        let result = {}().await;\n", request.tool_name));
+                code.push_str(&format!(
+                    "        let result = {}().await;\n",
+                    request.tool_name
+                ));
             }
-            
+
             code.push_str("        // TODO: 添加实际断言\n");
             code.push_str("        assert!(result.is_ok());\n");
             code.push_str("    }\n");
@@ -449,14 +482,20 @@ async fn test_{}_error_handling() {{
         let parameters_doc = if request.parameters.is_empty() {
             "无参数".to_string()
         } else {
-            request.parameters.iter()
+            request
+                .parameters
+                .iter()
                 .map(|p| {
                     let required = if p.required { "必需" } else { "可选" };
-                    let default = p.default_value.as_ref()
+                    let default = p
+                        .default_value
+                        .as_ref()
                         .map(|v| format!("，默认值：`{}`", v))
                         .unwrap_or_default();
-                    format!("- **`{}`** (`{}`): {} - {}{}", 
-                        p.name, p.param_type, required, p.description, default)
+                    format!(
+                        "- **`{}`** (`{}`): {} - {}{}",
+                        p.name, p.param_type, required, p.description, default
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -540,17 +579,23 @@ cargo run -- --tool {tool_name} {call_args}
             call_example = if request.parameters.is_empty() {
                 format!("    let result = {}().await?;", request.tool_name)
             } else {
-                let params = request.parameters.iter()
+                let params = request
+                    .parameters
+                    .iter()
                     .map(|p| format!("{}: Default::default()", p.name))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("    let params = Params {{ {} }};\n    let result = {}(params).await?;", 
-                    params, request.tool_name)
+                format!(
+                    "    let params = Params {{ {} }};\n    let result = {}(params).await?;",
+                    params, request.tool_name
+                )
             },
             call_args = if request.parameters.is_empty() {
                 String::new()
             } else {
-                request.parameters.iter()
+                request
+                    .parameters
+                    .iter()
                     .map(|p| format!("--{} <value>", p.name))
                     .collect::<Vec<_>>()
                     .join(" ")
@@ -586,18 +631,24 @@ cargo run -- --tool {tool_name} {call_args}
         let rules_obj = rules.as_object_mut().unwrap();
 
         if !rules_obj.contains_key(&domain_key) {
-            rules_obj.insert(domain_key.clone(), serde_json::json!({
-                "keywords": [],
-                "patterns": [],
-                "tools": {}
-            }));
+            rules_obj.insert(
+                domain_key.clone(),
+                serde_json::json!({
+                    "keywords": [],
+                    "patterns": [],
+                    "tools": {}
+                }),
+            );
         }
 
         // 添加工具到领域规则
         let domain_rules = rules_obj.get_mut(&domain_key).unwrap();
 
         // 添加工具定义
-        if let Some(tools) = domain_rules.get_mut("tools").and_then(|v| v.as_object_mut()) {
+        if let Some(tools) = domain_rules
+            .get_mut("tools")
+            .and_then(|v| v.as_object_mut())
+        {
             let tool_def = serde_json::json!({
                 "description": request.description,
                 "tags": request.tags,
@@ -617,9 +668,15 @@ cargo run -- --tool {tool_name} {call_args}
         }
 
         // 添加工具名称作为关键词
-        if let Some(keywords) = domain_rules.get_mut("keywords").and_then(|v| v.as_array_mut()) {
+        if let Some(keywords) = domain_rules
+            .get_mut("keywords")
+            .and_then(|v| v.as_array_mut())
+        {
             let tool_name_lower = request.tool_name.to_lowercase();
-            if !keywords.iter().any(|k| k.as_str() == Some(&tool_name_lower)) {
+            if !keywords
+                .iter()
+                .any(|k| k.as_str() == Some(&tool_name_lower))
+            {
                 keywords.push(serde_json::Value::String(tool_name_lower));
             }
 
@@ -642,9 +699,10 @@ cargo run -- --tool {tool_name} {call_args}
     /// 规范化领域名称
     pub fn normalize_domain(&self, domain: &str) -> String {
         let lower = domain.to_lowercase();
-        
+
         // 先检查完整词汇
-        if lower == "git" || lower == "版本控制" || lower == "version_control" || lower == "vcs" {
+        if lower == "git" || lower == "版本控制" || lower == "version_control" || lower == "vcs"
+        {
             return "vcs".to_string();
         }
         if lower.contains("文件") || lower.contains("file") {
@@ -668,7 +726,7 @@ cargo run -- --tool {tool_name} {call_args}
         if lower.contains("知识") || lower.contains("knowledge") {
             return "knowledge".to_string();
         }
-        
+
         // 默认：返回小写版本
         lower.replace(' ', "_")
     }
@@ -687,7 +745,12 @@ cargo run -- --tool {tool_name} {call_args}
     }
 
     /// 从缺口创建工具
-    pub fn create_from_gap(&self, gap_name: &str, gap_description: &str, suggested_capabilities: &[String]) -> Result<ToolCreationResult> {
+    pub fn create_from_gap(
+        &self,
+        gap_name: &str,
+        gap_description: &str,
+        suggested_capabilities: &[String],
+    ) -> Result<ToolCreationResult> {
         // 从缺口信息生成工具定义
         let tool_name = self.generate_tool_name_from_gap(gap_name);
 
@@ -730,17 +793,38 @@ cargo run -- --tool {tool_name} {call_args}
     fn infer_domain_from_description(&self, description: &str) -> String {
         let desc_lower = description.to_lowercase();
 
-        if desc_lower.contains("文件") || desc_lower.contains("file") || desc_lower.contains("read") || desc_lower.contains("write") {
+        if desc_lower.contains("文件")
+            || desc_lower.contains("file")
+            || desc_lower.contains("read")
+            || desc_lower.contains("write")
+        {
             "file_ops".to_string()
-        } else if desc_lower.contains("网络") || desc_lower.contains("network") || desc_lower.contains("http") || desc_lower.contains("download") {
+        } else if desc_lower.contains("网络")
+            || desc_lower.contains("network")
+            || desc_lower.contains("http")
+            || desc_lower.contains("download")
+        {
             "network".to_string()
-        } else if desc_lower.contains("git") || desc_lower.contains("版本") || desc_lower.contains("commit") {
+        } else if desc_lower.contains("git")
+            || desc_lower.contains("版本")
+            || desc_lower.contains("commit")
+        {
             "vcs".to_string()
-        } else if desc_lower.contains("数据") || desc_lower.contains("data") || desc_lower.contains("json") || desc_lower.contains("csv") {
+        } else if desc_lower.contains("数据")
+            || desc_lower.contains("data")
+            || desc_lower.contains("json")
+            || desc_lower.contains("csv")
+        {
             "data".to_string()
-        } else if desc_lower.contains("代码") || desc_lower.contains("code") || desc_lower.contains("analyze") {
+        } else if desc_lower.contains("代码")
+            || desc_lower.contains("code")
+            || desc_lower.contains("analyze")
+        {
             "code".to_string()
-        } else if desc_lower.contains("系统") || desc_lower.contains("system") || desc_lower.contains("process") {
+        } else if desc_lower.contains("系统")
+            || desc_lower.contains("system")
+            || desc_lower.contains("process")
+        {
             "system".to_string()
         } else {
             "general".to_string()
@@ -818,7 +902,7 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.generated_files.len(), 3); // tool + test + doc
-        
+
         // 验证生成的代码包含参数结构体
         let tool_code = std::fs::read_to_string(&result.generated_files[0]).unwrap();
         assert!(tool_code.contains("pub struct Params"));
@@ -842,9 +926,18 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let creator = ToolCreator::new(temp_dir.path()).unwrap();
 
-        assert_eq!(creator.infer_domain_from_description("需要读取文件"), "file_ops");
-        assert_eq!(creator.infer_domain_from_description("HTTP download tool"), "network");
-        assert_eq!(creator.infer_domain_from_description("Git commit 操作"), "vcs");
+        assert_eq!(
+            creator.infer_domain_from_description("需要读取文件"),
+            "file_ops"
+        );
+        assert_eq!(
+            creator.infer_domain_from_description("HTTP download tool"),
+            "network"
+        );
+        assert_eq!(
+            creator.infer_domain_from_description("Git commit 操作"),
+            "vcs"
+        );
         assert_eq!(creator.infer_domain_from_description("未知功能"), "general");
     }
 
@@ -853,9 +946,18 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let creator = ToolCreator::new(temp_dir.path()).unwrap();
 
-        assert_eq!(creator.generate_tool_name_from_gap("批量读取文件"), "批量读取文件");
-        assert_eq!(creator.generate_tool_name_from_gap("HTTP Download"), "http_download");
-        assert_eq!(creator.generate_tool_name_from_gap("123 Tool"), "tool_123_tool");
+        assert_eq!(
+            creator.generate_tool_name_from_gap("批量读取文件"),
+            "批量读取文件"
+        );
+        assert_eq!(
+            creator.generate_tool_name_from_gap("HTTP Download"),
+            "http_download"
+        );
+        assert_eq!(
+            creator.generate_tool_name_from_gap("123 Tool"),
+            "tool_123_tool"
+        );
     }
 
     #[test]
@@ -863,16 +965,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let creator = ToolCreator::new(temp_dir.path()).unwrap();
 
-        let result = creator.create_from_gap(
-            "批量读取配置文件",
-            "需要批量读取多个配置文件并合并",
-            &["batch".to_string(), "config".to_string()]
-        ).unwrap();
+        let result = creator
+            .create_from_gap(
+                "批量读取配置文件",
+                "需要批量读取多个配置文件并合并",
+                &["batch".to_string(), "config".to_string()],
+            )
+            .unwrap();
 
         assert!(result.success);
         assert!(result.generated_files[0].exists());
-        
+
         // 验证工具名称生成
-        assert!(result.tool_name.contains("批量读取配置文件") || result.tool_name.contains("config"));
+        assert!(
+            result.tool_name.contains("批量读取配置文件") || result.tool_name.contains("config")
+        );
     }
 }

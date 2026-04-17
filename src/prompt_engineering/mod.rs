@@ -17,11 +17,10 @@
 //! })).unwrap();
 //! ```
 
-pub mod template;
 pub mod manager;
-pub mod renderer;
 pub mod prompt_tools;
+pub mod renderer;
+pub mod template;
 
-pub use prompt_tools::PromptTools;
 pub use manager::PromptTemplateManager;
-
+pub use prompt_tools::PromptTools;

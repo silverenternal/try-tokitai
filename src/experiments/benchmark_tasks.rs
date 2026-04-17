@@ -43,7 +43,7 @@ impl BenchmarkTask {
 /// Load benchmark tasks from JSON file
 pub fn load_benchmark_tasks_from_file(path: &Path) -> anyhow::Result<Vec<BenchmarkTask>> {
     use std::fs;
-    
+
     if !path.exists() {
         anyhow::bail!("Benchmark tasks file not found: {:?}", path);
     }
@@ -54,7 +54,8 @@ pub fn load_benchmark_tasks_from_file(path: &Path) -> anyhow::Result<Vec<Benchma
     let data: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Failed to parse JSON: {}", e))?;
 
-    let tasks_array = data.get("tasks")
+    let tasks_array = data
+        .get("tasks")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("No 'tasks' array found in benchmark file"))?;
 

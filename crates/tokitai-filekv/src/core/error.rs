@@ -208,9 +208,7 @@ impl FileKVError {
     pub fn category(&self) -> ErrorCategory {
         match self {
             FileKVError::Fatal(FatalError::Io(_)) => ErrorCategory::Io,
-            FileKVError::Fatal(FatalError::Corruption(_) | FatalError::WalCorrupted(_)) => {
-                ErrorCategory::Corruption
-            }
+            FileKVError::Fatal(FatalError::Corruption(_) | FatalError::WalCorrupted(_)) => ErrorCategory::Corruption,
             FileKVError::Transient(TransientError::ResourceExhausted(_)) => ErrorCategory::Resource,
             FileKVError::Transient(TransientError::Timeout(_)) => ErrorCategory::Timeout,
             FileKVError::Domain(DomainError::Config(_)) => ErrorCategory::Config,
@@ -248,7 +246,7 @@ mod tests {
         let corruption = FatalError::Corruption("bad checksum".to_string());
         assert!(!corruption.is_retryable());
 
-        let io_err = FatalError::Io(std::io::Error::new(std::io::ErrorKind::Other, "disk full"));
+        let io_err = FatalError::Io(std::io::Error::other("disk full"));
         assert!(!io_err.is_retryable());
 
         let wal_corrupted = FatalError::WalCorrupted("truncated entry".to_string());
@@ -304,7 +302,10 @@ mod tests {
         assert_eq!(format!("{}", seg_not_found), "Segment not found: 42");
 
         let bloom_negative = ExpectedError::BloomNegative(7);
-        assert_eq!(format!("{}", bloom_negative), "Bloom filter negative: key not in segment 7");
+        assert_eq!(
+            format!("{}", bloom_negative),
+            "Bloom filter negative: key not in segment 7"
+        );
     }
 
     // ---- DomainError tests ----
@@ -321,10 +322,7 @@ mod tests {
 
     #[test]
     fn filekv_error_category_mapping() {
-        let io_err = FileKVError::Fatal(FatalError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "disk full",
-        )));
+        let io_err = FileKVError::Fatal(FatalError::Io(std::io::Error::other("disk full")));
         assert_eq!(io_err.category(), ErrorCategory::Io);
 
         let corruption = FileKVError::Fatal(FatalError::Corruption("bad data".to_string()));
@@ -344,7 +342,7 @@ mod tests {
 
     #[test]
     fn io_error_converts_to_fatal_filekv_error() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let io_err = std::io::Error::other("test");
         let fatal = FatalError::Io(io_err);
         let filekv_err = FileKVError::from(fatal);
         assert!(filekv_err.is_fatal());
