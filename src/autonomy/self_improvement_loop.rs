@@ -125,6 +125,8 @@ pub struct EvolutionConfig {
     pub auto_create_tools: bool,
     /// 工具创建优先级阈值
     pub tool_creation_priority_threshold: u8,
+    /// 是否自动发现外部工具（安全：默认关闭）
+    pub auto_discover_external_tools: bool,
 }
 
 impl Default for EvolutionConfig {
@@ -135,6 +137,7 @@ impl Default for EvolutionConfig {
             min_tasks_for_evolution: 10,
             auto_create_tools: false, // 默认需要用户确认
             tool_creation_priority_threshold: 7,
+            auto_discover_external_tools: false,
         }
     }
 }
@@ -709,6 +712,11 @@ impl SelfImprovementLoop {
 
     /// 发现并注册外部工具（异步版本）
     async fn discover_and_register_external_tools(&self) -> Result<Vec<String>> {
+        if !self.config.auto_discover_external_tools {
+            tracing::info!("外部工具自动发现已禁用（安全配置）");
+            return Ok(Vec::new());
+        }
+
         let mut registered_names = Vec::new();
 
         // 扫描常见目录中的脚本

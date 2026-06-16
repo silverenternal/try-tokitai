@@ -193,13 +193,19 @@ impl SystemCommands {
             .to_string());
         }
 
-        // 使用 bash -c 执行完整命令（支持管道、重定向等）
-        let output = std::process::Command::new("bash")
-            .args(["-c", &command])
-            .output()
-            .map_err(|e| {
-                CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
-            })?;
+        // 根据操作系统选择 shell
+        let output = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/c", &command])
+                .output()
+        } else {
+            std::process::Command::new("sh")
+                .args(["-c", &command])
+                .output()
+        }
+        .map_err(|e| {
+            CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
+        })?;
 
         let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();

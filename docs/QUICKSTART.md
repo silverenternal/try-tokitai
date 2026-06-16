@@ -5,6 +5,44 @@
 
 ---
 
+## 启动前必须安装
+
+要启动本项目的核心模式（CLI / TUI / MCP），只需要下面这些前置：
+
+### 必装
+
+1. `Rust 1.75+`
+   - 验证：`rustc --version`
+
+2. `Cargo`
+   - 验证：`cargo --version`
+
+3. 一个可用的模型接入方式（二选一）
+   - `Ollama` + 至少一个本地模型
+   - 任一远程 LLM 提供商的 API Key
+
+### Windows 补充
+
+如果你在 Windows 上通过源码编译运行本项目，建议准备：
+
+- Rust MSVC toolchain
+- Visual Studio C++ Build Tools（当本机缺少链接器时）
+
+### 不属于启动前置
+
+以下依赖 **不影响项目启动**，默认可以不安装：
+
+- 自然科学验证与科学后端：
+  `Lean4`、`lake`、`Mathlib`、`RDKit`、`Biopython`、`ASE`、`LAMMPS`、`OpenFOAM`、`Psi4`、`Quantum ESPRESSO`
+- 扩展运行时：
+  `R` / `Rscript`、Python 科学计算包、MPI 相关工具
+- Git 增强能力：
+  `Git` 推荐安装，但不是启动 CLI / TUI / MCP 的硬前置
+
+如果你的目标只是先把项目跑起来，可以先只装 Rust 和一个可用的 LLM 接入方式。
+
+---
+
 ## 第一步：获取 API Key
 
 本项目支持多个 LLM 提供商，选择一个即可开始：

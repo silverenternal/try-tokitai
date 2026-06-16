@@ -3,9 +3,8 @@
 //! Implements sparse indexing for efficient segment lookups.
 //! Uses hybrid approach: HashMap for O(1) point lookups + sorted Vec for range queries.
 
-use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,7 +40,7 @@ pub struct SparseIndexEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SparseIndex {
     #[serde(skip)] // Don't serialize, rebuild on load
-    key_map: AHashMap<String, u64>, // key -> offset for O(1) lookup
+    key_map: HashMap<String, u64>, // key -> offset for O(1) lookup
 
     pub entries: Vec<SparseIndexEntry>,
     pub segment_id: u64,
@@ -53,7 +52,7 @@ pub struct SparseIndex {
 impl SparseIndex {
     pub fn new(segment_id: u64) -> Self {
         Self {
-            key_map: AHashMap::new(),
+            key_map: HashMap::new(),
             entries: Vec::new(),
             segment_id,
             zone_map: Arc::new(Vec::new()),
@@ -111,10 +110,10 @@ impl SparseIndex {
 /// Dense index for detailed lookups
 ///
 /// GAP-C4: Added block_size configuration for sequential prefetch
-/// PERF-005 P2: Uses AHashMap for O(1) lookups with faster hashing than BTreeMap
+/// PERF-005 P2: Uses HashMap for O(1) lookups.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DenseIndex {
-    pub entries: AHashMap<String, DenseIndexEntry>,
+    pub entries: HashMap<String, DenseIndexEntry>,
     /// GAP-C4: Block size used for calculating block_id (bytes)
     #[serde(default)]
     pub block_size: u64,
@@ -124,7 +123,7 @@ impl DenseIndex {
     /// Create a new dense index with block size configuration
     pub fn with_block_size(block_size: u64) -> Self {
         Self {
-            entries: AHashMap::new(),
+            entries: HashMap::new(),
             block_size,
         }
     }

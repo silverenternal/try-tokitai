@@ -7,11 +7,11 @@
 //! Shard routing uses consistent key hashing: both `insert_by_key` and `get_by_key` compute
 //! the shard index from the key's hash, enabling O(1) lookups instead of O(num_shards) iteration.
 
-use ahash::AHasher;
 use bytes::Bytes;
 use moka::sync::Cache;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::DefaultHasher;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -265,7 +265,7 @@ impl BlockCache {
     #[cfg(not(feature = "benchmarks"))]
     fn calculate_shard_id(key: &str, num_shards: usize) -> usize {
         use std::hash::{Hash, Hasher};
-        let mut hasher = AHasher::default();
+        let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         (hasher.finish() as usize) % num_shards
     }
@@ -278,7 +278,7 @@ impl BlockCache {
     #[cfg(feature = "benchmarks")]
     pub fn calculate_shard_id(key: &str, num_shards: usize) -> usize {
         use std::hash::{Hash, Hasher};
-        let mut hasher = AHasher::default();
+        let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         (hasher.finish() as usize) % num_shards
     }

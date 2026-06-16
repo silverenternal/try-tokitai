@@ -1,53 +1,40 @@
-//! TUI 布局模块
+//! TUI layout module
 //!
-//! 定义三面板布局：左侧工具列表，中间对话区，右侧上下文/状态
+//! Single-panel chat layout: chat + suggestions(optional) + thinking(optional) + input + status
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-/// TUI 布局结构
+/// TUI layout for single-panel chat interface
 #[derive(Debug, Clone)]
 pub struct TuiLayout {
-    /// 整个区域
-    pub area: Rect,
-    /// 左侧工具列表区域
-    pub tool_list_area: Rect,
-    /// 中间对话区域
     pub chat_area: Rect,
-    /// 右侧上下文/状态区域
-    pub context_area: Rect,
-    /// 底部状态栏
+    pub thinking_area: Rect,
+    pub suggestions_area: Rect,
+    pub input_area: Rect,
     pub status_bar_area: Rect,
 }
 
 impl TuiLayout {
-    /// 计算布局
-    pub fn calculate(area: Rect) -> Self {
-        // 垂直布局：主区域 + 状态栏
-        let main_chunks = Layout::default()
+    pub fn calculate(area: Rect, input_h: u16, thinking_h: u16, suggestions_h: u16) -> Self {
+        let mut constraints = vec![Constraint::Min(1)]; // chat
+        if suggestions_h > 0 { constraints.push(Constraint::Length(suggestions_h)); }
+        if thinking_h > 0 { constraints.push(Constraint::Length(thinking_h)); }
+        constraints.push(Constraint::Length(input_h));
+        constraints.push(Constraint::Length(1));
+
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(1), // 状态栏
-            ])
+            .constraints(constraints)
             .split(area);
 
-        // 水平布局：工具列表 + 对话区 + 上下文
-        let horizontal_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(20), // 工具列表
-                Constraint::Percentage(60), // 对话区
-                Constraint::Percentage(20), // 上下文
-            ])
-            .split(main_chunks[0]);
+        let mut idx = 0;
+        let chat_area = chunks[idx]; idx += 1;
+        let suggestions_area = if suggestions_h > 0 { let a = chunks[idx]; idx += 1; a } else { Rect::default() };
+        let thinking_area = if thinking_h > 0 { let a = chunks[idx]; idx += 1; a } else { Rect::default() };
+        let input_area = chunks[idx]; idx += 1;
+        let status_bar_area = chunks[idx];
 
-        Self {
-            area,
-            tool_list_area: horizontal_chunks[0],
-            chat_area: horizontal_chunks[1],
-            context_area: horizontal_chunks[2],
-            status_bar_area: main_chunks[1],
-        }
+        Self { chat_area, thinking_area, suggestions_area, input_area, status_bar_area }
     }
 }
 
@@ -56,14 +43,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_layout_calculation() {
-        let area = Rect::new(0, 0, 100, 50);
-        let layout = TuiLayout::calculate(area);
-
-        assert_eq!(layout.area, area);
-        assert_eq!(layout.tool_list_area.width, 20);
-        assert_eq!(layout.chat_area.width, 60);
-        assert_eq!(layout.context_area.width, 20);
+    fn test_layout_basic() {
+        let layout = TuiLayout::calculate(Rect::new(0, 0, 100, 40), 3, 0, 0);
+        assert_eq!(layout.chat_area.height, 36);
+        assert_eq!(layout.input_area.height, 3);
         assert_eq!(layout.status_bar_area.height, 1);
+    }
+
+    #[test]
+    fn test_layout_with_suggestions() {
+        let layout = TuiLayout::calculate(Rect::new(0, 0, 100, 40), 3, 0, 3);
+        assert_eq!(layout.suggestions_area.height, 3);
+        assert_eq!(layout.chat_area.height, 33);
     }
 }

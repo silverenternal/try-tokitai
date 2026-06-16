@@ -422,8 +422,8 @@ pub struct SegmentFile {
     readahead_multiplier: u32,
     /// CFG-003: 全内存密集索引 (key -> DenseIndexEntry)
     /// 使用 RwLock 保护以支持并发更新
-    /// PERF-005 P2: Uses AHashMap for O(1) lookups with faster hashing than BTreeMap
-    dense_index: Option<parking_lot::RwLock<ahash::AHashMap<String, crate::core::sparse_index::DenseIndexEntry>>>,
+    /// PERF-005 P2: Uses HashMap for O(1) lookups in the dense index.
+    dense_index: Option<parking_lot::RwLock<std::collections::HashMap<String, crate::core::sparse_index::DenseIndexEntry>>>,
 }
 
 impl std::fmt::Debug for SegmentFile {
@@ -519,7 +519,7 @@ impl SegmentFile {
 
         // CFG-003: Build dense index if enabled (empty for new files)
         let dense_index = if dense_index_enabled {
-            Some(parking_lot::RwLock::new(ahash::AHashMap::new()))
+            Some(parking_lot::RwLock::new(std::collections::HashMap::new()))
         } else {
             None
         };
@@ -1254,7 +1254,7 @@ impl SegmentFile {
 
     /// POL-004: Quick check if key might exist in this segment (using dense index)
     ///
-    /// PERF-005 P2: This is a fast O(1) AHashMap lookup that avoids expensive bloom filter
+    /// PERF-005 P2: This is a fast O(1) HashMap lookup that avoids expensive bloom filter
     /// and zone map overhead when the dense index can definitively answer.
     ///
     /// # Returns

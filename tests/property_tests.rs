@@ -71,9 +71,9 @@ proptest! {
         s in "\\PC*"
     ) {
         let left = format!("{}{}", "", s);
-        let right = format!("{}{}", s, "");
+        let right = format!("{}{}", s.clone(), "");
 
-        prop_assert_eq!(left, s);
+        prop_assert_eq!(left, s.clone());
         prop_assert_eq!(right, s);
     }
 }
@@ -303,7 +303,8 @@ proptest! {
     fn test_string_length_non_negative(
         s in "\\PC*"
     ) {
-        prop_assert!(s.len() >= 0);
+        // usize 类型天然保证长度非负
+        prop_assert!(s.len() == s.len());
     }
 
     /// 测试字符串切片不越界
@@ -329,7 +330,7 @@ proptest! {
     /// 测试 Option 的 map 操作
     #[test]
     fn test_option_map(
-        opt in prop::option::any::<i32>(),
+        opt in any::<Option<i32>>(),
         multiplier in 1..100i32
     ) {
         let result = opt.map(|x| x * multiplier);
@@ -344,7 +345,7 @@ proptest! {
     /// 测试 Option 的 unwrap_or 操作
     #[test]
     fn test_option_unwrap_or(
-        opt in prop::option::any::<i32>(),
+        opt in any::<Option<i32>>(),
         default in any::<i32>()
     ) {
         let result = opt.unwrap_or(default);
@@ -362,7 +363,7 @@ proptest! {
     /// 测试 Result 的 is_ok/is_err 互斥性
     #[test]
     fn test_result_ok_err_mutually_exclusive(
-        result in prop::result::any::<i32, i32>()
+        result in any::<Result<i32, i32>>()
     ) {
         prop_assert!(result.is_ok() != result.is_err());
     }

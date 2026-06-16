@@ -1,0 +1,93 @@
+# AI Scientist Workflow
+# Minimum viable pipeline. Tools marked [NotImplemented] return explicit errors
+# rather than fake results.
+
+[workflow]
+id = "ai-scientist-minimal"
+name = "AI Scientist Minimal Pipeline"
+description = "Minimum viable research pipeline where each stage either executes or returns a clear NotImplemented error"
+
+[[workflow.stages]]
+id = "literature_review"
+name = "Literature Review"
+
+[[workflow.stages.steps]]
+id = "search_literature"
+description = "Search for relevant papers (NotImplemented until a remote API is configured)"
+tool = "search_paper"
+role = "researcher"
+
+[[workflow.stages.steps]]
+id = "fetch_paper"
+description = "Fetch a paper by ID from local cache or configured providers"
+tool = "fetch_paper"
+depends_on = ["search_literature"]
+role = "researcher"
+
+[[workflow.stages]]
+id = "hypothesis_generation"
+name = "Hypothesis Generation"
+
+[[workflow.stages.steps]]
+id = "generate_hypothesis"
+description = "Generate a testable hypothesis from the literature review (NotImplemented until LLM integration is configured)"
+tool = "generate_hypothesis"
+depends_on = ["fetch_paper"]
+role = "hypothesizer"
+
+[[workflow.stages]]
+id = "experiment_design"
+name = "Experiment Design"
+
+[[workflow.stages.steps]]
+id = "design_experiment"
+description = "Design an experiment to test the hypothesis (NotImplemented until experiment orchestration is configured)"
+tool = "design_experiment"
+depends_on = ["generate_hypothesis"]
+role = "experimenter"
+
+[[workflow.stages]]
+id = "verification"
+name = "Verification"
+
+[[workflow.stages.steps]]
+id = "math_simplify"
+description = "Simplify derived expressions using SymPy"
+tool = "sympy_simplify"
+depends_on = ["design_experiment"]
+role = "verifier"
+
+[[workflow.stages.steps]]
+id = "math_integrate"
+description = "Integrate expressions using SymPy"
+tool = "sympy_integrate"
+depends_on = ["design_experiment"]
+role = "verifier"
+
+[[workflow.stages]]
+id = "result_analysis"
+name = "Result Analysis"
+
+[[workflow.stages.steps]]
+id = "summarize_results"
+description = "Summarize experiment and verification outputs"
+tool = "run_python"
+depends_on = ["math_integrate"]
+role = "verifier"
+
+[[workflow.stages]]
+id = "report_generation"
+name = "Report Generation"
+
+[[workflow.stages.steps]]
+id = "generate_output"
+description = "Generate structured JSON output with results"
+tool = "run_python"
+depends_on = ["summarize_results"]
+role = "reporter"
+
+# Not implemented tool notes:
+# - generate_hypothesis requires LLM-backed hypothesis synthesis
+# - design_experiment requires richer experiment orchestration
+# - lean_verify requires Lean4 installation (`lake`)
+# - plot requires a plotting backend such as matplotlib

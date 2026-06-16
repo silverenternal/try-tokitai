@@ -79,6 +79,8 @@ pub struct AutonomousAssistant {
     git_ops: GitOperations,
     http_client: HttpClientTools,
     json_tools: JsonFormatTools,
+    /// 安全配置
+    pub security_config: crate::security::SecurityConfig,
 }
 
 impl AutonomousAssistant {
@@ -87,7 +89,12 @@ impl AutonomousAssistant {
     /// # 参数
     /// - `config`: 助手配置
     /// - `project_root`: 项目根目录路径
-    pub fn new(config: AssistantConfig, project_root: PathBuf) -> Result<Self> {
+    /// - `security_config`: 安全配置（从 config.toml + 环境变量加载）
+    pub fn new(
+        config: AssistantConfig,
+        project_root: PathBuf,
+        security_config: crate::security::SecurityConfig,
+    ) -> Result<Self> {
         let autonomy_dir = project_root.join(".tokitai").join("autonomy");
 
         // 创建工具注册表
@@ -166,6 +173,7 @@ impl AutonomousAssistant {
             git_ops: GitOperations,
             http_client: HttpClientTools::new(),
             json_tools: JsonFormatTools::default(),
+            security_config,
         })
     }
 
@@ -236,6 +244,22 @@ impl AutonomousAssistant {
     fn call_tool(&self, name: &str, args: &Value) -> Result<String> {
         info!("🔧 执行工具：{} {:?}", name, args);
 
+        // 安全授权检查
+        let auth = crate::security::authorize_tool_call(
+            name,
+            &self.security_config,
+            crate::security::ExecutionMode::Autonomous,
+        );
+        if let crate::security::AuthDecision::Deny(reason) = auth {
+            warn!("🚫 自主模式工具被拦截：{}", reason);
+            return Err(anyhow::anyhow!("安全策略拦截：{}", reason));
+        }
+
+        // 对 LLM 输出的参数做安全检查
+        if let Err(e) = self.validate_tool_args(name, args) {
+            return Err(e);
+        }
+
         use tokitai_core::ToolErrorKind;
 
         macro_rules! try_tool {
@@ -268,6 +292,79 @@ impl AutonomousAssistant {
 
         warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
+    }
+
+    /// 对 LLM 输出的工具参数做安全检查
+    fn validate_tool_args(&self, name: &str, args: &Value) -> Result<()> {
+        // 对文件操作类工具验证 path 参数
+        let file_tools = [
+            "read_file", "write_file", "edit_file", "copy_file", "move_file",
+            "delete_file", "list_dir", "mkdir", "create_dir",
+            "read_pdf_text", "read_pdf",
+        ];
+        if file_tools.contains(&name) {
+            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                let validation = crate::tools::io::security::validate_path(path);
+                if !validation.is_valid {
+                    return Err(anyhow::anyhow!(
+                        "路径安全验证失败：{}",
+                        validation.error.unwrap_or_else(|| "未知错误".to_string())
+                    ));
+                }
+            }
+            for key in &["source", "dest", "destination"] {
+                if let Some(p) = args.get(*key).and_then(|v| v.as_str()) {
+                    let validation = crate::tools::io::security::validate_path(p);
+                    if !validation.is_valid {
+                        return Err(anyhow::anyhow!(
+                            "路径安全验证失败 ({}): {}",
+                            key,
+                            validation.error.unwrap_or_else(|| "未知错误".to_string())
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 对命令执行工具检测 CR/LF 注入
+        if name == "run_safe_command" || name == "run_command" {
+            if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                if cmd.len() > 4096 {
+                    return Err(anyhow::anyhow!("命令过长 ({} > 4096)", cmd.len()));
+                }
+                if cmd.contains('\n') || cmd.contains('\r') {
+                    return Err(anyhow::anyhow!("命令包含换行符，疑似注入攻击"));
+                }
+                // run_command 仍需 confirmed=true
+                if name == "run_command" {
+                    let confirmed = args.get("confirmed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !confirmed {
+                        return Err(anyhow::anyhow!(
+                            "自主模式下 run_command 必须显式设置 confirmed=true"
+                        ));
+                    }
+                    // 额外：检查危险命令黑名单
+                    let cmd_name = cmd.split_whitespace().next().unwrap_or("");
+                    let cmd_base = cmd_name.rsplit('/').next().unwrap_or(cmd_name);
+                    let dangerous: &[&str] = &[
+                        "rm", "dd", "mkfs", "chmod", "chown", "sudo", "su",
+                        "shutdown", "reboot", "halt", "poweroff",
+                        "kill", "pkill", "killall",
+                        "iptables", "ufw",
+                        "passwd", "useradd", "userdel",
+                    ];
+                    if dangerous.contains(&cmd_base) {
+                        return Err(anyhow::anyhow!(
+                            "自主模式拒绝执行危险命令: '{}' 在黑名单中", cmd_base
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// 执行单次进化迭代
@@ -396,9 +493,14 @@ impl AutonomousAssistant {
 
     /// 本地审查
     fn local_review(&self) -> Result<bool> {
-        println!("      - 运行 cargo fmt...");
+        if !self.security_config.allow_autonomous_review {
+            println!("      - 自主代码审查已被安全配置禁用");
+            return Ok(true); // 跳过但不阻断流程
+        }
+
+        println!("      - 运行 cargo fmt --check...");
         let fmt_result = self.call_tool(
-            "run_command",
+            "run_safe_command",
             &json!({
                 "command": "cargo fmt --check"
             }),
@@ -411,7 +513,7 @@ impl AutonomousAssistant {
 
         println!("      - 运行 cargo clippy...");
         let clippy_result = self.call_tool(
-            "run_command",
+            "run_safe_command",
             &json!({
                 "command": "cargo clippy -- -D warnings"
             }),
@@ -423,7 +525,7 @@ impl AutonomousAssistant {
 
         println!("      - 运行 cargo test...");
         let test_result = self.call_tool(
-            "run_command",
+            "run_safe_command",
             &json!({
                 "command": "cargo test --quiet"
             }),
@@ -440,10 +542,15 @@ impl AutonomousAssistant {
 
     /// 回滚变更
     fn rollback_changes(&self) -> Result<()> {
+        if !self.security_config.allow_autonomous_rollback {
+            warn!("自主回滚已被安全配置禁用");
+            return Err(anyhow::anyhow!("回滚被安全策略拦截"));
+        }
         self.call_tool(
             "run_command",
             &json!({
-                "command": "git checkout -- ."
+                "command": "git checkout -- .",
+                "confirmed": true
             }),
         )?;
         Ok(())
@@ -451,6 +558,11 @@ impl AutonomousAssistant {
 
     /// 推送到 GitHub
     fn push_to_github(&self) -> Result<bool> {
+        if !self.security_config.allow_autonomous_git_push {
+            warn!("自主 git push 已被安全配置禁用");
+            return Err(anyhow::anyhow!("git push 被安全策略拦截"));
+        }
+
         // 检查是否有变更
         let status = self.call_tool("git_status", &json!({}))?;
 
@@ -468,7 +580,8 @@ impl AutonomousAssistant {
         self.call_tool(
             "run_command",
             &json!({
-                "command": "git add ."
+                "command": "git add .",
+                "confirmed": true
             }),
         )?;
 
@@ -476,7 +589,8 @@ impl AutonomousAssistant {
         self.call_tool(
             "run_command",
             &json!({
-                "command": &format!("git commit -m '{}'", commit_message)
+                "command": &format!("git commit -m '{}'", commit_message),
+                "confirmed": true
             }),
         )?;
 
@@ -485,7 +599,8 @@ impl AutonomousAssistant {
         self.call_tool(
             "run_command",
             &json!({
-                "command": "git push"
+                "command": "git push",
+                "confirmed": true
             }),
         )?;
 

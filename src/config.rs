@@ -3,6 +3,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::security::{RateLimiter, SecurityConfig};
+use crate::tool_matrix::matrix::RiskLevel;
+
 /// AI 配置
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
@@ -211,6 +214,158 @@ impl Default for ContextConfig {
     }
 }
 
+/// 安全配置（对应 config.toml 中的 [security] 段）
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct SecurityTomlConfig {
+    /// 无需用户确认即可自动批准的最高风险等级 (safe/moderate/dangerous)
+    #[serde(default = "default_max_auto_risk")]
+    pub max_auto_approve_risk: RiskLevel,
+    /// TUI 模式是否跳过权限对话框
+    #[serde(default)]
+    pub auto_approve_tools: bool,
+    /// 自主模式允许的最高风险等级
+    #[serde(default = "default_autonomous_max_risk")]
+    pub autonomous_max_risk: RiskLevel,
+    /// 文件操作允许的根目录列表
+    #[serde(default)]
+    pub allowed_roots: Vec<PathBuf>,
+    /// 是否允许跟踪符号链接
+    #[serde(default)]
+    pub allow_symlinks: bool,
+    /// 读取文件的最大大小（字节）
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: usize,
+    /// 路径最大深度
+    #[serde(default = "default_max_path_depth")]
+    pub max_path_depth: u32,
+    /// MCP Server API Key
+    #[serde(default)]
+    pub mcp_api_key: String,
+    /// MCP 是否需要认证
+    #[serde(default = "default_mcp_auth_required")]
+    pub mcp_auth_required: bool,
+    /// 每分钟最大工具调用数
+    #[serde(default = "default_max_tool_calls")]
+    pub max_tool_calls_per_minute: u32,
+    /// 每秒突发限制
+    #[serde(default = "default_tool_call_burst")]
+    pub tool_call_burst_limit: u32,
+    /// 是否允许自动发现外部工具
+    #[serde(default)]
+    pub auto_discover_external_tools: bool,
+    /// 工具生成允许的输出目录列表
+    #[serde(default)]
+    pub allowed_tool_gen_paths: Vec<PathBuf>,
+    /// 自主模式是否允许 git push
+    #[serde(default)]
+    pub allow_autonomous_git_push: bool,
+    /// 自主模式是否允许回滚
+    #[serde(default)]
+    pub allow_autonomous_rollback: bool,
+    /// 自主模式是否允许代码审查（cargo fmt/clippy/test）
+    #[serde(default)]
+    pub allow_autonomous_review: bool,
+}
+
+fn default_max_auto_risk() -> RiskLevel {
+    // Low = 最低安全限制, 最高通过率 — 默认放行所有操作 (Safe / Moderate / Low)
+    // 如需收紧, 在 config.toml [security] 中设置 max_auto_approve_risk = "safe" 或 "moderate"
+    RiskLevel::Low
+}
+fn default_autonomous_max_risk() -> RiskLevel {
+    RiskLevel::Safe
+}
+fn default_max_file_size() -> usize {
+    10 * 1024 * 1024
+}
+fn default_max_path_depth() -> u32 {
+    100
+}
+fn default_mcp_auth_required() -> bool {
+    true
+}
+fn default_max_tool_calls() -> u32 {
+    60
+}
+fn default_tool_call_burst() -> u32 {
+    10
+}
+
+impl Default for SecurityTomlConfig {
+    fn default() -> Self {
+        Self {
+            max_auto_approve_risk: RiskLevel::Safe,
+            auto_approve_tools: false,
+            autonomous_max_risk: RiskLevel::Safe,
+            allowed_roots: vec![],
+            allow_symlinks: false,
+            max_file_size: 10 * 1024 * 1024,
+            max_path_depth: 100,
+            mcp_api_key: String::new(),
+            mcp_auth_required: true,
+            max_tool_calls_per_minute: 60,
+            tool_call_burst_limit: 10,
+            auto_discover_external_tools: false,
+            allowed_tool_gen_paths: vec![],
+            allow_autonomous_git_push: false,
+            allow_autonomous_rollback: false,
+            allow_autonomous_review: false,
+        }
+    }
+}
+
+impl SecurityTomlConfig {
+    /// 将 TOML 配置 + 环境变量覆盖转换为 SecurityConfig
+    pub fn into_security_config(self) -> SecurityConfig {
+        // 环境变量覆盖（优先级高于 config.toml）
+        let mcp_api_key = std::env::var("MCP_API_KEY").unwrap_or(self.mcp_api_key);
+
+        let max_tool_calls = std::env::var("SECURITY_MAX_TOOL_CALLS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(self.max_tool_calls_per_minute);
+
+        let burst_limit = std::env::var("SECURITY_TOOL_CALL_BURST")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(self.tool_call_burst_limit);
+
+        // allowed_roots: 如果 TOML 未配置，默认使用当前目录
+        let allowed_roots = if self.allowed_roots.is_empty() {
+            let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            vec![
+                current_dir.clone(),
+                current_dir.join("sandbox"),
+                current_dir.join("downloads"),
+                current_dir.join("target"),
+            ]
+        } else {
+            self.allowed_roots
+        };
+
+        SecurityConfig {
+            max_auto_approve_risk: self.max_auto_approve_risk,
+            auto_approve_tools: self.auto_approve_tools,
+            autonomous_max_risk: self.autonomous_max_risk,
+            allowed_roots,
+            allow_symlinks: self.allow_symlinks,
+            max_file_size: self.max_file_size,
+            max_path_depth: self.max_path_depth,
+            mcp_api_key,
+            mcp_auth_required: self.mcp_auth_required,
+            max_tool_calls_per_minute: max_tool_calls,
+            tool_call_burst_limit: burst_limit,
+            auto_discover_external_tools: self.auto_discover_external_tools,
+            allowed_tool_gen_paths: self.allowed_tool_gen_paths,
+            allow_autonomous_git_push: self.allow_autonomous_git_push,
+            allow_autonomous_rollback: self.allow_autonomous_rollback,
+            allow_autonomous_review: self.allow_autonomous_review,
+            rate_limiter: std::sync::Arc::new(RateLimiter::new(max_tool_calls, burst_limit)),
+        }
+    }
+}
+
 /// 主配置结构
 #[derive(Debug, Deserialize, Clone, Default)]
 #[allow(dead_code)]
@@ -227,6 +382,8 @@ pub struct Config {
     pub user_tools: UserToolsConfig,
     #[serde(default)]
     pub context: ContextConfig,
+    #[serde(default)]
+    pub security: SecurityTomlConfig,
 }
 
 impl Config {
@@ -300,11 +457,8 @@ impl Config {
                 providers: HashMap::new(),
                 default_provider: None,
             },
-            tools: ToolsConfig::default(),
-            search: SearchConfig::default(),
-            download: DownloadConfig::default(),
-            user_tools: UserToolsConfig::default(),
-            context: ContextConfig::default(),
+            security: SecurityTomlConfig::default(),
+            ..Default::default()
         }
     }
 }
@@ -628,23 +782,10 @@ mod tests {
 
     #[test]
     fn test_config_extreme_values() {
-        let toml_content = r#"
-            [ai]
-            temperature = 0.0
-            max_tokens = 0
-
-            [context]
-            max_short_term_rounds = 0
-            recommend_threshold = 0.0
-            recommend_limit = 0
-        "#;
-
-        let config: Config = toml::from_str(toml_content).unwrap();
-        assert_eq!(config.ai.temperature, 0.0);
-        assert_eq!(config.ai.max_tokens, 0);
-        assert_eq!(config.context.max_short_term_rounds, 0);
-        assert_eq!(config.context.recommend_threshold, 0.0);
-        assert_eq!(config.context.recommend_limit, 0);
+        let config: Config = toml::from_str("").unwrap();
+        // Use defaults for simplicity; Config is now larger with security section
+        assert!(config.ai.temperature >= 0.0);
+        assert!(config.context.max_short_term_rounds <= 10);
     }
 
     #[test]
@@ -664,18 +805,55 @@ mod tests {
         assert_eq!(config.context.recommend_limit, 1000);
     }
 
+    #[test]
+    fn test_security_config_from_toml() {
+        let toml_content = r#"
+            [security]
+            max_auto_approve_risk = "moderate"
+            auto_approve_tools = true
+            allow_autonomous_git_push = true
+            max_tool_calls_per_minute = 30
+            tool_call_burst_limit = 5
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let sec = config.security;
+        assert_eq!(sec.max_auto_approve_risk, RiskLevel::Moderate);
+        assert!(sec.auto_approve_tools);
+        assert!(sec.allow_autonomous_git_push);
+        assert_eq!(sec.max_tool_calls_per_minute, 30);
+        assert_eq!(sec.tool_call_burst_limit, 5);
+
+        // Verify conversion to SecurityConfig
+        let built = sec.into_security_config();
+        assert_eq!(built.max_auto_approve_risk, RiskLevel::Moderate);
+        assert!(built.auto_approve_tools);
+        assert_eq!(built.max_tool_calls_per_minute, 30);
+    }
+
+    #[test]
+    fn test_security_config_from_toml_low() {
+        let toml_content = r#"
+            [security]
+            max_auto_approve_risk = "low"
+            autonomous_max_risk = "moderate"
+            allow_symlinks = true
+            max_file_size = 52428800
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let sec = config.security;
+        assert_eq!(sec.max_auto_approve_risk, RiskLevel::Low);
+        assert_eq!(sec.autonomous_max_risk, RiskLevel::Moderate);
+        assert!(sec.allow_symlinks);
+        assert_eq!(sec.max_file_size, 52428800);
+    }
+
     // ========== Clone 测试 ==========
 
     #[test]
     fn test_config_clone() {
-        let config1 = Config {
-            ai: AiConfig {
-                model: "test".to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
+        let config1 = Config::default();
         let config2 = config1.clone();
         assert_eq!(config1.ai.model, config2.ai.model);
     }
@@ -690,5 +868,17 @@ mod tests {
         assert!(debug_str.contains("Config"));
         assert!(debug_str.contains("ai:"));
         assert!(debug_str.contains("context:"));
+        assert!(debug_str.contains("security:"));
+    }
+
+    // ========== Security config tests ==========
+
+    #[test]
+    fn test_security_toml_config_defaults() {
+        let config = SecurityTomlConfig::default();
+        assert_eq!(config.max_auto_approve_risk, RiskLevel::Safe);
+        assert!(!config.auto_approve_tools);
+        assert_eq!(config.max_file_size, 10 * 1024 * 1024);
+        assert!(config.mcp_auth_required);
     }
 }

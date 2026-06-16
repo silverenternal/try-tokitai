@@ -54,23 +54,24 @@ impl Default for SandboxConfig {
         // 默认允许项目根目录和 sandbox 目录
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-        #[cfg(test)]
+        #[cfg(feature = "test-allow-all-paths")]
         {
-            // 测试模式：允许所有路径
+            // 测试模式（通过 feature flag 显式启用）：允许所有路径
+            // 仅在测试二进制中启用，release 构建不包含此路径
             Self {
                 allowed_roots: vec![
                     current_dir.clone(),
                     current_dir.join("sandbox"),
                     current_dir.join("downloads"),
                     current_dir.join("target"),
-                    PathBuf::from("/"), // 测试模式允许所有路径
+                    PathBuf::from("/"),
                 ],
                 allow_symlinks: true,
                 max_depth: 100,
             }
         }
 
-        #[cfg(not(test))]
+        #[cfg(not(feature = "test-allow-all-paths"))]
         {
             Self {
                 allowed_roots: vec![
@@ -98,8 +99,8 @@ impl SecurePathResolver {
         }
     }
 
-    /// 创建测试模式的路径解析器（允许所有路径）
-    #[cfg(test)]
+    /// 创建测试模式的路径解析器（通过 feature flag 启用，允许所有路径）
+    #[cfg(any(test, feature = "test-allow-all-paths"))]
     pub fn new_for_tests() -> Self {
         Self {
             config: SandboxConfig {
@@ -333,9 +334,9 @@ static GLOBAL_RESOLVER: OnceLock<RwLock<SecurePathResolver>> = OnceLock::new();
 /// 获取全局路径解析器（只读）
 pub fn get_global_resolver() -> &'static RwLock<SecurePathResolver> {
     GLOBAL_RESOLVER.get_or_init(|| {
-        #[cfg(test)]
+        #[cfg(feature = "test-allow-all-paths")]
         {
-            // 测试模式：使用宽松配置，允许所有常见目录
+            // 测试模式（通过 feature flag 显式启用）
             let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             RwLock::new(SecurePathResolver::with_config(SandboxConfig {
                 allowed_roots: vec![
@@ -345,14 +346,14 @@ pub fn get_global_resolver() -> &'static RwLock<SecurePathResolver> {
                     current_dir.join("target"),
                     current_dir.join("target").join("test_tmp"),
                     PathBuf::from("/tmp"),
-                    PathBuf::from("/"), // 测试模式允许所有路径
+                    PathBuf::from("/"),
                 ],
                 allow_symlinks: true,
                 max_depth: 100,
             }))
         }
 
-        #[cfg(not(test))]
+        #[cfg(not(feature = "test-allow-all-paths"))]
         {
             RwLock::new(SecurePathResolver::new())
         }
@@ -366,6 +367,11 @@ pub fn init_global_resolver(config: SandboxConfig) -> bool {
     GLOBAL_RESOLVER
         .set(RwLock::new(SecurePathResolver::with_config(config)))
         .is_ok()
+}
+
+/// Add an allowed root directory to the global resolver
+pub fn add_allowed_root(path: PathBuf) {
+    get_global_resolver().write().add_allowed_root(path);
 }
 
 /// 便捷函数：验证路径（使用全局解析器）

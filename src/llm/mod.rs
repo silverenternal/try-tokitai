@@ -132,6 +132,9 @@ pub struct ChatRequest {
     /// Whether to stream response
     #[serde(default)]
     pub stream: bool,
+    /// Tool/function definitions (OpenAI format)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<serde_json::Value>>,
 }
 
 fn default_temperature() -> f32 {
@@ -141,13 +144,19 @@ fn default_temperature() -> f32 {
 /// Message structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    /// Role: "system", "user", or "assistant"
+    /// Role: "system", "user", "assistant", or "tool"
     pub role: String,
     /// Message content
     pub content: String,
     /// Optional name for the participant
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Tool calls made by the assistant (for role="assistant" with function calling)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<serde_json::Value>>,
+    /// Tool call ID this message responds to (for role="tool")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -156,6 +165,8 @@ impl Message {
             role: "system".to_string(),
             content: content.to_string(),
             name: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
@@ -164,6 +175,8 @@ impl Message {
             role: "user".to_string(),
             content: content.to_string(),
             name: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
@@ -172,6 +185,8 @@ impl Message {
             role: "assistant".to_string(),
             content: content.to_string(),
             name: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 }
@@ -202,6 +217,12 @@ pub struct Usage {
 pub struct StreamChunk {
     pub content: String,
     pub finish_reason: Option<String>,
+    /// Tool calls detected in this chunk (accumulated from stream deltas)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<serde_json::Value>>,
+    /// Token usage (only present in final chunk)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
 }
 
 /// LLM Manager - manages multiple providers

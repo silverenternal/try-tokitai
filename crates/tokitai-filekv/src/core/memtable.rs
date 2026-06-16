@@ -29,10 +29,10 @@
 
 use crate::core::error::TransientError;
 use crate::core::types::ValuePointer;
-use ahash::AHasher;
 use bytes::Bytes;
 use dashmap::DashMap;
 use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -129,7 +129,7 @@ impl Default for MemTableConfig {
 pub struct MemTable {
     /// 数据：key → entry
     /// OPT-004: 使用 ahash 作为 hasher，比默认 RandomState 更快
-    data: DashMap<String, MemTableEntry, std::hash::BuildHasherDefault<AHasher>>,
+    data: DashMap<String, MemTableEntry, RandomState>,
     /// 当前大小（字节）
     size_bytes: AtomicUsize,
     /// 条目数
@@ -145,6 +145,15 @@ pub struct MemTable {
 }
 
 impl MemTable {
+    fn normalize_shard_count(shards: usize) -> usize {
+        let min_shards = shards.max(2);
+        if min_shards.is_power_of_two() {
+            min_shards
+        } else {
+            min_shards.next_power_of_two()
+        }
+    }
+
     /// 创建新的 MemTable 实例
     ///
     /// # POL-007: DashMap 分片配置
@@ -166,11 +175,12 @@ impl MemTable {
         config: MemTableConfig,
         memory_tracker: Option<Arc<crate::ops::memory_tracker::MemoryTracker>>,
     ) -> Self {
-        // POL-007: 使用配置的分片数量，DashMap 要求至少为 2
-        let shard_count = config.shards.max(2) as u64;
+        // DashMap requires shard count to be a power of two. Normalize here so
+        // environment-dependent defaults (for example num_cpus * 4) stay valid.
+        let shard_count = Self::normalize_shard_count(config.shards) as u64;
         Self {
             data: DashMap::with_hasher_and_shard_amount(
-                std::hash::BuildHasherDefault::<AHasher>::default(),
+                RandomState::new(),
                 shard_count as usize,
             ),
             size_bytes: AtomicUsize::new(0),
@@ -292,7 +302,7 @@ impl MemTable {
         let mut shards: HashMap<u64, Vec<(String, Bytes, u32)>> = HashMap::new();
 
         for (key, value_bytes, seq) in prepared {
-            let hasher = std::hash::BuildHasherDefault::<AHasher>::default();
+            let hasher = RandomState::new();
             let hash = hasher.hash_one(&key);
             let shard_idx = hash % self.shard_count;
             shards.entry(shard_idx).or_default().push((key, value_bytes, seq));
@@ -426,7 +436,7 @@ impl MemTable {
     pub fn iter(
         &self,
     ) -> impl Iterator<
-        Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry, std::hash::BuildHasherDefault<AHasher>>,
+        Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry, RandomState>,
     > + '_ {
         self.data.iter()
     }

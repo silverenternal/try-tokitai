@@ -58,6 +58,7 @@ impl LLMProvider for OpenAIProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            tools: request.tools,
         };
 
         let response: OpenAIResponse = self
@@ -80,8 +81,30 @@ impl LLMProvider for OpenAIProvider {
             .first()
             .context("No choices in OpenAI response")?;
 
+        // Convert tool_calls to JSON Value format if present
+        let tool_calls_json: Option<Vec<serde_json::Value>> =
+            choice.message.tool_calls.as_ref().map(|tc| {
+                tc.iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "type": "function",
+                            "function": {
+                                "name": t.function.name,
+                                "arguments": t.function.arguments,
+                            }
+                        })
+                    })
+                    .collect()
+            });
+
         Ok(ChatResponse {
-            content: choice.message.content.clone(),
+            content: tool_calls_json
+                .as_ref()
+                .map(|tc: &Vec<serde_json::Value>| {
+                    serde_json::to_string(tc).unwrap_or_default()
+                })
+                .unwrap_or_else(|| choice.message.content.clone()),
             model: response.model,
             usage: response.usage.map(|u| Usage {
                 prompt_tokens: u.prompt_tokens,
@@ -98,6 +121,7 @@ impl LLMProvider for OpenAIProvider {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>> {
         // Streaming implementation using SSE
         use futures::stream::StreamExt;
+        use std::collections::BTreeMap;
 
         let payload = OpenAIRequest {
             model: request.model,
@@ -107,6 +131,7 @@ impl LLMProvider for OpenAIProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(true),
+            tools: request.tools,
         };
 
         let mut event_source = reqwest_eventsource::EventSource::new(
@@ -118,6 +143,9 @@ impl LLMProvider for OpenAIProvider {
         )?;
 
         let stream = async_stream::stream! {
+            // Map to accumulate tool call deltas across SSE events
+            let mut tc_index: BTreeMap<usize, serde_json::Value> = BTreeMap::new();
+
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(reqwest_eventsource::Event::Open) => {}
@@ -127,10 +155,51 @@ impl LLMProvider for OpenAIProvider {
                         }
                         if let Ok(response) = serde_json::from_str::<OpenAIStreamResponse>(&message.data) {
                             if let Some(choice) = response.choices.first() {
-                                if let Some(content) = &choice.delta.content {
+                                // Accumulate tool call deltas
+                                if let Some(delta_tool_calls) = &choice.delta.tool_calls {
+                                    for dtc in delta_tool_calls {
+                                        let entry = tc_index.entry(dtc.index).or_insert_with(|| {
+                                            serde_json::json!({
+                                                "id": "",
+                                                "type": "function",
+                                                "function": {
+                                                    "name": "",
+                                                    "arguments": ""
+                                                }
+                                            })
+                                        });
+                                        if let Some(ref id) = dtc.id {
+                                            entry["id"] = serde_json::json!(id);
+                                        }
+                                        if let Some(ref fn_def) = dtc.function {
+                                            if let Some(ref name) = fn_def.name {
+                                                entry["function"]["name"] = serde_json::json!(name);
+                                            }
+                                            if let Some(ref args) = fn_def.arguments {
+                                                if let Some(ref existing) = entry["function"]["arguments"].as_str() {
+                                                    entry["function"]["arguments"] = serde_json::json!(format!("{}{}", existing, args));
+                                                } else {
+                                                    entry["function"]["arguments"] = serde_json::json!(args);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let tool_calls = if tc_index.is_empty() {
+                                    None
+                                } else {
+                                    Some(tc_index.values().cloned().collect())
+                                };
+
+                                let has_content = choice.delta.content.is_some() || choice.finish_reason.is_some();
+
+                                if has_content || tool_calls.is_some() {
                                     yield Ok(StreamChunk {
-                                        content: content.clone(),
+                                        content: choice.delta.content.clone().unwrap_or_default(),
                                         finish_reason: choice.finish_reason.clone(),
+                                        tool_calls: tool_calls.clone(),
+                                        usage: None,
                                     });
                                 }
                             }
@@ -426,6 +495,7 @@ impl LLMProvider for ZhipuProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            tools: request.tools,
         };
 
         let response: OpenAIResponse = self
@@ -513,6 +583,7 @@ impl LLMProvider for MoonshotProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            tools: request.tools,
         };
 
         let response: OpenAIResponse = self
@@ -576,6 +647,8 @@ struct OpenAIRequest {
     stop: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -594,7 +667,24 @@ struct OpenAIChoice {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIMessage {
+    #[serde(default)]
     content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<OpenAIToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpenAIToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: OpenAIFunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpenAIFunctionCall {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -619,6 +709,28 @@ struct OpenAIStreamChoice {
 struct OpenAIDelta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenAIDeltaToolCall>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAIDeltaToolCall {
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(rename = "type", default)]
+    call_type: Option<String>,
+    #[serde(default)]
+    function: Option<OpenAIDeltaFunction>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAIDeltaFunction {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 // ============================================================================

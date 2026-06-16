@@ -4,6 +4,7 @@ mod command_resolver;
 mod config;
 mod path_resolver;
 mod sandbox;
+pub mod security;
 mod tools;
 // Context is now a separate crate: tokitai-context
 mod assistant_common;
@@ -21,12 +22,14 @@ mod observability;
 mod orchestrator;
 mod prompt_engineering;
 mod provider_config;
+pub mod scientist;
 pub mod tool_market;
 mod tool_matrix;
 pub mod tui;
 
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -96,15 +99,29 @@ fn main() -> Result<()> {
         .and_then(|pos| args.get(pos + 1))
         .map(PathBuf::from);
 
-    // 初始化 tracing（输出到 stderr，避免干扰 stdout 的交互界面）
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("ai_assistant=warn".parse().unwrap())
-                .add_directive("tokitai=warn".parse().unwrap()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    // 初始化 tracing（TUI 模式输出到文件，其他模式输出到 stderr）
+    if use_tui {
+        let log_file = std::fs::File::create(".tokitai_tui.log").unwrap_or_else(|_| {
+            std::fs::File::create(format!("/tmp/tokitai_tui_{}.log", std::process::id())).unwrap()
+        });
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::from_default_env()
+                    .add_directive("ai_assistant=error".parse().unwrap())
+                    .add_directive("tokitai=error".parse().unwrap()),
+            )
+            .with_writer(std::sync::Mutex::new(log_file))
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::from_default_env()
+                    .add_directive("ai_assistant=warn".parse().unwrap())
+                    .add_directive("tokitai=warn".parse().unwrap()),
+            )
+            .with_writer(std::io::stderr)
+            .init();
+    }
 
     println!("🚀 AI Assistant 启动中...");
 
@@ -162,11 +179,22 @@ fn main() -> Result<()> {
 
     // 检查配置（支持多供应商模式）
     let has_api_key = api_key.is_some() || std::env::var("PROVIDERS").is_ok();
+
+    // Quick streaming test (after .env loaded)
+    let test_stream = args.iter().any(|arg| arg == "--test-stream");
+    if test_stream {
+        let rt = tokio::runtime::Runtime::new()?;
+        return rt.block_on(test_llm_stream());
+    }
+
     if !has_api_key {
         eprintln!("⚠️  警告：未配置 API Key");
         eprintln!("   在 .env 中设置 AI_API_KEY 或 PROVIDERS");
         eprintln!();
     }
+
+    // 构建安全配置（在 config 被 AssistantConfig 遮蔽之前）
+    let security_config = config.security.clone().into_security_config();
 
     // 创建助手配置
     let config = AssistantConfig::new(api_url, api_key, model);
@@ -185,30 +213,41 @@ fn main() -> Result<()> {
         println!("⚠️  注意：按 Ctrl+C 停止");
         println!("═══════════════════════════\n");
 
-        // 启动 MCP Server
+        // 启动 MCP Server（传入安全配置）
         tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(mcp::start_mcp_mode())?;
+            .block_on(mcp::start_mcp_mode(&security_config))?;
 
         return Ok(());
     }
 
     // 如果指定了 --tui，启动 TUI 模式
     if use_tui {
-        println!("🎨 启动 TUI 模式");
-        println!("═══════════════════════════");
-        println!("📱 界面：ratatui 终端图形界面");
-        println!();
-        println!("✨ TUI 功能：");
-        println!("   • 三面板布局（工具/对话/上下文）");
-        println!("   • 实时状态显示");
-        println!("   • 快捷键系统");
-        println!();
-        println!("⚠️  注意：按 Ctrl+Q 退出");
-        println!("═══════════════════════════\n");
+        println!("🚀 启动 Claude Code-style TUI 模式\n");
 
-        // 启动 TUI
-        tui::run_tui()?;
+        // 初始化 LLM 和工具（复用 CliAssistant 的初始化逻辑）
+        let assistant = CliAssistant::new(config.clone(), security_config.clone())?;
+        let llm_manager = assistant.get_llm_manager();
+        let tool_defs = Some(assistant.get_tool_definitions());
+
+        // Build tool executor closure from CliAssistant's call_tool
+        // We need to put assistant in a shared container
+        let assistant = std::sync::Arc::new(std::sync::Mutex::new(assistant));
+        let tool_executor: Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync> =
+            Arc::new({
+                let a = assistant.clone();
+                move |name: &str, args: &serde_json::Value| {
+                    a.lock().unwrap().call_tool(name, args)
+                        .map_err(|e| e.to_string())
+                }
+            });
+
+        if let Some(provider) = llm_manager.current_provider() {
+            let provider: Arc<dyn crate::llm::LLMProvider> = Arc::clone(provider);
+            tui::run_tui(provider, tool_defs, Some(tool_executor))?;
+        } else {
+            anyhow::bail!("No LLM provider configured. Please set up .env with API keys.");
+        }
 
         return Ok(());
     }
@@ -244,7 +283,11 @@ fn main() -> Result<()> {
         println!();
 
         // 创建自主助手
-        let assistant = AutonomousAssistant::new(config, std::env::current_dir().unwrap())
+        let assistant = AutonomousAssistant::new(
+            config,
+            std::env::current_dir().unwrap(),
+            security_config,
+        )
             .map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
 
         // 运行自主进化
@@ -254,7 +297,7 @@ fn main() -> Result<()> {
     }
 
     // 普通交互模式
-    let mut assistant = CliAssistant::new(config)?;
+    let mut assistant = CliAssistant::new(config, security_config)?;
 
     // 检查是否有命令行参数直接输入
     let non_arg_args: Vec<String> = args
@@ -288,6 +331,73 @@ fn main() -> Result<()> {
     // 运行交互式 CLI
     assistant.run_cli()?;
 
+    Ok(())
+}
+
+/// Quick test: verify LLM streaming works
+async fn test_llm_stream() -> Result<()> {
+    use crate::llm::providers::OpenAIProvider;
+    use crate::llm::{ChatRequest, LLMProvider, Message};
+    use futures::StreamExt;
+    use std::sync::Arc;
+
+    println!("=== LLM Streaming Test ===\n");
+
+    let api_url = std::env::var("AI_API_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1/chat/completions".to_string());
+    let api_key = std::env::var("AI_API_KEY").unwrap_or_default();
+    let model = std::env::var("AI_MODEL").unwrap_or_else(|_| "deepseek-chat".to_string());
+
+    println!("URL: {}", api_url);
+    println!("Model: {}", model);
+    println!("Key: {}...\n", &api_key[..api_key.len().min(15)]);
+
+    let provider = OpenAIProvider::with_base_url(api_key, api_url, Some(model.clone()));
+    let provider: Arc<dyn LLMProvider> = Arc::new(provider);
+
+    let request = ChatRequest {
+        model,
+        messages: vec![
+            Message::system("You are a helpful assistant. Keep responses very short."),
+            Message::user("Say hello in exactly one word."),
+        ],
+        temperature: 0.7,
+        max_tokens: Some(50),
+        top_p: None,
+        stop: None,
+        stream: true,
+        tools: None,
+    };
+
+    print!("Response: ");
+    match provider.chat_stream(request).await {
+        Ok(mut stream) => {
+            let mut total = String::new();
+            let mut chunks = 0;
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(c) => {
+                        chunks += 1;
+                        print!("{}", c.content);
+                        total.push_str(&c.content);
+                    }
+                    Err(e) => {
+                        eprintln!("\nSTREAM ERROR at chunk {}: {}", chunks, e);
+                        anyhow::bail!("Stream error: {}", e);
+                    }
+                }
+            }
+            println!("\n\nTotal: '{}' ({} chunks)", total.trim(), chunks);
+            if total.trim().is_empty() {
+                anyhow::bail!("Empty response - streaming may not be working");
+            }
+            println!("OK: Streaming works!");
+        }
+        Err(e) => {
+            eprintln!("FAILED to start stream: {:#}", e);
+            anyhow::bail!("Stream start failed: {}", e);
+        }
+    }
     Ok(())
 }
 

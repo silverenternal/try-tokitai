@@ -34,9 +34,16 @@ use crate::orchestrator::Orchestrator;
 use crate::path_resolver;
 use crate::tools::HttpClientTools;
 use crate::tools::{
-    CodeTools, DownloadTools, FileOperations, GitOperations, JsonFormatTools, SearchTools,
-    SystemTools,
+    CodeTools, DownloadTools, FileOperations, FileSearchTools,
+    GitOperations, JsonFormatTools, NetworkTools,
+    PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools, WikipediaTools,
 };
+use crate::tools::data::{DataConversionTools, JsonMergeTools, JsonQueryTools};
+use crate::scientist::tools::computation::ComputationTools;
+use crate::scientist::tools::data::DataTools;
+use crate::scientist::tools::literature::LiteratureTools;
+use crate::scientist::tools::sympy_tool::SymPyTool;
+use crate::scientist::tools::visualization::VisualizationTools;
 use std::sync::Arc;
 
 /// CLI AI 助手 - 面向用户的交互式助手
@@ -52,13 +59,29 @@ pub struct CliAssistant {
     integrated_modules: IntegratedModules,
     /// 工具实例（用于 call_tool 调用）
     file_ops: FileOperations,
+    file_search: FileSearchTools,
+    pdf_tools: PdfTools,
+    project_templates: ProjectTemplates,
     system_tools: SystemTools,
+    process_tools: ProcessTools,
     code_tools: CodeTools,
     web_search: SearchTools,
     download_tools: DownloadTools,
+    network_tools: NetworkTools,
+    wikipedia_tools: WikipediaTools,
     git_ops: GitOperations,
     http_client: HttpClientTools,
     json_tools: JsonFormatTools,
+    json_query: JsonQueryTools,
+    json_merge: JsonMergeTools,
+    data_conversion: DataConversionTools,
+    /// 科学家工具实例
+    literature_tools: LiteratureTools,
+    computation_tools: ComputationTools,
+    data_tools: DataTools,
+    visualization_tools: VisualizationTools,
+    /// SymPy 数学验证工具
+    sympy_tool: SymPyTool,
     /// LLM 管理器（多提供商支持）
     #[allow(dead_code)]
     llm_manager: Arc<LLMManager>,
@@ -68,6 +91,8 @@ pub struct CliAssistant {
     /// 配置文件
     #[allow(dead_code)]
     config_file: Config,
+    /// 安全配置
+    pub security_config: crate::security::SecurityConfig,
 }
 
 impl CliAssistant {
@@ -75,7 +100,8 @@ impl CliAssistant {
     ///
     /// # 参数
     /// - `config`: 助手配置
-    pub fn new(config: AssistantConfig) -> Result<Self> {
+    /// - `security_config`: 安全配置（从 config.toml + 环境变量加载）
+    pub fn new(config: AssistantConfig, security_config: crate::security::SecurityConfig) -> Result<Self> {
         // 加载配置文件
         let config_file = Config::load(None).unwrap_or_else(|e| {
             warn!("加载配置文件失败：{}，使用默认配置", e);
@@ -138,7 +164,7 @@ impl CliAssistant {
         let integrated_modules = match IntegratedModules::new(IntegratedModulesConfig::default()) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("⚠️  创建集成模块失败：{}", e);
+                warn!("⚠️  创建集成模块失败：{}", e);
                 IntegratedModules::new(IntegratedModulesConfig::for_testing()).unwrap()
             }
         };
@@ -149,14 +175,14 @@ impl CliAssistant {
         match integrated_modules.initialize() {
             Ok(init_report) => {
                 if !init_report.success {
-                    eprintln!("⚠️  集成模块初始化警告：");
+                    warn!("⚠️  集成模块初始化警告：");
                     for error in &init_report.errors {
-                        eprintln!("   - {}", error);
+                        warn!("  - {}", error);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("⚠️  集成模块初始化失败：{}", e);
+                warn!("⚠️  集成模块初始化失败：{}", e);
             }
         }
 
@@ -166,22 +192,107 @@ impl CliAssistant {
             orchestrator: Orchestrator::new(),
             integrated_modules,
             file_ops: FileOperations::default(),
+            file_search: FileSearchTools::default(),
+            pdf_tools: PdfTools::default(),
+            project_templates: ProjectTemplates::default(),
             system_tools: SystemTools::default(),
+            process_tools: ProcessTools::default(),
             code_tools: CodeTools::default(),
             web_search: SearchTools::new(),
             download_tools: DownloadTools::new(),
+            network_tools: NetworkTools::new(),
+            wikipedia_tools: WikipediaTools::new(),
             git_ops: GitOperations,
             http_client: HttpClientTools::new(),
             json_tools: JsonFormatTools::default(),
+            json_query: JsonQueryTools::default(),
+            json_merge: JsonMergeTools::default(),
+            data_conversion: DataConversionTools::default(),
+            literature_tools: LiteratureTools,
+            computation_tools: ComputationTools,
+            data_tools: DataTools,
+            visualization_tools: VisualizationTools,
+            sympy_tool: SymPyTool::new(),
             llm_manager,
             model_handler,
             config_file,
+            security_config,
         })
     }
 
     /// 获取所有工具定义
     pub fn get_tool_definitions(&self) -> Vec<Value> {
         self.tool_manager.get_all_tools()
+    }
+
+    /// 获取 LLM 管理器（用于 TUI 模式）
+    pub fn get_llm_manager(&self) -> Arc<LLMManager> {
+        self.llm_manager.clone()
+    }
+
+    /// 对 LLM 输出的工具参数做安全检查
+    fn validate_tool_args(&self, name: &str, args: &Value) -> Result<()> {
+        // 对文件操作类工具验证 path 参数
+        let file_tools = [
+            "read_file", "write_file", "edit_file", "copy_file", "move_file",
+            "delete_file", "list_dir", "mkdir", "create_dir",
+            "read_pdf_text", "read_pdf",
+        ];
+        if file_tools.contains(&name) {
+            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                let validation = crate::tools::io::security::validate_path(path);
+                if !validation.is_valid {
+                    return Err(anyhow::anyhow!(
+                        "路径安全验证失败：{}",
+                        validation.error.unwrap_or_else(|| "未知错误".to_string())
+                    ));
+                }
+            }
+            // 也检查 source/dest 参数（用于 copy/move）
+            for key in &["source", "dest", "destination"] {
+                if let Some(p) = args.get(*key).and_then(|v| v.as_str()) {
+                    let validation = crate::tools::io::security::validate_path(p);
+                    if !validation.is_valid {
+                        return Err(anyhow::anyhow!(
+                            "路径安全验证失败 ({}): {}",
+                            key,
+                            validation.error.unwrap_or_else(|| "未知错误".to_string())
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 对命令执行工具检测注入
+        if name == "run_safe_command" || name == "run_command" {
+            if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                if cmd.len() > 4096 {
+                    return Err(anyhow::anyhow!("命令过长 ({} > 4096)", cmd.len()));
+                }
+                // 检测 CR/LF 注入 — 防止通过换行注入额外命令
+                if cmd.contains('\n') || cmd.contains('\r') {
+                    return Err(anyhow::anyhow!("命令包含换行符，疑似注入攻击"));
+                }
+                // run_safe_command 额外检查危险元字符
+                if name == "run_safe_command" {
+                    for ch in &[';', '|', '&', '$', '`'] {
+                        if cmd.contains(*ch) {
+                            return Err(anyhow::anyhow!(
+                                "安全命令包含危险元字符 '{}'，请使用 run_command 并确认",
+                                ch
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 获取工具管理器（用于 TUI 模式）
+    pub fn get_tool_manager(&self) -> &ToolManager {
+        &self.tool_manager
     }
 
     /// 获取工具箱统计信息
@@ -192,6 +303,22 @@ impl CliAssistant {
     /// 调用工具
     pub fn call_tool(&self, name: &str, args: &Value) -> Result<String> {
         info!("🔧 执行工具：{} {:?}", name, args);
+
+        // 安全授权检查（作为第一道防线）
+        let auth = crate::security::authorize_tool_call(
+            name,
+            &self.security_config,
+            crate::security::ExecutionMode::Cli,
+        );
+        if let crate::security::AuthDecision::Deny(reason) = auth {
+            warn!("🚫 工具被安全策略拦截：{} (tool={})", reason, name);
+            return Err(anyhow::anyhow!("安全策略拦截：{}", reason));
+        }
+
+        // 对文件路径参数做路径验证
+        if let Err(e) = self.validate_tool_args(name, args) {
+            return Err(e);
+        }
 
         use tokitai_core::ToolErrorKind;
 
@@ -216,13 +343,28 @@ impl CliAssistant {
         }
 
         try_tool!(self.file_ops);
+        try_tool!(self.file_search);
+        try_tool!(self.pdf_tools);
+        try_tool!(self.project_templates);
         try_tool!(self.system_tools);
+        try_tool!(self.process_tools);
         try_tool!(self.code_tools);
         try_tool!(self.web_search);
         try_tool!(self.download_tools);
+        try_tool!(self.network_tools);
+        try_tool!(self.wikipedia_tools);
         try_tool!(self.git_ops);
         try_tool!(self.http_client);
         try_tool!(self.json_tools);
+        try_tool!(self.json_query);
+        try_tool!(self.json_merge);
+        try_tool!(self.data_conversion);
+        // Scientist tools
+        try_tool!(self.literature_tools);
+        try_tool!(self.computation_tools);
+        try_tool!(self.data_tools);
+        try_tool!(self.visualization_tools);
+        try_tool!(self.sympy_tool);
 
         warn!("❌ 未知工具：{}", name);
         Err(anyhow::anyhow!("未知工具：{}", name))
@@ -346,6 +488,27 @@ impl CliAssistant {
             let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
 
             println!("🔧 执行工具：{}", name);
+
+            // 安全授权检查
+            let auth = crate::security::authorize_tool_call(
+                name,
+                &self.security_config,
+                crate::security::ExecutionMode::Cli,
+            );
+            if let crate::security::AuthDecision::Deny(reason) = auth {
+                println!("🚫 工具被安全策略拦截：{}", reason);
+                results.push(json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [tool_call]
+                }));
+                results.push(json!({
+                    "role": "tool",
+                    "content": format!("安全策略拦截：{}", reason),
+                    "tool_call_id": tool_call.get("id").and_then(|i| i.as_str()).unwrap_or("")
+                }));
+                continue;
+            }
 
             match self.call_tool(name, &args) {
                 Ok(result) => {

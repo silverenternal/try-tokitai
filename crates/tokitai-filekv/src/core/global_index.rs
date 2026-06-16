@@ -4,7 +4,7 @@
 //! enabling O(1) point lookups without traversing all L0 segments.
 //!
 //! # Design
-//! - Uses `AHashMap<Arc<str>, KeyLocation>` for O(1) key lookups.
+//! - Uses `HashMap<Arc<str>, KeyLocation>` for O(1) key lookups.
 //! - `Arc<str>` provides shared ownership with minimal memory footprint vs `String`/`Vec<u8>`.
 //! - Generation counter distinguishes entries across compaction cycles.
 //! - RwLock-based concurrency control: reads are lock-free, writes use write lock.
@@ -12,7 +12,7 @@
 //! # OPT-010: BTreeMap Secondary Index for Range Queries
 //! - Added `BTreeMap<Arc<str>, KeyLocation>` as a secondary index for O(log n) range queries.
 //! - Both indexes are kept in sync during all write operations.
-//! - Primary index (AHashMap): O(1) point lookups, optimal for get() operations.
+//! - Primary index (HashMap): O(1) point lookups, optimal for get() operations.
 //! - Secondary index (BTreeMap): O(log n) range scans, optimal for range() operations.
 //! - Memory overhead: ~40-50% additional per entry (BTreeMap node overhead vs HashMap).
 //! - Trade-off: Acceptable memory increase for significant range query performance improvement.
@@ -25,9 +25,8 @@
 //! - Total (both indexes): ~128-160 bytes per key
 //! - Memory increase: ~40-50% vs single HashMap, but enables O(log n) range queries
 
-use ahash::AHashMap;
 use parking_lot::RwLock;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -132,14 +131,14 @@ impl Default for IndexUpdate {
 /// Bundles the primary index, range index, and memory usage tracking into a single
 /// RwLock so that writes (insert/remove/update) only need one lock acquisition.
 struct GlobalKeyIndexInner {
-    index: AHashMap<Arc<str>, KeyLocation>,
+    index: HashMap<Arc<str>, KeyLocation>,
     range_index: BTreeMap<Arc<str>, KeyLocation>,
     range_index_memory_usage: u64,
 }
 
 /// Global key index maintaining key-to-segment locations.
 ///
-/// OPT-001: Uses AHashMap<Arc<str>, KeyLocation> for O(1) lookups instead of
+/// OPT-001: Uses HashMap<Arc<str>, KeyLocation> for O(1) lookups instead of
 /// BTreeMap<Vec<u8>, KeyLocation> O(log n). Arc<str> provides memory-efficient
 /// shared ownership of string keys.
 ///
@@ -147,7 +146,7 @@ struct GlobalKeyIndexInner {
 /// Both indexes are kept in sync during all write operations (when enabled).
 ///
 /// OPT-001 (Enhanced): BTreeMap index can be disabled via config to save memory.
-/// When disabled, range() falls back to iterating all entries in AHashMap.
+/// When disabled, range() falls back to iterating all entries in HashMap.
 pub struct GlobalKeyIndex {
     /// Consolidated index state: primary index + range index + memory usage.
     /// Single RwLock ensures atomic updates during insert/remove/compaction.
@@ -182,7 +181,7 @@ impl GlobalKeyIndex {
     pub fn with_config(range_index_enabled: bool, range_index_memory_budget_bytes: u64) -> Self {
         Self {
             inner: RwLock::new(GlobalKeyIndexInner {
-                index: AHashMap::new(),
+                index: HashMap::new(),
                 range_index: BTreeMap::new(),
                 range_index_memory_usage: 0,
             }),
@@ -199,13 +198,13 @@ impl GlobalKeyIndex {
     }
 
     /// Create with a pre-populated HashMap.
-    pub fn with_entries(entries: AHashMap<Arc<str>, KeyLocation>, generation: u64) -> Self {
+    pub fn with_entries(entries: HashMap<Arc<str>, KeyLocation>, generation: u64) -> Self {
         Self::with_entries_and_config(entries, generation, true, 256 * 1024 * 1024)
     }
 
     /// Create with a pre-populated HashMap and custom configuration.
     pub fn with_entries_and_config(
-        entries: AHashMap<Arc<str>, KeyLocation>,
+        entries: HashMap<Arc<str>, KeyLocation>,
         generation: u64,
         range_index_enabled: bool,
         range_index_memory_budget_bytes: u64,
@@ -385,7 +384,7 @@ impl GlobalKeyIndex {
     /// iterating all entries. This provides significant performance improvement
     /// for large datasets (100K keys: P99 < 100µs vs >1ms with HashMap iteration).
     ///
-    /// OPT-001 (Enhanced): Falls back to AHashMap iteration when BTreeMap is disabled.
+    /// OPT-001 (Enhanced): Falls back to HashMap iteration when BTreeMap is disabled.
     ///
     /// The range is inclusive on both start and end boundaries.
     /// Returns empty Vec if start > end.
@@ -415,7 +414,7 @@ impl GlobalKeyIndex {
             }
         }
 
-        // Fallback: iterate AHashMap and filter by range (O(n))
+        // Fallback: iterate HashMap and filter by range (O(n))
         let inner = self.inner.read();
         let result: Vec<(Arc<str>, KeyLocation)> = inner
             .index
@@ -443,7 +442,7 @@ impl GlobalKeyIndex {
     /// Batch update: apply multiple inserts and removes atomically.
     ///
     /// Uses a single write lock to minimize contention.
-    /// OPT-010: Updates both AHashMap and BTreeMap indexes.
+    /// OPT-010: Updates both HashMap and BTreeMap indexes.
     /// OPT-001 (Enhanced): Respects memory budget for BTreeMap updates.
     pub fn batch_update(&self, update: IndexUpdate) {
         let mut inner = self.inner.write();
@@ -539,7 +538,7 @@ impl GlobalKeyIndex {
     where
         F: Fn(&mut dyn FnMut(Arc<str>, KeyLocation)) -> crate::core::error::FileKVResult<()>,
     {
-        let mut index = AHashMap::new();
+        let mut index = HashMap::new();
         let mut total_keys = 0usize;
 
         // Closure to collect entries
@@ -575,14 +574,14 @@ impl GlobalKeyIndex {
     /// tracked separately - if a key has a tombstone in a newer segment, it won't be
     /// added to the index even if it exists in an older segment.
     ///
-    /// OPT-010: Rebuilds both AHashMap and BTreeMap indexes (if enabled).
+    /// OPT-010: Rebuilds both HashMap and BTreeMap indexes (if enabled).
     pub fn rebuild_from_segments(
         &self,
         segments: &std::collections::BTreeMap<u64, Arc<crate::core::segment::SegmentFile>>,
     ) -> crate::core::error::FileKVResult<()> {
         use std::collections::HashSet;
 
-        let mut index = AHashMap::new();
+        let mut index = HashMap::new();
         let mut range_index = BTreeMap::new();
         let mut tombstones: HashSet<Arc<str>> = HashSet::new();
         let generation = self.current_generation();
@@ -648,7 +647,7 @@ impl GlobalKeyIndex {
     /// Removes all keys belonging to `old_segment_ids` and adds keys
     /// from the new segment.
     ///
-    /// OPT-010: Updates both AHashMap and BTreeMap indexes (if enabled).
+    /// OPT-010: Updates both HashMap and BTreeMap indexes (if enabled).
     pub fn update_after_compaction(
         &self,
         old_segment_ids: &[u64],
@@ -683,7 +682,7 @@ impl GlobalKeyIndex {
     }
 
     /// Remove entries belonging to specific segments (used during compaction, before segment swap).
-    /// OPT-010: Removes from both AHashMap and BTreeMap indexes (if enabled).
+    /// OPT-010: Removes from both HashMap and BTreeMap indexes (if enabled).
     pub fn remove_segments(&self, old_segment_ids: &[u64]) {
         let mut inner = self.inner.write();
 
@@ -716,7 +715,7 @@ impl GlobalKeyIndex {
 
     /// Bulk insert entries (used during compaction, after segment swap).
     /// Only inserts entries that don't already exist (preserves entries from non-compacted segments).
-    /// OPT-010: Inserts into both AHashMap and BTreeMap indexes (if enabled).
+    /// OPT-010: Inserts into both HashMap and BTreeMap indexes (if enabled).
     pub fn bulk_insert(&self, keys: Vec<(Arc<str>, KeyLocation)>) {
         let mut inner = self.inner.write();
 
@@ -748,7 +747,7 @@ impl GlobalKeyIndex {
 
     /// Bulk upsert entries (overwrites existing entries).
     /// Used during memtable flush where the new segment has the latest values for all keys.
-    /// OPT-010: Upserts into both AHashMap and BTreeMap indexes (if enabled).
+    /// OPT-010: Upserts into both HashMap and BTreeMap indexes (if enabled).
     pub fn bulk_upsert(&self, keys: Vec<(Arc<str>, KeyLocation)>) {
         let mut inner = self.inner.write();
 
@@ -1393,11 +1392,11 @@ mod tests {
             );
         }
 
-        // Point lookups should still work (uses AHashMap)
+        // Point lookups should still work (uses HashMap)
         assert!(index.get("a").is_some());
         assert!(index.get("c").is_some());
 
-        // Range query should work (fallback to AHashMap iteration)
+        // Range query should work (fallback to HashMap iteration)
         let results = index.range("b", "d");
         assert_eq!(results.len(), 3);
         let mut keys: Vec<_> = results.iter().map(|(k, _)| k.as_ref()).collect();
@@ -1429,7 +1428,7 @@ mod tests {
             );
         }
 
-        // All point lookups should work (AHashMap has all entries)
+        // All point lookups should still work (HashMap has all entries)
         for ch in b'a'..=b'j' {
             let key_str = std::str::from_utf8(&[ch]).unwrap().to_string();
             assert!(index.get(&key_str).is_some(), "Key {} should exist", key_str);
@@ -1475,7 +1474,7 @@ mod tests {
 
     #[test]
     fn test_range_fallback_correctness() {
-        // Verify that range query results are the same whether using BTreeMap or AHashMap fallback
+        // Verify that range query results are the same whether using BTreeMap or HashMap fallback
         let index_enabled = GlobalKeyIndex::with_config(true, 0);
         let index_disabled = GlobalKeyIndex::with_config(false, 0);
 

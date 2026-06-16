@@ -86,8 +86,8 @@ fn bench_branch_access_mixed(c: &mut Criterion) {
     // 80% 命中率场景
     group.bench_function("80pct_hit_rate", |b| {
         b.iter(|| {
-            let id = if rand::random::<u100>() < 80 {
-                // 80% 概率访问缓存中的分支
+            let id = if rand::random::<u8>() < 205 {
+                // 80% 概率访问缓存中的分支 (205/256 ≈ 80%)
                 format!("branch-{}", rand::random::<u8>() % 50)
             } else {
                 // 20% 概率访问不存在的分支
@@ -122,11 +122,11 @@ fn bench_ancestor_query_no_cache(c: &mut Criterion) {
         b.iter(|| {
             // 查询深度为 50 的祖先链
             let mut ancestors = Vec::new();
-            let mut current = black_box("f50");
-            while let Some(parent) = loader(current) {
+            let mut current = black_box("f50").to_string();
+            while let Some(parent) = loader(&current) {
                 if !parent.is_empty() {
                     ancestors.push(parent.clone());
-                    current = &parent;
+                    current = parent;
                 } else {
                     break;
                 }

@@ -239,6 +239,7 @@ impl ModelRouter {
                 top_p: None,
                 stop: None,
                 stream: false,
+                tools: None,
             };
 
             let start = std::time::Instant::now();

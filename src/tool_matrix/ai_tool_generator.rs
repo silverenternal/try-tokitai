@@ -149,12 +149,15 @@ impl AIToolGenerator {
                 role: "user".to_string(),
                 content: prompt,
                 name: None,
+                tool_calls: None,
+                tool_call_id: None,
             }],
             temperature: 0.7,
             max_tokens: Some(4096),
             top_p: None,
             stop: None,
             stream: false,
+            tools: None,
         };
 
         let ai_response = provider.chat(chat_request).await;
@@ -186,12 +189,15 @@ impl AIToolGenerator {
                     role: "user".to_string(),
                     content: test_prompt,
                     name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
                 }],
                 temperature: 0.5,
                 max_tokens: Some(2048),
                 top_p: None,
                 stop: None,
                 stream: false,
+                tools: None,
             };
 
             let test_response: Option<crate::llm::ChatResponse> =

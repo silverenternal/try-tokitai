@@ -28,6 +28,8 @@ yaml = ["serde_yaml"]
 # Tensor 计算：实验性功能，提供张量计算和神经网络基础操作
 # 注意：此 feature 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 candle、tch-rs）
 tensor = ["dep:candle-core", "dep:candle-nn", "dep:safetensors", "dep:half", "dep:ndarray"]
+# 测试模式：允许所有文件路径（仅用于内部测试，不可在生产构建中启用）
+test-allow-all-paths = []
 
 [dependencies]
 # Core AI framework
@@ -37,6 +39,16 @@ tokitai-mcp-server = "0.4.0"
 
 # Context management (local crate)
 tokitai-context = { path = "crates/tokitai-context" }
+tokitai-filekv = { path = "crates/tokitai-filekv" }
+
+# AI Scientist crates
+ai-scientist-core = { path = "crates/ai-scientist-core" }
+ai-scientist-rag = { path = "crates/ai-scientist-rag" }
+ai-scientist-verify = { path = "crates/ai-scientist-verify" }
+ai-scientist-science = { path = "crates/ai-scientist-science" }
+
+# Hashing
+blake3 = "1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -150,7 +162,7 @@ ignored = [
 
 # 排除独立测试目录
 [workspace]
-members = ["crates/tokitai-context"]
+members = ["crates/arc-swap", "crates/tokitai-context", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science"]
 exclude = ["test_tensor"]
 
 

@@ -7,11 +7,10 @@
 //! - 缓存命中率
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use std::path::PathBuf;
 use std::time::Instant;
 
 use ai_assistant::context::{
-    AdvancedMerger, BloomConflictDetector, BranchState, CompressionConfig,
+    AdvancedMerger, BloomConflictDetector, CompressionConfig,
     ContentAddressableStorage, ContentDeduplicator, MergeStrategy, ParallelContextManager,
     ParallelContextManagerConfig, ThreeWayMerger,
 };
@@ -181,12 +180,12 @@ fn bench_lcs_computation(c: &mut Criterion) {
     let mut group = c.benchmark_group("LCS Computation");
 
     for &size in &[10, 50, 100, 200, 500] {
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &n| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, &n| {
             let a: Vec<usize> = (0..n).collect();
-            let b: Vec<usize> = (0..n).step_by(2).collect();
+            let b_vec: Vec<usize> = (0..n).step_by(2).collect();
 
-            b.iter(|| {
-                black_box(AdvancedMerger::compute_lcs(&a, &b));
+            bencher.iter(|| {
+                black_box(AdvancedMerger::compute_lcs_pairs(&a, &b_vec));
             });
         });
     }
@@ -415,7 +414,7 @@ fn create_test_branch(
 ) -> ai_assistant::context::branch::ContextBranch {
     use ai_assistant::context::branch::ContextBranch;
 
-    let mut branch = ContextBranch::new(id, id, parent, dir.to_path_buf()).unwrap();
+    let branch = ContextBranch::new(id, id, parent, dir.to_path_buf()).unwrap();
 
     // 创建测试文件
     for i in 0..file_count {

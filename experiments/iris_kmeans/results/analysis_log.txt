@@ -1,0 +1,87 @@
+======================================================================
+IRIS DATASET ANALYSIS FOR K-MEANS CLUSTERING
+======================================================================
+
+Dataset shape: (150, 4)
+Number of samples: 150
+Number of features: 4
+Feature names: ['sepal length (cm)', 'sepal width (cm)', 'petal length (cm)', 'petal width (cm)']
+Target classes: ['setosa' 'versicolor' 'virginica']
+Class distribution: [50 50 50]
+
+======================================================================
+BASIC STATISTICS
+======================================================================
+       sepal length (cm)  sepal width (cm)  ...  petal width (cm)     species
+count         150.000000        150.000000  ...        150.000000  150.000000
+mean            5.843333          3.057333  ...          1.199333    1.000000
+std             0.828066          0.435866  ...          0.762238    0.819232
+min             4.300000          2.000000  ...          0.100000    0.000000
+25%             5.100000          2.800000  ...          0.300000    0.000000
+50%             5.800000          3.000000  ...          1.300000    1.000000
+75%             6.400000          3.300000  ...          1.800000    2.000000
+max             7.900000          4.400000  ...          2.500000    2.000000
+
+[8 rows x 5 columns]
+
+======================================================================
+FEATURE CORRELATION MATRIX
+======================================================================
+                   sepal length (cm)  ...  petal width (cm)
+sepal length (cm)           1.000000  ...          0.817941
+sepal width (cm)           -0.117570  ...         -0.366126
+petal length (cm)           0.871754  ...          0.962865
+petal width (cm)            0.817941  ...          1.000000
+
+[4 rows x 4 columns]
+
+Saved: D:/try-tokitai/experiments/iris_kmeans/results/iris_pairplot.png
+
+======================================================================
+K-MEANS CLUSTERING (K=3) - PRELIMINARY ANALYSIS
+======================================================================
+
+K-Means (k=3) on standardized data:
+  Adjusted Rand Index (ARI): 0.6201
+  Normalized Mutual Info (NMI): 0.6595
+  Silhouette Score: 0.4599
+  Inertia (WCSS): 139.82
+  Cluster centers (standardized):
+[[-0.05021989 -0.88337647  0.34773781  0.2815273 ]
+ [-1.01457897  0.85326268 -1.30498732 -1.25489349]
+ [ 1.13597027  0.08842168  0.99615451  1.01752612]]
+
+Confusion Matrix (rows=true, cols=predicted):
+Predicted   0   1   2
+True                 
+0           0  50   0
+1          39   0  11
+2          14   0  36
+
+Saved: D:/try-tokitai/experiments/iris_kmeans/results/iris_kmeans_pca_comparison.png
+
+======================================================================
+ELBOW METHOD - FINDING OPTIMAL K
+======================================================================
+  K=2: Inertia=222.36, Silhouette=0.5818
+  K=3: Inertia=139.82, Silhouette=0.4599
+  K=4: Inertia=114.09, Silhouette=0.3869
+  K=5: Inertia=90.93, Silhouette=0.3459
+  K=6: Inertia=81.54, Silhouette=0.3171
+  K=7: Inertia=72.63, Silhouette=0.3202
+  K=8: Inertia=62.54, Silhouette=0.3387
+  K=9: Inertia=55.12, Silhouette=0.3424
+  K=10: Inertia=47.39, Silhouette=0.3518
+
+Saved: D:/try-tokitai/experiments/iris_kmeans/results/iris_elbow_silhouette.png
+
+======================================================================
+PRELIMINARY ANALYSIS COMPLETE
+======================================================================
+
+Key findings:
+1. Iris dataset has 150 samples, 4 features, 3 classes (50 each)
+2. Petal features are most discriminative between species
+3. K-means (k=3) achieves good clustering quality
+4. Elbow method suggests k=3 is optimal
+5. One class (versicolor & virginica) has some overlap

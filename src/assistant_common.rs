@@ -192,6 +192,11 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     ));
     let _ =
         tool_registry.create_toolbox(ToolBox::new("data", "Data Tools", "Data processing tools"));
+    let _ = tool_registry.create_toolbox(ToolBox::new(
+        "scientist",
+        "Scientist Tools",
+        "AI Scientist research tools — literature, computation, data, visualization",
+    ));
 
     // 从各个 ToolProvider 注册工具
     let _ = tool_registry
@@ -242,4 +247,23 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
         .register_from_provider_sync::<ObservabilityTools>(Some("system"), ToolSource::Builtin);
     let _ = tool_registry
         .register_from_provider_sync::<PromptTools>(Some("system"), ToolSource::Builtin);
+
+    // Register Scientist tools
+    use crate::scientist::tools::computation::ComputationTools;
+    use crate::scientist::tools::data::DataTools;
+    use crate::scientist::tools::literature::LiteratureTools;
+    use crate::scientist::tools::visualization::VisualizationTools;
+    let _ = tool_registry
+        .register_from_provider_sync::<LiteratureTools>(Some("scientist"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<ComputationTools>(Some("scientist"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<DataTools>(Some("scientist"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<VisualizationTools>(Some("scientist"), ToolSource::Builtin);
+
+    // Register SymPy tools
+    use crate::scientist::tools::sympy_tool::SymPyTool;
+    let _ = tool_registry
+        .register_from_provider_sync::<SymPyTool>(Some("scientist"), ToolSource::Builtin);
 }

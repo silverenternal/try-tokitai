@@ -411,7 +411,15 @@ impl ToolRegistry {
                 description: def.description.clone(),
                 input_schema: def.input_schema.clone(),
                 tags: Vec::new(),
-                risk_level: "safe".to_string(),
+                risk_level: crate::security::default_tool_risk_map()
+                    .get(&def.name)
+                    .map(|r| match r {
+                        crate::tool_matrix::matrix::RiskLevel::Safe => "safe",
+                        crate::tool_matrix::matrix::RiskLevel::Moderate => "moderate",
+                        crate::tool_matrix::matrix::RiskLevel::Low => "low",
+                    })
+                    .unwrap_or("moderate")
+                    .to_string(),
                 source: match source {
                     ToolSource::Builtin => "builtin".to_string(),
                     ToolSource::Dynamic => "dynamic".to_string(),
@@ -497,7 +505,15 @@ impl ToolRegistry {
                 description: def.description.clone(),
                 input_schema: def.input_schema.clone(),
                 tags: Vec::new(),
-                risk_level: "safe".to_string(),
+                risk_level: crate::security::default_tool_risk_map()
+                    .get(&def.name)
+                    .map(|r| match r {
+                        crate::tool_matrix::matrix::RiskLevel::Safe => "safe",
+                        crate::tool_matrix::matrix::RiskLevel::Moderate => "moderate",
+                        crate::tool_matrix::matrix::RiskLevel::Low => "low",
+                    })
+                    .unwrap_or("moderate")
+                    .to_string(),
                 source: match source {
                     ToolSource::Builtin => "builtin".to_string(),
                     ToolSource::Dynamic => "dynamic".to_string(),

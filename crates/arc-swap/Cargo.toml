@@ -1,0 +1,9 @@
+[package]
+name = "arc-swap"
+version = "1.7.1"
+edition = "2021"
+description = "Local compatibility shim for arc-swap APIs used in workspace"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+

@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// 工具优化建议类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OptimizationType {
     /// 合并工具
     Merge,
@@ -206,7 +206,7 @@ impl ToolOptimizer {
     }
 
     /// 计算工具健康度
-    fn calculate_health_scores(&mut self) {
+    pub fn calculate_health_scores(&mut self) {
         self.health_scores.clear();
 
         for (tool_name, metrics) in &self.tool_metrics {

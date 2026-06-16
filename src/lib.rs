@@ -18,9 +18,11 @@ mod command_resolver;
 mod config;
 mod path_resolver;
 mod sandbox;
+pub mod security;
 mod tools;
 // Context is now a separate crate: tokitai-context
 pub use tokitai_context as context; // Re-export for backward compatibility
+pub use tokitai_filekv as filekv;
 mod assistant_common;
 mod autonomous_assistant;
 pub mod autonomy;
@@ -35,6 +37,7 @@ mod observability;
 mod orchestrator;
 mod prompt_engineering;
 mod provider_config;
+pub mod scientist;
 pub mod tool_market;
 mod tool_matrix;
 pub mod tui;
@@ -52,6 +55,12 @@ pub use tokitai_context::{
     BranchDiff, BranchMetadata, BranchState, ContextBranch, ContextGraph, ContextGraphManager,
     CowConfig, CowManager, CowStats, ForkResult, MergeResult, MergeStrategy, Merger,
     ParallelContextManager, ParallelContextManagerConfig,
+};
+
+// FileKV public types
+pub use tokitai_filekv::{
+    FileKV, FileKVConfig, FileKVStats, FileKVStatsSnapshot, MemTable, MemTableConfig,
+    MemTableEntry, SegmentFile, SparseIndex, SparseIndexManager, ValuePointer, WalEntry, WalManager,
 };
 
 // 重新导出 orchestrator 公共类型（用于集成测试）

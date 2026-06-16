@@ -52,7 +52,7 @@ pub struct ToolDefinition {
 }
 
 fn default_risk_level() -> String {
-    "safe".to_string()
+    "moderate".to_string()
 }
 
 fn default_tool_source() -> String {
@@ -112,7 +112,8 @@ pub enum RiskLevel {
     #[default]
     Safe,
     Moderate,
-    Dangerous,
+    /// 最高风险等级 — 包括命令执行、Git 写入、文件删除等（原 Dangerous）
+    Low,
 }
 
 /// 服务质量指标

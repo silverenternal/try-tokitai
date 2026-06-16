@@ -96,6 +96,34 @@ tokitai list             # 列出已安装工具
 
 ## 🚀 快速开始
 
+### 启动前需要安装
+
+要启动本项目的核心能力（CLI / TUI / MCP），只需要准备下面这些：
+
+1. `Rust 1.75+`
+   - 用于编译和运行项目
+   - 验证命令：`rustc --version`
+
+2. `Cargo`
+   - 通常随 Rust 一起安装
+   - 验证命令：`cargo --version`
+
+3. 一个可用的 LLM 接入方式（二选一）
+   - 本地方式：安装 `Ollama` 并拉取至少一个模型
+   - 远程方式：准备任一受支持提供商的 API Key（OpenAI / Anthropic / Gemini / 智谱 / 月之暗面等）
+
+4. Windows 用户的本地编译工具链（仅 Windows 源码编译需要）
+   - 推荐使用 Rust 默认的 MSVC toolchain
+   - 如本机缺少链接器，需要安装 Visual Studio C++ Build Tools
+
+下面这些 **不是项目启动前置**：
+
+- Git 上下文增强相关：`Git`（推荐安装，但不是纯启动 CLI/TUI 的硬前置）
+- 自然科学验证与科学后端：`Lean4`、`lake`、`Mathlib`、`RDKit`、`Biopython`、`ASE`、`LAMMPS`、`OpenFOAM`、`Psi4`、`Quantum ESPRESSO`
+- 额外运行时：`R` / `Rscript`、Python 科学栈、MPI 工具链
+
+也就是说，**不安装自然科学验证工具，本项目仍然可以正常启动和使用核心 Agent 能力**。
+
 ### 1. 配置 API Key
 
 ```bash

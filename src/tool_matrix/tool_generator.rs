@@ -280,6 +280,28 @@ impl ToolGenerator {
             None
         };
 
+        // 安全验证：检查输出路径是否在允许的目录内
+        // 如果未配置允许路径，则跳过验证（向后兼容）
+        let allowed_paths = crate::security::SecurityConfig::default().allowed_tool_gen_paths;
+        if !allowed_paths.is_empty() {
+            let canonical_target = request
+                .target_path
+                .canonicalize()
+                .unwrap_or_else(|_| request.target_path.clone());
+            let is_allowed = allowed_paths.iter().any(|root| {
+                canonical_target.starts_with(root)
+                    || canonical_target
+                        .starts_with(root.canonicalize().unwrap_or_else(|_| root.clone()))
+            });
+            if !is_allowed {
+                return Err(anyhow::anyhow!(
+                    "Tool generation path {:?} is not in allowed directories: {:?}",
+                    canonical_target,
+                    allowed_paths
+                ));
+            }
+        }
+
         // 确保目标目录存在
         if let Some(parent) = request.target_path.parent() {
             fs::create_dir_all(parent)?;

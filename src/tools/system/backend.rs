@@ -414,6 +414,7 @@ impl ProcessBackend for LinuxBackend {
         std::path::Path::new(&format!("/proc/{}", pid)).exists()
     }
 
+    #[cfg(unix)]
     fn check_process_ownership(&self, pid: u32) -> Result<(), ProcessError> {
         use std::fs;
         use std::os::unix::fs::MetadataExt;
@@ -432,6 +433,12 @@ impl ProcessBackend for LinuxBackend {
             }
         }
 
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn check_process_ownership(&self, _pid: u32) -> Result<(), ProcessError> {
+        // Windows: no UID-based ownership check, skip
         Ok(())
     }
 }
@@ -559,6 +566,7 @@ impl ProcessBackend for MacOSBackend {
             .unwrap_or(false)
     }
 
+    #[cfg(unix)]
     fn check_process_ownership(&self, pid: u32) -> Result<(), ProcessError> {
         let output = Command::new("ps")
             .args(["-o", "uid=", "-p", &pid.to_string()])
@@ -586,6 +594,11 @@ impl ProcessBackend for MacOSBackend {
             )));
         }
 
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn check_process_ownership(&self, _pid: u32) -> Result<(), ProcessError> {
         Ok(())
     }
 }
@@ -768,6 +781,58 @@ fn parse_time_string(time_str: &str) -> Option<u64> {
     None
 }
 
+/// Windows 平台后端实现
+#[cfg(windows)]
+pub struct WindowsBackend;
+
+#[cfg(windows)]
+impl ProcessBackend for WindowsBackend {
+    fn get_process_files(&self, pid: u32, limit: usize) -> Result<Vec<String>, ProcessError> {
+        // Use wmic or handle.exe on Windows
+        let output = Command::new("wmic")
+            .args(["process", "where", &format!("ProcessId={}", pid), "get", "ExecutablePath"])
+            .output()
+            .map_err(|e| ProcessError::CommandFailed(format!("wmic failed: {}", e)))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<String> = stdout.lines()
+            .skip(1).take(limit)
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| l.trim().to_string())
+            .collect();
+        Ok(lines)
+    }
+
+    fn get_process_env(&self, _pid: u32) -> Result<Vec<String>, ProcessError> {
+        Ok(vec!["(env not available on Windows)".to_string()])
+    }
+
+    fn get_system_resources(&self) -> Result<SystemResourceInfo, SystemInfoError> {
+        Ok(SystemResourceInfo {
+            cpu_cores: std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4),
+            load_avg_1m: None,
+            load_avg_5m: None,
+            load_avg_15m: None,
+            mem_total_kb: 0,
+            mem_free_kb: 0,
+            mem_available_kb: None,
+            disk_usage: DiskUsageInfo { total_gb: 0.0, used_gb: 0.0, available_gb: 0.0, usage_percent: 0.0 },
+            uptime_secs: None,
+        })
+    }
+
+    fn process_exists(&self, pid: u32) -> bool {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid)])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+
+    fn check_process_ownership(&self, _pid: u32) -> Result<(), ProcessError> {
+        Ok(()) // Windows: skip UID check
+    }
+}
+
 /// 根据当前平台创建后端实例
 pub fn create_backend() -> Box<dyn ProcessBackend> {
     #[cfg(target_os = "linux")]
@@ -780,7 +845,12 @@ pub fn create_backend() -> Box<dyn ProcessBackend> {
         Box::new(MacOSBackend)
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        Box::new(WindowsBackend)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         panic!("不支持的操作系统")
     }

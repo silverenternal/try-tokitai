@@ -68,8 +68,7 @@ parking_lot = "0.12"
 lru = "0.12"
 moka = { version = "0.12", features = ["sync"] }
 bytes = "1.5"
-ahash = { version = "0.8", features = ["serde"] }
-arc-swap = "1.7"  # RES-001: Lock-free Arc<Mmap> management
+arc-swap = "1.7.1"  # RES-001: Lock-free Arc<Mmap> management
 mimalloc = { version = "0.1", default-features = false, optional = true }
 num_cpus = "1"
 
