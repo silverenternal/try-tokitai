@@ -5,6 +5,8 @@ sandbox/
 downloads/
 *.context/
 .DS_Store
+.claude/
+.tokitai/
 CRASH
 input_tmp.in
 .tokitai_tui.log
