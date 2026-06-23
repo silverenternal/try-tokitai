@@ -18,6 +18,7 @@
 use crate::external_process::metadata::{
     ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel, ToolExecutionResult,
 };
+use crate::text_encoding::decode_bytes;
 use crate::external_process::wrapper::{validation, ExternalTool};
 use crate::tool_matrix::matrix::ToolDefinition;
 use anyhow::{bail, Context, Result};
@@ -160,8 +161,8 @@ impl ProcessWrapper {
 
         match result {
             Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = decode_bytes(&output.stdout);
+                let stderr = decode_bytes(&output.stderr);
                 Ok((stdout, stderr))
             }
             Ok(Err(e)) => bail!("Process execution failed: {}", e),

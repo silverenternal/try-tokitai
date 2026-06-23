@@ -25,6 +25,7 @@ path = "src/lib.rs"
 default = []
 # YAML 支持：用于 OpenAPI 规范解析
 yaml = ["serde_yaml"]
+desktop-shell = ["dep:wry", "dep:tao"]
 # Tensor 计算：实验性功能，提供张量计算和神经网络基础操作
 # 注意：此 feature 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 candle、tch-rs）
 tensor = ["dep:candle-core", "dep:candle-nn", "dep:safetensors", "dep:half", "dep:ndarray"]
@@ -37,8 +38,8 @@ tokitai = "0.4.0"
 tokitai-core = "0.4.0"
 tokitai-mcp-server = "0.4.0"
 
-# Context management (local crate)
-tokitai-context = { path = "crates/tokitai-context" }
+# Context management
+tokitai-context = "0.1.2"
 tokitai-filekv = { path = "crates/tokitai-filekv" }
 
 # AI Scientist crates
@@ -61,6 +62,8 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 async-trait = "0.1"
 async-stream = "0.3"
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
@@ -69,6 +72,7 @@ reqwest-eventsource = "0.6"
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
+scopeguard = "1.2"
 
 # Logging and tracing
 tracing = "0.1"
@@ -83,6 +87,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1.10"
 urlencoding = "2.1"
 url = "2.5"
+rfd = "0.15"
 
 # Web scraping
 scraper = "0.22"
@@ -122,6 +127,8 @@ tera = "1.19"
 # Terminal UI
 crossterm = "0.27"
 ratatui = "0.26"
+wry = { version = "0.40", optional = true }
+tao = { version = "0.28", optional = true }
 
 # System utilities
 which = "6.0"
@@ -162,10 +169,23 @@ ignored = [
 
 # 排除独立测试目录
 [workspace]
-members = ["crates/arc-swap", "crates/tokitai-context", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science"]
+members = ["crates/arc-swap", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science"]
 exclude = ["test_tensor"]
+
+[profile.release]
+incremental = false
 
 
 [[bench]]
 name = "core_benchmarks"
 harness = false
+
+[[bin]]
+name = "desktop_shell"
+path = "src/bin/desktop_shell.rs"
+required-features = ["desktop-shell"]
+
+[[bin]]
+name = "desktop_wry"
+path = "src/bin/desktop_wry.rs"
+required-features = ["desktop-shell"]

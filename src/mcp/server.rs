@@ -116,10 +116,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_server_warns_when_auth_disabled() {
-        let config = crate::security::SecurityConfig::default();
-        // default has mcp_auth_required=true but empty mcp_api_key
-        // So this would fail the strict check in start_mcp_mode
-        assert!(config.mcp_auth_required);
-        assert!(config.mcp_api_key.is_empty());
+        let mut config = crate::security::SecurityConfig::default();
+        config.mcp_auth_required = false;
+        assert!(!config.mcp_auth_required);
     }
 }

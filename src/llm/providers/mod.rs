@@ -59,6 +59,11 @@ impl LLMProvider for OpenAIProvider {
             stop: request.stop,
             stream: Some(false),
             tools: request.tools,
+            thinking: request
+                .thinking_mode
+                .clone()
+                .map(|mode| serde_json::json!({ "type": mode })),
+            reasoning_effort: request.reasoning_effort,
         };
 
         let response: OpenAIResponse = self
@@ -132,6 +137,11 @@ impl LLMProvider for OpenAIProvider {
             stop: request.stop,
             stream: Some(true),
             tools: request.tools,
+            thinking: request
+                .thinking_mode
+                .clone()
+                .map(|mode| serde_json::json!({ "type": mode })),
+            reasoning_effort: request.reasoning_effort,
         };
 
         let mut event_source = reqwest_eventsource::EventSource::new(
@@ -496,6 +506,8 @@ impl LLMProvider for ZhipuProvider {
             stop: request.stop,
             stream: Some(false),
             tools: request.tools,
+            thinking: None,
+            reasoning_effort: None,
         };
 
         let response: OpenAIResponse = self
@@ -584,6 +596,8 @@ impl LLMProvider for MoonshotProvider {
             stop: request.stop,
             stream: Some(false),
             tools: request.tools,
+            thinking: None,
+            reasoning_effort: None,
         };
 
         let response: OpenAIResponse = self
@@ -649,6 +663,10 @@ struct OpenAIRequest {
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

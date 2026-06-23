@@ -9,7 +9,6 @@ pub mod literature;
 pub mod privacy;
 pub mod security;
 pub mod sympy_tool;
-pub mod visualization;
 
 #[cfg(test)]
 mod integration_tests;

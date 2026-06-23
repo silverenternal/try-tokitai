@@ -7,7 +7,6 @@ mod tests {
     use tempfile::tempdir;
     use tokitai::ToolProvider;
 
-    /// Verify scientist tools are registered and have proper definitions.
     #[test]
     fn test_literature_tools_registered() {
         let defs = crate::scientist::tools::literature::LiteratureTools::tool_definitions();
@@ -22,6 +21,7 @@ mod tests {
         let defs = crate::scientist::tools::computation::ComputationTools::tool_definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"run_python"), "run_python not found in {:?}", names);
+        assert!(names.contains(&"run_python_file"), "run_python_file not found in {:?}", names);
         assert!(names.contains(&"run_r"), "run_r not found in {:?}", names);
         assert!(names.contains(&"run_julia"), "run_julia not found in {:?}", names);
     }
@@ -30,67 +30,30 @@ mod tests {
     fn test_data_tools_registered() {
         let defs = crate::scientist::tools::data::DataTools::tool_definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"load_dataset"), "load_dataset not found in {:?}", names);
-        assert!(names.contains(&"preprocess"), "preprocess not found in {:?}", names);
-        assert!(names.contains(&"split_data"), "split_data not found in {:?}", names);
+        assert!(
+            names.contains(&"inspect_dataset"),
+            "inspect_dataset not found in {:?}",
+            names
+        );
     }
 
     #[test]
     fn test_domain_science_tools_registered() {
         let defs = crate::scientist::tools::domain_science::DomainScienceTools::tool_definitions();
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(
-            names.contains(&"chemistry_mol_weight"),
-            "chemistry_mol_weight not found in {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"chemistry_conformers"),
-            "chemistry_conformers not found in {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"chemistry_quantum_energy"),
-            "chemistry_quantum_energy not found in {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"biology_translate"),
-            "biology_translate not found in {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"biology_blast"),
-            "biology_blast not found in {:?}",
-            names
-        );
-        assert!(names.contains(&"simulation_run"), "simulation_run not found in {:?}", names);
-        assert!(
-            names.contains(&"simulation_run_preset"),
-            "simulation_run_preset not found in {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"scientific_backend_status"),
-            "scientific_backend_status not found in {:?}",
-            names
-        );
+        assert!(names.contains(&"chemistry_mol_weight"));
+        assert!(names.contains(&"chemistry_conformers"));
+        assert!(names.contains(&"chemistry_quantum_energy"));
+        assert!(names.contains(&"biology_translate"));
+        assert!(names.contains(&"biology_blast"));
+        assert!(names.contains(&"simulation_run"));
+        assert!(names.contains(&"simulation_run_preset"));
+        assert!(names.contains(&"scientific_backend_status"));
     }
 
-    #[test]
-    fn test_visualization_tools_registered() {
-        let defs = crate::scientist::tools::visualization::VisualizationTools::tool_definitions();
-        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"plot"), "plot not found in {:?}", names);
-        assert!(names.contains(&"chart"), "chart not found in {:?}", names);
-        assert!(names.contains(&"graph"), "graph not found in {:?}", names);
-    }
-
-    /// Verify run_python actually executes code
     #[test]
     fn test_run_python_executes_real_code() {
         let tool = crate::scientist::tools::computation::ComputationTools;
-        // Test with a simple print statement
         let result = tool.call_tool(
             "run_python",
             &serde_json::json!({
@@ -100,18 +63,15 @@ mod tests {
         );
         assert!(result.is_ok(), "run_python failed: {:?}", result.err());
         let output = result.unwrap().to_string();
-        if output.contains("\"status\":\"success\"") {
-            assert!(output.contains("hello from python"), "Output: {}", output);
-        } else {
-            assert!(
-                output.contains("program not found") || output.contains("Failed to start"),
-                "Unexpected output without python runtime: {}",
-                output
-            );
-        }
+        assert!(
+            output.contains("hello from python")
+                || output.contains("no working Python interpreter")
+                || output.contains("Failed to start"),
+            "Unexpected output: {}",
+            output
+        );
     }
 
-    /// Verify run_python timeout works
     #[test]
     fn test_run_python_timeout() {
         let tool = crate::scientist::tools::computation::ComputationTools;
@@ -122,13 +82,11 @@ mod tests {
                 "timeout_secs": 1
             }),
         );
-        // Should succeed at the call_tool level but contain a timeout result
         assert!(result.is_ok());
         let output = result.unwrap().to_string();
         assert!(output.contains("timed_out"), "Expected timeout in: {}", output);
     }
 
-    /// Verify search_paper uses a real local-first fallback instead of fake data.
     #[test]
     fn test_search_paper_local_first_behavior() {
         let temp_dir = tempdir().unwrap();
@@ -157,28 +115,6 @@ mod tests {
         assert_eq!(payload["status"], "success");
         assert_eq!(payload["mode"], "local");
         assert!(payload["total"].as_u64().unwrap() >= 1);
-    }
-
-    /// Verify plot returns NotImplemented (not fake base64)
-    #[test]
-    fn test_plot_returns_not_implemented() {
-        let tool = crate::scientist::tools::visualization::VisualizationTools;
-        let result = tool.call_tool(
-            "plot",
-            &serde_json::json!({
-                "plot_type": "line",
-                "data": [1, 2, 3],
-                "title": "test"
-            }),
-        );
-        // Should be an error, not fake success with "[base64-encoded PNG]"
-        assert!(result.is_err(), "plot should return NotImplemented error");
-        let err_str = result.unwrap_err().to_string();
-        assert!(
-            !err_str.contains("[base64-encoded PNG]"),
-            "Must not contain fake base64: {}",
-            err_str
-        );
     }
 
     #[test]
@@ -256,27 +192,22 @@ mod tests {
         assert_eq!(preset["status"], "success");
         assert_eq!(preset["result"]["sim_type"], "qe");
 
-        let status = tool.call_tool("scientific_backend_status", &serde_json::json!({})).unwrap();
+        let status = tool
+            .call_tool("scientific_backend_status", &serde_json::json!({}))
+            .unwrap();
         assert_eq!(status["status"], "success");
         assert!(status["report"]["python"]["name"].is_string());
     }
 
-    /// Count total registered tool definitions
     #[test]
     fn test_count_all_scientist_tools() {
         let literature = crate::scientist::tools::literature::LiteratureTools::tool_definitions().len();
         let computation = crate::scientist::tools::computation::ComputationTools::tool_definitions().len();
         let data = crate::scientist::tools::data::DataTools::tool_definitions().len();
         let domain_science = crate::scientist::tools::domain_science::DomainScienceTools::tool_definitions().len();
-        let viz = crate::scientist::tools::visualization::VisualizationTools::tool_definitions().len();
         let sympy = crate::scientist::tools::sympy_tool::SymPyTool::tool_definitions().len();
 
-        let total = literature + computation + data + domain_science + viz + sympy;
-        // At minimum: 3 + 3 + 3 + 11 + 3 + 5 = 28
-        assert!(total >= 28, "Expected >= 28 scientist tools, got {}", total);
-        println!(
-            "Scientist tools: literature={}, computation={}, data={}, domain_science={}, viz={}, sympy={}, total={}",
-            literature, computation, data, domain_science, viz, sympy, total
-        );
+        let total = literature + computation + data + domain_science + sympy;
+        assert!(total >= 21, "Expected >= 21 scientist tools, got {}", total);
     }
 }

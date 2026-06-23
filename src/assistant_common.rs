@@ -19,49 +19,45 @@ use crate::tool_matrix::tool_selector::LightweightToolSelector;
 /// 包含 CLI 助手和自主助手共享的基础配置
 #[derive(Clone)]
 pub struct AssistantConfig {
-    /// AI API 端点 URL
     pub api_url: String,
-    /// AI API 密钥（可选）
     #[allow(dead_code)]
     pub api_key: Option<String>,
-    /// 使用的模型名称
     pub model: String,
-    /// HTTP 客户端（持久连接池）
+    pub temperature: f32,
+    pub max_tokens: usize,
     pub reqwest_client: Client,
 }
 
 impl AssistantConfig {
-    /// 创建新的助手配置
-    ///
-    /// # 参数
-    /// - `api_url`: AI API 端点 URL
-    /// - `api_key`: AI API 密钥（可选）
-    /// - `model`: 使用的模型名称
     pub fn new(api_url: String, api_key: Option<String>, model: String) -> Self {
-        // 创建持久的 HTTP 客户端（带连接池和超时配置）
+        Self::new_with_runtime(api_url, api_key, model, 0.7, 4096)
+    }
+
+    pub fn new_with_runtime(
+        api_url: String,
+        api_key: Option<String>,
+        model: String,
+        temperature: f32,
+        max_tokens: usize,
+    ) -> Self {
         let reqwest_client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120)) // 120 秒超时
-            .connect_timeout(std::time::Duration::from_secs(30)) // 30 秒连接超时
-            .pool_max_idle_per_host(10) // 每个主机最多 10 个空闲连接
+            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(10)
             .build()
-            .expect("创建 HTTP 客户端失败");
+            .expect("failed to create reqwest client");
 
         Self {
             api_url,
             api_key,
             model,
+            temperature,
+            max_tokens,
             reqwest_client,
         }
     }
 }
 
-// ============================================================================
-// 工具管理器
-// ============================================================================
-
-/// 工具管理器
-///
-/// 统一管理工具注册表、选择器和分发器
 pub struct ToolManager {
     /// 工具注册表
     pub tool_registry: ToolRegistry,
@@ -103,6 +99,29 @@ impl ToolManager {
         self.tool_registry
             .get_all_tools()
             .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": serde_json::from_str::<Value>(&t.input_schema).unwrap_or_default()
+                    }
+                })
+            })
+            .collect()
+    }
+
+    pub fn get_tools_by_name(&self, allowed_names: &[&str]) -> Vec<Value> {
+        let allowed = allowed_names
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        self.tool_registry
+            .get_all_tools()
+            .into_iter()
+            .filter(|tool| allowed.contains(tool.name.as_str()))
             .map(|t| {
                 serde_json::json!({
                     "type": "function",
@@ -195,7 +214,7 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     let _ = tool_registry.create_toolbox(ToolBox::new(
         "scientist",
         "Scientist Tools",
-        "AI Scientist research tools — literature, computation, data, visualization",
+        "AI Scientist research tools — literature, computation, data, symbolic verification",
     ));
 
     // 从各个 ToolProvider 注册工具
@@ -252,18 +271,44 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     use crate::scientist::tools::computation::ComputationTools;
     use crate::scientist::tools::data::DataTools;
     use crate::scientist::tools::literature::LiteratureTools;
-    use crate::scientist::tools::visualization::VisualizationTools;
     let _ = tool_registry
         .register_from_provider_sync::<LiteratureTools>(Some("scientist"), ToolSource::Builtin);
     let _ = tool_registry
         .register_from_provider_sync::<ComputationTools>(Some("scientist"), ToolSource::Builtin);
     let _ = tool_registry
         .register_from_provider_sync::<DataTools>(Some("scientist"), ToolSource::Builtin);
-    let _ = tool_registry
-        .register_from_provider_sync::<VisualizationTools>(Some("scientist"), ToolSource::Builtin);
 
     // Register SymPy tools
     use crate::scientist::tools::sympy_tool::SymPyTool;
     let _ = tool_registry
         .register_from_provider_sync::<SymPyTool>(Some("scientist"), ToolSource::Builtin);
+}
+
+pub fn curated_ai_scientist_tool_names() -> &'static [&'static str] {
+    &[
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "grep",
+        "find_files",
+        "read_pdf",
+        "search_web",
+        "fetch_url",
+        "search_arxiv",
+        "search_paper",
+        "fetch_paper",
+        "run_python",
+        "run_python_file",
+        "inspect_dataset",
+        "sympy_simplify",
+        "sympy_solve",
+        "sympy_integrate",
+        "sympy_diff",
+        "sympy_matrix",
+        "git_status",
+        "git_diff",
+        "git_log",
+        "git_current_branch",
+    ]
 }

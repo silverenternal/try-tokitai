@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 use tracing::warn;
+
+use crate::app_paths::AppPaths;
 
 /// 安全的文件操作沙箱
 ///
@@ -204,6 +208,84 @@ pub fn create_default_sandbox() -> SandboxedFileOps {
     SandboxedFileOps::new(allowed_dirs, None)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxBootstrapManifest {
+    pub initialized_at: DateTime<Utc>,
+    pub sandbox_root: String,
+    pub downloads_root: String,
+    pub sessions_root: String,
+    pub default_workspace_root: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SandboxBootstrapResult {
+    pub manifest: SandboxBootstrapManifest,
+    pub first_run: bool,
+}
+
+pub fn initialize_app_sandbox(paths: &AppPaths) -> Result<SandboxBootstrapResult> {
+    fs::create_dir_all(paths.state_dir()).with_context(|| {
+        format!(
+            "failed to create state directory: {}",
+            paths.state_dir().display()
+        )
+    })?;
+    fs::create_dir_all(paths.sessions_dir()).with_context(|| {
+        format!(
+            "failed to create sessions directory: {}",
+            paths.sessions_dir().display()
+        )
+    })?;
+    fs::create_dir_all(paths.sandbox_dir()).with_context(|| {
+        format!(
+            "failed to create sandbox directory: {}",
+            paths.sandbox_dir().display()
+        )
+    })?;
+    fs::create_dir_all(paths.downloads_dir()).with_context(|| {
+        format!(
+            "failed to create downloads directory: {}",
+            paths.downloads_dir().display()
+        )
+    })?;
+    fs::create_dir_all(paths.workspace_state_dir(&paths.sandbox_dir())).with_context(|| {
+        format!(
+            "failed to create workspace state directory: {}",
+            paths.workspace_state_dir(&paths.sandbox_dir()).display()
+        )
+    })?;
+
+    let manifest_path = paths.sandbox_manifest_path();
+    if let Ok(content) = fs::read_to_string(&manifest_path) {
+        if let Ok(manifest) = serde_json::from_str::<SandboxBootstrapManifest>(&content) {
+            return Ok(SandboxBootstrapResult {
+                manifest,
+                first_run: false,
+            });
+        }
+    }
+
+    let manifest = SandboxBootstrapManifest {
+        initialized_at: Utc::now(),
+        sandbox_root: paths.sandbox_dir().display().to_string(),
+        downloads_root: paths.downloads_dir().display().to_string(),
+        sessions_root: paths.sessions_dir().display().to_string(),
+        default_workspace_root: paths.sandbox_dir().display().to_string(),
+    };
+    let content = serde_json::to_string_pretty(&manifest)?;
+    fs::write(&manifest_path, content).with_context(|| {
+        format!(
+            "failed to write sandbox bootstrap manifest: {}",
+            manifest_path.display()
+        )
+    })?;
+
+    Ok(SandboxBootstrapResult {
+        manifest,
+        first_run: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +413,31 @@ mod tests {
         let nested_file = temp_dir.path().join("subdir/nested/file.txt");
         assert!(sandbox.write_file(&nested_file, "nested content").is_ok());
         assert!(nested_file.exists());
+    }
+
+    #[test]
+    fn test_initialize_app_sandbox_bootstraps_and_reuses_manifest() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("base");
+        let frontend_dir = temp_dir.path().join("frontend");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&base_dir).unwrap();
+        fs::create_dir_all(&frontend_dir).unwrap();
+
+        let paths = AppPaths::new(base_dir, frontend_dir, state_dir);
+        let first = initialize_app_sandbox(&paths).unwrap();
+        assert!(first.first_run);
+        assert!(paths.sandbox_dir().exists());
+        assert!(paths.downloads_dir().exists());
+        assert!(paths.sessions_dir().exists());
+        assert!(paths.workspace_state_dir(&paths.sandbox_dir()).exists());
+        assert!(paths.sandbox_manifest_path().exists());
+
+        let second = initialize_app_sandbox(&paths).unwrap();
+        assert!(!second.first_run);
+        assert_eq!(
+            second.manifest.default_workspace_root,
+            first.manifest.default_workspace_root
+        );
     }
 }

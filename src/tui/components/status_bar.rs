@@ -73,13 +73,11 @@ impl StatusBar {
         } else {
             Color::DarkGray
         };
+
         let spans = vec![
+            Span::styled(format!("{} ", mode), Style::default().fg(mode_color)),
             Span::styled(
-                format!("{} ", mode),
-                Style::default().fg(mode_color),
-            ),
-            Span::styled(
-                format!("🔒{} ", state.privacy_level),
+                format!("[privacy:{}] ", state.privacy_level),
                 Style::default().fg(privacy_color),
             ),
             Span::styled(

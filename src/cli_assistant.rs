@@ -25,8 +25,11 @@ use serde_json::{json, Value};
 use std::io::{self, Write};
 use tracing::{info, warn};
 
-use crate::assistant_common::{register_all_builtin_tools, AssistantConfig, ToolManager};
+use crate::assistant_common::{
+    curated_ai_scientist_tool_names, register_all_builtin_tools, AssistantConfig, ToolManager,
+};
 use crate::config::Config;
+use crate::domain_prompt::{science_expert_system_prompt, strip_emoji};
 use crate::integration::IntegratedModules;
 use crate::integration::IntegratedModulesConfig;
 use crate::llm::{LLMManager, ModelCommandHandler, ProviderInitializer};
@@ -43,8 +46,9 @@ use crate::scientist::tools::computation::ComputationTools;
 use crate::scientist::tools::data::DataTools;
 use crate::scientist::tools::literature::LiteratureTools;
 use crate::scientist::tools::sympy_tool::SymPyTool;
-use crate::scientist::tools::visualization::VisualizationTools;
+use crate::tools::io::security::{SandboxConfig, SecurePathResolver};
 use std::sync::Arc;
+use crate::tui::components::message_block::{MessageBlock, ToolCallStatus};
 
 /// CLI AI 助手 - 面向用户的交互式助手
 pub struct CliAssistant {
@@ -79,7 +83,6 @@ pub struct CliAssistant {
     literature_tools: LiteratureTools,
     computation_tools: ComputationTools,
     data_tools: DataTools,
-    visualization_tools: VisualizationTools,
     /// SymPy 数学验证工具
     sympy_tool: SymPyTool,
     /// LLM 管理器（多提供商支持）
@@ -95,7 +98,21 @@ pub struct CliAssistant {
     pub security_config: crate::security::SecurityConfig,
 }
 
+#[derive(Debug, Clone)]
+pub struct ChatRunResult {
+    pub content: String,
+    pub trace: Vec<MessageBlock>,
+}
+
 impl CliAssistant {
+    fn path_resolver(&self) -> SecurePathResolver {
+        SecurePathResolver::with_config(SandboxConfig {
+            allowed_roots: self.security_config.allowed_roots.clone(),
+            allow_symlinks: self.security_config.allow_symlinks,
+            max_depth: self.security_config.max_path_depth as usize,
+        })
+    }
+
     /// 创建新的 CLI AI 助手
     ///
     /// # 参数
@@ -186,15 +203,21 @@ impl CliAssistant {
             }
         }
 
+        let path_resolver = SecurePathResolver::with_config(SandboxConfig {
+            allowed_roots: security_config.allowed_roots.clone(),
+            allow_symlinks: security_config.allow_symlinks,
+            max_depth: security_config.max_path_depth as usize,
+        });
+
         Ok(Self {
             config,
             tool_manager,
             orchestrator: Orchestrator::new(),
             integrated_modules,
-            file_ops: FileOperations::default(),
-            file_search: FileSearchTools::default(),
-            pdf_tools: PdfTools::default(),
-            project_templates: ProjectTemplates::default(),
+            file_ops: FileOperations::with_resolver(path_resolver.clone()),
+            file_search: FileSearchTools::with_resolver(path_resolver.clone()),
+            pdf_tools: PdfTools::with_resolver(path_resolver.clone()),
+            project_templates: ProjectTemplates::with_resolver(path_resolver),
             system_tools: SystemTools::default(),
             process_tools: ProcessTools::default(),
             code_tools: CodeTools::default(),
@@ -211,7 +234,6 @@ impl CliAssistant {
             literature_tools: LiteratureTools,
             computation_tools: ComputationTools,
             data_tools: DataTools,
-            visualization_tools: VisualizationTools,
             sympy_tool: SymPyTool::new(),
             llm_manager,
             model_handler,
@@ -222,7 +244,8 @@ impl CliAssistant {
 
     /// 获取所有工具定义
     pub fn get_tool_definitions(&self) -> Vec<Value> {
-        self.tool_manager.get_all_tools()
+        self.tool_manager
+            .get_tools_by_name(curated_ai_scientist_tool_names())
     }
 
     /// 获取 LLM 管理器（用于 TUI 模式）
@@ -232,6 +255,8 @@ impl CliAssistant {
 
     /// 对 LLM 输出的工具参数做安全检查
     fn validate_tool_args(&self, name: &str, args: &Value) -> Result<()> {
+        let resolver = self.path_resolver();
+
         // 对文件操作类工具验证 path 参数
         let file_tools = [
             "read_file", "write_file", "edit_file", "copy_file", "move_file",
@@ -240,7 +265,7 @@ impl CliAssistant {
         ];
         if file_tools.contains(&name) {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                let validation = crate::tools::io::security::validate_path(path);
+                let validation = resolver.resolve(path);
                 if !validation.is_valid {
                     return Err(anyhow::anyhow!(
                         "路径安全验证失败：{}",
@@ -251,7 +276,7 @@ impl CliAssistant {
             // 也检查 source/dest 参数（用于 copy/move）
             for key in &["source", "dest", "destination"] {
                 if let Some(p) = args.get(*key).and_then(|v| v.as_str()) {
-                    let validation = crate::tools::io::security::validate_path(p);
+                    let validation = resolver.resolve(p);
                     if !validation.is_valid {
                         return Err(anyhow::anyhow!(
                             "路径安全验证失败 ({}): {}",
@@ -363,7 +388,6 @@ impl CliAssistant {
         try_tool!(self.literature_tools);
         try_tool!(self.computation_tools);
         try_tool!(self.data_tools);
-        try_tool!(self.visualization_tools);
         try_tool!(self.sympy_tool);
 
         warn!("❌ 未知工具：{}", name);
@@ -371,6 +395,60 @@ impl CliAssistant {
     }
 
     /// 与 AI 对话并处理工具调用
+    pub fn call_tool_without_auth(&self, name: &str, args: &Value) -> Result<String> {
+        info!("Executing tool without auth gate: {} {:?}", name, args);
+
+        if let Err(e) = self.validate_tool_args(name, args) {
+            return Err(e);
+        }
+
+        use tokitai_core::ToolErrorKind;
+
+        macro_rules! try_tool {
+            ($tools:expr) => {
+                match $tools.call_tool(name, args) {
+                    Ok(result) => {
+                        info!("Tool execution succeeded: {}", name);
+                        self.tool_manager.tool_registry.record_usage(name, true, 0);
+                        return Ok(result.to_string());
+                    }
+                    Err(e) => {
+                        if e.kind != ToolErrorKind::NotFound {
+                            info!("Tool execution failed: {} - {:?}", name, e);
+                            self.tool_manager.tool_registry.record_usage(name, false, 0);
+                            return Err(anyhow::anyhow!("tool {} failed: {}", name, e));
+                        }
+                    }
+                }
+            };
+        }
+
+        try_tool!(self.file_ops);
+        try_tool!(self.file_search);
+        try_tool!(self.pdf_tools);
+        try_tool!(self.project_templates);
+        try_tool!(self.system_tools);
+        try_tool!(self.process_tools);
+        try_tool!(self.code_tools);
+        try_tool!(self.web_search);
+        try_tool!(self.download_tools);
+        try_tool!(self.network_tools);
+        try_tool!(self.wikipedia_tools);
+        try_tool!(self.git_ops);
+        try_tool!(self.http_client);
+        try_tool!(self.json_tools);
+        try_tool!(self.json_query);
+        try_tool!(self.json_merge);
+        try_tool!(self.data_conversion);
+        try_tool!(self.literature_tools);
+        try_tool!(self.computation_tools);
+        try_tool!(self.data_tools);
+        try_tool!(self.sympy_tool);
+
+        warn!("Unknown tool in no-auth path: {}", name);
+        Err(anyhow::anyhow!("unknown tool: {}", name))
+    }
+
     pub fn chat_and_handle_tools(&self, messages: &mut Vec<Value>, input: &str) -> Result<String> {
         messages.push(json!({
             "role": "user",
@@ -380,8 +458,22 @@ impl CliAssistant {
         self.chat(messages)
     }
 
+    pub fn chat_with_trace(&self, messages: &mut Vec<Value>) -> Result<ChatRunResult> {
+        let mut trace = Vec::new();
+        let content = self.chat_internal(messages, Some(&mut trace))?;
+        Ok(ChatRunResult { content, trace })
+    }
+
     /// 与 AI 对话
     pub fn chat(&self, messages: &mut Vec<Value>) -> Result<String> {
+        self.chat_internal(messages, None)
+    }
+
+    fn chat_internal(
+        &self,
+        messages: &mut Vec<Value>,
+        mut trace: Option<&mut Vec<MessageBlock>>,
+    ) -> Result<String> {
         let tools = self.get_tool_definitions();
 
         // 从环境变量读取最新配置（支持运行时切换供应商）
@@ -444,7 +536,7 @@ impl CliAssistant {
                         .and_then(|tc: &Value| tc.as_array());
                     if let Some(tool_calls) = tool_calls_opt {
                         if !tool_calls.is_empty() {
-                            return self.handle_tool_calls(tool_calls, messages);
+                            return self.handle_tool_calls(tool_calls, messages, trace.as_deref_mut());
                         }
                     }
 
@@ -457,7 +549,7 @@ impl CliAssistant {
                                 "⚠️  AI 返回空响应，可能是 API 服务异常或模型输出问题".to_string()
                             );
                         }
-                        return Ok(content.to_string());
+                        return Ok(strip_emoji(content).trim().to_string());
                     } else {
                         warn!("⚠️  AI 响应中 content 字段缺失，完整消息：{:?}", message);
                     }
@@ -469,7 +561,12 @@ impl CliAssistant {
     }
 
     /// 处理工具调用
-    fn handle_tool_calls(&self, tool_calls: &[Value], messages: &mut Vec<Value>) -> Result<String> {
+    fn handle_tool_calls(
+        &self,
+        tool_calls: &[Value],
+        messages: &mut Vec<Value>,
+        mut trace: Option<&mut Vec<MessageBlock>>,
+    ) -> Result<String> {
         let mut results = Vec::new();
 
         for tool_call in tool_calls {
@@ -488,6 +585,15 @@ impl CliAssistant {
             let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
 
             println!("🔧 执行工具：{}", name);
+            let tool_call_id = tool_call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+            if let Some(ref mut blocks) = trace {
+                blocks.push(MessageBlock::ToolCall {
+                    name: name.to_string(),
+                    args: args.clone(),
+                    call_id: tool_call_id.clone(),
+                    status: ToolCallStatus::Executing,
+                });
+            }
 
             // 安全授权检查
             let auth = crate::security::authorize_tool_call(
@@ -497,6 +603,13 @@ impl CliAssistant {
             );
             if let crate::security::AuthDecision::Deny(reason) = auth {
                 println!("🚫 工具被安全策略拦截：{}", reason);
+                if let Some(ref mut blocks) = trace {
+                    blocks.push(MessageBlock::ToolResult {
+                        call_id: tool_call_id.clone(),
+                        result: format!("安全策略拦截：{}", reason),
+                        success: false,
+                    });
+                }
                 results.push(json!({
                     "role": "assistant",
                     "content": "",
@@ -513,6 +626,13 @@ impl CliAssistant {
             match self.call_tool(name, &args) {
                 Ok(result) => {
                     println!("✅ 工具执行成功");
+                    if let Some(ref mut blocks) = trace {
+                        blocks.push(MessageBlock::ToolResult {
+                            call_id: tool_call_id.clone(),
+                            result: result.clone(),
+                            success: true,
+                        });
+                    }
                     results.push(json!({
                         "role": "assistant",
                         "content": "",
@@ -526,6 +646,13 @@ impl CliAssistant {
                 }
                 Err(e) => {
                     println!("❌ 工具执行失败：{}", e);
+                    if let Some(ref mut blocks) = trace {
+                        blocks.push(MessageBlock::ToolResult {
+                            call_id: tool_call_id.clone(),
+                            result: format!("错误：{}", e),
+                            success: false,
+                        });
+                    }
                     results.push(json!({
                         "role": "assistant",
                         "content": "",
@@ -541,7 +668,7 @@ impl CliAssistant {
         }
 
         messages.extend(results);
-        self.chat(messages)
+        self.chat_internal(messages, trace)
     }
 
     /// 运行交互式 CLI
@@ -554,18 +681,8 @@ impl CliAssistant {
 
         let mut messages: Vec<Value> = vec![json!({
             "role": "system",
-            "content": "你是一个强大的 AI 助手，可以调用各种工具来帮助用户完成任务。你可以：
-- 读取和写入文件
-- 执行系统命令
-- 分析代码
-- 搜索网络信息
-- 搜索和下载图片
-- 网页截图和获取渲染内容
-
-请根据用户需求选择合适的工具。
-
-当用户输入'help'时，请列出你可以执行的操作示例。"
-        })];
+        "content": science_expert_system_prompt()
+    })];
 
         let mut stdout = io::stdout();
 

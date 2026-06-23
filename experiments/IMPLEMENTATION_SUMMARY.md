@@ -188,7 +188,7 @@ python experiments/scripts/generate_charts.py --all
 
 ### Compilation
 ```bash
-cd /home/hugo/codes/try-tokitai && cargo check
+cd <project-root> && cargo check
 # ✅ Compiles successfully (only dead code warnings)
 ```
 

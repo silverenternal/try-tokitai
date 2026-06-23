@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """Verify paper structure"""
 import sys, re
+from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 
-path = r'D:\try-tokitai\experiments\iris_model_comparison\paper\research_paper.md'
+path = Path(__file__).resolve().parents[1] / 'paper' / 'research_paper.md'
 with open(path, 'r', encoding='utf-8') as f:
     content = f.read()
 

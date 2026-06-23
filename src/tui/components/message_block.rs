@@ -1,15 +1,15 @@
-//! Message block types for rich chat rendering
+//! Message block types for rich chat rendering.
 //!
 //! Each message in the conversation is represented as a `MessageBlock`,
 //! which carries its visual presentation state alongside the data.
 
+use super::diff_viewer::FileDiff;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use super::diff_viewer::FileDiff;
 
 /// Status of a tool call
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +26,62 @@ pub enum ToolCallStatus {
     Complete,
     /// Execution failed
     Failed(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentSubagentRecord {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub purpose: String,
+    #[serde(default)]
+    pub input: String,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentVerifierCheck {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentVerifierReport {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub checks: Vec<AgentVerifierCheck>,
+    #[serde(default)]
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<String>,
+    #[serde(default)]
+    pub deterministic: bool,
 }
 
 /// A single message block in the conversation
@@ -76,6 +132,14 @@ pub enum MessageBlock {
     Diff {
         diff: FileDiff,
     },
+    /// A durable subagent execution record
+    Subagent {
+        record: AgentSubagentRecord,
+    },
+    /// A durable verifier report
+    Verification {
+        report: AgentVerifierReport,
+    },
 }
 
 impl MessageBlock {
@@ -90,6 +154,8 @@ impl MessageBlock {
             MessageBlock::Error { .. } => "Error",
             MessageBlock::System { .. } => "System",
             MessageBlock::Diff { .. } => "Diff",
+            MessageBlock::Subagent { .. } => "Subagent",
+            MessageBlock::Verification { .. } => "Verifier",
         }
     }
 
@@ -97,15 +163,15 @@ impl MessageBlock {
     pub fn color(&self) -> Color {
         match self {
             MessageBlock::User { .. } => Color::Cyan,
-            MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. } => {
-                Color::Green
-            }
+            MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. } => Color::Green,
             MessageBlock::ToolCall { .. } => Color::Yellow,
             MessageBlock::ToolResult { .. } => Color::Gray,
             MessageBlock::Thinking { .. } => Color::Blue,
             MessageBlock::Error { .. } => Color::Red,
             MessageBlock::System { .. } => Color::DarkGray,
             MessageBlock::Diff { .. } => Color::Green,
+            MessageBlock::Subagent { .. } => Color::Magenta,
+            MessageBlock::Verification { .. } => Color::Yellow,
         }
     }
 
@@ -121,6 +187,22 @@ impl MessageBlock {
             MessageBlock::ToolCall { name, .. } => name,
             MessageBlock::ToolResult { result, .. } => result,
             MessageBlock::Diff { diff } => &diff.file_path,
+            MessageBlock::Subagent { record } => {
+                if !record.output.is_empty() {
+                    &record.output
+                } else if !record.purpose.is_empty() {
+                    &record.purpose
+                } else {
+                    &record.name
+                }
+            }
+            MessageBlock::Verification { report } => {
+                if !report.summary.is_empty() {
+                    &report.summary
+                } else {
+                    &report.status
+                }
+            }
         }
     }
 
@@ -130,8 +212,7 @@ impl MessageBlock {
         if text.is_empty() {
             return 1;
         }
-        // Rough estimate: count lines accounting for wrapping
-        let max_chars = width.saturating_sub(4) as usize; // Allow for borders/padding
+        let max_chars = width.saturating_sub(4) as usize;
         if max_chars == 0 {
             return 1;
         }
@@ -149,7 +230,6 @@ impl MessageBlock {
                 }
             }
         }
-        // Add header line
         lines + 1
     }
 
@@ -158,10 +238,8 @@ impl MessageBlock {
         let color = self.color();
         let label = self.role_label();
         let max_chars = width.saturating_sub(4) as usize;
-
         let mut lines = Vec::new();
 
-        // Header line
         match self {
             MessageBlock::ToolCall {
                 name,
@@ -170,25 +248,21 @@ impl MessageBlock {
                 status,
             } => {
                 let status_icon = match status {
-                    ToolCallStatus::Pending => "⏳",
-                    ToolCallStatus::Approved => "✓",
-                    ToolCallStatus::Denied(_) => "✗",
-                    ToolCallStatus::Executing => "⚙",
-                    ToolCallStatus::Complete => "✓",
-                    ToolCallStatus::Failed(_) => "✗",
+                    ToolCallStatus::Pending => "[ ]",
+                    ToolCallStatus::Approved => "[+]",
+                    ToolCallStatus::Denied(_) => "[x]",
+                    ToolCallStatus::Executing => "[>]",
+                    ToolCallStatus::Complete => "[v]",
+                    ToolCallStatus::Failed(_) => "[!]",
                 };
-                let args_preview = serde_json::to_string(args)
-                    .unwrap_or_default();
+                let args_preview = serde_json::to_string(args).unwrap_or_default();
                 let args_short = if args_preview.len() > 60 {
                     format!("{}...", &args_preview[..57])
                 } else {
                     args_preview
                 };
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{} ", status_icon),
-                        Style::default().fg(color),
-                    ),
+                    Span::styled(format!("{} ", status_icon), Style::default().fg(color)),
                     Span::styled(
                         format!("Tool: {}", name),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -204,15 +278,12 @@ impl MessageBlock {
                 result,
                 success,
             } => {
-                let icon = if *success { "✓" } else { "✗" };
+                let icon = if *success { "[v]" } else { "[!]" };
                 let result_color = if *success { Color::Green } else { Color::Red };
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{} Result", icon),
-                        Style::default().fg(result_color).add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                // Content lines follow below
+                lines.push(Line::from(vec![Span::styled(
+                    format!("{} Result", icon),
+                    Style::default().fg(result_color).add_modifier(Modifier::BOLD),
+                )]));
                 for line in wrap_text(result, max_chars) {
                     lines.push(Line::from(Span::styled(
                         format!("  {}", line),
@@ -236,15 +307,78 @@ impl MessageBlock {
                     return lines;
                 }
             }
+            MessageBlock::Subagent { record } => {
+                let name = if record.name.is_empty() {
+                    "subagent"
+                } else {
+                    record.name.as_str()
+                };
+                let status = if record.status.is_empty() {
+                    "pending"
+                } else {
+                    record.status.as_str()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", label),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{} [{}]", name, status),
+                        Style::default().fg(Color::White),
+                    ),
+                ]));
+            }
+            MessageBlock::Verification { report } => {
+                let status = if report.status.is_empty() {
+                    "unknown"
+                } else {
+                    report.status.as_str()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", label),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("[{}]", status),
+                        Style::default().fg(Color::White),
+                    ),
+                ]));
+                if !report.summary.is_empty() {
+                    for line in wrap_text(&report.summary, max_chars) {
+                        lines.push(Line::from(Span::styled(
+                            line,
+                            Style::default().fg(Color::White),
+                        )));
+                    }
+                }
+                for issue in &report.issues {
+                    for line in wrap_text(&format!("- {}", issue), max_chars) {
+                        lines.push(Line::from(Span::styled(
+                            line,
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+                return lines;
+            }
             _ => {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("{} {}", label, if matches!(self, MessageBlock::AssistantStreaming { .. }) { "|" } else { "" }),
+                    format!(
+                        "{} {}",
+                        label,
+                        if matches!(self, MessageBlock::AssistantStreaming { .. }) {
+                            "|"
+                        } else {
+                            ""
+                        }
+                    ),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 )]));
             }
         }
 
-        // Content lines
         let text = match self {
             MessageBlock::ToolCall { .. } => return lines,
             _ => self.content(),
@@ -317,8 +451,27 @@ mod tests {
 
     #[test]
     fn test_message_block_colors() {
-        assert_eq!(MessageBlock::User { content: String::new(), branch_id: String::new() }.color(), Color::Cyan);
-        assert_eq!(MessageBlock::Assistant { content: String::new() }.color(), Color::Green);
-        assert_eq!(MessageBlock::Error { content: String::new() }.color(), Color::Red);
+        assert_eq!(
+            MessageBlock::User {
+                content: String::new(),
+                branch_id: String::new(),
+            }
+            .color(),
+            Color::Cyan
+        );
+        assert_eq!(
+            MessageBlock::Assistant {
+                content: String::new(),
+            }
+            .color(),
+            Color::Green
+        );
+        assert_eq!(
+            MessageBlock::Error {
+                content: String::new(),
+            }
+            .color(),
+            Color::Red
+        );
     }
 }

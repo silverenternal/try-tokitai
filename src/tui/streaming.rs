@@ -76,6 +76,7 @@ pub fn build_conversation(
     messages: &[crate::tui::components::message_block::MessageBlock],
     agent_prompt: Option<&str>,
 ) -> Vec<crate::llm::Message> {
+    use crate::domain_prompt::science_expert_system_prompt;
     use crate::llm::Message;
     use crate::tui::components::message_block::MessageBlock;
 
@@ -90,9 +91,8 @@ pub fn build_conversation(
         prompt.replace("{cwd}", &cwd)
     } else {
         format!(
-            "You are a helpful AI assistant with access to tools.\n\
-             Current working directory: {}\n\
-             When reading or writing files, use paths relative to this directory.",
+            "{}\n\nCurrent working directory: {}\nWhen reading or writing files, use paths relative to this directory.",
+            science_expert_system_prompt(),
             cwd
         )
     };
@@ -160,7 +160,7 @@ pub fn build_conversation(
                     tool_call_id: Some(call_id.clone()),
                 });
             }
-            // Skip streaming, diff, error, system, and thinking blocks in API history
+            // Skip streaming, diff, error, system, thinking, subagent, and verifier blocks in API history
             _ => {}
         }
     }

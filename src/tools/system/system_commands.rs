@@ -16,6 +16,7 @@
 use serde_json::json;
 use tokitai::tool;
 
+use crate::text_encoding::decode_bytes;
 use super::config;
 use super::error::CommandError;
 
@@ -122,8 +123,8 @@ impl SystemCommands {
                 CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
             })?;
 
-        let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut stdout = decode_bytes(&output.stdout);
+        let stderr = decode_bytes(&output.stderr);
 
         // 限制输出大小
         if stdout.len() > config::MAX_OUTPUT_SIZE {
@@ -207,8 +208,8 @@ impl SystemCommands {
             CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
         })?;
 
-        let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut stdout = decode_bytes(&output.stdout);
+        let mut stderr = decode_bytes(&output.stderr);
 
         // 限制输出大小
         if stdout.len() > config::MAX_OUTPUT_SIZE {
@@ -235,7 +236,7 @@ impl SystemCommands {
     /// 获取当前工作目录
     ///
     /// ## 返回
-    /// JSON 格式：`{"success": true, "data": {"path": "/home/user"}}`
+    /// JSON 格式：`{"success": true, "data": {"path": "<current-working-directory>"}}`
     ///
     /// ## 错误
     /// - 获取当前目录失败（罕见）

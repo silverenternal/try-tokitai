@@ -190,6 +190,7 @@ impl TuiApp {
         provider: Arc<dyn LLMProvider>,
         tool_definitions: Option<Vec<serde_json::Value>>,
         tool_executor: Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
+        security_config: crate::security::SecurityConfig,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
         let model = provider.default_model().to_string();
@@ -239,7 +240,7 @@ impl TuiApp {
             status_word: String::new(),
             max_tokens: (crate::tui::model_config::ModelRegistry::get_max_tokens(&model, usize::MAX) as f64 * 0.5) as usize,
             temperature: 0.7,
-            security_config: crate::security::SecurityConfig::default(),
+            security_config,
             session_manager: crate::tui::session::SessionManager::new().unwrap(),
             session_picker_idx: 0,
             session_picker_visible: false,
@@ -428,7 +429,7 @@ impl TuiApp {
                     match self.session_manager.load_messages(&id) {
                         Ok(msgs) => {
                             if msgs.is_empty() {
-                                // Empty session — go straight to chat
+                                // Empty session: go straight to chat
                                 self.session_manager.current_id = Some(id);
                                 self.session_picker_visible = false;
                                 self.mode = AppMode::Idle;
@@ -458,7 +459,7 @@ impl TuiApp {
                     let _ = self.session_manager.create_session(&model);
                     self.add_message(MessageBlock::System {
                         content: format!(
-                            "Ready — Deep Think: {}, {} tokens (temp {})",
+                            "Ready - Deep Think: {}, {} tokens (temp {})",
                             if self.config_state.deep_think { "ON" } else { "OFF" },
                             self.max_tokens,
                             self.temperature,
@@ -496,7 +497,7 @@ impl TuiApp {
                 let _ = self.session_manager.create_session(&model);
                 self.add_message(MessageBlock::System {
                     content: format!(
-                        "Ready — Deep Think: {}, {} tokens (temp {})",
+                        "Ready - Deep Think: {}, {} tokens (temp {})",
                         if self.config_state.deep_think { "ON" } else { "OFF" },
                         self.max_tokens,
                         self.temperature,
@@ -548,7 +549,7 @@ impl TuiApp {
                             let is_last_on_branch = self.graph_selected >= last_node_on_branch;
 
                             if user_nodes.is_empty() || is_last_on_branch {
-                                // Last node on its branch — continue on same branch
+                                // Last node on its branch: continue on same branch
                                 self.messages = msgs;
                                 self.current_branch_id = current_branch.clone();
                                 self.graph_session_id = None;
@@ -559,7 +560,7 @@ impl TuiApp {
                                     content: "Resumed conversation.".to_string(),
                                 });
                             } else {
-                                // Non-last node — fork new branch, keep ALL messages
+                                // Non-last node: fork new branch, keep all messages
                                 let fork_id = self.session_manager.fork_at_node(self.graph_selected, &current_branch)
                                     .unwrap_or_else(|_| format!("fork-{}", self.graph_selected + 1));
                                 self.current_branch_id = fork_id.clone();
@@ -651,9 +652,9 @@ impl TuiApp {
 
         // Sync security config from config screen
         // Security Level drives both auto_approve and max_risk:
-        //   Strict  → auto_approve=false (all tools ask for confirmation)
-        //   Standard → auto_approve=true, max_risk=Safe (auto safe, dialog for moderate+)
-        //   Permissive → auto_approve=true, max_risk=Moderate (auto safe+moderate, dialog for dangerous)
+        //   Strict: auto_approve=false (all tools ask for confirmation)
+        //   Standard: auto_approve=true, max_risk=Safe (auto safe, dialog for moderate+)
+        //   Permissive: auto_approve=true, max_risk=Moderate (auto safe+moderate, dialog for dangerous)
         let level = self.config_state.security_level;
         self.auto_approve_tools = level.auto_approve_enabled();
         self.security_config.auto_approve_tools = level.auto_approve_enabled();
@@ -936,6 +937,8 @@ impl TuiApp {
             stop: None,
             stream: true,
             tools,
+            thinking_mode: None,
+            reasoning_effort: None,
         };
 
         let provider = Arc::clone(&self.provider);
@@ -1078,7 +1081,7 @@ impl TuiApp {
                     } else {
                         let phase = self.research.phase.label().to_string();
                         self.add_message(MessageBlock::System {
-                            content: format!("→ Auto-advancing to: **{}**", phase),
+                            content: format!("-> Auto-advancing to: **{}**", phase),
                         });
                         let instructions = self.research.system_prompt();
                         self.send_user_message(&format!("Continue research. {}", instructions), rt);
@@ -1307,7 +1310,7 @@ impl TuiApp {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan))
-            .title(" Tokitai AI — Sessions ")
+            .title(" Tokitai AI - Sessions ")
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1425,7 +1428,7 @@ impl TuiApp {
         let help_y = inner.y + inner.height.saturating_sub(2);
         frame.render_widget(
             Paragraph::new(Span::styled(
-                " j/k or ↑↓ select  Enter graph  N new  D delete  Q quit",
+                " j/k or Up/Down select  Enter graph  N new  D delete  Q quit",
                 Style::default().fg(Color::DarkGray),
             )),
             Rect::new(inner.x + 1, help_y, inner.width.saturating_sub(2), 1),
@@ -1468,18 +1471,41 @@ impl TuiApp {
         self.frame_count = self.frame_count.wrapping_add(1);
         self.update_status_word();
 
+        if std::env::var_os("TOKITAI_TUI_MINIMAL").is_some() {
+            use ratatui::{
+                layout::Rect,
+                style::{Color, Style},
+                widgets::{Block, Borders, Paragraph},
+            };
+
+            let area = frame.size();
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Tokitai AI ");
+            frame.render_widget(block, area);
+            let inner = Rect::new(
+                area.x.saturating_add(2),
+                area.y.saturating_add(2),
+                area.width.saturating_sub(4),
+                1,
+            );
+            frame.render_widget(Paragraph::new("Minimal TUI render OK"), inner);
+            return;
+        }
+
         if self.mode == AppMode::Config {
             crate::tui::components::ConfigScreen::render(frame, frame.size(), &self.config_state, self.frame_count);
             return;
         }
 
-        // ── Session Picker ──
+        // Session Picker
         if self.mode == AppMode::SessionPicker {
             self.render_session_picker(frame);
             return;
         }
 
-        // ── Graph View ──
+        // Graph View
         if self.mode == AppMode::GraphView {
             self.graph_total = crate::tui::components::conversation_graph::render_graph(
                 frame,
@@ -1507,12 +1533,12 @@ impl TuiApp {
         // Chat panel (full area, no thinking split)
         ChatPanel::render(frame, layout.chat_area, &self.messages, scroll, self.frame_count, &self.status_word);
 
-        // Thinking bar — between chat and input (Claude Code style)
+        // Thinking bar between chat and input
         if thinking_on {
             render_thinking_bar(frame, layout.thinking_area, self.frame_count, &self.status_word);
         }
 
-        // Command suggestions — above input when typing /
+        // Command suggestions above input when typing /
         if suggestions_on {
             render_suggestions(frame, layout.suggestions_area, &self.input.buffer, &self.commands);
         }
@@ -1530,7 +1556,7 @@ impl TuiApp {
     }
 }
 
-/// Render a polished thinking indicator — Claude Code style.
+/// Render a polished thinking indicator.
 ///
 /// Shows a breathing dot (pulsing size + opacity) and a status word
 /// on a single line, optionally with a subtle shimmer trail.
@@ -1559,7 +1585,7 @@ fn render_thinking_bar(
     };
 
     // Dot animation: pick from a set of Unicode circle variants based on intensity
-    let dots = ["○", "◌", "◎", "●", "◉", "●", "◎", "◌"];
+    let dots = [".", "o", "o", "O", "O", "O", "*", "*"];
     let dot_idx = ((intensity * 7.0) as usize).min(7);
     let dot = dots[dot_idx];
 
@@ -1574,7 +1600,7 @@ fn render_thinking_bar(
     let shimmer: String = (0..3)
         .map(|i| {
             let fade = (intensity * 0.6) - (i as f32 * 0.20);
-            if fade > 0.0 { "·" } else { " " }
+            if fade > 0.0 { "." } else { " " }
         })
         .collect();
 
@@ -1593,7 +1619,7 @@ fn render_thinking_bar(
             )),
         ),
         ratatui::text::Span::styled(
-            format!("  {}…", word),
+            format!("  {}...", word),
             ratatui::style::Style::default().fg(Color::Cyan),
         ),
     ]);
@@ -1623,7 +1649,7 @@ fn render_suggestions(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, i
     for (name, desc) in matches.iter().take(12) {
         lines.push(Line::from(vec![
             Span::styled(format!(" /{}", name), Style::default().fg(Color::Yellow)),
-            Span::styled(format!(" — {}", desc), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" - {}", desc), Style::default().fg(Color::DarkGray)),
         ]));
     }
 
@@ -1648,6 +1674,7 @@ pub fn run_tui(
     provider: Arc<dyn LLMProvider>,
     tool_definitions: Option<Vec<serde_json::Value>>,
     tool_executor: Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
+    security_config: crate::security::SecurityConfig,
 ) -> Result<()> {
     info!("Starting Claude Code-style TUI");
 
@@ -1675,9 +1702,9 @@ pub fn run_tui(
         .build()?;
 
     // Create app
-    let mut app = TuiApp::new(provider, tool_definitions, tool_executor);
+    let mut app = TuiApp::new(provider, tool_definitions, tool_executor, security_config);
 
-    // Main loop — wrapped in catch_unwind to prevent crashes from killing the process
+    // Main loop wrapped in catch_unwind to prevent crashes from killing the process
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_main_loop(&mut terminal, &mut app, &rt)
     }));

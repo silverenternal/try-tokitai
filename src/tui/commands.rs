@@ -251,9 +251,9 @@ Available commands:
             "auto-approve" => {
                 app.auto_approve_tools = !app.auto_approve_tools;
                 let status = if app.auto_approve_tools {
-                    "ON 鈥?tool calls will be auto-approved"
+                    "ON - tool calls will be auto-approved"
                 } else {
-                    "OFF 鈥?tool calls require confirmation"
+                    "OFF - tool calls require confirmation"
                 };
                 app.add_message(MessageBlock::System {
                     content: format!("Auto-approve: {}", status),
@@ -276,7 +276,7 @@ Available commands:
                 } else {
                     let mut list = format!("Available agents ({}):\n\n", agents.len());
                     for (name, desc) in &agents {
-                        list.push_str(&format!("  /agent {} 鈥?{}\n", name, desc));
+                        list.push_str(&format!("  /agent {} - {}\n", name, desc));
                     }
                     list.push_str("\nUsage: /agent <name> to switch");
                     app.add_message(MessageBlock::System { content: list });
@@ -688,7 +688,7 @@ Available commands:
                         if !s.summary.is_empty() {
                             info.push_str(&format!("\nSummary: {}", s.summary));
                         } else {
-                            info.push_str("\nSummary: (none 鈥?use /summarize to generate)");
+                            info.push_str("\nSummary: (none - use /summarize to generate)");
                         }
                         app.add_message(MessageBlock::System { content: info });
                     } else {
@@ -715,7 +715,7 @@ Available commands:
                         let current = app.session_manager.current_id.as_deref() == Some(&s.id);
                         let marker = if current { " *" } else { "" };
                         let mut entry = format!(
-                            "  `{}`{}  鈥?{}\n    {} messages | {} | {}",
+                            "  `{}`{}  - {}\n    {} messages | {} | {}",
                             s.id, marker, s.title, s.message_count, s.model, s.updated_at,
                         );
                         if !s.summary.is_empty() {

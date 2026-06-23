@@ -271,7 +271,7 @@ pub struct SecurityTomlConfig {
 fn default_max_auto_risk() -> RiskLevel {
     // Low = 最低安全限制, 最高通过率 — 默认放行所有操作 (Safe / Moderate / Low)
     // 如需收紧, 在 config.toml [security] 中设置 max_auto_approve_risk = "safe" 或 "moderate"
-    RiskLevel::Low
+    RiskLevel::Safe
 }
 fn default_autonomous_max_risk() -> RiskLevel {
     RiskLevel::Safe

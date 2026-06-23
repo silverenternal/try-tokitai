@@ -14,12 +14,18 @@
 //! - `tokitai-context`: Git 风格的平行上下文管理系统（独立 crate）
 
 // 内部模块（不公开）
+pub mod app_paths;
 mod command_resolver;
-mod config;
+pub mod config;
+mod domain_prompt;
+pub mod desktop_host;
+pub mod host;
 mod path_resolver;
 mod sandbox;
 pub mod security;
+pub mod text_encoding;
 mod tools;
+pub mod toolchain;
 // Context is now a separate crate: tokitai-context
 pub use tokitai_context as context; // Re-export for backward compatibility
 pub use tokitai_filekv as filekv;
@@ -41,6 +47,7 @@ pub mod scientist;
 pub mod tool_market;
 mod tool_matrix;
 pub mod tui;
+pub mod web;
 
 // 重新导出常用类型
 pub use assistant_common::AssistantConfig;

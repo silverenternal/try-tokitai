@@ -44,6 +44,7 @@ use crate::autonomy::{AgentCoordinator, GitWorkflow, GitWorkflowTools};
 use crate::integration::{IntegratedModules, IntegratedModulesConfig};
 use crate::tool_matrix::registry::ToolRegistry;
 use crate::tool_matrix::registry::ToolSource;
+use crate::tools::io::security::{SandboxConfig, SecurePathResolver};
 use crate::tools::HttpClientTools;
 use crate::tools::{
     CodeTools, DownloadTools, FileOperations, GitOperations, JsonFormatTools, SearchTools,
@@ -84,6 +85,14 @@ pub struct AutonomousAssistant {
 }
 
 impl AutonomousAssistant {
+    fn path_resolver(&self) -> SecurePathResolver {
+        SecurePathResolver::with_config(SandboxConfig {
+            allowed_roots: self.security_config.allowed_roots.clone(),
+            allow_symlinks: self.security_config.allow_symlinks,
+            max_depth: self.security_config.max_path_depth as usize,
+        })
+    }
+
     /// 创建新的自主助手
     ///
     /// # 参数
@@ -157,6 +166,12 @@ impl AutonomousAssistant {
         let git_workflow = GitWorkflow::new(project_root.clone(), autonomy_dir.join("git"))
             .map_err(|e| anyhow::anyhow!("创建 Git 工作流失败：{}", e))?;
 
+        let path_resolver = SecurePathResolver::with_config(SandboxConfig {
+            allowed_roots: security_config.allowed_roots.clone(),
+            allow_symlinks: security_config.allow_symlinks,
+            max_depth: security_config.max_path_depth as usize,
+        });
+
         Ok(Self {
             config,
             tool_manager,
@@ -165,7 +180,7 @@ impl AutonomousAssistant {
             autonomy_dir,
             coordinator,
             git_workflow,
-            file_ops: FileOperations::default(),
+            file_ops: FileOperations::with_resolver(path_resolver),
             system_tools: SystemTools::default(),
             code_tools: CodeTools::default(),
             web_search: SearchTools::new(),
@@ -296,6 +311,8 @@ impl AutonomousAssistant {
 
     /// 对 LLM 输出的工具参数做安全检查
     fn validate_tool_args(&self, name: &str, args: &Value) -> Result<()> {
+        let resolver = self.path_resolver();
+
         // 对文件操作类工具验证 path 参数
         let file_tools = [
             "read_file", "write_file", "edit_file", "copy_file", "move_file",
@@ -304,7 +321,7 @@ impl AutonomousAssistant {
         ];
         if file_tools.contains(&name) {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                let validation = crate::tools::io::security::validate_path(path);
+                let validation = resolver.resolve(path);
                 if !validation.is_valid {
                     return Err(anyhow::anyhow!(
                         "路径安全验证失败：{}",
@@ -314,7 +331,7 @@ impl AutonomousAssistant {
             }
             for key in &["source", "dest", "destination"] {
                 if let Some(p) = args.get(*key).and_then(|v| v.as_str()) {
-                    let validation = crate::tools::io::security::validate_path(p);
+                    let validation = resolver.resolve(p);
                     if !validation.is_valid {
                         return Err(anyhow::anyhow!(
                             "路径安全验证失败 ({}): {}",

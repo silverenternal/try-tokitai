@@ -7,7 +7,7 @@
 use ai_scientist_rag::PdfParser;
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokitai::tool;
 
 pub struct LiteratureTools;
@@ -61,18 +61,6 @@ fn extract_title_from_md(content: &str, fallback: &str) -> String {
         .find(|line| line.starts_with("# "))
         .map(|line| line.trim_start_matches("# ").trim().to_string())
         .unwrap_or_else(|| fallback.to_string())
-}
-
-fn read_text_excerpt(path: &Path) -> Option<String> {
-    let content = fs::read_to_string(path).ok()?;
-    let excerpt = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(8)
-        .collect::<Vec<_>>()
-        .join(" ");
-    if excerpt.is_empty() { None } else { Some(excerpt) }
 }
 
 fn search_local_papers(query: &str, limit: usize) -> Vec<LocalPaperRecord> {

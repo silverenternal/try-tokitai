@@ -240,6 +240,8 @@ impl ModelRouter {
                 stop: None,
                 stream: false,
                 tools: None,
+                thinking_mode: None,
+                reasoning_effort: None,
             };
 
             let start = std::time::Instant::now();

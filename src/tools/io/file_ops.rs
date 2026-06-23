@@ -4,6 +4,7 @@ use crate::tools::io::utils::{
     ensure_file_exists, ensure_is_dir, ensure_is_file, ensure_parent_dir_exists,
     validate_single_path,
 };
+use crate::text_encoding::read_text_file;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
@@ -51,7 +52,7 @@ impl FileOperations {
         ensure_file_exists(path_obj).map_err(|e| e.to_value())?;
 
         // 读取文件
-        let content = fs::read_to_string(path_obj).map_err(|e| {
+        let content = read_text_file(path_obj).map_err(|e| {
             IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(canonical_path.clone()),
@@ -240,7 +241,7 @@ impl FileOperations {
         ensure_file_exists(path_obj).map_err(|e| e.to_value())?;
 
         // 读取现有内容
-        let mut existing = fs::read_to_string(path_obj).map_err(|e| {
+        let mut existing = read_text_file(path_obj).map_err(|e| {
             IoToolError::IoError {
                 message: e.to_string(),
                 path: Some(canonical_path.clone()),

@@ -1,20 +1,16 @@
-//! Computation Tools — Python/R/Julia script execution with sandboxing
+//! Computation tools for lightweight, reproducible experiment execution.
 
 use serde_json::Value;
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tokitai::tool;
+use crate::toolchain::{default_toolchain_command, detect_toolchain_executable};
+use crate::text_encoding::decode_bytes;
 
 pub struct ComputationTools;
 
-/// Execute a subprocess command with timeout and capture all output.
-/// Returns JSON with stdout, stderr, exit_code, and timed_out flag.
-fn run_command_with_timeout(
-    program: &str,
-    args: &[&str],
-    input: &str,
-    timeout_secs: u64,
-) -> Value {
+fn run_command_with_timeout(program: &str, args: &[&str], input: &str, timeout_secs: u64) -> Value {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .stdin(std::process::Stdio::piped())
@@ -22,11 +18,11 @@ fn run_command_with_timeout(
         .stderr(std::process::Stdio::piped());
 
     let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
+        Ok(child) => child,
+        Err(err) => {
             return serde_json::json!({
                 "status": "error",
-                "error": format!("Failed to start {}: {}", program, e),
+                "error": format!("Failed to start {}: {}", program, err),
                 "stdout": "",
                 "stderr": "",
                 "exit_code": -1,
@@ -35,7 +31,6 @@ fn run_command_with_timeout(
         }
     };
 
-    // Write stdin if any
     if !input.is_empty() {
         use std::io::Write;
         if let Some(mut stdin) = child.stdin.take() {
@@ -43,47 +38,44 @@ fn run_command_with_timeout(
         }
     }
 
-    // Wait with timeout
     let timeout = Duration::from_secs(timeout_secs);
-    let result = match std::process::Child::try_wait(&mut child) {
-        Ok(Some(status)) => Ok(status), // already exited
-        _ => {
-            // Wait with timeout
-            let start = std::time::Instant::now();
-            loop {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return serde_json::json!({
-                        "status": "timeout",
-                        "error": format!("Execution timed out after {} seconds", timeout_secs),
-                        "stdout": "",
-                        "stderr": "",
-                        "exit_code": -1,
-                        "timed_out": true
-                    });
-                }
-                match child.try_wait() {
-                    Ok(Some(status)) => break Ok(status),
-                    Ok(None) => {
-                        std::thread::sleep(Duration::from_millis(50));
-                        continue;
-                    }
-                    Err(e) => break Err(e),
-                }
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return serde_json::json!({
+                "status": "timeout",
+                "error": format!("Execution timed out after {} seconds", timeout_secs),
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "timed_out": true
+            });
+        }
+
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(err) => {
+                return serde_json::json!({
+                    "status": "error",
+                    "error": format!("Failed while waiting for process: {}", err),
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": -1,
+                    "timed_out": false
+                });
             }
         }
-    };
+    }
 
-    let output = child.wait_with_output();
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            let exit_code = out.status.code().unwrap_or(-1);
-
-            if out.status.success() {
+    match child.wait_with_output() {
+        Ok(output) => {
+            let stdout = decode_bytes(&output.stdout);
+            let stderr = decode_bytes(&output.stderr);
+            let exit_code = output.status.code().unwrap_or(-1);
+            if output.status.success() {
                 serde_json::json!({
                     "status": "success",
                     "stdout": stdout,
@@ -102,9 +94,9 @@ fn run_command_with_timeout(
                 })
             }
         }
-        Err(e) => serde_json::json!({
+        Err(err) => serde_json::json!({
             "status": "error",
-            "error": format!("Failed to get process output: {}", e),
+            "error": format!("Failed to collect process output: {}", err),
             "stdout": "",
             "stderr": "",
             "exit_code": -1,
@@ -113,39 +105,33 @@ fn run_command_with_timeout(
     }
 }
 
-/// Find available Python interpreter: try "python" then "python3"
-fn find_python() -> &'static str {
-    if Command::new("python")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        "python"
-    } else {
-        "python3"
-    }
+fn detect_runtime_command(key: &str) -> Option<String> {
+    detect_toolchain_executable(key).or_else(|| {
+        let fallback = default_toolchain_command(key);
+        if Command::new(&fallback)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            Some(fallback)
+        } else {
+            None
+        }
+    })
+}
+
+fn find_python() -> Option<String> {
+    detect_runtime_command("python")
 }
 
 #[tool]
 impl ComputationTools {
-    /// Execute a Python script with timeout and return structured results.
-    ///
-    /// ## Parameters
-    /// - `code`: Python code to execute
-    /// - `timeout_secs`: Max execution time in seconds (default 30, max 120)
-    ///
-    /// ## Returns
-    /// JSON with stdout, stderr, exit_code, and timed_out flag.
-    ///
-    /// ## Security
-    /// Code is executed in a subprocess. For production, use Docker sandboxing.
+    /// Execute inline Python code.
     pub fn run_python(&self, code: String, timeout_secs: Option<u64>) -> Result<Value, String> {
         let timeout = timeout_secs.unwrap_or(30).min(120);
-        let python = find_python();
-
-        let result = run_command_with_timeout(python, &["-c", &code], "", timeout);
-
+        let python = find_python().ok_or_else(|| "run_python: no working Python interpreter was found".to_string())?;
+        let result = run_command_with_timeout(&python, &["-c", &code], "", timeout);
         Ok(serde_json::json!({
             "operation": "run_python",
             "python": python,
@@ -154,38 +140,78 @@ impl ComputationTools {
         }))
     }
 
-    /// Execute R code and return results.
-    pub fn run_r(&self, code: String, packages: Option<Vec<String>>) -> Result<Value, String> {
-        let timeout = 60u64;
+    /// Execute a Python file directly from the workspace.
+    pub fn run_python_file(
+        &self,
+        path: String,
+        args_json: Option<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<Value, String> {
+        let timeout = timeout_secs.unwrap_or(120).min(1800);
+        let python = find_python().ok_or_else(|| "run_python_file: no working Python interpreter was found".to_string())?;
+        let script_path = Path::new(&path);
+        if !script_path.exists() {
+            return Err(format!("run_python_file: file does not exist: {}", path));
+        }
+        if !script_path.is_file() {
+            return Err(format!("run_python_file: path is not a file: {}", path));
+        }
 
-        // Load requested packages
-        let preamble = if let Some(pkgs) = packages {
-            pkgs.iter()
-                .map(|p| format!("library({})", p))
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            String::new()
-        };
+        let owned_args = args_json
+            .as_deref()
+            .map(|raw| serde_json::from_str::<Vec<String>>(raw).unwrap_or_default())
+            .unwrap_or_default();
+        let mut final_args = Vec::with_capacity(1 + owned_args.len());
+        final_args.push(path.as_str());
+        for item in &owned_args {
+            final_args.push(item.as_str());
+        }
 
-        let full_code = format!("{}\n{}", preamble, code);
-        let result = run_command_with_timeout("Rscript", &["-e", &full_code], "", timeout);
-
+        let result = run_command_with_timeout(&python, &final_args, "", timeout);
         Ok(serde_json::json!({
-            "operation": "run_r",
+            "operation": "run_python_file",
+            "python": python,
+            "path": path,
+            "args_json": args_json,
+            "args": owned_args,
             "timeout_secs": timeout,
             "result": result
         }))
     }
 
-    /// Execute Julia code and return results.
-    pub fn run_julia(&self, code: String) -> Result<Value, String> {
-        let timeout = 60u64;
-        let result = run_command_with_timeout("julia", &["-e", &code], "", timeout);
+    /// Execute R code when Rscript is available.
+    pub fn run_r(&self, code: String, packages: Option<Vec<String>>) -> Result<Value, String> {
+        let rscript = detect_runtime_command("rscript")
+            .ok_or_else(|| "run_r: no working Rscript interpreter was found".to_string())?;
+        let preamble = packages
+            .unwrap_or_default()
+            .iter()
+            .map(|pkg| format!("library({})", pkg))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let full_code = if preamble.is_empty() {
+            code
+        } else {
+            format!("{}\n{}", preamble, code)
+        };
+        let result = run_command_with_timeout(&rscript, &["-e", &full_code], "", 60);
+        Ok(serde_json::json!({
+            "operation": "run_r",
+            "rscript": rscript,
+            "timeout_secs": 60,
+            "result": result
+        }))
+    }
 
+    /// Execute Julia code when Julia is available.
+    pub fn run_julia(&self, code: String) -> Result<Value, String> {
+        let julia = detect_runtime_command("julia")
+            .ok_or_else(|| "run_julia: no working Julia interpreter was found".to_string())?;
+        let result = run_command_with_timeout(&julia, &["-e", &code], "", 60);
         Ok(serde_json::json!({
             "operation": "run_julia",
-            "timeout_secs": timeout,
+            "julia": julia,
+            "timeout_secs": 60,
             "result": result
         }))
     }

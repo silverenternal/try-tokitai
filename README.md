@@ -150,11 +150,56 @@ cargo run --release -- --mcp
 cargo run --release -- --autonomous
 ```
 
+### 桌面宿主预接入
+
+当前项目还不是完整打包后的桌面应用，但已经支持通过宿主注入运行参数来模拟桌面壳接入：
+
+```bash
+$env:TOKITAI_HOST_MODE="desktop"
+$env:TOKITAI_FRONTEND_DIR="$PWD\\frontend"
+$env:TOKITAI_STATE_DIR="$env:LOCALAPPDATA\\Tokitai\\app-state"
+cargo run --release -- --web
+```
+
+可选环境变量：
+
+- `TOKITAI_HOST_MODE=desktop|web`
+- `TOKITAI_FRONTEND_DIR`
+- `TOKITAI_STATE_DIR`
+- `TOKITAI_BIND_ADDR`
+
+其中 `desktop` 模式会切换到桌面宿主描述：
+- transport: `bridge`
+- protocol: `tokitai-host-v1`
+- 默认声明支持文件对话框、终端、PTY、原生菜单
+
 ### 3. 运行测试
 
 ```bash
 cargo test
 ```
+
+### 历史 Session 清洗
+
+如果早期历史会话里已经写入了英文残留、乱码正文、错误标题或错误摘要，可以运行一次性迁移清洗脚本：
+
+```bash
+cargo run --bin repair_sessions -- --dry-run
+cargo run --bin repair_sessions --
+```
+
+可选参数：
+
+- `--dry-run`：只扫描和统计，不改文件
+- `--state-dir <path>`：指定包含 `sessions/` 的状态目录
+
+脚本会：
+
+- 清洗历史消息中的乱码/损坏正文
+- 尝试恢复常见 mojibake
+- 重建 session 标题与摘要
+- 同步回写 `index.json`
+- 自动备份原始 session 文件到 `sessions/_repair_backup/`
 
 ---
 
@@ -204,6 +249,7 @@ cargo test
 |------|------|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | **快速启动指南**（推荐先看） |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
+| [docs/BUILD_CACHE.md](docs/BUILD_CACHE.md) | 编译产物与缓存清理策略 |
 
 ### 🎯 核心创新
 | 文档 | 说明 |

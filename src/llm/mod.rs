@@ -135,6 +135,12 @@ pub struct ChatRequest {
     /// Tool/function definitions (OpenAI format)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
+    /// Provider-specific thinking mode, e.g. DeepSeek `enabled` / `disabled`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_mode: Option<String>,
+    /// Provider-specific reasoning effort, e.g. DeepSeek `high` / `max`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 fn default_temperature() -> f32 {

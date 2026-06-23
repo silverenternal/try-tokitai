@@ -123,15 +123,23 @@ impl ProviderManager {
             }
 
             // 创建默认供应商
-            let name = props
+                let name = props
                 .get("AI_API_URL")
                 .map(|url| {
                     if url.contains("ollama") {
                         "ollama"
+                    } else if url.contains("deepseek") {
+                        "deepseek"
                     } else if url.contains("openai") {
                         "openai"
                     } else if url.contains("anthropic") {
                         "anthropic"
+                    } else if url.contains("googleapis") || url.contains("generativelanguage") {
+                        "gemini"
+                    } else if url.contains("bigmodel") {
+                        "glm"
+                    } else if url.contains("moonshot") {
+                        "moonshot"
                     } else {
                         "default"
                     }

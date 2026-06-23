@@ -528,7 +528,7 @@ pip install scikit-learn>=1.0 numpy>=1.21 pandas>=1.3 matplotlib>=3.4 seaborn>=0
 
 ```bash
 # 进入代码目录
-cd D:\try-tokitai\experiments\iris_model_comparison\code
+cd experiments/iris_model_comparison/code
 
 # 按Phase顺序运行
 python 01_hyperparameter_sensitivity.py

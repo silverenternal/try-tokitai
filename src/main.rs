@@ -1,10 +1,15 @@
 #![recursion_limit = "256"]
 
+mod app_paths;
 mod command_resolver;
 mod config;
+mod domain_prompt;
+mod desktop_host;
+mod host;
 mod path_resolver;
 mod sandbox;
 pub mod security;
+mod text_encoding;
 mod tools;
 // Context is now a separate crate: tokitai-context
 mod assistant_common;
@@ -25,7 +30,9 @@ mod provider_config;
 pub mod scientist;
 pub mod tool_market;
 mod tool_matrix;
+mod toolchain;
 pub mod tui;
+mod web;
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -33,9 +40,11 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use app_paths::AppPaths;
 use assistant_common::AssistantConfig;
 use autonomous_assistant::AutonomousAssistant;
 use cli_assistant::CliAssistant;
+use domain_prompt::science_expert_system_prompt;
 
 // ============================================================================
 // Tokitai 双轨服务架构
@@ -74,6 +83,7 @@ fn main() -> Result<()> {
     let use_autonomous = args.iter().any(|arg| arg == "--autonomous" || arg == "-a");
     let use_mcp = args.iter().any(|arg| arg == "--mcp" || arg == "-m");
     let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
+    let use_web = args.iter().any(|arg| arg == "--web" || arg == "-w");
 
     // 检查工具市场命令
     if args.len() >= 2 && args[1] == "tokitai" {
@@ -99,10 +109,19 @@ fn main() -> Result<()> {
         .and_then(|pos| args.get(pos + 1))
         .map(PathBuf::from);
 
+    let detected_project_root = project_path
+        .clone()
+        .unwrap_or_else(AppPaths::discover_project_root);
+
+    let _ = std::env::set_current_dir(&detected_project_root);
+
     // 初始化 tracing（TUI 模式输出到文件，其他模式输出到 stderr）
     if use_tui {
-        let log_file = std::fs::File::create(".tokitai_tui.log").unwrap_or_else(|_| {
-            std::fs::File::create(format!("/tmp/tokitai_tui_{}.log", std::process::id())).unwrap()
+        let app_paths = AppPaths::for_local_dev(detected_project_root.clone());
+        let _ = std::fs::create_dir_all(app_paths.state_dir());
+        let log_file = std::fs::File::create(app_paths.tui_log_path()).unwrap_or_else(|_| {
+            let fallback = std::env::temp_dir().join(format!("tokitai_tui_{}.log", std::process::id()));
+            std::fs::File::create(fallback).unwrap()
         });
         tracing_subscriber::fmt()
             .with_env_filter(
@@ -126,7 +145,7 @@ fn main() -> Result<()> {
     println!("🚀 AI Assistant 启动中...");
 
     // 加载 .env 文件（如果存在）
-    if let Ok(env_content) = std::fs::read_to_string(".env") {
+    if let Ok(env_content) = std::fs::read_to_string(detected_project_root.join(".env")) {
         for line in env_content.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -221,6 +240,23 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if use_web {
+        println!("?? ??? Web Workspace ???\n");
+        let config_file = crate::config::Config::load(None).unwrap_or_default();
+        let host = web::WebHostConfig::from_env_or_local_dev(
+            detected_project_root.clone(),
+        );
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(web::start_web_mode(
+                host,
+                config.clone(),
+                config_file,
+                security_config.clone(),
+            ))?;
+        return Ok(());
+    }
+
     // 如果指定了 --tui，启动 TUI 模式
     if use_tui {
         println!("🚀 启动 Claude Code-style TUI 模式\n");
@@ -244,7 +280,12 @@ fn main() -> Result<()> {
 
         if let Some(provider) = llm_manager.current_provider() {
             let provider: Arc<dyn crate::llm::LLMProvider> = Arc::clone(provider);
-            tui::run_tui(provider, tool_defs, Some(tool_executor))?;
+            tui::run_tui(
+                provider,
+                tool_defs,
+                Some(tool_executor),
+                security_config.clone(),
+            )?;
         } else {
             anyhow::bail!("No LLM provider configured. Please set up .env with API keys.");
         }
@@ -314,8 +355,8 @@ fn main() -> Result<()> {
         // 创建临时消息向量
         let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
             "role": "system",
-            "content": "你是一个强大的 AI 助手，可以调用各种工具来帮助用户完成任务。"
-        })];
+        "content": science_expert_system_prompt()
+    })];
 
         match assistant.chat_and_handle_tools(&mut messages, &input) {
             Ok(response) => {
@@ -367,6 +408,8 @@ async fn test_llm_stream() -> Result<()> {
         stop: None,
         stream: true,
         tools: None,
+        thinking_mode: None,
+        reasoning_effort: None,
     };
 
     print!("Response: ");

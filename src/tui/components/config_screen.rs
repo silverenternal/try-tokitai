@@ -1,5 +1,6 @@
-//! Pre-chat configuration screen with model selector
+//! Pre-chat configuration screen with model selector.
 
+use crate::tui::model_config::ModelRegistry;
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
@@ -7,7 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use crate::tui::model_config::ModelRegistry;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigField {
@@ -20,14 +20,10 @@ pub enum ConfigField {
     Start,
 }
 
-/// Security level choices for the config screen
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SecurityLevelChoice {
-    /// Ask for all tool calls
     Strict,
-    /// Auto-approve Safe, ask for Moderate+
     Standard,
-    /// Auto-approve all tools (Safe + Moderate + Low)
     Permissive,
 }
 
@@ -42,18 +38,16 @@ impl SecurityLevelChoice {
 
     pub fn label(&self) -> &'static str {
         match self {
-            SecurityLevelChoice::Strict => "Strict — confirm every tool call",
-            SecurityLevelChoice::Standard => "Standard — auto safe, confirm moderate + low",
-            SecurityLevelChoice::Permissive => "Permissive — auto all tools",
+            SecurityLevelChoice::Strict => "Strict - confirm every tool call",
+            SecurityLevelChoice::Standard => "Standard - auto safe, confirm moderate + low",
+            SecurityLevelChoice::Permissive => "Permissive - auto all tools",
         }
     }
 
-    /// Does this level auto-approve any tools?
     pub fn auto_approve_enabled(&self) -> bool {
         !matches!(self, SecurityLevelChoice::Strict)
     }
 
-    /// Maximum risk level that gets auto-approved
     pub fn max_auto_risk(&self) -> crate::tool_matrix::matrix::RiskLevel {
         match self {
             SecurityLevelChoice::Strict => crate::tool_matrix::matrix::RiskLevel::Safe,
@@ -71,22 +65,18 @@ pub struct ConfigScreenState {
     pub deep_think: bool,
     pub competition_mode: bool,
     pub privacy_mode: bool,
-    /// Security level for tool permission control
     pub security_level: SecurityLevelChoice,
-    /// Index into ModelRegistry::all_models()
     pub model_index: usize,
-    /// Available models for quick selection
     pub available_models: Vec<crate::tui::model_config::ModelInfo>,
-    /// Custom API key override (empty = use default from env)
     pub custom_key: String,
-    /// Whether editing the key field
     pub editing_key: bool,
 }
 
 impl ConfigScreenState {
     pub fn new(model: String, provider: String, api_key_preview: String) -> Self {
         let available_models = ModelRegistry::all_models();
-        let model_index = available_models.iter()
+        let model_index = available_models
+            .iter()
             .position(|m| m.model == model)
             .unwrap_or(0);
         Self {
@@ -105,7 +95,6 @@ impl ConfigScreenState {
         }
     }
 
-    /// Visual order: DeepThink → Competition → Privacy → ToolPermission → ModelSelect → KeyInput → Start
     pub fn select_next(&mut self) {
         self.editing_key = false;
         self.selected_field = match self.selected_field {
@@ -179,229 +168,424 @@ impl ConfigScreen {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        // ── Logo banner ──
-        let logo_lines = super::logo::render_logo(frame_count);
-        let logo_h = logo_lines.len() as u16;
-        if inner.height > logo_h + 10 {
-            for (i, line) in logo_lines.into_iter().enumerate() {
-                let y = inner.y + 1 + i as u16;
-                if y < inner.y + inner.height {
-                    frame.render_widget(
-                        Paragraph::new(line).centered(),
-                        ratatui::layout::Rect::new(inner.x + 2, y, inner.width.saturating_sub(4), 1),
-                    );
-                }
+        if let Some(mode) = std::env::var_os("TOKITAI_CONFIG_DEBUG") {
+            let mode = mode.to_string_lossy();
+            return match mode.as_ref() {
+                "title" => render_debug_title(frame, inner),
+                "compact" => render_compact(frame, inner, state),
+                "no-logo" => render_rich(frame, inner, state, false),
+                _ => render_rich(frame, inner, state, true),
+            };
+        }
+
+        if inner.width < 64 || inner.height < 24 {
+            render_compact(frame, inner, state);
+            return;
+        }
+
+        render_rich(frame, inner, state, frame_count != u64::MAX);
+    }
+}
+
+fn render_debug_title(frame: &mut Frame, inner: Rect) {
+    let x = inner.x.saturating_add(2);
+    let y = inner.y.saturating_add(1);
+    let w = inner.width.saturating_sub(4);
+    frame.render_widget(
+        Paragraph::new("Configure before starting"),
+        Rect::new(x, y, w, 1),
+    );
+}
+
+fn render_rich(frame: &mut Frame, inner: Rect, state: &ConfigScreenState, show_logo_override: bool) {
+    let logo_lines = if show_logo_override {
+        super::logo::render_logo(0)
+    } else {
+        Vec::new()
+    };
+    let logo_h = logo_lines.len() as u16;
+    let show_logo = show_logo_override && inner.height > logo_h + 15 && inner.width >= 78;
+
+    if show_logo {
+        for (i, line) in logo_lines.into_iter().enumerate() {
+            let y = inner.y + 1 + i as u16;
+            if y < inner.y + inner.height {
+                frame.render_widget(
+                    Paragraph::new(line),
+                    Rect::new(inner.x + 2, y, inner.width.saturating_sub(4), 1),
+                );
             }
         }
+    }
 
-        let logo_offset: u16 = if inner.height > logo_h + 10 { logo_h + 2 } else { 0 };
-        let mut y = inner.y + 1 + logo_offset;
-        let x = inner.x + 2;
-        let w = inner.width.saturating_sub(4);
+    let logo_offset = if show_logo { logo_h + 2 } else { 0 };
+    let x = inner.x + 2;
+    let mut y = inner.y + 1 + logo_offset;
+    let w = inner.width.saturating_sub(4);
+    let bottom = inner.y + inner.height;
 
-        // Title
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
                 "Configure before starting",
                 Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            ))),
-            Rect::new(x, y, w, 1),
-        );
-        y += 3;
-
-        // ── Deep Think ──
-        let hl = |field: &ConfigField, target: ConfigField| -> Style {
-            if *field == target { Style::default().fg(Color::Black).bg(Color::Cyan) }
-            else { Style::default().fg(Color::White) }
-        };
-        let on_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
-        let off_style = Style::default().fg(Color::DarkGray);
-
-        let (dt_on, dt_label) = if state.deep_think {
-            (on_style, "[ ON ]  Deep Think — max reasoning depth")
-        } else {
-            (off_style, "[ OFF ] Deep Think — faster responses")
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Deep Think: ", Style::default().fg(Color::Gray)),
-                Span::styled(dt_label, hl(&state.selected_field, ConfigField::DeepThink)),
-            ])),
-            Rect::new(x, y, w, 1),
-        );
-        y += 1;
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                if state.deep_think { "  ON  — Max output tokens, higher creativity" }
-                else { "  OFF — Standard output" },
-                if state.deep_think { Style::default().fg(Color::Green) }
-                else { Style::default().fg(Color::DarkGray) },
-            )),
-            Rect::new(x, y, w, 1),
-        );
-        y += 2;
-
-        // ── Competition ──
-        let (cp_on, cp_label) = if state.competition_mode {
-            (on_style, "[ ON ]  Competition Mode — human checkpoints")
-        } else {
-            (off_style, "[ OFF ] Competition Mode — fully autonomous")
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Competition: ", Style::default().fg(Color::Gray)),
-                Span::styled(cp_label, hl(&state.selected_field, ConfigField::Competition)),
-            ])),
-            Rect::new(x, y, w, 1),
-        );
-        y += 1;
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                if state.competition_mode { "  ON  — Pauses between phases, requires /approve" }
-                else { "  OFF — Fully autonomous" },
-                if state.competition_mode { Style::default().fg(Color::Green) }
-                else { Style::default().fg(Color::DarkGray) },
-            )),
-            Rect::new(x, y, w, 1),
-        );
-        y += 2;
-
-        // ── Privacy ──
-        let (pv_on, pv_label) = if state.privacy_mode {
-            (on_style, "[ ON ]  Privacy Guard — local model for confidential phases")
-        } else {
-            (off_style, "[ OFF ] Privacy Guard — no restrictions")
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Privacy: ", Style::default().fg(Color::Gray)),
-                Span::styled(pv_label, hl(&state.selected_field, ConfigField::Privacy)),
-            ])),
-            Rect::new(x, y, w, 1),
-        );
-        y += 1;
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                if state.privacy_mode { "  ON  — Blocks cloud API for confidential/strict phases" }
-                else { "  OFF — No restrictions" },
-                if state.privacy_mode { Style::default().fg(Color::Green) }
-                else { Style::default().fg(Color::DarkGray) },
-            )),
-            Rect::new(x, y, w, 1),
-        );
-        y += 2;
-
-        // ── Tool Permission ──
-        let sec_text = state.security_level.label();
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Permission: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("[ {} ]", sec_text),
-                    hl(&state.selected_field, ConfigField::ToolPermission),
-                ),
-            ])),
-            Rect::new(x, y, w, 1),
-        );
-        y += 1;
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                "  Strict: confirm all  |  Standard: auto safe  |  Permissive: auto all  ← → to cycle",
+            ),
+            Span::styled(
+                "  tuned for a safe quick start",
                 Style::default().fg(Color::DarkGray),
-            )),
-            Rect::new(x, y, w, 1),
-        );
-        y += 2;
+            ),
+        ])),
+        Rect::new(x, y, w, 1),
+    );
+    y += 1;
 
-        // ── Model Select ──
-        let model_hl = hl(&state.selected_field, ConfigField::ModelSelect);
-        if let Some(info) = state.selected_model_info() {
-            let desc = format!(
-                "{} — {} ({} output)",
-                info.display_name, info.description, info.max_output_tokens
-            );
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(" Model: ", Style::default().fg(Color::Gray)),
-                    Span::styled(
-                        format!("[ {} ]  {}", info.model, info.provider),
-                        model_hl.add_modifier(Modifier::BOLD),
-                    ),
-                ])),
-                Rect::new(x, y, w, 1),
-            );
-            y += 1;
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(&desc, Style::default().fg(Color::DarkGray)),
-                    Span::styled("  ← → to change", Style::default().fg(Color::DarkGray)),
-                ])),
-                Rect::new(x, y, w, 1),
-            );
-            // Show the model count
-            let pos = format!("{}/{}", state.model_index + 1, state.available_models.len());
-            frame.render_widget(
-                Paragraph::new(Span::styled(pos, Style::default().fg(Color::DarkGray))),
-                Rect::new(x + w - 10, y - 1, 8, 1),
-            );
-        }
-        y += 2;
-
-        // ── API Key ──
-        let key_hl = hl(&state.selected_field, ConfigField::KeyInput);
-        let key_display = if state.editing_key {
-            format!("{}▌", state.custom_key)
-        } else if !state.custom_key.is_empty() {
-            "•••••••• (custom)".to_string()
+    render_toggle_row(
+        frame,
+        Rect::new(x, y, w, 2),
+        "Deep Think",
+        state.selected_field == ConfigField::DeepThink,
+        state.deep_think,
+        if state.deep_think {
+            "Max reasoning depth, higher token budget, slower but more thorough."
         } else {
-            format!("{} (from env)", state.api_key_preview)
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" API Key: ", Style::default().fg(Color::Gray)),
-                Span::styled(key_display, key_hl),
-                Span::styled("  Enter to edit", Style::default().fg(Color::DarkGray)),
-            ])),
-            Rect::new(x, y, w, 1),
-        );
-        y += 1;
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                "  Leave empty to use environment variable. Custom key is used for this session only.",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Rect::new(x, y, w, 1),
-        );
-        y += 2;
+            "Balanced mode for faster replies and lower token use."
+        },
+    );
+    y += 2;
 
-        // ── Start ──
-        let s_style = if state.selected_field == ConfigField::Start {
-            Style::default().fg(Color::Black).bg(Color::Green)
+    render_toggle_row(
+        frame,
+        Rect::new(x, y, w, 2),
+        "Competition Mode",
+        state.selected_field == ConfigField::Competition,
+        state.competition_mode,
+        if state.competition_mode {
+            "Adds human checkpoints between research phases and waits for approval."
         } else {
-            Style::default().fg(Color::Green)
-        };
+            "Lets the agent continue end to end without manual checkpoints."
+        },
+    );
+    y += 2;
+
+    render_toggle_row(
+        frame,
+        Rect::new(x, y, w, 2),
+        "Privacy Guard",
+        state.selected_field == ConfigField::Privacy,
+        state.privacy_mode,
+        if state.privacy_mode {
+            "Blocks cloud-only paths for sensitive work and prefers safer local handling."
+        } else {
+            "No additional privacy restrictions beyond the normal tool policy."
+        },
+    );
+    y += 2;
+
+    let permission_text = format!("[ {} ]", state.security_level.label());
+    render_value_row(
+        frame,
+        Rect::new(x, y, w, 2),
+        "Tool Permission",
+        state.selected_field == ConfigField::ToolPermission,
+        &permission_text,
+        "Left/Right cycles how aggressively tool calls are auto-approved.",
+    );
+    y += 2;
+
+    if let Some(info) = state.selected_model_info() {
+        let primary = format!("[ {} ]  {}", info.model, info.provider);
+        let secondary = format!(
+            "{} | {} output tokens | Left/Right to change",
+            info.display_name, info.max_output_tokens
+        );
+        render_value_row(
+            frame,
+            Rect::new(x, y, w, 2),
+            "Model",
+            state.selected_field == ConfigField::ModelSelect,
+            &primary,
+            &secondary,
+        );
+
+        let counter = format!("{}/{}", state.model_index + 1, state.available_models.len());
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" ▶ Start Chat ", s_style.add_modifier(Modifier::BOLD)),
-            ])),
+            Paragraph::new(counter).alignment(Alignment::Right),
             Rect::new(x, y, w, 1),
         );
-        y += 2;
+    }
+    y += 2;
 
-        // ── Key hints ──
+    let key_display = if state.editing_key {
+        format!("{}_", state.custom_key)
+    } else if !state.custom_key.is_empty() {
+        "******** (custom for this session)".to_string()
+    } else {
+        format!("{} (from env)", state.api_key_preview)
+    };
+    render_value_row(
+        frame,
+        Rect::new(x, y, w, 2),
+        "API Key",
+        state.selected_field == ConfigField::KeyInput,
+        &key_display,
+        "Press Enter to edit. Leave empty to keep using the environment variable.",
+    );
+    y += 2;
+
+    if y < bottom.saturating_sub(3) {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                "[ Start Chat ]",
+                if state.selected_field == ConfigField::Start {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                },
+            )])),
+            Rect::new(x, y, w, 1),
+        );
+    }
+
+    if bottom > inner.y + 1 {
+        let hint_y = bottom.saturating_sub(2);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" ↑↓", Style::default().fg(Color::Yellow)),
-                Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" ←→", Style::default().fg(Color::Yellow)),
-                Span::styled(" toggle/model  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" Enter", Style::default().fg(Color::Yellow)),
-                Span::styled(" select/edit  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" q", Style::default().fg(Color::Yellow)),
+                Span::styled("Up/Down", Style::default().fg(Color::Yellow)),
+                Span::styled(" move  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Left/Right", Style::default().fg(Color::Yellow)),
+                Span::styled(" toggle  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Enter", Style::default().fg(Color::Yellow)),
+                Span::styled(" edit/select  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("q", Style::default().fg(Color::Yellow)),
                 Span::styled(" quit", Style::default().fg(Color::DarkGray)),
             ])),
-            Rect::new(x, inner.y + inner.height - 2, w, 1),
+            Rect::new(x, hint_y, w, 1),
+        );
+    }
+}
+
+fn render_compact(frame: &mut Frame, inner: Rect, state: &ConfigScreenState) {
+    let x = inner.x.saturating_add(2);
+    let mut y = inner.y.saturating_add(1);
+    let w = inner.width.saturating_sub(4);
+    let bottom = inner.y.saturating_add(inner.height);
+
+    frame.render_widget(
+        Paragraph::new("Configure before starting"),
+        Rect::new(x, y, w, 1),
+    );
+    y += 2;
+
+    let selected_style = |selected: bool| {
+        if selected {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        }
+    };
+
+    let mut render_text = |text: Line<'static>, y_pos: &mut u16| {
+        if *y_pos < bottom.saturating_sub(2) {
+            frame.render_widget(Paragraph::new(text), Rect::new(x, *y_pos, w, 1));
+        }
+        *y_pos = y_pos.saturating_add(1);
+    };
+
+    let deep_label = if state.deep_think {
+        "[ ON ]  Deep Think"
+    } else {
+        "[ OFF ] Deep Think"
+    };
+    render_text(
+        Line::from(vec![
+            Span::styled("Deep Think: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                deep_label.to_string(),
+                selected_style(state.selected_field == ConfigField::DeepThink),
+            ),
+        ]),
+        &mut y,
+    );
+    y = y.saturating_add(1);
+
+    let competition_label = if state.competition_mode {
+        "[ ON ]  Competition Mode"
+    } else {
+        "[ OFF ] Competition Mode"
+    };
+    render_text(
+        Line::from(vec![
+            Span::styled("Competition: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                competition_label.to_string(),
+                selected_style(state.selected_field == ConfigField::Competition),
+            ),
+        ]),
+        &mut y,
+    );
+    y = y.saturating_add(1);
+
+    let privacy_label = if state.privacy_mode {
+        "[ ON ]  Privacy Guard"
+    } else {
+        "[ OFF ] Privacy Guard"
+    };
+    render_text(
+        Line::from(vec![
+            Span::styled("Privacy: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                privacy_label.to_string(),
+                selected_style(state.selected_field == ConfigField::Privacy),
+            ),
+        ]),
+        &mut y,
+    );
+    y = y.saturating_add(1);
+
+    render_text(
+        Line::from(vec![
+            Span::styled("Permission: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                state.security_level.label().to_string(),
+                selected_style(state.selected_field == ConfigField::ToolPermission),
+            ),
+        ]),
+        &mut y,
+    );
+    y = y.saturating_add(1);
+
+    if let Some(info) = state.selected_model_info() {
+        render_text(
+            Line::from(vec![
+                Span::styled("Model: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{} ({})", info.model, info.provider),
+                    selected_style(state.selected_field == ConfigField::ModelSelect),
+                ),
+            ]),
+            &mut y,
+        );
+        y = y.saturating_add(1);
+    }
+
+    let key_display = if state.editing_key {
+        format!("{}_", state.custom_key)
+    } else if !state.custom_key.is_empty() {
+        "(custom key for this session)".to_string()
+    } else {
+        format!("{} (from env)", state.api_key_preview)
+    };
+    render_text(
+        Line::from(vec![
+            Span::styled("API Key: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                key_display,
+                selected_style(state.selected_field == ConfigField::KeyInput),
+            ),
+        ]),
+        &mut y,
+    );
+    y = y.saturating_add(1);
+
+    render_text(
+        Line::from(vec![Span::styled(
+            "Start Chat",
+            if state.selected_field == ConfigField::Start {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            },
+        )]),
+        &mut y,
+    );
+
+    let hint_y = bottom.saturating_sub(2);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Up/Down", Style::default().fg(Color::Yellow)),
+            Span::styled(" move  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Left/Right", Style::default().fg(Color::Yellow)),
+            Span::styled(" toggle  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Yellow)),
+            Span::styled(" select/edit  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::styled(" quit", Style::default().fg(Color::DarkGray)),
+        ])),
+        Rect::new(x, hint_y, w, 1),
+    );
+}
+
+fn render_toggle_row(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    selected: bool,
+    enabled: bool,
+    desc: &str,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let value = if enabled { "[ ON ]" } else { "[ OFF ]" };
+    let value_style = if selected {
+        Style::default().fg(Color::Black).bg(Color::Cyan)
+    } else if enabled {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!(" {}: ", label), Style::default().fg(Color::Gray)),
+            Span::styled(format!("{}  {}", value, label), value_style),
+        ])),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    if area.height > 1 {
+        frame.render_widget(
+            Paragraph::new(Span::styled(desc.to_string(), Style::default().fg(Color::DarkGray))),
+            Rect::new(area.x, area.y + 1, area.width, 1),
+        );
+    }
+}
+
+fn render_value_row(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    selected: bool,
+    value: &str,
+    desc: &str,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let value_style = if selected {
+        Style::default().fg(Color::Black).bg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!(" {}: ", label), Style::default().fg(Color::Gray)),
+            Span::styled(value.to_string(), value_style),
+        ])),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    if area.height > 1 {
+        frame.render_widget(
+            Paragraph::new(Span::styled(desc.to_string(), Style::default().fg(Color::DarkGray))),
+            Rect::new(area.x, area.y + 1, area.width, 1),
         );
     }
 }

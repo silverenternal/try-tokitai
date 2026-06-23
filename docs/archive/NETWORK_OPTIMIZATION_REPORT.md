@@ -166,7 +166,7 @@ export BROWSER_ENABLE_GPU=false
 
 **跨平台 Chrome 检测**:
 - ✅ macOS: `/Applications/Google Chrome.app/...`
-- ✅ Windows: `C:\Program Files\Google\Chrome\...`
+- ✅ Windows: `%ProgramFiles%\Google\Chrome\...`
 - ✅ Linux: `/usr/bin/google-chrome`
 
 **使用示例**:

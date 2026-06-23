@@ -7,6 +7,8 @@ use ratatui::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::text_encoding::read_text_file;
+
 /// A single line in a diff
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiffLine {
@@ -23,6 +25,10 @@ pub struct FileDiff {
     pub lines: Vec<DiffLine>,
     pub added: usize,
     pub removed: usize,
+    #[serde(default)]
+    pub before_content: String,
+    #[serde(default)]
+    pub after_content: String,
 }
 
 impl FileDiff {
@@ -93,6 +99,8 @@ impl FileDiff {
             lines: diff_lines,
             added,
             removed,
+            before_content: old.to_string(),
+            after_content: new.to_string(),
         }
     }
 
@@ -168,8 +176,7 @@ pub fn detect_file_write(tool_name: &str, args: &serde_json::Value, result: &str
     let new_content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
     // Try to read old content for diff
-    let old_content =
-        std::fs::read_to_string(path).unwrap_or_default();
+    let old_content = read_text_file(std::path::Path::new(path)).unwrap_or_default();
 
     if old_content == new_content || new_content.is_empty() {
         return None;

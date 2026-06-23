@@ -1,78 +1,158 @@
-//! Data Tools — Dataset loading, preprocessing, splitting
+//! Data tools focused on real experiment setup rather than mock preprocessing.
 
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::fs;
+use std::path::Path;
 use tokitai::tool;
 
 pub struct DataTools;
 
+fn detect_format(path: &str, requested: Option<&str>) -> String {
+    let requested = requested.unwrap_or("auto").trim().to_ascii_lowercase();
+    if requested != "auto" && !requested.is_empty() {
+        return requested;
+    }
+
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("unknown")
+        .to_ascii_lowercase()
+}
+
+fn inspect_delimited(content: &str, delimiter: char, preview_rows: usize) -> Value {
+    let rows: Vec<Vec<String>> = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(preview_rows + 1)
+        .map(|line| line.split(delimiter).map(|cell| cell.trim().to_string()).collect())
+        .collect();
+
+    if rows.is_empty() {
+        return json!({
+            "format": "table",
+            "rows_previewed": 0,
+            "column_count": 0,
+            "columns": [],
+            "preview": [],
+        });
+    }
+
+    let columns = rows.first().cloned().unwrap_or_default();
+    let preview = rows.iter().skip(1).cloned().collect::<Vec<_>>();
+    json!({
+        "format": "table",
+        "rows_previewed": preview.len(),
+        "column_count": columns.len(),
+        "columns": columns,
+        "preview": preview,
+    })
+}
+
+fn inspect_json_value(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => {
+            let columns = items
+                .iter()
+                .find_map(|item| item.as_object())
+                .map(|map| map.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            json!({
+                "format": "json",
+                "shape": "array",
+                "size_hint": items.len(),
+                "column_count": columns.len(),
+                "columns": columns,
+                "preview": items.iter().take(5).cloned().collect::<Vec<_>>(),
+            })
+        }
+        Value::Object(map) => json!({
+            "format": "json",
+            "shape": "object",
+            "size_hint": map.len(),
+            "column_count": map.len(),
+            "columns": map.keys().cloned().collect::<Vec<_>>(),
+            "preview": value,
+        }),
+        _ => json!({
+            "format": "json",
+            "shape": "scalar",
+            "size_hint": 1,
+            "column_count": 0,
+            "columns": [],
+            "preview": value,
+        }),
+    }
+}
+
 #[tool]
 impl DataTools {
-    /// Load a dataset from file or URL
+    /// Inspect a local dataset and return a lightweight structural summary.
     ///
-    /// Supports CSV, JSON, Parquet, and HDF5 formats.
-    ///
-    /// ## Parameters
-    /// - `path`: File path or URL
-    /// - `format`: Dataset format ("csv", "json", "parquet", "hdf5", "auto")
-    pub fn load_dataset(&self, path: String, format: Option<String>) -> Result<Value, String> {
-        let fmt = format.unwrap_or_else(|| "auto".into());
-        Ok(serde_json::json!({
-            "status": "success",
-            "operation": "load_dataset",
-            "path": path,
-            "format": fmt,
-            "rows": 1000,
-            "columns": ["col1", "col2", "col3"],
-            "dtypes": {"col1": "float64", "col2": "int64", "col3": "object"}
-        }))
-    }
-
-    /// Preprocess data with standard transformations
-    ///
-    /// ## Parameters
-    /// - `operations`: List of operations ("normalize", "standardize", "one_hot", "impute", "scale")
-    /// - `columns`: Target columns (empty = all numeric)
-    /// - `data`: Input data as JSON
-    pub fn preprocess(
+    /// Supported formats: csv, tsv, json, jsonl.
+    pub fn inspect_dataset(
         &self,
-        operations: Vec<String>,
-        columns: Option<Vec<String>>,
-        data: Value,
+        path: String,
+        format: Option<String>,
+        preview_rows: Option<usize>,
     ) -> Result<Value, String> {
-        Ok(serde_json::json!({
-            "status": "success",
-            "operation": "preprocess",
-            "operations_applied": operations,
-            "columns_processed": columns.unwrap_or_default(),
-            "shape": [1000, 10]
-        }))
-    }
+        let preview_rows = preview_rows.unwrap_or(5).clamp(1, 20);
+        let dataset_path = Path::new(&path);
+        if !dataset_path.exists() {
+            return Err(format!("inspect_dataset: file does not exist: {}", path));
+        }
+        if !dataset_path.is_file() {
+            return Err(format!("inspect_dataset: path is not a file: {}", path));
+        }
 
-    /// Split data into train/validation/test sets
-    ///
-    /// ## Parameters
-    /// - `data`: Input data
-    /// - `ratios`: Split ratios [train, val, test] (default [0.7, 0.15, 0.15])
-    /// - `seed`: Random seed for reproducibility
-    pub fn split_data(
-        &self,
-        data: Value,
-        ratios: Option<Vec<f64>>,
-        seed: Option<u64>,
-    ) -> Result<Value, String> {
-        let ratios = ratios.unwrap_or_else(|| vec![0.7, 0.15, 0.15]);
-        let seed = seed.unwrap_or(42);
+        let content = fs::read_to_string(dataset_path)
+            .map_err(|err| format!("inspect_dataset: failed to read '{}': {}", path, err))?;
+        let format_name = detect_format(&path, format.as_deref());
 
-        Ok(serde_json::json!({
-            "status": "success",
-            "operation": "split_data",
-            "ratios": ratios,
-            "seed": seed,
-            "splits": {
-                "train": { "size": 700 },
-                "val": { "size": 150 },
-                "test": { "size": 150 }
+        let summary = match format_name.as_str() {
+            "csv" => inspect_delimited(&content, ',', preview_rows),
+            "tsv" => inspect_delimited(&content, '\t', preview_rows),
+            "json" => {
+                let value: Value = serde_json::from_str(&content)
+                    .map_err(|err| format!("inspect_dataset: invalid json in '{}': {}", path, err))?;
+                inspect_json_value(&value)
             }
+            "jsonl" => {
+                let rows = content
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .take(preview_rows)
+                    .map(|line| {
+                        serde_json::from_str::<Value>(line)
+                            .unwrap_or_else(|_| json!({ "raw": line }))
+                    })
+                    .collect::<Vec<_>>();
+                let columns = rows
+                    .iter()
+                    .find_map(|item| item.as_object())
+                    .map(|map| map.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                json!({
+                    "format": "jsonl",
+                    "rows_previewed": rows.len(),
+                    "column_count": columns.len(),
+                    "columns": columns,
+                    "preview": rows,
+                })
+            }
+            other => {
+                return Err(format!(
+                    "inspect_dataset: unsupported dataset format '{}' for '{}'. Use csv, tsv, json, or jsonl.",
+                    other, path
+                ));
+            }
+        };
+
+        Ok(json!({
+            "status": "success",
+            "operation": "inspect_dataset",
+            "path": path,
+            "summary": summary
         }))
     }
 }
