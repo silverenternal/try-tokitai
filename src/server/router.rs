@@ -18,9 +18,10 @@ async fn healthz() -> &'static str {
 /// 构建完整的 HTTP server router
 pub fn build_router(state: AppState) -> Router {
     // /v1 子树：所有依赖 AppState 的路由都挂在这里
-    let v1: Router<AppState> = Router::new().merge(routes::health::router());
-    // .merge(routes::chat::router()) // Commit 2
-    // .merge(routes::tools::router()) // Commit 2
+    let v1: Router<AppState> = Router::new()
+        .merge(routes::health::router())
+        .merge(routes::tools::router())
+        .merge(routes::chat::router());
     // .merge(routes::providers::router()) // Commit 3
     // .merge(routes::orchestrator::router()) // Commit 3
     // .merge(routes::dialogue::router()) // Commit 4

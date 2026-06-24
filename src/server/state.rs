@@ -12,6 +12,8 @@ use crate::llm::LLMManager;
 use crate::orchestrator::Orchestrator;
 use parking_lot::Mutex as PlMutex;
 
+use super::tool_set::ServerToolSet;
+
 /// 服务器配置（host 永远是 127.0.0.1）
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -36,13 +38,15 @@ impl Default for ServerConfig {
 /// 跨 handler 共享的应用状态
 ///
 /// 注意：本版本**不**持有 CliAssistant。Server 模式下独立构造子组件，
-/// 工具调用走 `ToolDispatcher`，对话/编排/LLM 直接访问各自子组件。
+/// 工具调用走 `ServerToolSet`，对话/编排/LLM 直接访问各自子组件。
 #[derive(Clone)]
 pub struct AppState {
     /// 助手基础配置
     pub config: Arc<AssistantConfig>,
-    /// 工具管理器
+    /// 工具管理器（注册表 + 选择器 + dispatcher）
     pub tool_manager: Arc<ToolManager>,
+    /// server 模式专用的工具实例集（8 个 #[tool] provider）
+    pub tool_set: Arc<ServerToolSet>,
     /// 编排器（角色切换、上下文优化、命令分发）
     pub orchestrator: Arc<PlMutex<Orchestrator>>,
     /// LLM 供应商管理
@@ -58,6 +62,7 @@ impl AppState {
     pub fn new(
         config: AssistantConfig,
         tool_manager: ToolManager,
+        tool_set: ServerToolSet,
         orchestrator: Orchestrator,
         llm: LLMManager,
         dialogue: DialogueStateMachine,
@@ -65,6 +70,7 @@ impl AppState {
         Self {
             config: Arc::new(config),
             tool_manager: Arc::new(tool_manager),
+            tool_set: Arc::new(tool_set),
             orchestrator: Arc::new(PlMutex::new(orchestrator)),
             llm: Arc::new(llm),
             dialogue: Arc::new(PlMutex::new(dialogue)),

@@ -2,4 +2,6 @@
 //!
 //! 每个子文件实现一类资源端点；通过 `Router::merge` 挂到顶层。
 
+pub mod chat;
 pub mod health;
+pub mod tools;

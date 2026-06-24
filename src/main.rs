@@ -215,6 +215,7 @@ fn main() -> Result<()> {
         use crate::llm::{LLMManager, ProviderInitializer};
         use crate::orchestrator::Orchestrator;
         use crate::server::state::AppState;
+        use crate::server::tool_set::ServerToolSet;
 
         println!("🌐 启动 HTTP REST API Server 模式");
         println!("═══════════════════════════");
@@ -248,8 +249,16 @@ fn main() -> Result<()> {
 
         let orchestrator = Orchestrator::new();
         let dialogue = DialogueStateMachine::new_without_persistence();
+        let tool_set = ServerToolSet::new_default();
 
-        let app_state = AppState::new(config, tool_manager, orchestrator, llm_manager, dialogue);
+        let app_state = AppState::new(
+            config,
+            tool_manager,
+            tool_set,
+            orchestrator,
+            llm_manager,
+            dialogue,
+        );
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         return rt.block_on(crate::server::run_server(
