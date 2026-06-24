@@ -16,6 +16,7 @@
 pub mod error;
 pub mod router;
 pub mod state;
+pub mod stores;
 pub mod tool_set;
 
 mod routes;

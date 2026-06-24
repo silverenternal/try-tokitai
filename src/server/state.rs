@@ -12,6 +12,7 @@ use crate::llm::LLMManager;
 use crate::orchestrator::Orchestrator;
 use parking_lot::Mutex as PlMutex;
 
+use super::stores::SharedStores;
 use super::tool_set::ServerToolSet;
 
 /// 服务器配置（host 永远是 127.0.0.1）
@@ -53,6 +54,8 @@ pub struct AppState {
     pub llm: Arc<PlMutex<LLMManager>>,
     /// 对话状态机
     pub dialogue: Arc<PlMutex<DialogueStateMachine>>,
+    /// 会话 / 工作流仓库
+    pub stores: SharedStores,
     /// 服务器配置
     pub server_cfg: ServerConfig,
 }
@@ -74,6 +77,7 @@ impl AppState {
             orchestrator: Arc::new(PlMutex::new(orchestrator)),
             llm: Arc::new(PlMutex::new(llm)),
             dialogue: Arc::new(PlMutex::new(dialogue)),
+            stores: SharedStores::new(),
             server_cfg: ServerConfig::default(),
         }
     }

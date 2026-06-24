@@ -23,10 +23,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::tools::router())
         .merge(routes::chat::router())
         .merge(routes::providers::router())
-        .merge(routes::orchestrator::router());
-    // .merge(routes::dialogue::router()) // Commit 4
-    // .merge(routes::workflows::router()) // Commit 4
-    // .merge(routes::sessions::router()) // Commit 4
+        .merge(routes::orchestrator::router())
+        .merge(routes::dialogue::router())
+        .merge(routes::workflows::router())
+        .merge(routes::sessions::router());
     // .merge(routes::context::router()) // Commit 5
     // .merge(routes::autonomy::router()) // Commit 5
     // .merge(routes::tool_market::router()) // Commit 5
