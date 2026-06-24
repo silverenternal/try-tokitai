@@ -44,6 +44,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "bk-tree",
  "candle-core",
@@ -93,6 +94,8 @@ dependencies = [
  "tokitai-core",
  "tokitai-mcp-server",
  "toml",
+ "tower 0.5.3",
+ "tower-http 0.6.8",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -4443,9 +4446,11 @@ dependencies = [
  "http-body",
  "iri-string",
  "pin-project-lite",
+ "tokio",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

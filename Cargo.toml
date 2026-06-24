@@ -28,6 +28,8 @@ yaml = ["serde_yaml"]
 # Tensor 计算：实验性功能，提供张量计算和神经网络基础操作
 # 注意：此 feature 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 candle、tch-rs）
 tensor = ["dep:candle-core", "dep:candle-nn", "dep:safetensors", "dep:half", "dep:ndarray"]
+# HTTP REST API Server：基于 axum 0.7，仅监听 127.0.0.1
+server = ["dep:axum", "dep:tower", "dep:tower-http"]
 
 [dependencies]
 # Core AI framework
@@ -53,6 +55,11 @@ async-stream = "0.3"
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls"] }
 reqwest-eventsource = "0.6"
+
+# HTTP server (optional, feature-gated)
+axum = { version = "0.7", optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace", "timeout"], optional = true }
 
 # Error handling
 anyhow = "1.0"

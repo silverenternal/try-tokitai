@@ -1,0 +1,74 @@
+//! AppState：跨 handler 共享的应用状态
+//!
+//! 字段按可共享性分两类：
+//! - 大部分组件用 `Arc<…>` 共享，便于跨 handler 并发访问。
+//! - 部分类型因自身 API 需要 `&mut self` 用 `parking_lot::Mutex` 包装。
+
+use std::sync::Arc;
+
+use crate::assistant_common::{AssistantConfig, ToolManager};
+use crate::dialogue::DialogueStateMachine;
+use crate::llm::LLMManager;
+use crate::orchestrator::Orchestrator;
+use parking_lot::Mutex as PlMutex;
+
+/// 服务器配置（host 永远是 127.0.0.1）
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    /// 监听端口
+    pub port: u16,
+    /// 可选 Bearer token
+    pub api_key: Option<String>,
+    /// 是否启用 CORS（开发用）
+    pub cors_enabled: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            port: 8080,
+            api_key: None,
+            cors_enabled: true,
+        }
+    }
+}
+
+/// 跨 handler 共享的应用状态
+///
+/// 注意：本版本**不**持有 CliAssistant。Server 模式下独立构造子组件，
+/// 工具调用走 `ToolDispatcher`，对话/编排/LLM 直接访问各自子组件。
+#[derive(Clone)]
+pub struct AppState {
+    /// 助手基础配置
+    pub config: Arc<AssistantConfig>,
+    /// 工具管理器
+    pub tool_manager: Arc<ToolManager>,
+    /// 编排器（角色切换、上下文优化、命令分发）
+    pub orchestrator: Arc<PlMutex<Orchestrator>>,
+    /// LLM 供应商管理
+    pub llm: Arc<LLMManager>,
+    /// 对话状态机
+    pub dialogue: Arc<PlMutex<DialogueStateMachine>>,
+    /// 服务器配置
+    pub server_cfg: ServerConfig,
+}
+
+impl AppState {
+    /// 构造 AppState
+    pub fn new(
+        config: AssistantConfig,
+        tool_manager: ToolManager,
+        orchestrator: Orchestrator,
+        llm: LLMManager,
+        dialogue: DialogueStateMachine,
+    ) -> Self {
+        Self {
+            config: Arc::new(config),
+            tool_manager: Arc::new(tool_manager),
+            orchestrator: Arc::new(PlMutex::new(orchestrator)),
+            llm: Arc::new(llm),
+            dialogue: Arc::new(PlMutex::new(dialogue)),
+            server_cfg: ServerConfig::default(),
+        }
+    }
+}

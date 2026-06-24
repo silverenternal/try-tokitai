@@ -25,6 +25,10 @@ pub mod tool_market;
 mod tool_matrix;
 pub mod tui;
 
+// HTTP REST API Server（feature-gated）
+#[cfg(feature = "server")]
+mod server;
+
 use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{info, warn};
@@ -62,7 +66,18 @@ use cli_assistant::CliAssistant;
 // │  • 服务边界：不响应用户交互，不处理外部查询                             │
 // └─────────────────────────────────────────────────────────────────────────┘
 //
-// 详细文档：structure_ensure/SERVICES.md
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  服务三：HTTP REST API Server（新增，面向程序/浏览器）                  │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │  • 启动命令：cargo run --features server -- --server --port 8080        │
+// │  • 服务对象：其他程序、脚本、浏览器插件                                  │
+// │  • 驱动方式：HTTP 请求驱动                                              │
+// │  • 交互模式：JSON over HTTP / SSE                                       │
+// │  • 典型场景：嵌入其他工作流、Web UI、自动化                              │
+// │  • 服务边界：仅监听 127.0.0.1；可选用 Bearer token                      │
+// └─────────────────────────────────────────────────────────────────────────┘
+//
+// 详细文档：docs/SERVER.md
 // ============================================================================
 
 fn main() -> Result<()> {
@@ -71,6 +86,10 @@ fn main() -> Result<()> {
     let use_autonomous = args.iter().any(|arg| arg == "--autonomous" || arg == "-a");
     let use_mcp = args.iter().any(|arg| arg == "--mcp" || arg == "-m");
     let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "-t");
+    #[cfg(feature = "server")]
+    let use_server = args.iter().any(|arg| arg == "--server" || arg == "-s");
+    #[cfg(not(feature = "server"))]
+    let use_server = false;
 
     // 检查工具市场命令
     if args.len() >= 2 && args[1] == "tokitai" {
@@ -95,6 +114,23 @@ fn main() -> Result<()> {
         .position(|arg| arg == "--project-path" || arg == "-p")
         .and_then(|pos| args.get(pos + 1))
         .map(PathBuf::from);
+
+    // 解析 --port 参数（仅在 --server 模式下使用）
+    #[cfg(feature = "server")]
+    let server_port: u16 = args
+        .iter()
+        .position(|arg| arg == "--port" || arg == "-P")
+        .and_then(|pos| args.get(pos + 1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(8080);
+
+    // 解析 --api-key 参数（仅在 --server 模式下使用）
+    #[cfg(feature = "server")]
+    let server_api_key: Option<String> = args
+        .iter()
+        .position(|arg| arg == "--api-key")
+        .and_then(|pos| args.get(pos + 1))
+        .cloned();
 
     // 初始化 tracing（输出到 stderr，避免干扰 stdout 的交互界面）
     tracing_subscriber::fmt()
@@ -170,6 +206,58 @@ fn main() -> Result<()> {
 
     // 创建助手配置
     let config = AssistantConfig::new(api_url, api_key, model);
+
+    // 如果指定了 --server，启动 HTTP REST API Server 模式
+    #[cfg(feature = "server")]
+    if use_server {
+        use crate::assistant_common::{register_all_builtin_tools, ToolManager};
+        use crate::dialogue::DialogueStateMachine;
+        use crate::llm::{LLMManager, ProviderInitializer};
+        use crate::orchestrator::Orchestrator;
+        use crate::server::state::AppState;
+
+        println!("🌐 启动 HTTP REST API Server 模式");
+        println!("═══════════════════════════");
+        println!("📡 传输模式：HTTP/1.1 (axum)");
+        println!("🔒 绑定地址：127.0.0.1:{}", server_port);
+        if server_api_key.is_some() {
+            println!("🔑 鉴权：Bearer token 已启用");
+        } else {
+            println!("🔓 鉴权：关闭（仅 loopback 可访问）");
+        }
+        println!();
+        println!("✨ HTTP Server 功能：");
+        println!("   • 暴露全部 CLI/TUI 能力为 REST API");
+        println!("   • /v1/chat、/v1/tools/call、/v1/orchestrator/* 等");
+        println!("   • /v1/chat/stream 支持 SSE 流式响应");
+        println!();
+        println!("📚 文档：docs/SERVER.md");
+        println!("⚠️  注意：按 Ctrl+C 停止");
+        println!("═══════════════════════════\n");
+
+        // 独立构造 server 模式下的子组件
+        // （不复用 CliAssistant，因 CliAssistant 持有大量 owned 字段不易共享）
+        let app_config = crate::config::Config::load(None).unwrap_or_default();
+        let llm_manager = ProviderInitializer::new(app_config)
+            .initialize_llm_manager()
+            .unwrap_or_else(|_| LLMManager::new());
+
+        let tool_registry = crate::tool_matrix::registry::ToolRegistry::new();
+        register_all_builtin_tools(&tool_registry);
+        let tool_manager = ToolManager::new(tool_registry);
+
+        let orchestrator = Orchestrator::new();
+        let dialogue = DialogueStateMachine::new_without_persistence();
+
+        let app_state = AppState::new(config, tool_manager, orchestrator, llm_manager, dialogue);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        return rt.block_on(crate::server::run_server(
+            server_port,
+            server_api_key,
+            app_state,
+        ));
+    }
 
     // 如果指定了 --mcp，启动 MCP Server 模式
     if use_mcp {

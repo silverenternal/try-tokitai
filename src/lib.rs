@@ -39,6 +39,10 @@ pub mod tool_market;
 mod tool_matrix;
 pub mod tui;
 
+// HTTP REST API Server（feature-gated）
+#[cfg(feature = "server")]
+pub mod server;
+
 // 重新导出常用类型
 pub use assistant_common::AssistantConfig;
 pub use autonomous_assistant::AutonomousAssistant;
