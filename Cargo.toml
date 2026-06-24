@@ -35,8 +35,8 @@ tokitai = "0.4.0"
 tokitai-core = "0.4.0"
 tokitai-mcp-server = "0.4.0"
 
-# Context management (local crate)
-tokitai-context = { path = "crates/tokitai-context" }
+# Context management (from crates.io)
+tokitai-context = "0.1.2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -51,7 +51,7 @@ async-trait = "0.1"
 async-stream = "0.3"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls"] }
 reqwest-eventsource = "0.6"
 
 # Error handling
@@ -150,8 +150,8 @@ ignored = [
 
 # 排除独立测试目录
 [workspace]
-members = ["crates/tokitai-context"]
-exclude = ["test_tensor"]
+members = []
+exclude = ["test_tensor", "crates/tokitai-context"]
 
 
 [[bench]]
