@@ -2,7 +2,7 @@
 
 > **AI 原生工具选择器 + Git 分支式上下文管理**
 >
-> 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互**、**TUI 图形界面**、**MCP 协议**、**自主进化** 和 **Git 式上下文管理**。
+> 基于 [Tokitai](https://github.com/silverenternal/tokitai) 构建的强大 AI 助手，支持 **CLI 交互**、**TUI 图形界面**、**HTTP REST API**、**MCP 协议**、**自主进化** 和 **Git 式上下文管理**。
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)]()
@@ -62,7 +62,7 @@ ctx.time_travel("main", "0xabc123...")?;
 |------|----------|----------|----------|
 | **📱 CLI AI 助手** | `cargo run --release` | 用户 | 查询、分析、临时任务 |
 | **🎨 TUI 图形界面** | `cargo run --release -- --tui` | 用户 | 可视化交互、工具浏览 |
-| **🔌 MCP Server** | `cargo run --release -- --mcp` | 外部 AI 客户端 | 工具暴露、协议兼容 |
+| **🌐 HTTP REST API Server** | `cargo run --release --features server -- --server --port 8080` | 本地程序 / 浏览器 | 嵌入其他工作流、Web UI、自动化 |
 | **🤖 自主进化** | `cargo run --release -- --autonomous` | 项目自身 | 代码改进、技术债务清理 |
 
 ### 六大 LLM 提供商支持
@@ -175,6 +175,7 @@ cargo test
 | 文档 | 说明 |
 |------|------|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | **快速启动指南**（推荐先看） |
+| [docs/SERVER.md](docs/SERVER.md) | **HTTP REST API Server 使用文档** |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 完整用户指南 |
 
 ### 🎯 核心创新

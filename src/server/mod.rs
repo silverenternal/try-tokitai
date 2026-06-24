@@ -13,6 +13,7 @@
 //! ## 特性开关
 //! 整个模块由 `server` cargo feature 控制；不启用时不会拉入 axum/tower 依赖。
 
+pub mod auth;
 pub mod error;
 pub mod router;
 pub mod state;
@@ -20,9 +21,6 @@ pub mod stores;
 pub mod tool_set;
 
 mod routes;
-
-#[cfg(feature = "server")]
-pub use state::ServerConfig;
 
 use anyhow::Result;
 use std::net::Ipv4Addr;
@@ -36,7 +34,11 @@ use tracing::info;
 /// - `port`: 监听端口（1-65535）
 /// - `api_key`: 可选的 Bearer token；为 None 时关闭鉴权
 /// - `state`: 已构造好的 [`AppState`](state::AppState)
-pub async fn run_server(port: u16, api_key: Option<String>, state: state::AppState) -> Result<()> {
+pub async fn run_server(
+    port: u16,
+    api_key: Option<String>,
+    mut state: state::AppState,
+) -> Result<()> {
     use tokio::net::TcpListener;
 
     let bind_addr = Ipv4Addr::LOCALHOST;
@@ -49,8 +51,9 @@ pub async fn run_server(port: u16, api_key: Option<String>, state: state::AppSta
     let mut config = state.server_cfg.clone();
     config.port = port;
     config.api_key = api_key;
+    state.server_cfg = config.clone();
 
-    let app = router::build_router(state);
+    let app = router::build_router(state, config.api_key.clone());
 
     info!("🌐 HTTP Server 监听 http://{}", addr);
     if config.api_key.is_some() {

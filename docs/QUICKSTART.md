@@ -113,13 +113,21 @@ cargo run --release -- --mcp
 
 将所有工具暴露为 MCP 标准接口，供其他 AI 客户端调用。
 
-### 自主进化模式
+### HTTP REST API Server 模式
 
 ```bash
-cargo run --release -- --autonomous
+cargo run --features server -- --server --port 8080
 ```
 
-AI 将自主分析项目、发现改进点、执行修复并提交。
+如需鉴权，附加 `--api-key`：
+
+```bash
+cargo run --features server -- --server --port 8080 --api-key abc123
+```
+
+服务只会监听 `127.0.0.1`，适合本机脚本、Web UI 和自动化流程调用。
+
+完整接口说明请参见：[docs/SERVER.md](SERVER.md)。
 
 ---
 
