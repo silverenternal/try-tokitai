@@ -83,16 +83,11 @@ impl ServerToolSet {
 
 /// 把 tokitai::ToolCaller 的同步 call_tool 包成可放进 Vec<dyn ...> 的 dyn 形式
 trait ToolCallerDyn: Send + Sync {
-    fn call_tool_dyn(&self, name: &str, args: &Value)
-        -> Result<Value, tokitai_core::ToolError>;
+    fn call_tool_dyn(&self, name: &str, args: &Value) -> Result<Value, tokitai_core::ToolError>;
 }
 
 impl<T: ToolCaller + Send + Sync> ToolCallerDyn for T {
-    fn call_tool_dyn(
-        &self,
-        name: &str,
-        args: &Value,
-    ) -> Result<Value, tokitai_core::ToolError> {
+    fn call_tool_dyn(&self, name: &str, args: &Value) -> Result<Value, tokitai_core::ToolError> {
         ToolCaller::call_tool(self, name, args)
     }
 }

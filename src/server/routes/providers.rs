@@ -46,18 +46,21 @@ async fn list_providers(State(state): State<AppState>) -> Json<ProvidersResp> {
         .list_providers()
         .into_iter()
         .filter_map(|provider_type| {
-            llm.get_provider(provider_type).map(|provider| ProviderSummary {
-                name: provider.name().to_string(),
-                provider_type: provider.provider_type().as_str().to_string(),
-                default_model: provider.default_model().to_string(),
-            })
+            llm.get_provider(provider_type)
+                .map(|provider| ProviderSummary {
+                    name: provider.name().to_string(),
+                    provider_type: provider.provider_type().as_str().to_string(),
+                    default_model: provider.default_model().to_string(),
+                })
         })
         .collect();
 
     Json(ProvidersResp { current, providers })
 }
 
-async fn current_provider(State(state): State<AppState>) -> Result<Json<ProviderSummary>, ApiError> {
+async fn current_provider(
+    State(state): State<AppState>,
+) -> Result<Json<ProviderSummary>, ApiError> {
     let llm = state.llm.lock();
     let provider = llm
         .current_provider()
@@ -94,10 +97,11 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResp> {
         .list_providers()
         .into_iter()
         .filter_map(|provider_type| {
-            llm.get_provider(provider_type).map(|provider| ModelSummary {
-                provider: provider.provider_type().as_str().to_string(),
-                model: provider.default_model().to_string(),
-            })
+            llm.get_provider(provider_type)
+                .map(|provider| ModelSummary {
+                    provider: provider.provider_type().as_str().to_string(),
+                    model: provider.default_model().to_string(),
+                })
         })
         .collect();
 
@@ -110,6 +114,9 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResp> {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/providers", get(list_providers))
-        .route("/providers/current", get(current_provider).post(switch_provider))
+        .route(
+            "/providers/current",
+            get(current_provider).post(switch_provider),
+        )
         .route("/models", get(list_models))
 }

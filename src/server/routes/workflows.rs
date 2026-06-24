@@ -9,9 +9,7 @@ use axum::{Json, Router};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::orchestrator::workflow::{
-    templates, Workflow, WorkflowEngine, WorkflowStatus,
-};
+use crate::orchestrator::workflow::{templates, Workflow, WorkflowEngine, WorkflowStatus};
 use crate::server::error::ApiError;
 use crate::server::state::AppState;
 
@@ -77,10 +75,7 @@ fn build_template(id: &str) -> Result<Workflow, ApiError> {
     match id {
         "code_review" => Ok(templates::create_code_review_workflow()),
         "task_decomposition" => Ok(templates::create_task_decomposition_workflow()),
-        other => Err(ApiError::NotFound(format!(
-            "未知工作流模板：{}",
-            other
-        ))),
+        other => Err(ApiError::NotFound(format!("未知工作流模板：{}", other))),
     }
 }
 

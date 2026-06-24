@@ -6,8 +6,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::orchestrator::AgentRole;
 use crate::orchestrator::orchestrator::OrchestratorCommand;
+use crate::orchestrator::AgentRole;
 use crate::server::error::ApiError;
 use crate::server::state::AppState;
 
@@ -82,7 +82,12 @@ async fn run_command(
         "Toolbox" => OrchestratorCommand::Toolbox,
         "SwitchProvider" => OrchestratorCommand::SwitchProvider,
         "ShowProviders" => OrchestratorCommand::ShowProviders,
-        other => return Err(ApiError::BadRequest(format!("未知 orchestrator 命令：{}", other))),
+        other => {
+            return Err(ApiError::BadRequest(format!(
+                "未知 orchestrator 命令：{}",
+                other
+            )))
+        }
     };
 
     let result = state.orchestrator.lock().execute_command(command);
@@ -106,7 +111,10 @@ async fn clear_context(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::json!({"ok": true}))
 }
 
-async fn set_role(State(state): State<AppState>, Json(req): Json<RoleReq>) -> Result<Json<Value>, ApiError> {
+async fn set_role(
+    State(state): State<AppState>,
+    Json(req): Json<RoleReq>,
+) -> Result<Json<Value>, ApiError> {
     let role = AgentRole::from_str(&req.role);
     let mut orchestrator = state.orchestrator.lock();
     orchestrator.execute_command(OrchestratorCommand::SwitchRole(role));

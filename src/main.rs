@@ -31,6 +31,7 @@ mod server;
 
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -213,9 +214,11 @@ fn main() -> Result<()> {
         use crate::assistant_common::{register_all_builtin_tools, ToolManager};
         use crate::dialogue::DialogueStateMachine;
         use crate::llm::{LLMManager, ProviderInitializer};
+        use crate::mcp::McpClientManager;
         use crate::orchestrator::Orchestrator;
         use crate::server::state::AppState;
         use crate::server::tool_set::ServerToolSet;
+        use crate::tool_market::ToolMarket;
 
         println!("🌐 启动 HTTP REST API Server 模式");
         println!("═══════════════════════════");
@@ -251,13 +254,19 @@ fn main() -> Result<()> {
         let dialogue = DialogueStateMachine::new_without_persistence();
         let tool_set = ServerToolSet::new_default();
 
-        let app_state = AppState::new(
+        // 工具市场 + MCP 客户端
+        let tool_market = Arc::new(tokio::sync::Mutex::new(ToolMarket::new(None).ok()));
+        let mcp_manager = Arc::new(parking_lot::Mutex::new(McpClientManager::new()));
+
+        let app_state = AppState::with_extras(
             config,
             tool_manager,
             tool_set,
             orchestrator,
             llm_manager,
             dialogue,
+            tool_market,
+            mcp_manager,
         );
 
         let rt = tokio::runtime::Runtime::new().unwrap();

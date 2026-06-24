@@ -36,19 +36,15 @@ use tracing::info;
 /// - `port`: 监听端口（1-65535）
 /// - `api_key`: 可选的 Bearer token；为 None 时关闭鉴权
 /// - `state`: 已构造好的 [`AppState`](state::AppState)
-pub async fn run_server(
-    port: u16,
-    api_key: Option<String>,
-    state: state::AppState,
-) -> Result<()> {
+pub async fn run_server(port: u16, api_key: Option<String>, state: state::AppState) -> Result<()> {
     use tokio::net::TcpListener;
 
     let bind_addr = Ipv4Addr::LOCALHOST;
     let addr = std::net::SocketAddr::from((bind_addr, port));
 
-    let listener = TcpListener::bind(addr).await.map_err(|e| {
-        anyhow::anyhow!("绑定 {} 失败：{}（端口被占用？）", addr, e)
-    })?;
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("绑定 {} 失败：{}（端口被占用？）", addr, e))?;
 
     let mut config = state.server_cfg.clone();
     config.port = port;

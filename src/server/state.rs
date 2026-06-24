@@ -9,9 +9,13 @@ use std::sync::Arc;
 use crate::assistant_common::{AssistantConfig, ToolManager};
 use crate::dialogue::DialogueStateMachine;
 use crate::llm::LLMManager;
+use crate::mcp::McpClientManager;
 use crate::orchestrator::Orchestrator;
+use crate::tool_market::ToolMarket;
 use parking_lot::Mutex as PlMutex;
 
+use super::routes::autonomy::AutonomyStore;
+use super::routes::context::ContextState;
 use super::stores::SharedStores;
 use super::tool_set::ServerToolSet;
 
@@ -56,12 +60,21 @@ pub struct AppState {
     pub dialogue: Arc<PlMutex<DialogueStateMachine>>,
     /// 会话 / 工作流仓库
     pub stores: SharedStores,
+    /// 工具市场（可选；初始化失败时为 None）
+    pub tool_market: Arc<tokio::sync::Mutex<Option<ToolMarket>>>,
+    /// MCP 客户端管理
+    pub mcp: Arc<PlMutex<McpClientManager>>,
+    /// tokitai-context facade（仅缓存路径；Context 在 handler 内 spawn_blocking 打开）
+    pub context: Arc<PlMutex<ContextState>>,
+    /// 自主进化后台任务句柄
+    pub autonomy: AutonomyStore,
     /// 服务器配置
     pub server_cfg: ServerConfig,
 }
 
 impl AppState {
-    /// 构造 AppState
+    /// 构造 AppState（不含 tool_market / mcp / context）
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: AssistantConfig,
         tool_manager: ToolManager,
@@ -78,6 +91,38 @@ impl AppState {
             llm: Arc::new(PlMutex::new(llm)),
             dialogue: Arc::new(PlMutex::new(dialogue)),
             stores: SharedStores::new(),
+            tool_market: Arc::new(tokio::sync::Mutex::new(None)),
+            mcp: Arc::new(PlMutex::new(McpClientManager::new())),
+            context: super::routes::context::build_default_context(),
+            autonomy: AutonomyStore::default(),
+            server_cfg: ServerConfig::default(),
+        }
+    }
+
+    /// 构造 AppState，附带 tool_market 与 mcp（main.rs 用）
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_extras(
+        config: AssistantConfig,
+        tool_manager: ToolManager,
+        tool_set: ServerToolSet,
+        orchestrator: Orchestrator,
+        llm: LLMManager,
+        dialogue: DialogueStateMachine,
+        tool_market: Arc<tokio::sync::Mutex<Option<ToolMarket>>>,
+        mcp: Arc<PlMutex<McpClientManager>>,
+    ) -> Self {
+        Self {
+            config: Arc::new(config),
+            tool_manager: Arc::new(tool_manager),
+            tool_set: Arc::new(tool_set),
+            orchestrator: Arc::new(PlMutex::new(orchestrator)),
+            llm: Arc::new(PlMutex::new(llm)),
+            dialogue: Arc::new(PlMutex::new(dialogue)),
+            stores: SharedStores::new(),
+            tool_market,
+            mcp,
+            context: super::routes::context::build_default_context(),
+            autonomy: AutonomyStore::default(),
             server_cfg: ServerConfig::default(),
         }
     }

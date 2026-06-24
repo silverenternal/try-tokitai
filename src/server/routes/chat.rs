@@ -183,10 +183,7 @@ fn message_from_value(v: Value) -> Result<Message, ApiError> {
         "system" => Ok(Message::system(&content)),
         "user" => Ok(Message::user(&content)),
         "assistant" => Ok(Message::assistant(&content)),
-        other => Err(ApiError::BadRequest(format!(
-            "不支持的消息角色：{}",
-            other
-        ))),
+        other => Err(ApiError::BadRequest(format!("不支持的消息角色：{}", other))),
     }
 }
 
