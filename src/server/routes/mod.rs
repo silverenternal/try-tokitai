@@ -4,4 +4,6 @@
 
 pub mod chat;
 pub mod health;
+pub mod orchestrator;
+pub mod providers;
 pub mod tools;

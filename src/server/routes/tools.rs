@@ -9,7 +9,6 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::assistant_common::register_all_builtin_tools;
 use crate::server::error::ApiError;
 use crate::server::state::AppState;
 use crate::tools::{

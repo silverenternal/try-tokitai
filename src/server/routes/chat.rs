@@ -10,12 +10,13 @@ use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::post;
 use axum::{Json, Router};
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::convert::Infallible;
 
-use crate::llm::{ChatRequest, Message};
+use crate::llm::{ChatRequest, LLMProvider, Message};
 use crate::server::error::ApiError;
 use crate::server::state::AppState;
 
@@ -51,15 +52,19 @@ pub struct ChatResp {
     pub finish_reason: Option<String>,
 }
 
+fn current_provider(state: &AppState) -> Result<std::sync::Arc<dyn LLMProvider>, ApiError> {
+    let llm = state.llm.lock();
+    llm.current_provider()
+        .cloned()
+        .ok_or_else(|| ApiError::LlmError("未设置当前 LLM provider".to_string()))
+}
+
 /// `POST /v1/chat` handler
 async fn chat(
     State(state): State<AppState>,
     Json(req): Json<ChatReq>,
 ) -> Result<Json<ChatResp>, ApiError> {
-    let provider = state
-        .llm
-        .current_provider()
-        .ok_or_else(|| ApiError::LlmError("未设置当前 LLM provider".to_string()))?;
+    let provider = current_provider(&state)?;
 
     let messages: Vec<Message> = req
         .messages
@@ -104,16 +109,8 @@ async fn chat(
 async fn chat_stream(
     State(state): State<AppState>,
     Json(req): Json<ChatReq>,
-) -> Result<
-    Sse<impl Stream<Item = Result<Event, Infallible>>>,
-    ApiError,
-> {
-    use async_stream::try_stream;
-
-    let provider = state
-        .llm
-        .current_provider()
-        .ok_or_else(|| ApiError::LlmError("未设置当前 LLM provider".to_string()))?;
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let provider = current_provider(&state)?;
 
     // SSE 流式目前仅在 OpenAIProvider 实现
     if provider.provider_type().as_str() != "openai" {

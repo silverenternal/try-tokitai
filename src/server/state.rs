@@ -49,8 +49,8 @@ pub struct AppState {
     pub tool_set: Arc<ServerToolSet>,
     /// 编排器（角色切换、上下文优化、命令分发）
     pub orchestrator: Arc<PlMutex<Orchestrator>>,
-    /// LLM 供应商管理
-    pub llm: Arc<LLMManager>,
+    /// LLM 供应商管理（可切换 current provider）
+    pub llm: Arc<PlMutex<LLMManager>>,
     /// 对话状态机
     pub dialogue: Arc<PlMutex<DialogueStateMachine>>,
     /// 服务器配置
@@ -72,7 +72,7 @@ impl AppState {
             tool_manager: Arc::new(tool_manager),
             tool_set: Arc::new(tool_set),
             orchestrator: Arc::new(PlMutex::new(orchestrator)),
-            llm: Arc::new(llm),
+            llm: Arc::new(PlMutex::new(llm)),
             dialogue: Arc::new(PlMutex::new(dialogue)),
             server_cfg: ServerConfig::default(),
         }

@@ -21,9 +21,9 @@ pub fn build_router(state: AppState) -> Router {
     let v1: Router<AppState> = Router::new()
         .merge(routes::health::router())
         .merge(routes::tools::router())
-        .merge(routes::chat::router());
-    // .merge(routes::providers::router()) // Commit 3
-    // .merge(routes::orchestrator::router()) // Commit 3
+        .merge(routes::chat::router())
+        .merge(routes::providers::router())
+        .merge(routes::orchestrator::router());
     // .merge(routes::dialogue::router()) // Commit 4
     // .merge(routes::workflows::router()) // Commit 4
     // .merge(routes::sessions::router()) // Commit 4
