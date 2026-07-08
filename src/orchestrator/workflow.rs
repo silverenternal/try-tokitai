@@ -13,8 +13,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::orchestrator::{AgentRole, ContextMessage, ContextOptimizer, MessageType, RoleSwitcher};
@@ -993,9 +993,7 @@ impl WorkflowEngine {
                 let executor = executor.clone();
 
                 // Use spawn_blocking so tokio::time::timeout can cancel long-running sync calls
-                let result = tokio::task::spawn_blocking(move || {
-                    executor(&tool, &args)
-                }).await;
+                let result = tokio::task::spawn_blocking(move || executor(&tool, &args)).await;
 
                 match result {
                     Ok(Ok(value)) => {
@@ -1006,19 +1004,19 @@ impl WorkflowEngine {
                         self.log("步骤失败", &format!("{}: {}", step.id, e));
                         Err(anyhow::anyhow!("工具 '{}' 执行失败: {}", step.tool, e))
                     }
-                    Err(join_err) => {
-                        Err(anyhow::anyhow!("工具 '{}' 执行异常: {}", step.tool, join_err))
-                    }
+                    Err(join_err) => Err(anyhow::anyhow!(
+                        "工具 '{}' 执行异常: {}",
+                        step.tool,
+                        join_err
+                    )),
                 }
             }
-            None => {
-                Err(anyhow::anyhow!(
-                    "步骤 '{}' 需要工具 '{}'，但未注入 tool_executor。\n\
+            None => Err(anyhow::anyhow!(
+                "步骤 '{}' 需要工具 '{}'，但未注入 tool_executor。\n\
                      调用 WorkflowEngine::with_tool_executor() 设置工具执行器。",
-                    step.id,
-                    step.tool
-                ))
-            }
+                step.id,
+                step.tool
+            )),
         }
     }
 }
@@ -1618,11 +1616,14 @@ mod tests {
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let executed_clone = executed.clone();
 
-        let workflow = make_test_workflow("order-test", vec![
-            make_step("A", "tool_a", vec![]),
-            make_step("B", "tool_b", vec!["A"]),
-            make_step("C", "tool_c", vec!["B"]),
-        ]);
+        let workflow = make_test_workflow(
+            "order-test",
+            vec![
+                make_step("A", "tool_a", vec![]),
+                make_step("B", "tool_b", vec!["A"]),
+                make_step("C", "tool_c", vec!["B"]),
+            ],
+        );
 
         let mut engine = WorkflowEngine::new(Workflow::new("w".into(), "w".into(), "".into()))
             .with_tool_executor(move |tool_name: &str, _args: &Value| {
@@ -1637,17 +1638,24 @@ mod tests {
         let pos_a = order.iter().position(|s| s == "tool_a").unwrap();
         let pos_b = order.iter().position(|s| s == "tool_b").unwrap();
         let pos_c = order.iter().position(|s| s == "tool_c").unwrap();
-        assert!(pos_a < pos_b, "A must execute before B, got order: {:?}", *order);
-        assert!(pos_b < pos_c, "B must execute before C, got order: {:?}", *order);
+        assert!(
+            pos_a < pos_b,
+            "A must execute before B, got order: {:?}",
+            *order
+        );
+        assert!(
+            pos_b < pos_c,
+            "B must execute before C, got order: {:?}",
+            *order
+        );
     }
 
     #[tokio::test]
     async fn test_declarative_workflow_timeout_yielding() {
         // Timeout works when the tool executor yields to the runtime.
         // Here we simulate a slow async tool by blocking in a spawn_blocking task.
-        let workflow = make_test_workflow("timeout-test", vec![
-            make_step("slow", "slow_tool", vec![]),
-        ]);
+        let workflow =
+            make_test_workflow("timeout-test", vec![make_step("slow", "slow_tool", vec![])]);
 
         // Use a step-level timeout of 1 second
         let mut wf = workflow;
@@ -1672,9 +1680,8 @@ mod tests {
         let call_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let call_count_clone = call_count.clone();
 
-        let mut workflow = make_test_workflow("retry-test", vec![
-            make_step("flaky", "flaky_tool", vec![]),
-        ]);
+        let mut workflow =
+            make_test_workflow("retry-test", vec![make_step("flaky", "flaky_tool", vec![])]);
         workflow.steps[0].retry = RetryConfig {
             max_retries: 3,
             retry_interval_ms: 10,
@@ -1694,16 +1701,17 @@ mod tests {
         let result = engine.execute_declarative(&workflow, &json!({})).await;
         assert!(result.is_ok());
         let r = result.unwrap();
-        assert_eq!(r.status, WorkflowStatus::Completed,
-            "Workflow should succeed after retries");
+        assert_eq!(
+            r.status,
+            WorkflowStatus::Completed,
+            "Workflow should succeed after retries"
+        );
         assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
     async fn test_declarative_workflow_no_executor_returns_error() {
-        let workflow = make_test_workflow("no-executor", vec![
-            make_step("A", "tool_a", vec![]),
-        ]);
+        let workflow = make_test_workflow("no-executor", vec![make_step("A", "tool_a", vec![])]);
 
         let mut engine = WorkflowEngine::new(Workflow::new("w".into(), "w".into(), "".into()));
         // No tool_executor set
@@ -1711,8 +1719,11 @@ mod tests {
         let result = engine.execute_declarative(&workflow, &json!({})).await;
         assert!(result.is_ok()); // Returns WorkflowResult, not Err
         let r = result.unwrap();
-        assert_ne!(r.status, WorkflowStatus::Completed,
-            "Workflow without executor should not complete");
+        assert_ne!(
+            r.status,
+            WorkflowStatus::Completed,
+            "Workflow without executor should not complete"
+        );
         let err_msg = r.error.as_ref().map(|s| s.as_str()).unwrap_or("");
         assert!(
             err_msg.contains("tool_executor"),

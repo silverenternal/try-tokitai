@@ -16,16 +16,6 @@ pub struct DesktopHostRuntime {
     descriptor: HostDescriptor,
 }
 
-pub trait DesktopBridgeAdapter {
-    fn descriptor(&self) -> &HostDescriptor;
-    fn invoke<'a>(
-        &'a self,
-        command: &'a str,
-        payload: Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = HostBridgeResponse> + Send + 'a>>;
-    fn open_stream(&self, command: &str, payload: Value) -> Result<HostBridgeStream>;
-}
-
 impl DesktopHostRuntime {
     pub fn new(
         host: WebHostConfig,
@@ -65,24 +55,6 @@ impl DesktopHostRuntime {
 
     pub fn open_stream(&self, command: &str, payload: Value) -> Result<HostBridgeStream> {
         dispatch_bridge_stream(self.state.clone(), command, payload)
-    }
-}
-
-impl DesktopBridgeAdapter for DesktopHostRuntime {
-    fn descriptor(&self) -> &HostDescriptor {
-        self.descriptor()
-    }
-
-    fn invoke<'a>(
-        &'a self,
-        command: &'a str,
-        payload: Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = HostBridgeResponse> + Send + 'a>> {
-        Box::pin(async move { self.invoke(command, payload).await })
-    }
-
-    fn open_stream(&self, command: &str, payload: Value) -> Result<HostBridgeStream> {
-        self.open_stream(command, payload)
     }
 }
 

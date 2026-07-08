@@ -6,10 +6,88 @@
     <title>Agent Workspace</title>
     <link rel="stylesheet" href="./vendor/monaco/vs/editor/editor.main.css" />
     <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260623a" />
+    <link rel="stylesheet" href="./styles.css?v=20260706c" />
   </head>
   <body>
     <div class="app-shell">
+      <header class="workspace-header shell-topbar">
+        <div class="shell-topbar-left">
+          <button
+            id="left-sidebar-toggle"
+            class="layout-corner-button shell-topbar-button"
+            type="button"
+            aria-label="Toggle left sidebar"
+            title="Toggle left sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 5.5h6v13h-6z"></path>
+              <path d="M13.5 6.5h6"></path>
+              <path d="M13.5 12h6"></path>
+              <path d="M13.5 17.5h6"></path>
+            </svg>
+          </button>
+
+          <div class="mode-switch workspace-mode-switch" id="mode-switch" role="tablist" aria-label="Workspace mode">
+            <button
+              class="mode-switch-button is-active"
+              id="mode-chat"
+              type="button"
+              data-mode="chat"
+              aria-selected="true"
+              aria-label="Chat"
+              title="Chat"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6.5 7.5h11a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H11l-3.5 2.5v-2.5h-1a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z"></path>
+                <path d="M8.5 10.5h7"></path>
+                <path d="M8.5 13.5h4.5"></path>
+              </svg>
+              <span class="mode-switch-button-text" data-i18n="modeChat">Chat</span>
+            </button>
+            <button
+              class="mode-switch-button"
+              id="mode-research"
+              type="button"
+              data-mode="research"
+              aria-selected="false"
+              aria-label="Agent"
+              title="Agent"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9.25 17.25h5.5"></path>
+                <path d="M10 20h4"></path>
+                <path d="M8.75 14.75c-.95-.9-1.75-2.28-1.75-4.1 0-3 2.25-5.4 5-5.4s5 2.4 5 5.4c0 1.82-.8 3.2-1.75 4.1-.62.58-1.25 1.23-1.25 2.1h-4.5c0-.87-.63-1.52-1.25-2.1Z"></path>
+              </svg>
+              <span class="mode-switch-button-text" data-i18n="modeResearch">Agent</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="shell-topbar-spacer" aria-hidden="true"></div>
+
+        <div class="shell-topbar-right">
+          <div class="workspace-meta">
+            <span class="workspace-header-label" id="workspace-title">Workspace</span>
+            <span class="workspace-header-root" id="workspace-root-label"></span>
+          </div>
+
+          <button
+            id="right-sidebar-toggle"
+            class="layout-corner-button shell-topbar-button"
+            type="button"
+            aria-label="Toggle right sidebar"
+            title="Toggle right sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13.5 5.5h6v13h-6z"></path>
+              <path d="M4.5 6.5h6"></path>
+              <path d="M4.5 12h6"></path>
+              <path d="M4.5 17.5h6"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
       <aside class="activity-rail" id="activity-rail">
         <div class="activity-rail-main">
           <button class="activity-rail-button is-active" type="button" data-activity-panel="nav" aria-label="Navigation" title="Navigation">
@@ -25,6 +103,12 @@
               <path d="M3.75 12h16.5"></path>
               <path d="M6.75 6.75h3.25v3.25H6.75z"></path>
               <path d="M14 14h3.25v3.25H14z"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="search" aria-label="Search" title="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="5.5"></circle>
+              <path d="m16 16 4 4"></path>
             </svg>
           </button>
           <button class="activity-rail-button" type="button" data-activity-panel="git" aria-label="Source Control" title="Source Control">
@@ -111,6 +195,43 @@
           <div class="extension-list" id="extension-list"></div>
         </section>
 
+        <section class="activity-panel" id="activity-panel-search" data-activity-panel-id="search">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group">
+              <div class="activity-panel-eyebrow" data-i18n="searchLabel">Search</div>
+              <div class="activity-panel-title" data-i18n="searchTitle">Research Search</div>
+            </div>
+            <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6.5 9 12l6 5.5"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="search-mode-switch segmented-control" id="search-mode-switch" data-segmented>
+            <button type="button" class="segment is-active" data-value="web" data-i18n="searchModeWeb">Web</button>
+            <button type="button" class="segment" data-value="papers" data-i18n="searchModePapers">Papers</button>
+            <button type="button" class="segment" data-value="tracking" data-i18n="searchModeTracking">Tracking</button>
+            <button type="button" class="segment" data-value="benchmarks" data-i18n="searchModeBenchmarks">Benchmarks</button>
+            <button type="button" class="segment" data-value="models" data-i18n="searchModeModels">Models</button>
+            <button type="button" class="segment" data-value="datasets" data-i18n="searchModeDatasets">Datasets</button>
+            <button type="button" class="segment" data-value="github" data-i18n="searchModeGitHub">GitHub</button>
+          </div>
+
+          <div class="extension-search-shell">
+            <input id="search-query-input" class="extension-search-input" type="text" placeholder="Search" />
+          </div>
+
+          <div class="search-panel-meta" id="search-health-strip"></div>
+          <div class="search-panel-actions">
+            <button class="git-action-button git-action-button-primary" type="button" id="search-run-button" data-i18n="searchRun">Search</button>
+          </div>
+          <div class="search-workspace" id="search-workspace">
+            <div class="search-results" id="search-results"></div>
+            <aside class="search-preview-panel" id="search-preview-panel"></aside>
+          </div>
+        </section>
+
         <section class="activity-panel" id="activity-panel-git" data-activity-panel-id="git">
           <div class="activity-panel-head">
             <div class="activity-panel-title-group">
@@ -189,6 +310,7 @@
           <div class="run-session-panel" id="run-debug-session" hidden></div>
         </section>
       </div>
+      <div class="shell-resizer shell-resizer-flyout" id="activity-flyout-resizer" data-layout-resizer-kind="flyout" aria-hidden="true"></div>
 
       <div class="corner-tools">
         <button
@@ -250,18 +372,7 @@
           </div>
 
           <main class="workspace">
-            <header class="workspace-header">
-              <div class="workspace-heading">
-                <p class="workspace-kicker" id="workspace-root-label"></p>
-                <h1 id="workspace-title">Workspace</h1>
-              </div>
-
-              <div class="workspace-meta">
-                <span class="meta-pill meta-pill-muted" id="risk-pill">safe</span>
-              </div>
-            </header>
-
-            <section class="workspace-body">
+            <section class="workspace-body" id="workspace-body">
               <section class="workspace-chat">
                 <section class="conversation-stage">
                   <div class="agent-prelude-background" id="agent-prelude-background" hidden>
@@ -337,9 +448,6 @@
                       <section class="agent-runtime-strip composer-runtime-strip" id="agent-runtime-strip" hidden></section>
                       <section class="permission-strip" id="permission-strip" hidden></section>
                     </div>
-                    <div class="composer-status-right">
-                      <section class="agent-process-strip" id="agent-process-strip" hidden></section>
-                    </div>
                   </div>
 
                   <label class="composer-field" for="message-input">
@@ -349,108 +457,62 @@
                       data-placeholder-key="composerPlaceholder"
                       placeholder="Type a task or continue the current conversation like TUI."
                     ></textarea>
+                    <div class="composer-inline-tools">
+                      <div class="composer-inline-tools-left">
+                        <button class="attach-button" type="button" id="attach-button" aria-label="Attach files" title="Attach files">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="8.5"></circle>
+                            <path d="M12 8.5v7"></path>
+                            <path d="M8.5 12h7"></path>
+                          </svg>
+                        </button>
+                        <input id="file-input" type="file" multiple hidden />
+                      </div>
+                      <div class="composer-inline-tools-right">
+                        <button class="composer-stop" type="button" id="composer-stop" hidden>
+                          Stop
+                        </button>
+                        <details class="effort-anchor" id="effort-disclosure">
+                          <summary class="effort-trigger" id="effort-trigger">
+                            <span class="effort-trigger-label" data-i18n="effortTitle">Effort</span>
+                            <span class="effort-trigger-value" id="effort-trigger-value" data-i18n="effortLow">Low</span>
+                          </summary>
+
+                          <section class="effort-popover" id="effort-panel">
+                            <div class="effort-popover-head">
+                              <strong id="effort-panel-title">Effort Low</strong>
+                            </div>
+
+                            <p class="effort-panel-meta" id="effort-panel-meta"></p>
+
+                            <div class="effort-scale-labels">
+                              <span data-i18n="effortFast">Faster</span>
+                              <span data-i18n="effortSmart">Smarter</span>
+                            </div>
+
+                            <div class="effort-slider" id="effort-slider" role="tablist" aria-label="Thinking level">
+                              <div class="effort-slider-track" aria-hidden="true">
+                                <div class="effort-slider-matrix" id="effort-slider-matrix"></div>
+                                <span class="effort-slider-dot effort-slider-dot-0"></span>
+                                <span class="effort-slider-dot effort-slider-dot-1"></span>
+                                <span class="effort-slider-dot effort-slider-dot-2"></span>
+                                <span class="effort-slider-dot effort-slider-dot-3"></span>
+                                <span class="effort-slider-thumb"></span>
+                              </div>
+                              <div class="effort-slider-hitareas">
+                                <button class="effort-stop is-active" type="button" data-effort="low" aria-label="Low"></button>
+                                <button class="effort-stop" type="button" data-effort="medium" aria-label="Medium"></button>
+                                <button class="effort-stop" type="button" data-effort="high" aria-label="High"></button>
+                                <button class="effort-stop" type="button" data-effort="max" aria-label="Max"></button>
+                              </div>
+                            </div>
+                          </section>
+                        </details>
+                      </div>
+                    </div>
                   </label>
 
                   <div class="composer-attachments" id="composer-attachments" hidden></div>
-
-                  <div class="composer-actions">
-                    <div class="composer-actions-left">
-                      <div class="mode-switch mode-switch-inline" role="tablist" aria-label="Workspace mode">
-                        <button
-                          class="mode-switch-button is-active"
-                          type="button"
-                          data-mode="chat"
-                          data-i18n="modeChat"
-                          aria-selected="true"
-                        >
-                          Chat
-                        </button>
-                        <button
-                          class="mode-switch-button"
-                          type="button"
-                          data-mode="research"
-                          data-i18n="modeResearch"
-                          aria-selected="false"
-                        >
-                          Agent
-                        </button>
-                      </div>
-                      <button class="attach-button" type="button" id="attach-button" aria-label="Attach files" title="Attach files">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <circle cx="12" cy="12" r="8.5"></circle>
-                          <path d="M12 8.5v7"></path>
-                          <path d="M8.5 12h7"></path>
-                        </svg>
-                      </button>
-                      <input id="file-input" type="file" multiple hidden />
-                    </div>
-
-                    <div class="composer-actions-right">
-                      <button class="composer-stop" type="button" id="composer-stop" hidden>
-                        Stop
-                      </button>
-
-                      <details class="effort-anchor" id="effort-disclosure">
-                        <summary class="effort-trigger" id="effort-trigger">
-                          <span class="effort-trigger-label" data-i18n="effortTitle">Effort</span>
-                          <span class="effort-trigger-value" id="effort-trigger-value" data-i18n="effortLow">Low</span>
-                        </summary>
-
-                        <section class="effort-popover" id="effort-panel">
-                          <div class="effort-popover-head">
-                            <strong id="effort-panel-title">Effort Low</strong>
-                          </div>
-
-                          <p class="effort-panel-meta" id="effort-panel-meta"></p>
-
-                          <div class="effort-scale-labels">
-                            <span data-i18n="effortFast">Faster</span>
-                            <span data-i18n="effortSmart">Smarter</span>
-                          </div>
-
-                          <div class="effort-slider" id="effort-slider" role="tablist" aria-label="Thinking level">
-                            <div class="effort-slider-track" aria-hidden="true">
-                              <div class="effort-slider-matrix" id="effort-slider-matrix"></div>
-                              <span class="effort-slider-dot effort-slider-dot-0"></span>
-                              <span class="effort-slider-dot effort-slider-dot-1"></span>
-                              <span class="effort-slider-dot effort-slider-dot-2"></span>
-                              <span class="effort-slider-dot effort-slider-dot-3"></span>
-                              <span class="effort-slider-thumb"></span>
-                            </div>
-                            <div class="effort-slider-hitareas">
-                              <button class="effort-stop is-active" type="button" data-effort="low" aria-label="Low"></button>
-                              <button class="effort-stop" type="button" data-effort="medium" aria-label="Medium"></button>
-                              <button class="effort-stop" type="button" data-effort="high" aria-label="High"></button>
-                              <button class="effort-stop" type="button" data-effort="max" aria-label="Max"></button>
-                            </div>
-                          </div>
-                        </section>
-                      </details>
-                    </div>
-                  </div>
-
-                  <div class="mode-switch" id="mode-switch" role="tablist" aria-label="Workspace mode">
-                    <button
-                      class="mode-switch-button is-active"
-                      id="mode-chat"
-                      type="button"
-                      data-mode="chat"
-                      data-i18n="modeChat"
-                      aria-selected="true"
-                    >
-                      Chat
-                    </button>
-                    <button
-                      class="mode-switch-button"
-                      id="mode-research"
-                      type="button"
-                      data-mode="research"
-                      data-i18n="modeResearch"
-                      aria-selected="false"
-                    >
-                      Agent
-                    </button>
-                  </div>
 
                   <div class="settings-popovers">
                     <section class="settings-popover" id="settings-panel" hidden>
@@ -576,6 +638,38 @@
                   </div>
                 </section>
               </section>
+              <div class="shell-resizer shell-resizer-browser" id="browser-split-resizer" data-layout-resizer-kind="browser" aria-hidden="true"></div>
+              <aside class="browser-workspace" id="browser-workspace" hidden>
+                <div class="browser-toolbar">
+                  <div class="browser-toolbar-group">
+                    <button class="git-action-button" type="button" id="browser-back-button">Back</button>
+                    <button class="git-action-button" type="button" id="browser-refresh-button">Refresh</button>
+                    <button class="git-action-button" type="button" id="browser-external-button">External</button>
+                  </div>
+                  <div class="browser-toolbar-address" id="browser-toolbar-address">No page loaded</div>
+                  <button
+                    class="browser-toolbar-button"
+                    type="button"
+                    id="browser-close-button"
+                    aria-label="Close browser"
+                    title="Close browser"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m7 7 10 10"></path>
+                      <path d="M17 7 7 17"></path>
+                    </svg>
+                  </button>
+                </div>
+                <div class="browser-frame-shell">
+                  <iframe
+                    class="browser-frame"
+                    id="browser-frame"
+                    title="In-app browser"
+                    referrerpolicy="no-referrer"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+                  ></iframe>
+                </div>
+              </aside>
               <section class="git-workspace" id="git-workspace" hidden>
                 <div class="git-toolbar">
                   <div class="git-toolbar-group">
@@ -785,6 +879,42 @@
           </div>
 
           <section class="workspace-code-panel is-closed">
+            <div class="workspace-launcher" id="workspace-launcher" hidden>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="git">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⊞</span>
+                  <span class="workspace-launcher-label">审查</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+Shift+G</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="terminal">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⌘</span>
+                  <span class="workspace-launcher-label">终端</span>
+                </span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="browser">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">◌</span>
+                  <span class="workspace-launcher-label">浏览器</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+T</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="files">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">◫</span>
+                  <span class="workspace-launcher-label">文件</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+P</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="side-chat">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⊕</span>
+                  <span class="workspace-launcher-label">侧边聊天</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+Alt+S</span>
+              </button>
+            </div>
             <div class="workspace-code-scroll" id="workspace-code-scroll">
               <div class="workspace-code-placeholder" id="workspace-code-content">Double-click a file to preview its contents.</div>
             </div>
@@ -817,8 +947,6 @@
       <button class="session-floating-menu-item is-danger" type="button" id="session-menu-delete">Delete</button>
     </div>
 
-    <div id="panel-menu" class="panel-floating-menu" hidden></div>
-
     <div id="toast" class="toast" role="status" aria-live="polite">Copied</div>
 
     <script src="./vendor/katex/katex.min.js?v=20260619m"></script>
@@ -847,7 +975,7 @@
         },
       });
     </script>
-    <script src="./app.js?v=20260623a"></script>
+    <script src="./app.js?v=20260706c"></script>
   </body>
 </html>
 

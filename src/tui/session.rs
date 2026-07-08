@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use super::components::message_block::MessageBlock;
 use crate::app_paths::AppPaths;
 use crate::text_encoding::{normalize_text_for_display, read_text_file};
-use super::components::message_block::MessageBlock;
 
 // ============================================================================
 // SessionBranch
@@ -100,6 +100,12 @@ fn sanitize_message_block(block: &mut MessageBlock) {
         | MessageBlock::Error { content }
         | MessageBlock::System { content } => {
             *content = normalize_text_for_display(content);
+        }
+        MessageBlock::AssistantChoices { title, options } => {
+            *title = normalize_text_for_display(title);
+            for value in options {
+                *value = normalize_text_for_display(value);
+            }
         }
         MessageBlock::ToolCall { name, status, .. } => {
             *name = normalize_text_for_display(name);
@@ -215,10 +221,9 @@ impl SessionManager {
     // ------------------------------------------------------------------
 
     pub fn new() -> Result<Self> {
-        let sessions_dir = AppPaths::for_local_dev(
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        )
-        .sessions_dir();
+        let sessions_dir =
+            AppPaths::for_local_dev(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+                .sessions_dir();
 
         Self::from_sessions_dir(sessions_dir)
     }
@@ -360,7 +365,8 @@ impl SessionManager {
         } else {
             self.index.insert(0, updated_meta);
         }
-        self.index.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        self.index
+            .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         self.save_index()?;
 
         Ok(())
@@ -381,7 +387,8 @@ impl SessionManager {
             };
             sanitize_session_file(&mut file);
 
-            let next_title = auto_title(&file.messages).unwrap_or_else(|| "New conversation".to_string());
+            let next_title =
+                auto_title(&file.messages).unwrap_or_else(|| "New conversation".to_string());
             let next_summary = auto_summary(&file.messages).unwrap_or_default();
 
             let mut file_changed = false;
@@ -404,7 +411,8 @@ impl SessionManager {
         }
 
         if changed {
-            self.index.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+            self.index
+                .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
             self.save_index()?;
         }
 
@@ -559,7 +567,9 @@ fn looks_like_corrupted_text(raw: &str) -> bool {
     const MOJIBAKE_MARKERS: [&str; 12] = [
         "鈥", "銆", "锛", "鍙", "鏂", "寮", "缁", "鐮", "姝", "闂", "璇", "閿",
     ];
-    MOJIBAKE_MARKERS.iter().any(|marker| trimmed.contains(marker))
+    MOJIBAKE_MARKERS
+        .iter()
+        .any(|marker| trimmed.contains(marker))
 }
 
 fn is_low_value_summary_text(raw: &str) -> bool {
@@ -595,36 +605,42 @@ fn is_low_value_summary_text(raw: &str) -> bool {
 
 /// Extract a short title from the first user message.
 fn auto_title(messages: &[MessageBlock]) -> Option<String> {
-    let user_msg = messages.iter().find_map(|m| {
-        if let MessageBlock::User { content, .. } = m {
-            if is_low_value_summary_text(content) {
-                None
+    let user_msg = messages
+        .iter()
+        .find_map(|m| {
+            if let MessageBlock::User { content, .. } = m {
+                if is_low_value_summary_text(content) {
+                    None
+                } else {
+                    Some(content.as_str())
+                }
             } else {
-                Some(content.as_str())
+                None
             }
-        } else {
-            None
-        }
-    }).or_else(|| messages.iter().find_map(|m| {
-        if let MessageBlock::User { content, .. } = m {
-            Some(content.as_str())
-        } else {
-            None
-        }
-    }))?;
+        })
+        .or_else(|| {
+            messages.iter().find_map(|m| {
+                if let MessageBlock::User { content, .. } = m {
+                    Some(content.as_str())
+                } else {
+                    None
+                }
+            })
+        })?;
 
     compact_message_text(user_msg, 28).or_else(|| Some("New conversation".to_string()))
 }
 
 /// Extract a short rolling summary from the latest visible conversation message.
 fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
-    let preferred = messages.iter().rev().find_map(|message| match message {
-        MessageBlock::Assistant { content }
-        | MessageBlock::AssistantStreaming { content }
-        | MessageBlock::Error { content }
-        | MessageBlock::System { content } => {
-            if is_low_value_summary_text(content) {
-                None
+        let preferred = messages.iter().rev().find_map(|message| match message {
+            MessageBlock::Assistant { content }
+            | MessageBlock::AssistantChoices { title: content, .. }
+            | MessageBlock::AssistantStreaming { content }
+            | MessageBlock::Error { content }
+            | MessageBlock::System { content } => {
+                if is_low_value_summary_text(content) {
+                    None
             } else {
                 compact_message_text(content, 42)
             }
@@ -642,6 +658,14 @@ fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
                 None
             } else {
                 compact_message_text(content, 42)
+            }
+        }
+        MessageBlock::AssistantChoices { title, options } => {
+            let combined = format!("{} {}", title, options.join(" "));
+            if is_low_value_summary_text(&combined) {
+                None
+            } else {
+                compact_message_text(&combined, 42)
             }
         }
         _ => None,
@@ -667,6 +691,10 @@ pub async fn generate_ai_summary(
             MessageBlock::Assistant { content } => {
                 let short: String = content.chars().take(200).collect();
                 conv_text.push_str(&format!("Assistant: {}\n", short));
+            }
+            MessageBlock::AssistantChoices { title, options } => {
+                let joined = options.join(" | ");
+                conv_text.push_str(&format!("Assistant choices: {} => {}\n", title, joined));
             }
             _ => {}
         }

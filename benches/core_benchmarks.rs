@@ -237,7 +237,8 @@ fn benchmark_hash_chain_append(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let mut current_hash = String::from(
-                    "0x0000000000000000000000000000000000000000000000000000000000000000");
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                );
 
                 for i in 0..size {
                     let content_hash = format!("content_{}", i);
@@ -263,8 +264,8 @@ fn benchmark_hash_chain_verify(c: &mut Criterion) {
 
     // 预先生成哈希链
     let mut chain: Vec<(String, String)> = Vec::new();
-    let mut current_hash = String::from(
-        "0x0000000000000000000000000000000000000000000000000000000000000000");
+    let mut current_hash =
+        String::from("0x0000000000000000000000000000000000000000000000000000000000000000");
 
     for i in 0..100 {
         let content_hash = format!("content_{}", i);

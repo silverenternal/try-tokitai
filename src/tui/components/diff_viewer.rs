@@ -45,14 +45,12 @@ impl FileDiff {
 
         // Simple diff: find common prefix/suffix, show changed middle
         let mut prefix = 0;
-        while prefix < old_lines.len() && prefix < new_lines.len()
+        while prefix < old_lines.len()
+            && prefix < new_lines.len()
             && old_lines[prefix] == new_lines[prefix]
         {
             if prefix < 3 {
-                diff_lines.push(DiffLine::Context(format!(
-                    "  {}",
-                    old_lines[prefix]
-                )));
+                diff_lines.push(DiffLine::Context(format!("  {}", old_lines[prefix])));
             } else if prefix == 3 {
                 diff_lines.push(DiffLine::Context("  ...".to_string()));
             }
@@ -62,8 +60,7 @@ impl FileDiff {
         let mut suffix = 0;
         while suffix < old_lines.len().saturating_sub(prefix)
             && suffix < new_lines.len().saturating_sub(prefix)
-            && old_lines[old_lines.len() - 1 - suffix]
-                == new_lines[new_lines.len() - 1 - suffix]
+            && old_lines[old_lines.len() - 1 - suffix] == new_lines[new_lines.len() - 1 - suffix]
         {
             suffix += 1;
         }
@@ -89,8 +86,7 @@ impl FileDiff {
         }
         for i in suffix_start..old_lines.len().min(suffix_start + 3) {
             if i < old_lines.len() {
-                diff_lines
-                    .push(DiffLine::Context(format!("  {}", old_lines[i])));
+                diff_lines.push(DiffLine::Context(format!("  {}", old_lines[i])));
             }
         }
 
@@ -119,17 +115,13 @@ impl FileDiff {
                 DiffLine::Add(text) => {
                     out.push(Line::from(Span::styled(
                         text.clone(),
-                        Style::default()
-                            .fg(Color::Green)
-                            .bg(Color::Rgb(0, 40, 0)),
+                        Style::default().fg(Color::Green).bg(Color::Rgb(0, 40, 0)),
                     )));
                 }
                 DiffLine::Remove(text) => {
                     out.push(Line::from(Span::styled(
                         text.clone(),
-                        Style::default()
-                            .fg(Color::Red)
-                            .bg(Color::Rgb(50, 0, 0)),
+                        Style::default().fg(Color::Red).bg(Color::Rgb(50, 0, 0)),
                     )));
                 }
                 DiffLine::Context(text) => {
@@ -164,7 +156,11 @@ impl FileDiff {
 }
 
 /// Detect if a write_file result represents a file modification
-pub fn detect_file_write(tool_name: &str, args: &serde_json::Value, result: &str) -> Option<FileDiff> {
+pub fn detect_file_write(
+    tool_name: &str,
+    args: &serde_json::Value,
+    result: &str,
+) -> Option<FileDiff> {
     if tool_name != "write_file" && tool_name != "edit_file" {
         return None;
     }

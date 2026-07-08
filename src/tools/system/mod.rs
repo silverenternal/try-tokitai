@@ -23,12 +23,14 @@ pub mod backend;
 pub mod code_analyzer;
 pub mod config;
 pub mod error;
+pub mod ide_tools;
 pub mod process_manager;
 pub mod system_commands;
 pub mod system_monitor;
 
 // 重新导出主要工具类型
 pub use code_analyzer::CodeAnalyzer;
+pub use ide_tools::IdeTools;
 pub use process_manager::ProcessManager;
 pub use system_commands::SystemCommands;
 

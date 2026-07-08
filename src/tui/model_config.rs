@@ -8,7 +8,7 @@ pub struct ModelInfo {
     pub provider: &'static str,
     pub model: &'static str,
     pub display_name: &'static str,
-    pub context_window: usize,   // total context (input + output)
+    pub context_window: usize,    // total context (input + output)
     pub max_output_tokens: usize, // max output tokens
     pub supports_streaming: bool,
     pub description: &'static str,

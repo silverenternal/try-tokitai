@@ -1,6 +1,6 @@
 use crate::tools::io::error::IoToolError;
 use crate::tools::io::security::SecurePathResolver;
-use crate::tools::io::utils::{ensure_is_dir, validate_single_path};
+use crate::tools::io::utils::{ensure_is_dir, ensure_is_file, validate_single_path};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -39,6 +39,18 @@ const MAX_PATTERN_LENGTH: usize = 4096;
 
 #[tool]
 impl FileSearchTools {
+    /// 兼容旧名称的内容搜索入口
+    pub fn search_content(
+        &self,
+        pattern: String,
+        path: String,
+        case_sensitive: Option<bool>,
+        max_results: Option<usize>,
+        use_regex: Option<bool>,
+    ) -> Result<Value, Value> {
+        self.grep(pattern, path, case_sensitive, max_results, use_regex)
+    }
+
     /// 在文件中搜索文本（支持正则表达式）
     /// 类似 grep 命令，支持大小写选项
     pub fn grep(
@@ -63,20 +75,10 @@ impl FileSearchTools {
             .to_value());
         }
 
-        // 读取文件
-        let content = fs::read_to_string(&canonical_path).map_err(|e| {
-            IoToolError::IoError {
-                message: e.to_string(),
-                path: Some(canonical_path.clone()),
-                operation: "read_file (for grep)".to_string(),
-                suggestion: "请检查文件权限或文件是否存在".to_string(),
-            }
-            .to_value()
-        })?;
-
         let max_results = max_results.unwrap_or(100);
         let case_sensitive = case_sensitive.unwrap_or(true);
         let use_regex = use_regex.unwrap_or(false);
+        let canonical_path_ref = Path::new(&canonical_path);
 
         // 编译正则表达式（如果需要）
         let regex = if use_regex {
@@ -97,28 +99,89 @@ impl FileSearchTools {
             None
         };
 
-        let mut results = Vec::new();
-        let mut total_matches = 0;
+        if canonical_path_ref.is_dir() {
+            let mut results = Vec::new();
+            let mut total_matches = 0usize;
+            let mut files_scanned = 0usize;
+            let mut files_with_matches = 0usize;
+            let mut skipped_files = Vec::new();
+            let mut skipped_count = 0usize;
+            let walker = DirectoryWalker::new(canonical_path_ref, MAX_SEARCH_DEPTH);
 
-        for (line_num, line) in content.lines().enumerate() {
-            let matched = if let Some(ref re) = regex {
-                re.is_match(line)
-            } else if case_sensitive {
-                line.contains(&pattern)
-            } else {
-                line.to_lowercase().contains(&pattern.to_lowercase())
-            };
+            for entry in walker {
+                let file_path = entry.path();
+                if !file_path.is_file() {
+                    continue;
+                }
+                files_scanned += 1;
 
-            if matched {
-                total_matches += 1;
-                if results.len() < max_results {
-                    results.push(json!({
-                        "line": line_num + 1,
-                        "content": line.trim()
-                    }));
+                let content = match fs::read_to_string(file_path) {
+                    Ok(content) => content,
+                    Err(_) => {
+                        skipped_count += 1;
+                        if skipped_files.len() < 10 {
+                            skipped_files.push(file_path.to_string_lossy().to_string());
+                        }
+                        continue;
+                    }
+                };
+
+                let matched_in_file = collect_grep_matches(
+                    &content,
+                    file_path.to_string_lossy().as_ref(),
+                    &pattern,
+                    case_sensitive,
+                    regex.as_ref(),
+                    max_results,
+                    &mut total_matches,
+                    &mut results,
+                );
+                if matched_in_file > 0 {
+                    files_with_matches += 1;
                 }
             }
+
+            return Ok(IoToolError::success_response(
+                "grep",
+                json!({
+                    "directory": canonical_path,
+                    "pattern": pattern,
+                    "total_matches": total_matches,
+                    "results": results,
+                    "truncated": total_matches > max_results,
+                    "use_regex": use_regex,
+                    "files_scanned": files_scanned,
+                    "files_with_matches": files_with_matches,
+                    "skipped_files": skipped_files,
+                    "skipped_count": skipped_count
+                }),
+            ));
         }
+
+        ensure_is_file(canonical_path_ref).map_err(|e| e.to_value())?;
+
+        let content = fs::read_to_string(canonical_path_ref).map_err(|e| {
+            IoToolError::IoError {
+                message: e.to_string(),
+                path: Some(canonical_path.clone()),
+                operation: "read_file (for grep)".to_string(),
+                suggestion: "请检查文件权限或文件是否存在".to_string(),
+            }
+            .to_value()
+        })?;
+
+        let mut results = Vec::new();
+        let mut total_matches = 0usize;
+        collect_grep_matches(
+            &content,
+            &canonical_path,
+            &pattern,
+            case_sensitive,
+            regex.as_ref(),
+            max_results,
+            &mut total_matches,
+            &mut results,
+        );
 
         Ok(IoToolError::success_response(
             "grep",
@@ -153,8 +216,9 @@ impl FileSearchTools {
 
         let mut results = Vec::new();
         let walker = DirectoryWalker::new(Path::new(&canonical_dir), max_depth);
+        let mut truncated = false;
 
-        for entry in walker.take(max_results) {
+        for entry in walker {
             let name = entry.file_name().to_string();
 
             // 检查是否匹配
@@ -185,6 +249,10 @@ impl FileSearchTools {
                     "is_dir": entry.path().is_dir(),
                     "depth": entry.depth
                 }));
+                if results.len() >= max_results {
+                    truncated = true;
+                    break;
+                }
             }
         }
 
@@ -195,7 +263,82 @@ impl FileSearchTools {
                 "pattern": pattern,
                 "extension": extension,
                 "results": results,
-                "total": results.len()
+                "total": results.len(),
+                "truncated": truncated
+            }),
+        ))
+    }
+
+    /// 以树状结构概览目录，适合先理解项目结构再决定读哪个文件
+    pub fn tree_dir(
+        &self,
+        directory: String,
+        max_depth: Option<usize>,
+        max_entries: Option<usize>,
+    ) -> Result<Value, Value> {
+        let canonical_dir =
+            validate_single_path(&self.resolver, &directory).map_err(|e| e.to_value())?;
+        ensure_is_dir(Path::new(&canonical_dir)).map_err(|e| e.to_value())?;
+
+        let max_depth = max_depth.unwrap_or(3).min(MAX_SEARCH_DEPTH);
+        let max_entries = max_entries.unwrap_or(200).clamp(1, 1000);
+
+        fn build_tree(path: &Path, depth: usize, max_depth: usize, remaining: &mut usize) -> Value {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+            if *remaining == 0 {
+                return json!({
+                    "name": name,
+                    "path": path.to_string_lossy().to_string(),
+                    "kind": if path.is_dir() { "directory" } else { "file" },
+                    "truncated": true,
+                });
+            }
+            *remaining = remaining.saturating_sub(1);
+
+            if !path.is_dir() || depth >= max_depth {
+                return json!({
+                    "name": name,
+                    "path": path.to_string_lossy().to_string(),
+                    "kind": if path.is_dir() { "directory" } else { "file" },
+                });
+            }
+
+            let mut children = Vec::new();
+            if let Ok(entries) = fs::read_dir(path) {
+                let mut items = entries.flatten().collect::<Vec<_>>();
+                items.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+                for entry in items {
+                    if *remaining == 0 {
+                        break;
+                    }
+                    children.push(build_tree(&entry.path(), depth + 1, max_depth, remaining));
+                }
+            }
+
+            json!({
+                "name": name,
+                "path": path.to_string_lossy().to_string(),
+                "kind": "directory",
+                "children": children,
+            })
+        }
+
+        let mut remaining = max_entries;
+        let tree = build_tree(Path::new(&canonical_dir), 0, max_depth, &mut remaining);
+
+        Ok(IoToolError::success_response(
+            "tree_dir",
+            json!({
+                "directory": canonical_dir,
+                "max_depth": max_depth,
+                "max_entries": max_entries,
+                "truncated": remaining == 0,
+                "tree": tree,
             }),
         ))
     }
@@ -316,11 +459,18 @@ impl FileSearchTools {
                 .cmp(&a.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0))
         });
 
+        let total_results = results.len();
+        let truncated = total_results > max_results;
+        results.truncate(max_results);
+
         Ok(IoToolError::success_response(
             "find_large_files",
             json!({
                 "directory": canonical_dir,
                 "min_size_mb": min_size_mb.unwrap_or(10.0),
+                "max_results": max_results,
+                "returned": results.len(),
+                "truncated": truncated,
                 "results": results
             }),
         ))
@@ -480,6 +630,49 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+fn line_matches_pattern(
+    line: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    regex: Option<&Regex>,
+) -> bool {
+    if let Some(re) = regex {
+        re.is_match(line)
+    } else if case_sensitive {
+        line.contains(pattern)
+    } else {
+        line.to_lowercase().contains(&pattern.to_lowercase())
+    }
+}
+
+fn collect_grep_matches(
+    content: &str,
+    file_path: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    regex: Option<&Regex>,
+    max_results: usize,
+    total_matches: &mut usize,
+    results: &mut Vec<Value>,
+) -> usize {
+    let mut matched_in_file = 0usize;
+    for (line_num, line) in content.lines().enumerate() {
+        if !line_matches_pattern(line, pattern, case_sensitive, regex) {
+            continue;
+        }
+        *total_matches += 1;
+        matched_in_file += 1;
+        if results.len() < max_results {
+            results.push(json!({
+                "file": file_path,
+                "line": line_num + 1,
+                "content": line.trim()
+            }));
+        }
+    }
+    matched_in_file
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +733,33 @@ mod tests {
     }
 
     #[test]
+    fn test_grep_directory_recursive() {
+        let test_dir = get_test_temp_dir("grep_directory_test");
+        let nested = test_dir.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(test_dir.join("file1.txt"), "alpha\nbeta\n").unwrap();
+        std::fs::write(nested.join("file2.txt"), "gamma alpha\n").unwrap();
+
+        let tools = FileSearchTools::new();
+        let result = tools
+            .grep(
+                "alpha".to_string(),
+                test_dir.to_string_lossy().to_string(),
+                Some(true),
+                Some(10),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["data"]["total_matches"], 2);
+        assert_eq!(result["data"]["files_with_matches"], 2);
+        assert_eq!(result["data"]["skipped_count"], 0);
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
     fn test_find_files() {
         let test_dir = get_test_temp_dir("find_files_test");
         std::fs::write(test_dir.join("file1.rs"), "content").unwrap();
@@ -559,6 +779,59 @@ mod tests {
 
         assert_eq!(result["status"], "success");
         assert_eq!(result["data"]["total"], 2);
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_find_files_honors_max_results() {
+        let test_dir = get_test_temp_dir("find_files_limit_test");
+        std::fs::write(test_dir.join("file1.rs"), "content").unwrap();
+        std::fs::write(test_dir.join("file2.rs"), "content").unwrap();
+        std::fs::write(test_dir.join("file3.rs"), "content").unwrap();
+
+        let tools = FileSearchTools::new();
+        let result = tools
+            .find_files(
+                test_dir.to_string_lossy().to_string(),
+                None,
+                Some("rs".to_string()),
+                Some(1),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["data"]["total"], 1);
+        assert_eq!(result["data"]["truncated"], true);
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_find_large_files_honors_max_results() {
+        let test_dir = get_test_temp_dir("large_files_limit_test");
+        let large_a = test_dir.join("a.bin");
+        let large_b = test_dir.join("b.bin");
+        let large_c = test_dir.join("c.bin");
+        std::fs::write(&large_a, vec![0u8; 1024 * 1024 + 1]).unwrap();
+        std::fs::write(&large_b, vec![0u8; 1024 * 1024 + 2]).unwrap();
+        std::fs::write(&large_c, vec![0u8; 1024 * 1024 + 3]).unwrap();
+
+        let tools = FileSearchTools::new();
+        let result = tools
+            .find_large_files(
+                test_dir.to_string_lossy().to_string(),
+                Some(1.0),
+                Some(2),
+                Some(4),
+            )
+            .unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["data"]["returned"], 2);
+        assert_eq!(result["data"]["truncated"], true);
+        assert_eq!(result["data"]["results"].as_array().unwrap().len(), 2);
 
         let _ = std::fs::remove_dir_all(&test_dir);
     }

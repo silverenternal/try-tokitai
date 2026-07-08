@@ -354,14 +354,16 @@ impl {struct_name} {{
         fs::create_dir_all(output_dir)
             .with_context(|| format!("创建输出目录失败: {:?}", output_dir))?;
         let file_path = output_dir.join(format!("{}.rs", tool_name));
-        fs::write(&file_path, code).with_context(|| format!("写入工具代码失败: {:?}", file_path))?;
+        fs::write(&file_path, code)
+            .with_context(|| format!("写入工具代码失败: {:?}", file_path))?;
         info!("工具代码已保存: {:?}", file_path);
         Ok(file_path)
     }
 
     fn save_test_code(&self, tool_name: &str, tests: &str, output_dir: &Path) -> Result<PathBuf> {
         let file_path = output_dir.join(format!("test_{}.rs", tool_name));
-        fs::write(&file_path, tests).with_context(|| format!("写入测试代码失败: {:?}", file_path))?;
+        fs::write(&file_path, tests)
+            .with_context(|| format!("写入测试代码失败: {:?}", file_path))?;
         info!("测试代码已保存: {:?}", file_path);
         Ok(file_path)
     }

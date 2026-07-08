@@ -175,8 +175,8 @@ fn repair_session_file(
     backup_root: &Path,
     stats: &mut RepairStats,
 ) -> Result<bool> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut file: SessionFile = serde_json::from_str(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
 
@@ -227,8 +227,13 @@ fn backup_file(path: &Path, backup_root: &Path, backed_up_files: &mut usize) -> 
         .unwrap_or("session.json");
     let backup_path = backup_root.join(name);
     if !backup_path.exists() {
-        fs::copy(path, &backup_path)
-            .with_context(|| format!("failed to back up {} to {}", path.display(), backup_path.display()))?;
+        fs::copy(path, &backup_path).with_context(|| {
+            format!(
+                "failed to back up {} to {}",
+                path.display(),
+                backup_path.display()
+            )
+        })?;
         *backed_up_files += 1;
     }
     Ok(())
@@ -238,6 +243,7 @@ fn repair_message_block(block: &mut MessageBlock, repaired_nested_fields: &mut u
     match block {
         MessageBlock::User { content, .. }
         | MessageBlock::Assistant { content }
+        | MessageBlock::AssistantChoices { title: content, .. }
         | MessageBlock::AssistantStreaming { content }
         | MessageBlock::Thinking { content, .. }
         | MessageBlock::Error { content }
@@ -254,7 +260,8 @@ fn repair_message_block(block: &mut MessageBlock, repaired_nested_fields: &mut u
             changed |= repair_text_counted(&mut record.status, repaired_nested_fields);
             changed |= repair_text_counted(&mut record.kind, repaired_nested_fields);
             changed |= repair_optional_text_counted(&mut record.started_at, repaired_nested_fields);
-            changed |= repair_optional_text_counted(&mut record.completed_at, repaired_nested_fields);
+            changed |=
+                repair_optional_text_counted(&mut record.completed_at, repaired_nested_fields);
             for evidence in &mut record.evidence {
                 changed |= repair_text_counted(evidence, repaired_nested_fields);
             }
@@ -369,14 +376,19 @@ fn looks_like_corrupted_text(raw: &str) -> bool {
         return true;
     }
     let total_chars = trimmed.chars().count().max(1);
-    let question_like = trimmed.chars().filter(|ch| matches!(ch, '?' | '？')).count();
+    let question_like = trimmed
+        .chars()
+        .filter(|ch| matches!(ch, '?' | '？'))
+        .count();
     if question_like >= 4 && (question_like as f32 / total_chars as f32) > 0.18 {
         return true;
     }
     const MOJIBAKE_MARKERS: [&str; 12] = [
         "鈥", "銆", "锛", "鍙", "鏂", "寮", "缁", "鐮", "姝", "闂", "璇", "閿",
     ];
-    MOJIBAKE_MARKERS.iter().any(|marker| trimmed.contains(marker))
+    MOJIBAKE_MARKERS
+        .iter()
+        .any(|marker| trimmed.contains(marker))
 }
 
 fn is_question_mark_garbage(raw: &str) -> bool {
@@ -385,7 +397,10 @@ fn is_question_mark_garbage(raw: &str) -> bool {
         return false;
     }
     let total_chars = trimmed.chars().count().max(1);
-    let question_like = trimmed.chars().filter(|ch| matches!(ch, '?' | '？')).count();
+    let question_like = trimmed
+        .chars()
+        .filter(|ch| matches!(ch, '?' | '？'))
+        .count();
     question_like >= 4 && (question_like as f32 / total_chars as f32) > 0.3
 }
 
@@ -415,7 +430,9 @@ fn is_low_value_summary_text(raw: &str) -> bool {
         "unreadable content",
     ];
 
-    GENERIC_FALLBACKS.iter().any(|needle| trimmed.contains(needle))
+    GENERIC_FALLBACKS
+        .iter()
+        .any(|needle| trimmed.contains(needle))
 }
 
 fn auto_title(messages: &[MessageBlock]) -> Option<String> {
@@ -448,6 +465,7 @@ fn auto_title(messages: &[MessageBlock]) -> Option<String> {
 fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
     let preferred = messages.iter().rev().find_map(|message| match message {
         MessageBlock::Assistant { content }
+        | MessageBlock::AssistantChoices { title: content, .. }
         | MessageBlock::AssistantStreaming { content }
         | MessageBlock::Error { content }
         | MessageBlock::System { content } => {
@@ -490,7 +508,12 @@ fn try_restore_mojibake(raw: &str) -> Option<String> {
         .into_iter()
         .filter(|candidate| !looks_like_corrupted_text(candidate))
         .filter(|candidate| candidate.chars().any(|ch| !matches!(ch, '?' | '？')))
-        .max_by_key(|candidate| candidate.chars().filter(|ch| is_human_text_char(*ch)).count())
+        .max_by_key(|candidate| {
+            candidate
+                .chars()
+                .filter(|ch| is_human_text_char(*ch))
+                .count()
+        })
 }
 
 fn reinterpret_latin1_as_utf8(raw: &str) -> Option<String> {
@@ -510,10 +533,7 @@ fn reinterpret_latin1_as_utf8(raw: &str) -> Option<String> {
 }
 
 fn reinterpret_windows_1252_as_utf8(raw: &str) -> Option<String> {
-    let bytes: Option<Vec<u8>> = raw
-        .chars()
-        .map(windows_1252_byte)
-        .collect();
+    let bytes: Option<Vec<u8>> = raw.chars().map(windows_1252_byte).collect();
     let bytes = bytes?;
     String::from_utf8(bytes).ok()
 }

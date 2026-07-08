@@ -28,9 +28,9 @@ pub mod streaming;
 pub use app::{run_tui, AppMode, ThinkingLevel, TuiApp};
 pub use commands::{CommandRegistry, CommandResult};
 pub use components::{
-    ChatPanel, ConfigField, ConfigScreen, ConfigScreenState, InputBar, InputBarState,
-    MessageBlock, PendingToolCall, PermissionAction, PermissionDialog, SecurityLevelChoice,
-    StatusBar, StatusBarState, ThinkingBlock, ToolCallBlock, ToolCallStatus, ToolResultBlock,
+    ChatPanel, ConfigField, ConfigScreen, ConfigScreenState, InputBar, InputBarState, MessageBlock,
+    PendingToolCall, PermissionAction, PermissionDialog, SecurityLevelChoice, StatusBar,
+    StatusBarState, ThinkingBlock, ToolCallBlock, ToolCallStatus, ToolResultBlock,
 };
 pub use event::AppEvent;
 pub use layout::TuiLayout;

@@ -25,7 +25,9 @@ impl AppPaths {
     pub fn discover_project_root() -> PathBuf {
         if let Ok(explicit) = std::env::var("TOKITAI_PROJECT_ROOT") {
             let candidate = PathBuf::from(explicit);
-            if candidate.join("Cargo.toml").exists() || candidate.join("frontend").join("index.html").exists() {
+            if candidate.join("Cargo.toml").exists()
+                || candidate.join("frontend").join("index.html").exists()
+            {
                 return candidate;
             }
         }
@@ -132,7 +134,9 @@ fn local_dev_state_dir(base_dir: &Path) -> PathBuf {
 
 fn find_project_root_from(start: &Path) -> Option<PathBuf> {
     for candidate in start.ancestors() {
-        if candidate.join("Cargo.toml").exists() && candidate.join("frontend").join("index.html").exists() {
+        if candidate.join("Cargo.toml").exists()
+            && candidate.join("frontend").join("index.html").exists()
+        {
             return Some(candidate.to_path_buf());
         }
     }

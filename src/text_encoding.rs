@@ -27,8 +27,7 @@ pub fn decode_bytes_lossy(bytes: &[u8]) -> Cow<'_, str> {
 }
 
 pub fn read_text_file(path: &Path) -> Result<String> {
-    let bytes = fs::read(path)
-        .with_context(|| format!("failed to read '{}'", path.display()))?;
+    let bytes = fs::read(path).with_context(|| format!("failed to read '{}'", path.display()))?;
     Ok(decode_bytes(&bytes))
 }
 
@@ -114,21 +113,7 @@ fn looks_like_corrupted_text(raw: &str) -> bool {
     }
 
     let suspicious = [
-        "锟",
-        "�",
-        "鈥",
-        "馃",
-        "鎴",
-        "鏂",
-        "寮",
-        "璇",
-        "杩",
-        "鍙",
-        "鐨",
-        "缁",
-        "浠",
-        "锛",
-        "銆",
+        "锟", "�", "鈥", "馃", "鎴", "鏂", "寮", "璇", "杩", "鍙", "鐨", "缁", "浠", "锛", "銆",
     ];
 
     let suspicious_hits = suspicious
@@ -136,7 +121,9 @@ fn looks_like_corrupted_text(raw: &str) -> bool {
         .filter(|needle| trimmed.contains(**needle))
         .count();
 
-    suspicious_hits >= 2 || is_question_mark_garbage(trimmed) || looks_like_latin1_utf8_mojibake(trimmed)
+    suspicious_hits >= 2
+        || is_question_mark_garbage(trimmed)
+        || looks_like_latin1_utf8_mojibake(trimmed)
 }
 
 fn is_question_mark_garbage(raw: &str) -> bool {
@@ -194,7 +181,9 @@ fn text_quality_score(raw: &str) -> i32 {
 
 fn count_cjk_chars(raw: &str) -> usize {
     raw.chars()
-        .filter(|ch| ('\u{4e00}'..='\u{9fff}').contains(ch) || ('\u{3400}'..='\u{4dbf}').contains(ch))
+        .filter(|ch| {
+            ('\u{4e00}'..='\u{9fff}').contains(ch) || ('\u{3400}'..='\u{4dbf}').contains(ch)
+        })
         .count()
 }
 
@@ -228,7 +217,12 @@ fn try_restore_mojibake(raw: &str) -> Option<String> {
         .into_iter()
         .filter(|candidate| !looks_like_corrupted_text(candidate))
         .filter(|candidate| candidate.chars().any(|ch| !matches!(ch, '?' | '锛')))
-        .max_by_key(|candidate| candidate.chars().filter(|ch| is_human_text_char(*ch)).count())
+        .max_by_key(|candidate| {
+            candidate
+                .chars()
+                .filter(|ch| is_human_text_char(*ch))
+                .count()
+        })
 }
 
 fn reinterpret_latin1_as_utf8(raw: &str) -> Option<String> {

@@ -4,9 +4,9 @@
 //! Includes a local implementation for common sequence operations so the
 //! platform remains functional even when Biopython is unavailable.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 
 use crate::python_bridge::{find_python_with_module, run_python_json};
 
@@ -60,7 +60,10 @@ impl LocalBiologyTool {
             return Err("Sequence is empty".into());
         }
 
-        if !normalized.chars().all(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'N')) {
+        if !normalized
+            .chars()
+            .all(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'N'))
+        {
             return Err("Sequence contains non-DNA characters".into());
         }
 
@@ -69,22 +72,70 @@ impl LocalBiologyTool {
 
     fn codon_table() -> HashMap<&'static str, char> {
         HashMap::from([
-            ("TTT", 'F'), ("TTC", 'F'), ("TTA", 'L'), ("TTG", 'L'),
-            ("CTT", 'L'), ("CTC", 'L'), ("CTA", 'L'), ("CTG", 'L'),
-            ("ATT", 'I'), ("ATC", 'I'), ("ATA", 'I'), ("ATG", 'M'),
-            ("GTT", 'V'), ("GTC", 'V'), ("GTA", 'V'), ("GTG", 'V'),
-            ("TCT", 'S'), ("TCC", 'S'), ("TCA", 'S'), ("TCG", 'S'),
-            ("CCT", 'P'), ("CCC", 'P'), ("CCA", 'P'), ("CCG", 'P'),
-            ("ACT", 'T'), ("ACC", 'T'), ("ACA", 'T'), ("ACG", 'T'),
-            ("GCT", 'A'), ("GCC", 'A'), ("GCA", 'A'), ("GCG", 'A'),
-            ("TAT", 'Y'), ("TAC", 'Y'), ("TAA", '*'), ("TAG", '*'),
-            ("CAT", 'H'), ("CAC", 'H'), ("CAA", 'Q'), ("CAG", 'Q'),
-            ("AAT", 'N'), ("AAC", 'N'), ("AAA", 'K'), ("AAG", 'K'),
-            ("GAT", 'D'), ("GAC", 'D'), ("GAA", 'E'), ("GAG", 'E'),
-            ("TGT", 'C'), ("TGC", 'C'), ("TGA", '*'), ("TGG", 'W'),
-            ("CGT", 'R'), ("CGC", 'R'), ("CGA", 'R'), ("CGG", 'R'),
-            ("AGT", 'S'), ("AGC", 'S'), ("AGA", 'R'), ("AGG", 'R'),
-            ("GGT", 'G'), ("GGC", 'G'), ("GGA", 'G'), ("GGG", 'G'),
+            ("TTT", 'F'),
+            ("TTC", 'F'),
+            ("TTA", 'L'),
+            ("TTG", 'L'),
+            ("CTT", 'L'),
+            ("CTC", 'L'),
+            ("CTA", 'L'),
+            ("CTG", 'L'),
+            ("ATT", 'I'),
+            ("ATC", 'I'),
+            ("ATA", 'I'),
+            ("ATG", 'M'),
+            ("GTT", 'V'),
+            ("GTC", 'V'),
+            ("GTA", 'V'),
+            ("GTG", 'V'),
+            ("TCT", 'S'),
+            ("TCC", 'S'),
+            ("TCA", 'S'),
+            ("TCG", 'S'),
+            ("CCT", 'P'),
+            ("CCC", 'P'),
+            ("CCA", 'P'),
+            ("CCG", 'P'),
+            ("ACT", 'T'),
+            ("ACC", 'T'),
+            ("ACA", 'T'),
+            ("ACG", 'T'),
+            ("GCT", 'A'),
+            ("GCC", 'A'),
+            ("GCA", 'A'),
+            ("GCG", 'A'),
+            ("TAT", 'Y'),
+            ("TAC", 'Y'),
+            ("TAA", '*'),
+            ("TAG", '*'),
+            ("CAT", 'H'),
+            ("CAC", 'H'),
+            ("CAA", 'Q'),
+            ("CAG", 'Q'),
+            ("AAT", 'N'),
+            ("AAC", 'N'),
+            ("AAA", 'K'),
+            ("AAG", 'K'),
+            ("GAT", 'D'),
+            ("GAC", 'D'),
+            ("GAA", 'E'),
+            ("GAG", 'E'),
+            ("TGT", 'C'),
+            ("TGC", 'C'),
+            ("TGA", '*'),
+            ("TGG", 'W'),
+            ("CGT", 'R'),
+            ("CGC", 'R'),
+            ("CGA", 'R'),
+            ("CGG", 'R'),
+            ("AGT", 'S'),
+            ("AGC", 'S'),
+            ("AGA", 'R'),
+            ("AGG", 'R'),
+            ("GGT", 'G'),
+            ("GGC", 'G'),
+            ("GGA", 'G'),
+            ("GGG", 'G'),
         ])
     }
 
@@ -255,7 +306,11 @@ print(json.dumps(gc / len(sequence)))
         run_python_json::<f64>(python, script, &[sequence])
     }
 
-    fn biopython_align(python: &str, seq_a: &str, seq_b: &str) -> Result<serde_json::Value, String> {
+    fn biopython_align(
+        python: &str,
+        seq_a: &str,
+        seq_b: &str,
+    ) -> Result<serde_json::Value, String> {
         let script = r#"
 import json
 import sys

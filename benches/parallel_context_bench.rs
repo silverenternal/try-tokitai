@@ -10,9 +10,9 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use std::time::Instant;
 
 use ai_assistant::context::{
-    AdvancedMerger, BloomConflictDetector, CompressionConfig,
-    ContentAddressableStorage, ContentDeduplicator, MergeStrategy, ParallelContextManager,
-    ParallelContextManagerConfig, ThreeWayMerger,
+    AdvancedMerger, BloomConflictDetector, CompressionConfig, ContentAddressableStorage,
+    ContentDeduplicator, MergeStrategy, ParallelContextManager, ParallelContextManagerConfig,
+    ThreeWayMerger,
 };
 
 /// 创建测试用的平行上下文管理器

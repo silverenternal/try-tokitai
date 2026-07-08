@@ -4,9 +4,9 @@
 //! Includes a local heuristic backend so the platform can run common
 //! cheminformatics tasks without waiting for RDKit/Psi4 installation.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::python_bridge::{find_python_with_module, run_python_json};
 
@@ -34,10 +34,18 @@ pub trait ChemistryToolInterface: Send + Sync {
     async fn descriptors(&self, smiles: &str) -> Result<serde_json::Value, String>;
 
     /// Run a SMILES-based reaction
-    async fn reaction(&self, reactants: &[String], reaction_smarts: &str) -> Result<Vec<String>, String>;
+    async fn reaction(
+        &self,
+        reactants: &[String],
+        reaction_smarts: &str,
+    ) -> Result<Vec<String>, String>;
 
     /// Run a lightweight quantum chemistry energy evaluation.
-    async fn quantum_energy(&self, structure: &serde_json::Value, method: Option<&str>) -> Result<serde_json::Value, String>;
+    async fn quantum_energy(
+        &self,
+        structure: &serde_json::Value,
+        method: Option<&str>,
+    ) -> Result<serde_json::Value, String>;
 }
 
 /// Local chemistry implementation for fast, dependency-light fallback.
@@ -286,7 +294,11 @@ print(json.dumps({
 }))
 "#;
         let structure_json = serde_json::to_string(structure).map_err(|e| e.to_string())?;
-        run_python_json::<serde_json::Value>(python, script, &[&structure_json, method.unwrap_or("scf/sto-3g")])
+        run_python_json::<serde_json::Value>(
+            python,
+            script,
+            &[&structure_json, method.unwrap_or("scf/sto-3g")],
+        )
     }
 }
 
@@ -375,7 +387,11 @@ impl ChemistryToolInterface for LocalChemistryTool {
         }))
     }
 
-    async fn reaction(&self, reactants: &[String], reaction_smarts: &str) -> Result<Vec<String>, String> {
+    async fn reaction(
+        &self,
+        reactants: &[String],
+        reaction_smarts: &str,
+    ) -> Result<Vec<String>, String> {
         if reactants.is_empty() {
             return Err("At least one reactant is required".into());
         }
@@ -388,7 +404,11 @@ impl ChemistryToolInterface for LocalChemistryTool {
         Ok(vec![format!("{joined}>>{reaction_smarts}")])
     }
 
-    async fn quantum_energy(&self, structure: &serde_json::Value, method: Option<&str>) -> Result<serde_json::Value, String> {
+    async fn quantum_energy(
+        &self,
+        structure: &serde_json::Value,
+        method: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         let atom_count = structure
             .get("symbols")
             .and_then(|v| v.as_array())
@@ -439,12 +459,20 @@ impl ChemistryToolInterface for AutoChemistryTool {
         local.descriptors(smiles).await
     }
 
-    async fn reaction(&self, reactants: &[String], reaction_smarts: &str) -> Result<Vec<String>, String> {
+    async fn reaction(
+        &self,
+        reactants: &[String],
+        reaction_smarts: &str,
+    ) -> Result<Vec<String>, String> {
         let local = LocalChemistryTool;
         local.reaction(reactants, reaction_smarts).await
     }
 
-    async fn quantum_energy(&self, structure: &serde_json::Value, method: Option<&str>) -> Result<serde_json::Value, String> {
+    async fn quantum_energy(
+        &self,
+        structure: &serde_json::Value,
+        method: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         if let Some(python) = Self::psi4_backend_available() {
             return Self::psi4_quantum_energy(&python, structure, method);
         }
@@ -474,11 +502,19 @@ impl ChemistryToolInterface for StubChemistryTool {
         Err("Chemistry tool not configured.".into())
     }
 
-    async fn reaction(&self, _reactants: &[String], _reaction_smarts: &str) -> Result<Vec<String>, String> {
+    async fn reaction(
+        &self,
+        _reactants: &[String],
+        _reaction_smarts: &str,
+    ) -> Result<Vec<String>, String> {
         Err("Chemistry tool not configured.".into())
     }
 
-    async fn quantum_energy(&self, _structure: &serde_json::Value, _method: Option<&str>) -> Result<serde_json::Value, String> {
+    async fn quantum_energy(
+        &self,
+        _structure: &serde_json::Value,
+        _method: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         Err("Quantum chemistry backend not configured.".into())
     }
 }

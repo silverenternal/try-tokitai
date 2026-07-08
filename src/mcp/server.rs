@@ -44,7 +44,9 @@ pub async fn start_mcp_mode(security_config: &crate::security::SecurityConfig) -
             }
         }
     } else {
-        warn!("⚠️  MCP 认证已禁用 (mcp_auth_required=false)。任何可访问此服务的客户端都能调用工具。");
+        warn!(
+            "⚠️  MCP 认证已禁用 (mcp_auth_required=false)。任何可访问此服务的客户端都能调用工具。"
+        );
     }
 
     // 将 API key 注入环境变量，供底层 MCP 协议使用
@@ -54,13 +56,21 @@ pub async fn start_mcp_mode(security_config: &crate::security::SecurityConfig) -
 
     // 打印安全边界
     info!("MCP 安全边界:");
-    info!("  - 认证: {}", if security_config.mcp_auth_required { "必需" } else { "已禁用" });
+    info!(
+        "  - 认证: {}",
+        if security_config.mcp_auth_required {
+            "必需"
+        } else {
+            "已禁用"
+        }
+    );
     info!("  - Dangerous 工具: 已拦截");
     info!("  - Moderate 工具: 允许");
     info!("  - Safe 工具: 允许");
-    info!("  - 速率限制: {}/min, {} burst/sec",
-        security_config.max_tool_calls_per_minute,
-        security_config.tool_call_burst_limit);
+    info!(
+        "  - 速率限制: {}/min, {} burst/sec",
+        security_config.max_tool_calls_per_minute, security_config.tool_call_burst_limit
+    );
 
     // 创建并运行 MCP Server
     // 注意：tokitai_mcp_server 的 McpServer::run() 会通过 stdio 接收客户端请求，
@@ -76,7 +86,6 @@ pub async fn start_mcp_mode(security_config: &crate::security::SecurityConfig) -
 
 #[cfg(test)]
 mod tests {
-    
 
     #[tokio::test]
     async fn test_mcp_server_security_requires_key_when_auth_enabled() {

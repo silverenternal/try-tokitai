@@ -66,9 +66,7 @@ impl PdfParser {
     /// Parse a PDF file and extract structured content
     pub fn parse(&self, path: &Path) -> Result<ParsedPaper, ParserError> {
         if !path.exists() {
-            return Err(ParserError::FileNotFound(
-                path.display().to_string(),
-            ));
+            return Err(ParserError::FileNotFound(path.display().to_string()));
         }
 
         let ext = path
@@ -137,14 +135,7 @@ impl PdfParser {
     }
 
     /// Extract sections from paper text
-    fn extract_sections(
-        text: &str,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Vec<String>,
-        Vec<String>,
-    ) {
+    fn extract_sections(text: &str) -> (Option<String>, Option<String>, Vec<String>, Vec<String>) {
         let mut title = None;
         let mut abstract_text = None;
         let mut sections = Vec::new();
@@ -227,8 +218,15 @@ impl PdfParser {
                 // Simple heuristic: split by comma, clean up
                 return line
                     .split(',')
-                    .map(|s| s.trim().trim_matches(|c: char| c.is_numeric() || c == '*').trim().to_string())
-                    .filter(|s| s.len() > 3 && !s.contains("university") && !s.contains("institute"))
+                    .map(|s| {
+                        s.trim()
+                            .trim_matches(|c: char| c.is_numeric() || c == '*')
+                            .trim()
+                            .to_string()
+                    })
+                    .filter(|s| {
+                        s.len() > 3 && !s.contains("university") && !s.contains("institute")
+                    })
                     .collect();
             }
         }

@@ -73,7 +73,10 @@ impl HybridRetriever {
                 *term_freqs.entry(term.clone()).or_insert(0) += 1;
             }
             for (term, tf) in term_freqs {
-                index.entry(term).or_default().insert(chunk.chunk.id.clone(), tf);
+                index
+                    .entry(term)
+                    .or_default()
+                    .insert(chunk.chunk.id.clone(), tf);
             }
         }
         let mut total = self.total_docs.write().await;
@@ -84,22 +87,32 @@ impl HybridRetriever {
     }
 
     pub async fn retrieve(&self, query: &str) -> Result<Vec<RetrievalResult>, String> {
-        let query_emb = self.embedding_provider.embed(query).await
+        let query_emb = self
+            .embedding_provider
+            .embed(query)
+            .await
             .map_err(|e| format!("Embedding error: {}", e))?;
 
         let dense_results = {
             let store = self.vector_store.read().await;
-            store.search(&query_emb, self.config.dense_candidates).await
+            store
+                .search(&query_emb, self.config.dense_candidates)
+                .await
                 .map_err(|e| format!("Vector search error: {}", e))?
         };
 
         let sparse_results = self.bm25_search(query).await;
         let fused = Self::reciprocal_rank_fusion(&dense_results, &sparse_results, &self.config);
 
-        Ok(fused.into_iter().take(self.config.top_k)
+        Ok(fused
+            .into_iter()
+            .take(self.config.top_k)
             .map(|(chunk, score)| RetrievalResult {
-                chunk, score, source: "hybrid".to_string(),
-            }).collect())
+                chunk,
+                score,
+                source: "hybrid".to_string(),
+            })
+            .collect())
     }
 
     async fn bm25_search(&self, query: &str) -> Vec<(DocumentChunk, f64)> {
@@ -115,7 +128,9 @@ impl HybridRetriever {
         for term in &query_terms {
             if let Some(postings) = index.get(term) {
                 let df = postings.len() as f64;
-                if df == 0.0 { continue; }
+                if df == 0.0 {
+                    continue;
+                }
                 let idf = ((total as f64 - df + 0.5) / (df + 0.5) + 1.0).ln();
                 for (doc_id, tf) in postings {
                     let doc_len = *lengths.get(doc_id).unwrap_or(&1) as f64;
@@ -154,11 +169,15 @@ impl HybridRetriever {
         let k = config.rrf_k;
 
         for (rank, (chunk, _)) in dense.iter().enumerate() {
-            let entry = scores.entry(chunk.chunk.id.clone()).or_insert_with(|| (0.0, chunk.clone()));
+            let entry = scores
+                .entry(chunk.chunk.id.clone())
+                .or_insert_with(|| (0.0, chunk.clone()));
             entry.0 += config.dense_weight / (k + (rank + 1) as f64);
         }
         for (rank, (chunk, _)) in sparse.iter().enumerate() {
-            let entry = scores.entry(chunk.chunk.id.clone()).or_insert_with(|| (0.0, chunk.clone()));
+            let entry = scores
+                .entry(chunk.chunk.id.clone())
+                .or_insert_with(|| (0.0, chunk.clone()));
             entry.0 += (1.0 - config.dense_weight) / (k + (rank + 1) as f64);
         }
 

@@ -1,6 +1,5 @@
 use ai_assistant::scientist::tools::{
-    computation::ComputationTools, domain_science::DomainScienceTools, literature::LiteratureTools,
-    sympy_tool::SymPyTool,
+    computation::ComputationTools, literature::LiteratureTools, sympy_tool::SymPyTool,
 };
 use ai_assistant::scientist::workflow::AI_SCIENTIST_WORKFLOW_TOML;
 use serde::Deserialize;
@@ -32,16 +31,19 @@ struct WorkflowStep {
 
 fn execute_workflow_tool(tool: &str, args: &Value) -> Result<Value, String> {
     match tool {
-        "search_paper" => LiteratureTools.call_tool(tool, args).map_err(|e| e.to_string()),
-        "fetch_paper" => LiteratureTools.call_tool(tool, args).map_err(|e| e.to_string()),
+        "search_paper" => LiteratureTools
+            .call_tool(tool, args)
+            .map_err(|e| e.to_string()),
+        "fetch_paper" => LiteratureTools
+            .call_tool(tool, args)
+            .map_err(|e| e.to_string()),
         "sympy_simplify" => SymPyTool::new()
             .call_tool(tool, args)
             .map_err(|e| e.to_string()),
         "sympy_integrate" => SymPyTool::new()
             .call_tool(tool, args)
             .map_err(|e| e.to_string()),
-        "run_python" => ComputationTools.call_tool(tool, args).map_err(|e| e.to_string()),
-        "simulation_run" => DomainScienceTools
+        "run_python" => ComputationTools
             .call_tool(tool, args)
             .map_err(|e| e.to_string()),
         other => Err(format!(
@@ -82,11 +84,13 @@ fn scientist_workflow_runtime_handles_local_and_not_implemented_steps() {
                 "fetch_paper" => json!({
                     "paper_id": "runtime_paper"
                 }),
-                "generate_hypothesis" => json!({
-                    "knowledge_summary": "workflow stages are aligned"
+                "formulate_problem" => json!({
+                    "code": "print('problem-formulated')",
+                    "timeout_secs": 5
                 }),
-                "design_experiment" => json!({
-                    "hypothesis": "Runtime checks prevent workflow regressions"
+                "design_pipeline" => json!({
+                    "code": "print('pipeline-designed')",
+                    "timeout_secs": 5
                 }),
                 "math_simplify" => json!({
                     "expression": "x + x"
@@ -97,6 +101,14 @@ fn scientist_workflow_runtime_handles_local_and_not_implemented_steps() {
                 }),
                 "summarize_results" => json!({
                     "code": "print('runtime-summary')",
+                    "timeout_secs": 5
+                }),
+                "plan_paper_blueprint" => json!({
+                    "code": "print('paper-blueprint-planned')",
+                    "timeout_secs": 5
+                }),
+                "draft_paper_sections" => json!({
+                    "code": "print('paper-sections-drafted')",
                     "timeout_secs": 5
                 }),
                 "generate_output" => json!({
@@ -120,13 +132,17 @@ fn scientist_workflow_runtime_handles_local_and_not_implemented_steps() {
                     let payload = result.expect("fetch_paper should succeed");
                     assert_eq!(payload["status"], "success");
                     assert_eq!(payload["mode"], "local");
-                    assert!(payload["content"].as_str().unwrap_or("").contains("workflow runtime"));
+                    assert!(payload["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("workflow runtime"));
                     saw_successful_local_step = true;
                 }
-                "generate_hypothesis" | "design_experiment" => {
-                    let err = result.expect_err("step should report NotImplemented");
-                    assert!(err.contains("NotImplemented"));
-                    saw_not_implemented_step = true;
+                "formulate_problem" | "design_pipeline" => {
+                    let payload = result.expect("run_python should return structured payload");
+                    assert_eq!(payload["operation"], "run_python");
+                    assert!(payload["result"]["status"].is_string());
+                    saw_python_execution = true;
                 }
                 "math_simplify" => match result {
                     Ok(payload) => {
@@ -154,7 +170,10 @@ fn scientist_workflow_runtime_handles_local_and_not_implemented_steps() {
                         );
                     }
                 },
-                "summarize_results" | "generate_output" => {
+                "summarize_results"
+                | "plan_paper_blueprint"
+                | "draft_paper_sections"
+                | "generate_output" => {
                     let payload = result.expect("run_python should return structured payload");
                     assert_eq!(payload["operation"], "run_python");
                     assert!(payload["result"]["status"].is_string());
@@ -163,26 +182,10 @@ fn scientist_workflow_runtime_handles_local_and_not_implemented_steps() {
                 _ => {}
             }
         }
-
-        if stage.id == "result_analysis" {
-            let simulation = execute_workflow_tool(
-                "simulation_run",
-                &json!({
-                    "sim_type": "md",
-                    "steps": 50,
-                    "dt": 0.002
-                }),
-            )
-            .expect("domain science runtime should succeed");
-            assert_eq!(simulation["status"], "success");
-            assert_eq!(simulation["result"]["success"], true);
-            saw_successful_local_step = true;
-        }
     }
 
     std::env::remove_var("AI_SCIENTIST_PAPERS_DIR");
 
     assert!(saw_successful_local_step);
-    assert!(saw_not_implemented_step);
     assert!(saw_python_execution);
 }

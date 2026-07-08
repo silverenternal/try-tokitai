@@ -2,10 +2,10 @@
 
 use std::path::PathBuf;
 
-use ai_assistant::desktop_host::DesktopHostRuntime;
-use ai_assistant::AssistantConfig;
 use ai_assistant::config::Config;
+use ai_assistant::desktop_host::DesktopHostRuntime;
 use ai_assistant::web::WebHostConfig;
+use ai_assistant::AssistantConfig;
 
 fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

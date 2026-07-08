@@ -26,6 +26,9 @@ web.stdout.log
 .tokitai/traces/
 /.tokitai-web.err.log
 /.tokitai-web.log
+/.codex-web.err.log
+/.codex-web.log
+/run-web.log
 /tmp_stream_req.json
 tmp_*
 tmp_web_run_*

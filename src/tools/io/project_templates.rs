@@ -1,4 +1,4 @@
-use crate::tools::io::error::IoToolError;
+﻿use crate::tools::io::error::IoToolError;
 use crate::tools::io::security::SecurePathResolver;
 use crate::tools::io::utils::validate_single_path;
 use serde_json::{json, Value};
@@ -696,24 +696,6 @@ impl ProjectTemplates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    /// 获取测试临时目录路径（在当前目录下，避免沙箱问题）
-    fn get_test_temp_dir(name: &str) -> PathBuf {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        // 使用时间戳和随机数确保唯一性
-        let unique_id = format!(
-            "{}_{}_{}",
-            name,
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        // 不预先创建目录，让测试自己管理
-        current_dir.join("target").join("test_tmp").join(unique_id)
-    }
 
     #[test]
     fn test_create_rust_project() {

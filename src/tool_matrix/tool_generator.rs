@@ -134,9 +134,7 @@ impl ToolGenerator {
         Self::from_default_dir_with_security_config(SecurityConfig::default())
     }
 
-    pub fn from_default_dir_with_security_config(
-        security_config: SecurityConfig,
-    ) -> Result<Self> {
+    pub fn from_default_dir_with_security_config(security_config: SecurityConfig) -> Result<Self> {
         let default_dir = PathBuf::from("templates/tools");
         if default_dir.exists() {
             Self::with_security_config(default_dir, security_config)
@@ -161,7 +159,10 @@ impl ToolGenerator {
 
             match self.load_template(&path) {
                 Ok(template) => {
-                    info!("加载模板: {} ({})", template.template.name, template.template.id);
+                    info!(
+                        "加载模板: {} ({})",
+                        template.template.name, template.template.id
+                    );
                     self.templates
                         .insert(template.template.id.clone(), template);
                 }
@@ -293,8 +294,14 @@ impl ToolGenerator {
 
         match operation {
             "read" => "let content = fs::read_to_string(&path)?;\nOk(content)".to_string(),
-            "write" => "fs::write(&path, &content)?;\nOk(format!(\"Successfully wrote to {}\", path))".to_string(),
-            "copy" => "fs::copy(&path, &dest_path)?;\nOk(format!(\"Copied {} to {}\", path, dest_path))".to_string(),
+            "write" => {
+                "fs::write(&path, &content)?;\nOk(format!(\"Successfully wrote to {}\", path))"
+                    .to_string()
+            }
+            "copy" => {
+                "fs::copy(&path, &dest_path)?;\nOk(format!(\"Copied {} to {}\", path, dest_path))"
+                    .to_string()
+            }
             "delete" => "fs::remove_file(&path)?;\nOk(format!(\"Deleted {}\", path))".to_string(),
             "list" => r#"let mut files = Vec::new();
 for entry in fs::read_dir(&path)? {
@@ -412,8 +419,8 @@ Ok(serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)"#
         for cap in if_pattern.captures_iter(template) {
             let var_name = &cap[1];
             let block_content = &cap[2];
-            let has_var =
-                context.get(var_name).is_some() || context.get(&format!("{}_param", var_name)).is_some();
+            let has_var = context.get(var_name).is_some()
+                || context.get(&format!("{}_param", var_name)).is_some();
             let replacement = if has_var { block_content } else { "" };
             result = result.replace(&cap[0], replacement);
         }

@@ -123,7 +123,7 @@ impl ProviderManager {
             }
 
             // 创建默认供应商
-                let name = props
+            let name = props
                 .get("AI_API_URL")
                 .map(|url| {
                     if url.contains("ollama") {

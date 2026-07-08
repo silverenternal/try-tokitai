@@ -1,12 +1,12 @@
 //! Computation tools for lightweight, reproducible experiment execution.
 
+use crate::text_encoding::decode_bytes;
+use crate::toolchain::{default_toolchain_command, detect_toolchain_executable};
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tokitai::tool;
-use crate::toolchain::{default_toolchain_command, detect_toolchain_executable};
-use crate::text_encoding::decode_bytes;
 
 pub struct ComputationTools;
 
@@ -130,7 +130,8 @@ impl ComputationTools {
     /// Execute inline Python code.
     pub fn run_python(&self, code: String, timeout_secs: Option<u64>) -> Result<Value, String> {
         let timeout = timeout_secs.unwrap_or(30).min(120);
-        let python = find_python().ok_or_else(|| "run_python: no working Python interpreter was found".to_string())?;
+        let python = find_python()
+            .ok_or_else(|| "run_python: no working Python interpreter was found".to_string())?;
         let result = run_command_with_timeout(&python, &["-c", &code], "", timeout);
         Ok(serde_json::json!({
             "operation": "run_python",
@@ -148,7 +149,9 @@ impl ComputationTools {
         timeout_secs: Option<u64>,
     ) -> Result<Value, String> {
         let timeout = timeout_secs.unwrap_or(120).min(1800);
-        let python = find_python().ok_or_else(|| "run_python_file: no working Python interpreter was found".to_string())?;
+        let python = find_python().ok_or_else(|| {
+            "run_python_file: no working Python interpreter was found".to_string()
+        })?;
         let script_path = Path::new(&path);
         if !script_path.exists() {
             return Err(format!("run_python_file: file does not exist: {}", path));

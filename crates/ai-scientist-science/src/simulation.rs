@@ -76,8 +76,14 @@ impl LocalSimulationTool {
     fn supported(sim_type: &str) -> bool {
         matches!(
             sim_type.to_ascii_lowercase().as_str(),
-            "md" | "molecular_dynamics" | "cfd" | "fluid" | "optimization" | "qe" | "quantum_espresso"
-                | "dft" | "electronic_structure"
+            "md" | "molecular_dynamics"
+                | "cfd"
+                | "fluid"
+                | "optimization"
+                | "qe"
+                | "quantum_espresso"
+                | "dft"
+                | "electronic_structure"
         )
     }
 }
@@ -131,7 +137,10 @@ impl AutoSimulationTool {
         None
     }
 
-    fn run_ase_backend(python: &str, config: &SimulationConfig) -> Result<SimulationResult, String> {
+    fn run_ase_backend(
+        python: &str,
+        config: &SimulationConfig,
+    ) -> Result<SimulationResult, String> {
         let script = r#"
 import json
 import sys
@@ -329,7 +338,10 @@ impl SimulationToolInterface for LocalSimulationTool {
 impl SimulationToolInterface for AutoSimulationTool {
     async fn run(&self, config: SimulationConfig) -> Result<SimulationResult, String> {
         let sim_type = config.sim_type.to_ascii_lowercase();
-        if matches!(sim_type.as_str(), "md" | "molecular_dynamics" | "optimization") {
+        if matches!(
+            sim_type.as_str(),
+            "md" | "molecular_dynamics" | "optimization"
+        ) {
             if let Some(python) = Self::ase_backend_available() {
                 return Self::run_ase_backend(&python, &config);
             }
@@ -342,7 +354,10 @@ impl SimulationToolInterface for AutoSimulationTool {
                 return Ok(Self::run_openfoam_backend(&config, command));
             }
         }
-        if matches!(sim_type.as_str(), "qe" | "quantum_espresso" | "dft" | "electronic_structure") {
+        if matches!(
+            sim_type.as_str(),
+            "qe" | "quantum_espresso" | "dft" | "electronic_structure"
+        ) {
             if let Some(command) = Self::quantum_espresso_backend_available() {
                 return Ok(Self::run_quantum_espresso_backend(&config, command));
             }

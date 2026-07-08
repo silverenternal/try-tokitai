@@ -2,15 +2,19 @@
 //!
 //! Declarative workflow definition for the full AI Scientist pipeline.
 
+mod paper_workflow;
+
 /// Path to the workflow TOML file
 pub const AI_SCIENTIST_WORKFLOW_TOML: &str = include_str!("ai_scientist.toml");
+
+pub use paper_workflow::{run_paper_workflow, PaperWorkflowRequest, PaperWorkflowResult};
 
 /// Available workflow stages
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResearchStage {
     LiteratureReview,
-    HypothesisGeneration,
-    ExperimentDesign,
+    ProblemFormulation,
+    ImplementationOrBenchmarkDesign,
     Verification,
     ResultAnalysis,
     ReportGeneration,
@@ -20,8 +24,8 @@ impl ResearchStage {
     pub fn id(&self) -> &str {
         match self {
             Self::LiteratureReview => "literature_review",
-            Self::HypothesisGeneration => "hypothesis_generation",
-            Self::ExperimentDesign => "experiment_design",
+            Self::ProblemFormulation => "problem_formulation",
+            Self::ImplementationOrBenchmarkDesign => "implementation_or_benchmark_design",
             Self::Verification => "verification",
             Self::ResultAnalysis => "result_analysis",
             Self::ReportGeneration => "report_generation",
@@ -30,9 +34,9 @@ impl ResearchStage {
 
     pub fn label(&self) -> &str {
         match self {
-            Self::LiteratureReview => "Literature Review",
-            Self::HypothesisGeneration => "Hypothesis Generation",
-            Self::ExperimentDesign => "Experiment Design",
+            Self::LiteratureReview => "CS Literature Review",
+            Self::ProblemFormulation => "Problem Formulation",
+            Self::ImplementationOrBenchmarkDesign => "Implementation Or Benchmark Design",
             Self::Verification => "Verification",
             Self::ResultAnalysis => "Result Analysis",
             Self::ReportGeneration => "Report Generation",
@@ -42,8 +46,8 @@ impl ResearchStage {
     pub fn order(&self) -> usize {
         match self {
             Self::LiteratureReview => 0,
-            Self::HypothesisGeneration => 1,
-            Self::ExperimentDesign => 2,
+            Self::ProblemFormulation => 1,
+            Self::ImplementationOrBenchmarkDesign => 2,
             Self::Verification => 3,
             Self::ResultAnalysis => 4,
             Self::ReportGeneration => 5,
@@ -53,8 +57,8 @@ impl ResearchStage {
     pub fn all() -> Vec<ResearchStage> {
         vec![
             Self::LiteratureReview,
-            Self::HypothesisGeneration,
-            Self::ExperimentDesign,
+            Self::ProblemFormulation,
+            Self::ImplementationOrBenchmarkDesign,
             Self::Verification,
             Self::ResultAnalysis,
             Self::ReportGeneration,
@@ -77,8 +81,8 @@ mod tests {
             ids,
             vec![
                 "literature_review",
-                "hypothesis_generation",
-                "experiment_design",
+                "problem_formulation",
+                "implementation_or_benchmark_design",
                 "verification",
                 "result_analysis",
                 "report_generation",
@@ -87,9 +91,9 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                "Literature Review",
-                "Hypothesis Generation",
-                "Experiment Design",
+                "CS Literature Review",
+                "Problem Formulation",
+                "Implementation Or Benchmark Design",
                 "Verification",
                 "Result Analysis",
                 "Report Generation",

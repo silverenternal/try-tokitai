@@ -790,12 +790,20 @@ impl ProcessBackend for WindowsBackend {
     fn get_process_files(&self, pid: u32, limit: usize) -> Result<Vec<String>, ProcessError> {
         // Use wmic or handle.exe on Windows
         let output = Command::new("wmic")
-            .args(["process", "where", &format!("ProcessId={}", pid), "get", "ExecutablePath"])
+            .args([
+                "process",
+                "where",
+                &format!("ProcessId={}", pid),
+                "get",
+                "ExecutablePath",
+            ])
             .output()
             .map_err(|e| ProcessError::CommandFailed(format!("wmic failed: {}", e)))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<String> = stdout.lines()
-            .skip(1).take(limit)
+        let lines: Vec<String> = stdout
+            .lines()
+            .skip(1)
+            .take(limit)
             .filter(|l| !l.trim().is_empty())
             .map(|l| l.trim().to_string())
             .collect();
@@ -808,14 +816,21 @@ impl ProcessBackend for WindowsBackend {
 
     fn get_system_resources(&self) -> Result<SystemResourceInfo, SystemInfoError> {
         Ok(SystemResourceInfo {
-            cpu_cores: std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4),
+            cpu_cores: std::thread::available_parallelism()
+                .map(|n| n.get() as u32)
+                .unwrap_or(4),
             load_avg_1m: None,
             load_avg_5m: None,
             load_avg_15m: None,
             mem_total_kb: 0,
             mem_free_kb: 0,
             mem_available_kb: None,
-            disk_usage: DiskUsageInfo { total_gb: 0.0, used_gb: 0.0, available_gb: 0.0, usage_percent: 0.0 },
+            disk_usage: DiskUsageInfo {
+                total_gb: 0.0,
+                used_gb: 0.0,
+                available_gb: 0.0,
+                usage_percent: 0.0,
+            },
             uptime_secs: None,
         })
     }

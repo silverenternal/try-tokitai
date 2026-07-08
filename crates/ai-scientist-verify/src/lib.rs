@@ -7,5 +7,5 @@
 pub mod lean4;
 pub mod sympy;
 
-pub use lean4::{LeanVerifier, LeanVerificationResult};
-pub use sympy::{SymPyVerifier, SymPyResult};
+pub use lean4::{LeanVerificationResult, LeanVerifier};
+pub use sympy::{SymPyResult, SymPyVerifier};

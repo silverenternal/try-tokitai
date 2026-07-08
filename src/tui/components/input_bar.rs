@@ -248,10 +248,7 @@ impl InputBar {
     /// Render the input bar at the bottom of the screen
     pub fn render(frame: &mut Frame, area: Rect, state: &InputBarState) {
         // Build styled content showing the prompt, buffer, and cursor
-        let mut spans = vec![Span::styled(
-            "> ",
-            Style::default().fg(Color::Green),
-        )];
+        let mut spans = vec![Span::styled("> ", Style::default().fg(Color::Green))];
 
         let chars: Vec<char> = state.buffer.chars().collect();
         for (i, ch) in chars.iter().enumerate() {
@@ -284,8 +281,11 @@ impl InputBar {
             ));
         }
 
-        let paragraph = Paragraph::new(Line::from(spans))
-            .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray)));
+        let paragraph = Paragraph::new(Line::from(spans)).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
 
         frame.render_widget(paragraph, area);
     }

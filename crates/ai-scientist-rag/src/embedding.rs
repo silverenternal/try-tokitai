@@ -134,9 +134,10 @@ impl EmbeddingProvider for OpenAiEmbeddingProvider {
             )));
         }
 
-        let body: EmbeddingResponse = response.json().await.map_err(|e| {
-            EmbeddingError::ApiError(format!("Failed to parse response: {}", e))
-        })?;
+        let body: EmbeddingResponse = response
+            .json()
+            .await
+            .map_err(|e| EmbeddingError::ApiError(format!("Failed to parse response: {}", e)))?;
 
         Ok(body.data.into_iter().map(|d| d.embedding).collect())
     }

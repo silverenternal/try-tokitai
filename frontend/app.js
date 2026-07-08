@@ -94,6 +94,82 @@
     reviewEmpty: "\u5f53\u524d\u5de5\u4f5c\u533a\u6ca1\u6709\u53d8\u66f4\u3002",
     reviewUnavailable: "\u5f53\u524d\u5de5\u4f5c\u533a\u6682\u65f6\u65e0\u6cd5\u67e5\u770b\u53d8\u66f4\u3002",
     reviewError: "\u65e0\u6cd5\u52a0\u8f7d\u6587\u4ef6 diff\u3002",
+    reviewerFeedbackTitle: "\u8bc4\u5ba1\u53cd\u9988",
+    reviewerFeedbackMeta: "\u672a\u89e3\u51b3 {count} / \u603b\u8ba1 {total}",
+    reviewerFeedbackCurrentRun: "\u5f53\u524d Run",
+    reviewerFeedbackEmpty: "\u5f53\u524d\u8fd8\u6ca1\u6709\u8bc4\u5ba1\u53cd\u9988\u3002",
+    reviewerFeedbackReviewer: "\u8bc4\u5ba1\u4eba",
+    reviewerFeedbackScore: "\u8bc4\u5206",
+    reviewerFeedbackComment: "\u610f\u89c1",
+    reviewerFeedbackRunId: "Run ID",
+    reviewerFeedbackAdd: "\u6dfb\u52a0\u53cd\u9988",
+    reviewerFeedbackResolve: "\u6807\u8bb0\u5df2\u89e3\u51b3",
+    reviewerFeedbackResolved: "\u5df2\u89e3\u51b3",
+    reviewerFeedbackOpen: "\u5f85\u5904\u7406",
+    reviewerFeedbackRefresh: "\u5237\u65b0",
+    reviewerFeedbackDraftHint: "\u5c06 reviewer / \u4eba\u5ba1\u610f\u89c1\u7ed1\u5b9a\u5230\u5f53\u524d run\u3002",
+    reviewerFeedbackScoreHint: "0-100\uff0c\u53ef\u7559\u7a7a",
+    reviewerFeedbackValidation: "\u8bf7\u586b\u5199\u8bc4\u5ba1\u4eba\u548c\u610f\u89c1\u3002",
+    reviewerFeedbackScoreInvalid: "\u8bc4\u5206\u9700\u8981\u5728 0 \u5230 100 \u4e4b\u95f4\u3002",
+    toastReviewerFeedbackSaved: "\u8bc4\u5ba1\u53cd\u9988\u5df2\u8bb0\u5f55",
+    toastReviewerFeedbackResolved: "\u8bc4\u5ba1\u53cd\u9988\u5df2\u6807\u8bb0\u4e3a\u5df2\u89e3\u51b3",
+    toastReviewerFeedbackRefreshed: "\u8bc4\u5ba1\u53cd\u9988\u5df2\u5237\u65b0",
+    paperWorkflowTitle: "\u8bba\u6587\u4ea7\u51fa",
+    paperWorkflowRun: "\u751f\u6210\u8bba\u6587",
+    paperWorkflowRunning: "\u6b63\u5728\u751f\u6210\u8bba\u6587...",
+    paperWorkflowOpen: "\u6253\u5f00",
+    paperWorkflowSummaryFallback: "\u5c06\u5f53\u524d\u7814\u7a76\u95ed\u73af\u6574\u7406\u4e3a\u8bba\u6587\u3001\u9644\u5f55\u4e0e\u7ed3\u679c\u5305\u3002",
+    paperWorkflowEmpty: "\u5f53\u524d\u8fd8\u6ca1\u6709\u8bba\u6587\u4ea7\u7269\u3002",
+    paperWorkflowArtifacts: "\u8bba\u6587\u4ea7\u7269",
+    paperWorkflowPrimary: "\u4e3b\u7a3f",
+    toastPaperWorkflowDone: "\u8bba\u6587\u4ea7\u7269\u5df2\u751f\u6210",
+    paperWorkflowPromptTitle: "\u8bba\u6587\u5361\u7247",
+    paperWorkflowPromptReady: "\u5f53\u524d\u7814\u7a76\u5bf9\u8bdd\u5df2\u5177\u5907\u751f\u6210\u8bba\u6587\u7684\u6761\u4ef6\u3002",
+    paperWorkflowPromptGenerate: "\u751f\u6210\u8bba\u6587",
+    paperWorkflowPromptLater: "\u6682\u4e0d\u751f\u6210",
+    paperWorkflowPromptHint: "\u53ef\u5728\u5f53\u524d session \u7684\u7814\u7a76\u9762\u677f\u91cc\u7a0d\u540e\u518d\u751f\u6210\u3002",
+    toastPaperWorkflowDismissed: "\u5df2\u5173\u95ed\u672c\u6b21\u8bba\u6587\u751f\u6210\u63d0\u793a",
+    searchLabel: "\u641c\u7d22",
+    searchTitle: "\u7814\u7a76\u68c0\u7d22",
+    searchSubtitle: "Web via provider / Papers via official APIs / Datasets via retrieval base",
+    searchModeWeb: "\u7f51\u9875",
+    searchModePapers: "\u8bba\u6587",
+    searchModeTracking: "\u8ffd\u8e2a",
+    searchModeBenchmarks: "\u57fa\u51c6",
+    searchModeModels: "Models",
+    searchModeDatasets: "\u6570\u636e\u96c6",
+    searchModeGitHub: "GitHub",
+    searchPlaceholderWeb: "\u7528 Web provider \u641c\u7d22\u516c\u5f00\u7f51\u9875\u8d44\u6599",
+    searchPlaceholderPapers: "\u641c\u7d22\u8bba\u6587\u4e3b\u9898\u3001\u65b9\u6cd5\u6216 benchmark",
+    searchPlaceholderTracking: "\u641c\u7d22 Hugging Face Trending Papers \u7b49\u7814\u7a76\u8ffd\u8e2a\u9762",
+    searchPlaceholderBenchmarks: "\u641c\u7d22 MLPerf \u5b98\u65b9 benchmark \u9762\uff0c\u4f8b\u5982 inference\u3001training\u3001storage",
+    searchPlaceholderModels: "\u641c\u7d22 ONNX Model Zoo \u5b98\u65b9\u6a21\u578b\uff0c\u4f8b\u5982 bert\u3001resnet\u3001diffusion",
+    searchPlaceholderDatasets: "\u76f4\u8fde OpenML / Hugging Face / Papers With Code / Kaggle \u641c\u7d22\u516c\u5f00\u6570\u636e\u96c6\u5019\u9009",
+    searchPlaceholderGitHub: "\u641c\u7d22 GitHub \u4ed3\u5e93\u3001\u4ee3\u7801\u6216\u6570\u636e\u96c6\uff0c\u4f8b\u5982\uff1arepo:openai evals \u6216 mnist pytorch",
+    searchRun: "\u641c\u7d22",
+    searchOpen: "\u6253\u5f00",
+    searchUseDataset: "\u751f\u6210 Manifest",
+    searchHealthReady: "\u5df2\u8fde\u63a5",
+    searchHealthDown: "\u672a\u8fde\u63a5",
+    searchHealthDegraded: "\u90e8\u5206\u53ef\u7528",
+    searchHealthUnknown: "\u672a\u77e5",
+    searchEmpty: "\u8fd8\u6ca1\u6709\u68c0\u7d22\u7ed3\u679c\u3002",
+    searchLoading: "\u6b63\u5728\u641c\u7d22...",
+    searchError: "\u641c\u7d22\u5931\u8d25\u3002",
+    searchDatasetHealth: "\u7814\u7a76\u68c0\u7d22\u5e95\u5ea7",
+    searchWebHealth: "Web provider",
+    searchPapersHealth: "\u5b98\u65b9\u8bba\u6587 API",
+    searchTrackingHealth: "\u7814\u7a76\u8ffd\u8e2a",
+    searchBenchmarksHealth: "\u57fa\u51c6\u5e73\u53f0",
+    searchModelsHealth: "ONNX Model Zoo",
+    searchGitHubHealth: "GitHub \u68c0\u7d22",
+    searchManifestReady: "Manifest \u5df2\u751f\u6210",
+    searchNoUrl: "\u5f53\u524d\u7ed3\u679c\u6ca1\u6709\u53ef\u7528\u94fe\u63a5",
+    toastSearchCopied: "\u641c\u7d22\u7ed3\u679c\u5df2\u5237\u65b0",
+    autoSkillsTitle: "\u672c\u8f6e\u81ea\u52a8\u542f\u7528\u7684 skills",
+    autoSkillsKindWorkflow: "\u6d41\u7a0b",
+    autoSkillsKindSubfield: "\u5b50\u9886\u57df",
+    autoSkillsKindGeneral: "\u901a\u7528",
     modeChat: "Chat",
     modeResearch: "Agent",
     gitLabel: "Git \u5de5\u4f5c\u53f0",
@@ -234,6 +310,82 @@
     reviewEmpty: "No working tree changes.",
     reviewUnavailable: "Review is unavailable for this workspace.",
     reviewError: "Unable to load file diff.",
+    reviewerFeedbackTitle: "Reviewer feedback",
+    reviewerFeedbackMeta: "{count} open / {total} total",
+    reviewerFeedbackCurrentRun: "Current run",
+    reviewerFeedbackEmpty: "No reviewer feedback yet.",
+    reviewerFeedbackReviewer: "Reviewer",
+    reviewerFeedbackScore: "Score",
+    reviewerFeedbackComment: "Comment",
+    reviewerFeedbackRunId: "Run ID",
+    reviewerFeedbackAdd: "Add feedback",
+    reviewerFeedbackResolve: "Resolve",
+    reviewerFeedbackResolved: "Resolved",
+    reviewerFeedbackOpen: "Open",
+    reviewerFeedbackRefresh: "Refresh",
+    reviewerFeedbackDraftHint: "Bind human-review notes to the current run.",
+    reviewerFeedbackScoreHint: "0-100, optional",
+    reviewerFeedbackValidation: "Reviewer and comment are required.",
+    reviewerFeedbackScoreInvalid: "Score must be between 0 and 100.",
+    toastReviewerFeedbackSaved: "Reviewer feedback recorded",
+    toastReviewerFeedbackResolved: "Reviewer feedback resolved",
+    toastReviewerFeedbackRefreshed: "Reviewer feedback refreshed",
+    paperWorkflowTitle: "Paper output",
+    paperWorkflowRun: "Generate paper",
+    paperWorkflowRunning: "Generating paper...",
+    paperWorkflowOpen: "Open",
+    paperWorkflowSummaryFallback: "Assemble the current research loop into a paper, appendix, and result bundle.",
+    paperWorkflowEmpty: "No paper artifacts yet.",
+    paperWorkflowArtifacts: "Artifacts",
+    paperWorkflowPrimary: "Primary draft",
+    toastPaperWorkflowDone: "Paper artifacts generated",
+    paperWorkflowPromptTitle: "Paper card",
+    paperWorkflowPromptReady: "This research conversation is ready for an optional paper generation step.",
+    paperWorkflowPromptGenerate: "Generate paper",
+    paperWorkflowPromptLater: "Not now",
+    paperWorkflowPromptHint: "You can still generate it later from the research panel for this session.",
+    toastPaperWorkflowDismissed: "Paper generation prompt dismissed for this session",
+    searchLabel: "Search",
+    searchTitle: "Research Retrieval",
+    searchSubtitle: "Web via provider / Papers via official APIs / Datasets via retrieval base",
+    searchModeWeb: "Web",
+    searchModePapers: "Papers",
+    searchModeTracking: "Tracking",
+    searchModeBenchmarks: "Benchmarks",
+    searchModeModels: "Models",
+    searchModeDatasets: "Datasets",
+    searchModeGitHub: "GitHub",
+    searchPlaceholderWeb: "Search public web resources via the web provider",
+    searchPlaceholderPapers: "Search paper topics, methods, or benchmarks",
+    searchPlaceholderTracking: "Search research-tracking surfaces such as Hugging Face Trending Papers",
+    searchPlaceholderBenchmarks: "Search official benchmark platforms such as MLPerf training or inference",
+    searchPlaceholderModels: "Search official ONNX Model Zoo models such as bert, resnet, or diffusion",
+    searchPlaceholderDatasets: "Search public dataset candidates via OpenML / Hugging Face / Papers With Code / Kaggle",
+    searchPlaceholderGitHub: "Search GitHub repositories, code, or dataset repos",
+    searchRun: "Search",
+    searchOpen: "Open",
+    searchUseDataset: "Build manifest",
+    searchHealthReady: "Connected",
+    searchHealthDown: "Down",
+    searchHealthDegraded: "Degraded",
+    searchHealthUnknown: "Unknown",
+    searchEmpty: "No retrieval results yet.",
+    searchLoading: "Searching...",
+    searchError: "Search failed.",
+    searchDatasetHealth: "Research retrieval base",
+    searchWebHealth: "Web provider",
+    searchPapersHealth: "Official paper APIs",
+    searchTrackingHealth: "Research tracking",
+    searchBenchmarksHealth: "Benchmark platforms",
+    searchModelsHealth: "ONNX Model Zoo",
+    searchGitHubHealth: "GitHub search",
+    searchManifestReady: "Manifest created",
+    searchNoUrl: "This result has no usable link",
+    toastSearchCopied: "Search results refreshed",
+    autoSkillsTitle: "Auto-enabled skills this turn",
+    autoSkillsKindWorkflow: "Workflow",
+    autoSkillsKindSubfield: "Subfield",
+    autoSkillsKindGeneral: "General",
     modeChat: "Chat",
     modeResearch: "Agent",
     gitLabel: "Git workspace",
@@ -309,6 +461,21 @@ const BRIDGE_COMMANDS = {
   workspaceUndoFile: "workspace.file.undo",
   workspaceCompleteFile: "workspace.file.complete",
   workspaceReviewFile: "workspace.review.file",
+  reviewerFeedbackState: "reviewer_feedback.state",
+  reviewerFeedbackAdd: "reviewer_feedback.add",
+  reviewerFeedbackResolve: "reviewer_feedback.resolve",
+  researchPaperWorkflowRun: "research.paper_workflow.run",
+  searchHealth: "search.health",
+  searchWeb: "search.web",
+  searchPapers: "search.papers",
+  searchTracking: "search.tracking",
+  searchBenchmarks: "search.benchmarks",
+  searchModels: "search.models",
+  searchGitHub: "search.github",
+  searchGitHubPreview: "search.github_preview",
+  searchDatasets: "search.datasets",
+  searchDatasetManifest: "search.dataset_manifest",
+  browserOpen: "browser.open",
   chatSend: "chat.send",
   chatStream: "chat.stream",
   chatStop: "chat.stop",
@@ -440,6 +607,117 @@ function createHostClient(meta) {
       rawFileUrl(path) {
         const normalized = String(path || "").trim();
         return normalized ? `/api/workspace/file/raw?path=${encodeURIComponent(normalized)}` : "";
+      },
+    },
+    reviewerFeedback: {
+      state() {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.reviewerFeedbackState : "/api/reviewer-feedback");
+      },
+      add(payload) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.reviewerFeedbackAdd : "/api/reviewer-feedback/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      },
+      resolve(index) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.reviewerFeedbackResolve : "/api/reviewer-feedback/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index }),
+        });
+      },
+    },
+    research: {
+      paperWorkflow(payload) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.researchPaperWorkflowRun : "/api/research/paper-workflow", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      },
+    },
+    search: {
+      health() {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchHealth : "/api/search/health");
+      },
+      web(query, limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchWeb : "/api/search/web", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit }),
+        });
+      },
+      papers(query, source = "auto", limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchPapers : "/api/search/papers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, source, limit }),
+        });
+      },
+      tracking(query, source = "auto", limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchTracking : "/api/search/tracking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, source, limit }),
+        });
+      },
+      benchmarks(query, source = "mlperf", limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchBenchmarks : "/api/search/benchmarks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, source, limit }),
+        });
+      },
+      models(query, limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchModels : "/api/search/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit }),
+        });
+      },
+      github(query, mode = "repositories", limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchGitHub : "/api/search/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, mode, limit }),
+        });
+      },
+      githubPreview(repoFullName, branch = null, path = null, commitSha = null, compareBaseSha = null, compareHeadSha = null, historyScopeMode = null) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchGitHubPreview : "/api/search/github/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repo_full_name: repoFullName,
+            branch,
+            path,
+            commit_sha: commitSha,
+            compare_base_sha: compareBaseSha,
+            compare_head_sha: compareHeadSha,
+            history_scope_mode: historyScopeMode,
+          }),
+        });
+      },
+      datasets(query, limit = 8) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchDatasets : "/api/search/datasets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, limit }),
+        });
+      },
+      datasetManifest(datasetUrl, title = null) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.searchDatasetManifest : "/api/search/dataset-manifest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataset_url: datasetUrl, title }),
+        });
+      },
+      browserOpen(url) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.browserOpen : "/api/browser/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
       },
     },
     chat: {
@@ -634,9 +912,140 @@ let currentGitView = "overview";
 let gitDataLoadState = { diff: false, graph: false };
 let gitLoadPromise = null;
 let activeActivityPanel = "nav";
+let preferredLeftActivityPanel = "nav";
 let extensionCatalog = [];
+let searchMode = "web";
+let searchState = {
+  loading: false,
+  health: null,
+  results: null,
+  error: "",
+  manifests: {},
+  activeManifestUrl: "",
+  githubPreview: null,
+  githubPreviewLoading: false,
+  githubPreviewError: "",
+  githubPreviewSourceIndex: -1,
+  githubPreviewHistory: [],
+  githubPreviewHistoryIndex: -1,
+  lastQuery: "",
+};
+let browserState = {
+  currentUrl: "",
+  currentTitle: "",
+  currentViewUrl: "",
+  history: [],
+  historyIndex: -1,
+  loading: false,
+  blankReloadAttempts: 0,
+  renderRequestId: 0,
+};
+let preferredDockRightSidebarPanelId = "tree";
+let rightSidebarCollapsed = false;
+
+function syncBrowserStateFromFrame(options = {}) {
+  if (!browserFrame) return;
+  try {
+    const frameDocument = browserFrame.contentDocument;
+    if (!frameDocument) return;
+    const nextUrl = cleanDisplayText(browserState.currentUrl || "");
+    const nextTitle = cleanDisplayText(frameDocument.title || "");
+    const pushHistory = options.pushHistory !== false;
+    if (nextUrl) {
+      browserState.currentUrl = nextUrl;
+      browserState.currentTitle = nextTitle;
+      if (pushHistory && browserState.history[browserState.historyIndex] !== nextUrl) {
+        browserState.history = browserState.history.slice(0, browserState.historyIndex + 1);
+        browserState.history.push(nextUrl);
+        browserState.historyIndex = browserState.history.length - 1;
+      }
+      if (browserToolbarAddress) {
+        browserToolbarAddress.textContent = nextTitle ? `${nextTitle} - ${nextUrl}` : nextUrl;
+      }
+    }
+  } catch (error) {
+    console.warn("failed to sync browser frame state", error);
+  }
+}
+
+function closeInAppBrowser() {
+  browserState.currentUrl = "";
+  browserState.currentTitle = "";
+  browserState.currentViewUrl = "";
+  browserState.history = [];
+  browserState.historyIndex = -1;
+  browserState.blankReloadAttempts = 0;
+  browserState.renderRequestId += 1;
+  if (browserFrame) {
+    browserFrame.removeAttribute("srcdoc");
+    delete browserFrame.dataset.viewUrl;
+    browserFrame.src = "about:blank";
+  }
+  if (browserToolbarAddress) {
+    browserToolbarAddress.textContent = "No page loaded";
+  }
+  setMainView("chat");
+  applyDockLayout();
+  syncLayoutCornerControls();
+}
+
+async function loadInAppBrowserDocument(data, fallbackHref) {
+  if (!browserFrame) return;
+  browserState.blankReloadAttempts = 0;
+  const viewUrl = cleanDisplayText(
+    data?.view_url || browserState.currentViewUrl || `/api/browser/view?url=${encodeURIComponent(fallbackHref || browserState.currentUrl || "")}`,
+  );
+  browserState.currentViewUrl = viewUrl;
+  const requestId = ++browserState.renderRequestId;
+  const response = await fetch(viewUrl, { cache: "no-store" });
+  const html = await response.text();
+  if (requestId !== browserState.renderRequestId) return;
+  const frameDocument = browserFrame.contentDocument || browserFrame.contentWindow?.document;
+  if (!frameDocument) {
+    browserFrame.src = viewUrl;
+    return;
+  }
+  browserFrame.dataset.viewUrl = viewUrl;
+  frameDocument.open();
+  frameDocument.write(html);
+  frameDocument.close();
+  window.setTimeout(() => {
+    if (requestId !== browserState.renderRequestId) return;
+    syncBrowserStateFromFrame({ pushHistory: false });
+  }, 30);
+}
+
+function scheduleBrowserBlankCheck(expectedUrl) {
+  if (!browserFrame) return;
+  const attemptToken = ++browserState.blankReloadAttempts;
+  window.setTimeout(async () => {
+    if (!browserFrame || browserState.currentUrl !== expectedUrl) return;
+    if (attemptToken !== browserState.blankReloadAttempts) return;
+    let shouldRetry = false;
+    try {
+      const body = browserFrame.contentDocument?.body || null;
+      const textLen = (body?.innerText || "").trim().length;
+      const htmlLen = (body?.innerHTML || "").trim().length;
+      const href = browserFrame.contentWindow?.location?.href || "";
+      shouldRetry = textLen === 0 && htmlLen === 0 && (!href || href === "about:blank");
+    } catch (_error) {
+      shouldRetry = false;
+    }
+    if (!shouldRetry) return;
+    try {
+      await loadInAppBrowserDocument({}, expectedUrl);
+    } catch (error) {
+      console.error(error);
+    }
+  }, 900);
+}
 let runDebugState = null;
 let terminalState = { sessions: [], active_id: null };
+const reviewerFeedbackDrafts = new Map();
+const reviewerFeedbackPendingSessions = new Set();
+const paperWorkflowPendingSessions = new Set();
+const paperWorkflowAutoTriggeredSessions = new Set();
+const paperWorkflowPromptDismissedSessions = new Set();
 let terminalDrawerDismissed = false;
 let terminalPollTimer = null;
 let researchFloatingDismissed = false;
@@ -644,7 +1053,7 @@ let researchFloatingDrag = null;
 let researchFloatingReopenDrag = null;
 let researchFloatingReopenSuppressClick = false;
 let researchFloatingBoardPosition = null;
-let preservedMessageScrollTop = null;
+let preservedMessageScrollState = null;
 let workspaceTreeData = [];
 let activeWorkspaceFilePath = null;
 let expandedWorkspaceDirs = new Set();
@@ -679,6 +1088,22 @@ let workspaceMonacoCompletionProviders = new Set();
 let workspaceMonacoThemeReady = false;
 let workspaceMonacoModelCache = new Map();
 let workspaceMonacoViewStateCache = new Map();
+let paperWorkspaceState = {
+  sectionId: "",
+  path: "",
+  label: "",
+  file: null,
+  loading: false,
+  error: "",
+};
+function resetPaperWorkspaceState() {
+  paperWorkspaceState.sectionId = "";
+  paperWorkspaceState.path = "";
+  paperWorkspaceState.label = "";
+  paperWorkspaceState.file = null;
+  paperWorkspaceState.loading = false;
+  paperWorkspaceState.error = "";
+}
 let workspaceMonacoDefinitionProviders = new Set();
 let workspaceMonacoSymbolProviders = new Set();
 let workspaceMonacoHoverProviders = new Set();
@@ -687,6 +1112,7 @@ let workspaceSymbolIndexCache = new Map();
 let workspaceDiagnosticsTimer = null;
 let workspacePendingReveal = null;
 let workspaceReferenceMatches = [];
+let preserveWorkspaceSlotWhenCodeClosed = true;
 
 function currentGitFetchOptions(view = currentGitView) {
   return {
@@ -752,7 +1178,6 @@ async function refreshLatexRendering() {
 }
 let currentWorkspaceRoot = "";
 let activeDockDrag = null;
-let activePanelMenuId = null;
 let activeResizerDrag = null;
 let gripHoldTimer = null;
 let suppressNextGripClick = false;
@@ -765,11 +1190,13 @@ let liveEditedFiles = [];
 let liveProcessEvents = [];
 let pinnedEditedFiles = [];
 let activeAssistantTurn = null;
+let pendingAssistantRuntimeNode = null;
 let pendingAssistantTextNode = null;
 let pendingAssistantStableNode = null;
 let pendingAssistantTailNode = null;
 let pendingAssistantStatusTextNode = null;
 let pendingAssistantStatusTimeNode = null;
+let pendingAssistantRenderedRuntimeText = null;
 let pendingAssistantRenderedStableText = null;
 let pendingAssistantRenderedTailText = null;
 let pendingAssistantTextFrame = null;
@@ -777,6 +1204,7 @@ let pendingAssistantStatusFrame = null;
 let pendingAssistantBubbleFrame = null;
 let pendingBootstrapRefreshPromise = null;
 let suppressVisibleStreamBootstrap = false;
+let lastVisibleCompletionSignature = "";
 const MAX_LIVE_PROCESS_EVENTS = 4;
 let researchDetailOpen = false;
 
@@ -838,10 +1266,17 @@ const providerList = document.getElementById("provider-list");
 const workspacePickerToggle = document.getElementById("workspace-picker-toggle");
 const activityRail = document.getElementById("activity-rail");
 const activityFlyout = document.getElementById("activity-flyout");
+const activityFlyoutResizer = document.getElementById("activity-flyout-resizer");
 const activityRailButtons = document.querySelectorAll("[data-activity-panel]");
 const activityPanels = document.querySelectorAll("[data-activity-panel-id]");
 const extensionSearchInput = document.getElementById("extension-search-input");
 const extensionList = document.getElementById("extension-list");
+const searchModeSwitch = document.getElementById("search-mode-switch");
+const searchQueryInput = document.getElementById("search-query-input");
+const searchRunButton = document.getElementById("search-run-button");
+const searchResults = document.getElementById("search-results");
+const searchHealthStrip = document.getElementById("search-health-strip");
+const searchPreviewPanel = document.getElementById("search-preview-panel");
 const runDebugList = document.getElementById("run-debug-list");
 const runDebugSession = document.getElementById("run-debug-session");
 const terminalRailButton = document.getElementById("terminal-rail-button");
@@ -899,13 +1334,24 @@ const workspaceCodeLineButton = document.getElementById("workspace-code-line");
 const workspaceCodeSymbolsButton = document.getElementById("workspace-code-symbols");
 const workspaceCodeReferencesButton = document.getElementById("workspace-code-references");
 const workspaceCodeRenameButton = document.getElementById("workspace-code-rename");
+const workspaceLauncher = document.getElementById("workspace-launcher");
 const dockWorkspace = document.getElementById("dock-workspace");
 const panelMenu = document.getElementById("panel-menu");
 const panelGrips = document.querySelectorAll("[data-panel-grip]");
 const panelResizers = document.querySelectorAll("[data-resizer-after]");
 const activityCollapseButtons = document.querySelectorAll("[data-collapse-activity]");
+const leftSidebarToggleButton = document.getElementById("left-sidebar-toggle");
+const rightSidebarToggleButton = document.getElementById("right-sidebar-toggle");
 const gitNav = document.getElementById("git-nav");
 const gitWorkspace = document.getElementById("git-workspace");
+const browserSplitResizer = document.getElementById("browser-split-resizer");
+const browserWorkspace = document.getElementById("browser-workspace");
+const browserFrame = document.getElementById("browser-frame");
+const browserBackButton = document.getElementById("browser-back-button");
+const browserRefreshButton = document.getElementById("browser-refresh-button");
+const browserExternalButton = document.getElementById("browser-external-button");
+const browserCloseButton = document.getElementById("browser-close-button");
+const browserToolbarAddress = document.getElementById("browser-toolbar-address");
 const gitStatusBanner = document.getElementById("git-status-banner");
 const gitOverviewView = document.getElementById("git-view-overview");
 const gitChangesView = document.getElementById("git-view-changes");
@@ -925,11 +1371,18 @@ const DOCK_LAYOUT_KEY = "tokitai-dock-layout-v1";
 const RESEARCH_STARTED_KEY = "tokitai-research-started-v1";
 const SANDBOX_NOTICE_KEY = "tokitai-sandbox-notice-v1";
 const PANEL_IDS = ["sidebar", "chat", "research", "code", "tree"];
+const LEFT_ACTIVITY_ORDER = ["nav", "extensions", "search", "git", "run"];
+const RIGHT_DOCK_PANEL_IDS = ["tree", "code", "research"];
 const DEFAULT_DOCK_LAYOUT = {
   order: ["sidebar", "chat", "research", "code", "tree"],
   hidden: { sidebar: true, chat: false, research: true, tree: false, code: true },
-  widths: { sidebar: 280, chat: 1, research: 360, tree: 280, code: 420 },
+  widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 520 },
 };
+const MIN_ACTIVITY_FLYOUT_WIDTH = 248;
+const MAX_ACTIVITY_FLYOUT_WIDTH = 820;
+const SEARCH_GITHUB_FLYOUT_BREAKPOINT = 1120;
+const SEARCH_GITHUB_FLYOUT_MIN_WIDTH = 760;
+const SEARCH_GITHUB_FLYOUT_MAX_WIDTH = 980;
 
 function t(key) {
   return translations[currentLanguage]?.[key] || translations.en[key] || key;
@@ -948,6 +1401,50 @@ function setRootCssVar(name, value) {
   document.documentElement.style.setProperty(name, value);
 }
 
+function isSearchGitHubPreviewActive() {
+  if (!(activeActivityPanel === "search" && searchMode === "github")) {
+    return false;
+  }
+  if (searchState?.githubPreviewLoading || searchState?.githubPreviewError) {
+    return true;
+  }
+  return Boolean(searchState?.githubPreview && typeof searchState.githubPreview === "object");
+}
+
+function resolveSearchGitHubFlyoutWidth(baseWidth) {
+  const viewportWidth = Number(window?.innerWidth || 0);
+  if (viewportWidth < SEARCH_GITHUB_FLYOUT_BREAKPOINT) {
+    return baseWidth;
+  }
+  const availableWidth = Math.max(0, viewportWidth - 56);
+  const preservedMainWidth = viewportWidth >= 1320 ? 420 : 360;
+  const recommendedWidth = clamp(
+    availableWidth - preservedMainWidth,
+    SEARCH_GITHUB_FLYOUT_MIN_WIDTH,
+    SEARCH_GITHUB_FLYOUT_MAX_WIDTH,
+  );
+  return Math.max(baseWidth, recommendedWidth);
+}
+
+function syncShellLayoutVars() {
+  const flyoutWidth = clamp(
+    Number(dockLayout?.widths?.flyout || DEFAULT_DOCK_LAYOUT.widths.flyout),
+    MIN_ACTIVITY_FLYOUT_WIDTH,
+    MAX_ACTIVITY_FLYOUT_WIDTH,
+  );
+  const effectiveFlyoutWidth = isSearchGitHubPreviewActive()
+    ? resolveSearchGitHubFlyoutWidth(flyoutWidth)
+    : flyoutWidth;
+  const browserWidth = clamp(Number(dockLayout?.widths?.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 360, 760);
+  if (dockLayout?.widths) {
+    dockLayout.widths.flyout = flyoutWidth;
+    dockLayout.widths.browser = browserWidth;
+  }
+  setRootCssVar("--activity-flyout-width", `${flyoutWidth}px`);
+  setRootCssVar("--activity-flyout-effective-width", `${effectiveFlyoutWidth}px`);
+  setRootCssVar("--browser-panel-width", `${browserWidth}px`);
+}
+
 function readDockLayout() {
   try {
     const raw = localStorage.getItem(DOCK_LAYOUT_KEY);
@@ -955,8 +1452,15 @@ function readDockLayout() {
     const parsed = JSON.parse(raw);
     const widths = { ...DEFAULT_DOCK_LAYOUT.widths, ...(parsed.widths || {}) };
     widths.sidebar = clamp(Number(widths.sidebar || DEFAULT_DOCK_LAYOUT.widths.sidebar), 220, 420);
-    widths.tree = clamp(Number(widths.tree || DEFAULT_DOCK_LAYOUT.widths.tree), 200, 2400);
-    widths.code = clamp(Number(widths.code || DEFAULT_DOCK_LAYOUT.widths.code), 320, 2400);
+    widths.research = clamp(Number(widths.research || DEFAULT_DOCK_LAYOUT.widths.research), 320, 460);
+    widths.tree = clamp(Number(widths.tree || DEFAULT_DOCK_LAYOUT.widths.tree), 300, 420);
+    widths.code = clamp(Number(widths.code || DEFAULT_DOCK_LAYOUT.widths.code), 560, 1400);
+    widths.flyout = clamp(
+      Number(widths.flyout || DEFAULT_DOCK_LAYOUT.widths.flyout),
+      MIN_ACTIVITY_FLYOUT_WIDTH,
+      MAX_ACTIVITY_FLYOUT_WIDTH,
+    );
+    widths.browser = clamp(Number(widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 360, 760);
     return {
       order: Array.isArray(parsed.order)
         ? PANEL_IDS.filter((id) => parsed.order.includes(id)).concat(PANEL_IDS.filter((id) => !parsed.order.includes(id)))
@@ -970,6 +1474,7 @@ function readDockLayout() {
 }
 
 let dockLayout = readDockLayout();
+syncShellLayoutVars();
 let pendingResearchStart = false;
 
 function readResearchStartedSessions() {
@@ -1018,6 +1523,40 @@ function hasResearchStartedForCurrentSession() {
   return Boolean(id) && researchStartedSessions.has(id);
 }
 
+function resultBundleFieldValue(resultBundle, name) {
+  const key = String(name || "").trim();
+  if (!key) return "";
+  const fields = Array.isArray(resultBundle?.summary_fields) ? resultBundle.summary_fields : [];
+  const match = fields.find((field) => normalizeText(field?.name || "") === normalizeText(key));
+  return cleanDisplayText(match?.value || "", "");
+}
+
+function isPaperWorkflowReadyForAutoRun(research) {
+  const backendPaperReady = research?.paper_ready || null;
+  if (!research || research.paper_workflow) return false;
+  if (backendPaperReady?.workflow_present) return false;
+  if (backendPaperReady?.ready) return false;
+  const backendReason = normalizeText(backendPaperReady?.reason || "");
+  if (backendPaperReady && backendReason && !backendReason.includes("no server-side paper workflow exists yet")) {
+    return false;
+  }
+  if (!research.active) return false;
+  if (!hasResearchStartedForCurrentSession()) return false;
+  if (research.waiting_approval) return false;
+  const overallState = String(resolveResearchOverallState(research) || "").trim().toLowerCase();
+  if (!["complete", "resumable"].includes(overallState)) return false;
+  const verifierStatus = String(research?.runtime?.verifier?.status || "").trim().toLowerCase();
+  if (verifierStatus && !["pass", "complete"].includes(verifierStatus)) return false;
+  return Boolean(resultBundleFieldValue(research?.result_bundle || null, "run_id"));
+}
+
+function shouldShowPaperWorkflowPrompt(research) {
+  const sessionId = String(bootstrapData?.current_session_id || "").trim();
+  if (!sessionId) return false;
+  if (paperWorkflowPromptDismissedSessions.has(sessionId)) return false;
+  return isPaperWorkflowReadyForAutoRun(research);
+}
+
 async function ensureSessionReady() {
   let sessionId = String(bootstrapData?.current_session_id || "").trim();
   if (sessionId) return sessionId;
@@ -1054,12 +1593,7 @@ function visiblePanelIds() {
 }
 
 function renderedPanelIds() {
-  const ordered = visiblePanelIds().filter((id) => id !== "code");
-  if (!dockLayout.hidden.code) {
-    const chatIndex = ordered.indexOf("chat");
-    ordered.splice(chatIndex >= 0 ? chatIndex + 1 : ordered.length, 0, "code");
-  }
-  return ordered;
+  return visiblePanelIds();
 }
 
 function isMarkdownWorkspaceFile(file) {
@@ -1099,16 +1633,16 @@ function workspaceFileMetaText(file) {
     pdf: currentLanguage === "zh" ? "PDF 文档" : "PDF document",
     audio: currentLanguage === "zh" ? "音频预览" : "Audio preview",
     video: currentLanguage === "zh" ? "视频预览" : "Video preview",
-    unsupported: currentLanguage === "zh" ? "当前类型暂不支持预览" : "Preview not supported",
+    unsupported: currentLanguage === "zh" ? "暂不支持预览" : "Preview not supported",
   };
 
   if (previewKind !== "text" && previewKind !== "markdown") {
-    return labelMap[previewKind] || mimeType || (currentLanguage === "zh" ? "文件预览" : "File preview");
+    return labelMap[previewKind] || mimeType || (currentLanguage === "zh" ? "閺傚洣娆㈡０鍕潔" : "File preview");
   }
 
   return currentLanguage === "zh"
-    ? `${Number(file.line_count || 0)} 行${file.truncated ? " · 预览已截断" : ""}`
-    : `${Number(file.line_count || 0)} lines${file.truncated ? " · preview truncated" : ""}`;
+    ? `${Number(file.line_count || 0)} 行${file.truncated ? " / 预览已截断" : ""}`
+    : `${Number(file.line_count || 0)} lines${file.truncated ? " / preview truncated" : ""}`;
 }
 
 function syncWorkspaceCodeRenderToggle() {
@@ -1711,14 +2245,14 @@ async function ensureWorkspaceMonacoLanguageProviders(languageId) {
         const target = workspaceFindDefinitionTarget(word.word, String(currentWorkspaceFile?.path || ""));
         if (!target) return null;
         const locationText = target.path === String(currentWorkspaceFile?.path || "")
-          ? (currentLanguage === "zh" ? "当前文件" : "Current file")
+          ? (currentLanguage === "zh" ? "瑜版挸澧犻弬鍥︽" : "Current file")
           : target.path;
         return {
           range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
           contents: [
             { value: `**${word.word}**` },
             { value: target.lineText ? `\`${target.lineText}\`` : "" },
-            { value: currentLanguage === "zh" ? `定义位置: ${locationText}:${target.lineNumber}` : `Definition: ${locationText}:${target.lineNumber}` },
+            { value: currentLanguage === "zh" ? `鐎规矮绠熸担宥囩枂: ${locationText}:${target.lineNumber}` : `Definition: ${locationText}:${target.lineNumber}` },
           ].filter((entry) => entry.value),
         };
       },
@@ -1752,6 +2286,21 @@ function disposeWorkspaceMonaco() {
   workspaceMonacoModel = null;
   workspaceMonacoLanguageId = "";
   syncWorkspaceCodeToolbar();
+}
+
+function syncWorkspaceLauncherVisibility() {
+  if (!workspaceLauncher) return;
+  const shouldShow = preserveWorkspaceSlotWhenCodeClosed && !currentWorkspaceFile && !isWorkspaceCodeOpen;
+  workspaceLauncher.hidden = !shouldShow;
+}
+
+function scheduleWorkspaceMonacoLayout() {
+  if (!workspaceMonacoEditor) return;
+  window.requestAnimationFrame(() => workspaceMonacoEditor?.layout?.());
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => workspaceMonacoEditor?.layout?.());
+  });
+  window.setTimeout(() => workspaceMonacoEditor?.layout?.(), 120);
 }
 
 async function mountWorkspaceMonaco(host, file) {
@@ -1822,6 +2371,12 @@ async function mountWorkspaceMonaco(host, file) {
       bottom: 18,
     },
   });
+
+  workspaceCodeResizeObserver?.disconnect?.();
+  workspaceCodeResizeObserver = new ResizeObserver(() => {
+    workspaceMonacoEditor?.layout?.();
+  });
+  workspaceCodeResizeObserver.observe(host);
 
   workspaceMonacoEditor.onDidChangeModelContent(() => {
     const nextValue = workspaceMonacoEditor?.getValue() ?? "";
@@ -1903,11 +2458,11 @@ async function mountWorkspaceMonaco(host, file) {
   });
 
   workspaceMonacoEditor.onDidAttemptReadOnlyEdit?.(() => {
-    showToast(currentLanguage === "zh" ? "当前视图不可编辑" : "This view is read only");
+    showToast(currentLanguage === "zh" ? "瑜版挸澧犵憴鍡楁禈娑撳秴褰茬紓鏍帆" : "This view is read only");
   });
 
   window.requestAnimationFrame(() => {
-    workspaceMonacoEditor?.layout?.();
+    scheduleWorkspaceMonacoLayout();
     const cachedViewState = workspaceMonacoViewStateCache.get(fileKey);
     if (cachedViewState) {
       try {
@@ -2118,7 +2673,7 @@ function revealWorkspaceReferenceMatches(matches, symbol) {
     return;
   }
   const summary = currentLanguage === "zh"
-    ? `${symbol}：${workspaceReferenceMatches.length} 处引用`
+    ? `${symbol}: ${workspaceReferenceMatches.length} 处引用`
     : `${symbol}: ${workspaceReferenceMatches.length} references`;
   showToast(summary);
   if (!reviewStrip) return;
@@ -2185,7 +2740,7 @@ async function runWorkspaceRenameSymbol() {
   const currentPath = String(currentWorkspaceFile?.path || "");
   const localReferences = references.filter((entry) => entry.path === currentPath);
   if (!localReferences.length) {
-    showToast(currentLanguage === "zh" ? "当前轻量版仅支持重命名当前文件中的符号" : "Lightweight rename currently supports the active file only");
+    showToast(currentLanguage === "zh" ? "轻量重命名目前只支持当前文件中的符号" : "Lightweight rename currently supports the active file only");
     return;
   }
   const edit = {
@@ -2205,7 +2760,7 @@ async function runWorkspaceRenameSymbol() {
   workspaceMonacoEditor.executeEdits("tokitai.rename", edit.edits.map((item) => item.textEdit));
   showToast(
     currentLanguage === "zh"
-      ? `已在当前文件重命名 ${localReferences.length} 处`
+      ? `已在当前文件中重命名 ${localReferences.length} 处`
       : `Renamed ${localReferences.length} occurrences in current file`,
   );
 }
@@ -2241,8 +2796,8 @@ async function updateWorkspaceDiagnostics() {
         if (!last || expected !== ch) {
           markers.push({
             severity: monaco.MarkerSeverity.Warning,
-            message: currentLanguage === "zh" ? "括号可能没有正确配对" : "Bracket may be unmatched",
-            message: currentLanguage === "zh" ? "括号可能没有正确配对" : "Bracket may be unmatched",
+            message: currentLanguage === "zh" ? "閹奉剙褰块崣顖濆厴濞屸剝婀佸锝団€橀柊宥咁嚠" : "Bracket may be unmatched",
+            message: currentLanguage === "zh" ? "閹奉剙褰块崣顖濆厴濞屸剝婀佸锝団€橀柊宥咁嚠" : "Bracket may be unmatched",
             startColumn: charIndex + 1,
             endLineNumber: lineIndex + 1,
             endColumn: charIndex + 2,
@@ -2257,8 +2812,7 @@ async function updateWorkspaceDiagnostics() {
   stack.slice(-8).forEach((entry) => {
     markers.push({
       severity: monaco.MarkerSeverity.Hint,
-      message: currentLanguage === "zh" ? "这里的括号还没有闭合" : "This bracket is not yet closed",
-      message: currentLanguage === "zh" ? "这里的括号还没有闭合" : "This bracket is not yet closed",
+      message: currentLanguage === "zh" ? "这个括号尚未闭合" : "This bracket is not yet closed",
       startColumn: entry.column,
       endLineNumber: entry.lineNumber,
       endColumn: entry.column + 1,
@@ -2270,7 +2824,7 @@ async function updateWorkspaceDiagnostics() {
       if (/^\t+/.test(line)) {
         markers.push({
           severity: monaco.MarkerSeverity.Info,
-          message: currentLanguage === "zh" ? "这里使用了 Tab 缩进，可能影响格式一致性" : "Tab indentation may cause inconsistent formatting",
+          message: currentLanguage === "zh" ? "Tab 缩进可能导致格式不一致" : "Tab indentation may cause inconsistent formatting",
           startLineNumber: index + 1,
           startColumn: 1,
           endLineNumber: index + 1,
@@ -2558,7 +3112,7 @@ function updateWorkspaceCodeView() {
     disposeWorkspaceMonaco();
     workspaceCodeContent.className = "workspace-code-unsupported";
     workspaceCodeContent.innerHTML = `
-      <div class="workspace-code-unsupported-title">${escapeHtml(currentLanguage === "zh" ? "当前文件类型暂不支持预览" : "This file type is not supported for preview")}</div>
+      <div class="workspace-code-unsupported-title">${escapeHtml(currentLanguage === "zh" ? "该文件类型暂不支持预览" : "This file type is not supported for preview")}</div>
       <div class="workspace-code-unsupported-meta">${escapeHtml(currentWorkspaceFile.mime_type || "")}</div>
     `;
   } else if (isMarkdown && workspaceCodeRenderMode === "rendered") {
@@ -2577,7 +3131,7 @@ function updateWorkspaceCodeView() {
       console.error(error);
       workspaceCodeContent.className = "workspace-code-unsupported";
       workspaceCodeContent.innerHTML = `
-        <div class="workspace-code-unsupported-title">${escapeHtml(currentLanguage === "zh" ? "代码编辑器加载失败" : "Failed to load the code editor")}</div>
+        <div class="workspace-code-unsupported-title">${escapeHtml(currentLanguage === "zh" ? "加载代码编辑器失败" : "Failed to load the code editor")}</div>
         <div class="workspace-code-unsupported-meta">${escapeHtml(error?.message || "")}</div>
       `;
     });
@@ -2592,7 +3146,7 @@ function panelElement(panelId) {
 }
 
 function panelMinWidth(panelId) {
-  return { sidebar: 220, chat: 272, research: 300, tree: 220, code: 320 }[panelId] || 220;
+  return { sidebar: 220, chat: 320, research: 320, tree: 300, code: 560 }[panelId] || 220;
 }
 
 function panelCurrentWidth(panelId) {
@@ -2603,31 +3157,37 @@ function panelCurrentWidth(panelId) {
 function panelMaxWidth(panelId) {
   const workspaceWidth = Math.max(dockWorkspace?.clientWidth || 0, window.innerWidth || 0, 1280);
   const chatFloor = panelMinWidth("chat");
-  const sharedUpperBound = Math.max(420, workspaceWidth - chatFloor - 24);
+  const sharedUpperBound = Math.max(640, workspaceWidth - chatFloor - 24);
   return {
     sidebar: 420,
     research: 460,
-    tree: sharedUpperBound,
-    code: Math.max(620, sharedUpperBound),
+    tree: Math.min(420, sharedUpperBound),
+    code: Math.min(1400, Math.max(860, sharedUpperBound)),
   }[panelId] || sharedUpperBound;
 }
 
 function normalizeDockLayout() {
-  dockLayout.order = PANEL_IDS.filter((id) => dockLayout.order.includes(id)).concat(
-    PANEL_IDS.filter((id) => !dockLayout.order.includes(id)),
-  );
+  dockLayout.order = ["sidebar", "chat", "tree", "code", "research"];
   dockLayout.hidden.chat = false;
   dockLayout.hidden.sidebar = true;
-  if (currentWorkspaceMode !== "research") {
-    dockLayout.hidden.research = true;
+  RIGHT_DOCK_PANEL_IDS.forEach((panelId) => {
+    dockLayout.hidden[panelId] = true;
+  });
+  if (currentMainView !== "browser" && !rightSidebarCollapsed) {
+    const targetPanelId = resolvePreferredRightDockPanelId();
+    if (RIGHT_DOCK_PANEL_IDS.includes(targetPanelId)) {
+      dockLayout.hidden[targetPanelId] = false;
+      preferredDockRightSidebarPanelId = targetPanelId;
+    }
   }
-  if (dockLayout.hidden.code) {
-    dockLayout.order = dockLayout.order.filter((id) => id !== "code").concat("code");
+  if (currentWorkspaceMode !== "research" || !hasResearchStartedForCurrentSession()) {
+    dockLayout.hidden.research = true;
   }
 }
 
 function applyDockLayout() {
   if (!dockWorkspace) return;
+  syncShellLayoutVars();
   normalizeDockLayout();
 
   const visible = renderedPanelIds();
@@ -2639,7 +3199,7 @@ function applyDockLayout() {
   const panelGap = Number.parseFloat(window.getComputedStyle(dockWorkspace).columnGap || window.getComputedStyle(dockWorkspace).gap || "0") || 0;
   const totalItemCount = visible.length + Math.max(0, visible.length - 1);
   const gapTotalWidth = Math.max(0, totalItemCount - 1) * panelGap;
-  const resizerTotalWidth = Math.max(0, visible.length - 1) * 10;
+  const resizerTotalWidth = Math.max(0, visible.length - 1) * 12;
   let nonChatWidthBudget = Math.max(0, workspaceWidth - gapTotalWidth - resizerTotalWidth - panelMinWidth("chat"));
   const nonChatVisible = visible.filter((panelId) => panelId !== "chat");
   const plannedWidths = {};
@@ -2693,97 +3253,138 @@ function applyDockLayout() {
     }
   });
 
+  const nextOrder = [];
   visible.forEach((panelId) => {
     const panel = panelElement(panelId);
     if (!panel) return;
-    dockWorkspace.appendChild(panel);
+    nextOrder.push(panel);
     const resizer = resizerByPanelId.get(panelId);
     if (resizer) {
-      dockWorkspace.appendChild(resizer);
+      nextOrder.push(resizer);
     }
   });
 
   hidden.forEach((panelId) => {
     const panel = panelElement(panelId);
     if (!panel) return;
-    dockWorkspace.appendChild(panel);
+    nextOrder.push(panel);
   });
 
   resizers
     .filter((resizer) => resizer.classList.contains("is-hidden"))
     .forEach((resizer) => {
-    dockWorkspace.appendChild(resizer);
-  });
+      nextOrder.push(resizer);
+    });
+
+  const currentOrder = Array.from(dockWorkspace.children);
+  const sameOrder =
+    currentOrder.length === nextOrder.length &&
+    currentOrder.every((node, index) => node === nextOrder[index]);
+
+  if (!sameOrder) {
+    nextOrder.forEach((node) => dockWorkspace.appendChild(node));
+  }
+  syncLayoutCornerControls();
+  syncWorkspaceLauncherVisibility();
+  scheduleWorkspaceMonacoLayout();
 }
 
 function closePanelMenu() {
-  activePanelMenuId = null;
   if (panelMenu) {
     panelMenu.hidden = true;
     panelMenu.innerHTML = "";
   }
-  panelGrips.forEach((grip) => grip.setAttribute("aria-expanded", "false"));
 }
 
-function togglePanelHidden(panelId) {
-  if (panelId === "chat") return;
-  dockLayout.hidden[panelId] = !dockLayout.hidden[panelId];
-  saveDockLayout();
-  applyDockLayout();
-  closePanelMenu();
+function hasBrowserSidebarTarget() {
+  return Boolean(cleanDisplayText(browserState.currentUrl || "", ""));
 }
 
-function openPanelMenu(panelId, anchor) {
-  if (!panelMenu || !anchor) return;
-  if (activePanelMenuId === panelId && !panelMenu.hidden) {
-    closePanelMenu();
+function availableRightSidebarModes() {
+  const modes = ["tree"];
+  if (isWorkspaceCodeOpen || currentWorkspaceFile || !dockLayout.hidden.code) {
+    modes.push("code");
+  }
+  if (currentWorkspaceMode === "research" && (hasResearchStartedForCurrentSession() || researchDetailOpen)) {
+    modes.push("research");
+  }
+  if (hasBrowserSidebarTarget()) {
+    modes.push("browser");
+  }
+  return [...new Set(modes)];
+}
+
+function resolvePreferredRightDockPanelId() {
+  const available = availableRightSidebarModes().filter((item) => item !== "browser");
+  const preferred = RIGHT_DOCK_PANEL_IDS.includes(preferredDockRightSidebarPanelId)
+    ? preferredDockRightSidebarPanelId
+    : "tree";
+  if (available.includes(preferred)) return preferred;
+  return available[0] || "tree";
+}
+
+function syncLayoutCornerControls() {
+  leftSidebarToggleButton?.classList.toggle("is-active", Boolean(activeActivityPanel));
+  rightSidebarToggleButton?.classList.toggle(
+    "is-active",
+    currentMainView === "browser" || RIGHT_DOCK_PANEL_IDS.some((id) => !dockLayout.hidden[id]),
+  );
+  if (appShell) {
+    appShell.classList.toggle("has-right-sidebar", currentMainView === "browser" || RIGHT_DOCK_PANEL_IDS.some((id) => !dockLayout.hidden[id]));
+  }
+  if (activityFlyoutResizer) {
+    activityFlyoutResizer.hidden = !activeActivityPanel;
+  }
+  if (browserSplitResizer) {
+    browserSplitResizer.hidden = currentMainView !== "browser";
+  }
+}
+
+function toggleLeftSidebarVisibility() {
+  if (activeActivityPanel) {
+    setActivityPanel(null, { preserveMainView: preserveMainViewDuringFlyout() });
     return;
   }
+  setActivityPanel(preferredLeftActivityPanel || LEFT_ACTIVITY_ORDER[0]);
+}
 
-  activePanelMenuId = panelId;
-  const hidden = Boolean(dockLayout.hidden[panelId]);
-  const hiddenCandidates = PANEL_IDS.filter(
-    (id) => id !== "chat" && dockLayout.hidden[id] && id !== panelId,
-  );
-  panelMenu.innerHTML = `
-    ${
-      panelId !== "chat"
-        ? `<button class="panel-floating-menu-item" type="button" data-panel-toggle="${escapeHtml(panelId)}">${hidden ? "Show panel" : "Hide panel"}</button>`
-        : ""
-    }
-    ${
-      hiddenCandidates.length
-        ? `<div class="panel-floating-menu-label">Hidden Panels</div>${hiddenCandidates
-            .map(
-              (id) =>
-                `<button class="panel-floating-menu-item" type="button" data-panel-show="${escapeHtml(id)}">Show ${escapeHtml(id)}</button>`,
-            )
-            .join("")}`
-        : ""
-    }
-  `;
-  panelMenu.hidden = false;
-  const rect = anchor.getBoundingClientRect();
-  const menuWidth = 168;
-  const left = Math.min(window.innerWidth - menuWidth - 12, Math.max(12, rect.left + rect.width / 2 - menuWidth / 2));
-  panelMenu.style.left = `${left}px`;
-  panelMenu.style.top = `${rect.bottom + 8}px`;
-  panelGrips.forEach((grip) => {
-    grip.setAttribute("aria-expanded", grip === anchor ? "true" : "false");
-  });
-  panelMenu.querySelectorAll("[data-panel-toggle]").forEach((button) => {
-    button.addEventListener("click", () => togglePanelHidden(button.getAttribute("data-panel-toggle") || ""));
-  });
-  panelMenu.querySelectorAll("[data-panel-show]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const targetId = button.getAttribute("data-panel-show") || "";
-      if (!targetId) return;
-      dockLayout.hidden[targetId] = false;
-      saveDockLayout();
-      applyDockLayout();
-      closePanelMenu();
-    });
-  });
+function showRightSidebarMode(mode) {
+  const nextMode = String(mode || "").trim();
+  if (!nextMode) return;
+  if (nextMode === "browser") {
+    if (!hasBrowserSidebarTarget()) return;
+    rightSidebarCollapsed = false;
+    setMainView("browser");
+    return;
+  }
+  if (!RIGHT_DOCK_PANEL_IDS.includes(nextMode)) return;
+  preferredDockRightSidebarPanelId = nextMode;
+  rightSidebarCollapsed = false;
+  if (currentMainView === "browser") {
+    setMainView("chat");
+    return;
+  }
+  saveDockLayout();
+  applyDockLayout();
+  syncLayoutCornerControls();
+}
+
+function toggleRightSidebarVisibility() {
+  if (currentMainView === "browser") {
+    rightSidebarCollapsed = true;
+    setMainView("chat");
+    return;
+  }
+  const hasVisibleDockSidebar = RIGHT_DOCK_PANEL_IDS.some((id) => !dockLayout.hidden[id]);
+  if (hasVisibleDockSidebar) {
+    rightSidebarCollapsed = true;
+    saveDockLayout();
+    applyDockLayout();
+    syncLayoutCornerControls();
+    return;
+  }
+  rightSidebarCollapsed = false;
+  showRightSidebarMode(resolvePreferredRightDockPanelId());
 }
 
 function reorderPanels(sourceId, targetId) {
@@ -2820,6 +3421,8 @@ function stopResizerDrag() {
     }
   }
   activeResizerDrag.handle?.classList.remove("is-active");
+  appShell?.classList.remove("is-resizing-flyout");
+  document.getElementById("workspace-body")?.classList.remove("is-browser-resizing");
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
   activeResizerDrag = null;
@@ -2912,11 +3515,8 @@ function highlightDockTarget(clientX) {
 
 function ensureCodePanelVisible() {
   captureMessageScrollPosition();
-  dockLayout.hidden.code = false;
-  const next = dockLayout.order.filter((id) => id !== "code");
-  const chatIndex = next.indexOf("chat");
-  next.splice(chatIndex >= 0 ? chatIndex + 1 : next.length, 0, "code");
-  dockLayout.order = next;
+  preferredDockRightSidebarPanelId = "code";
+  rightSidebarCollapsed = false;
   saveDockLayout();
   applyDockLayout();
   requestAnimationFrame(() => restoreMessageScrollPosition());
@@ -2924,11 +3524,15 @@ function ensureCodePanelVisible() {
 
 function hideCodePanel() {
   captureMessageScrollPosition();
-  dockLayout.hidden.code = true;
   isWorkspaceCodeOpen = false;
   activeWorkspaceFilePath = null;
   currentWorkspaceFile = null;
   workspacePendingReveal = null;
+  if (preserveWorkspaceSlotWhenCodeClosed) {
+    preferredDockRightSidebarPanelId = "code";
+  } else if (preferredDockRightSidebarPanelId === "code") {
+    preferredDockRightSidebarPanelId = "tree";
+  }
   saveDockLayout();
   applyDockLayout();
   requestAnimationFrame(() => restoreMessageScrollPosition());
@@ -3027,21 +3631,45 @@ function onDockPointerUp(event) {
 function handleResizerPointerDown(event, handle) {
   if (event.button !== 0) return;
   stopDockDrag();
-  const afterId = handle?.getAttribute("data-resizer-after") || "";
-  const visible = renderedPanelIds();
-  const leftIndex = visible.indexOf(afterId);
-  const leftPanelId = leftIndex >= 0 ? visible[leftIndex] : "";
-  const rightPanelId = leftIndex >= 0 ? visible[leftIndex + 1] || "" : "";
-  if (!leftPanelId || !rightPanelId) return;
-  activeResizerDrag = {
-    handle,
-    pointerId: event.pointerId ?? null,
-    afterId,
-    leftPanelId,
-    rightPanelId,
-    startX: event.clientX,
-  };
-  handle.classList.add("is-active");
+  const kind = handle?.dataset?.layoutResizerKind || "dock";
+  if (kind === "flyout") {
+    if (!activeActivityPanel || !activityFlyout) return;
+    activeResizerDrag = {
+      kind,
+      handle,
+      pointerId: event.pointerId ?? null,
+      startX: event.clientX,
+    };
+    handle.classList.add("is-active");
+    appShell?.classList.add("is-resizing-flyout");
+  } else if (kind === "browser") {
+    if (currentMainView !== "browser" || !browserWorkspace) return;
+    activeResizerDrag = {
+      kind,
+      handle,
+      pointerId: event.pointerId ?? null,
+      startX: event.clientX,
+    };
+    handle.classList.add("is-active");
+    document.getElementById("workspace-body")?.classList.add("is-browser-resizing");
+  } else {
+    const afterId = handle?.getAttribute("data-resizer-after") || "";
+    const visible = renderedPanelIds();
+    const leftIndex = visible.indexOf(afterId);
+    const leftPanelId = leftIndex >= 0 ? visible[leftIndex] : "";
+    const rightPanelId = leftIndex >= 0 ? visible[leftIndex + 1] || "" : "";
+    if (!leftPanelId || !rightPanelId) return;
+    activeResizerDrag = {
+      kind,
+      handle,
+      pointerId: event.pointerId ?? null,
+      afterId,
+      leftPanelId,
+      rightPanelId,
+      startX: event.clientX,
+    };
+    handle.classList.add("is-active");
+  }
   if (handle?.setPointerCapture && event.pointerId != null) {
     try {
       handle.setPointerCapture(event.pointerId);
@@ -3062,20 +3690,36 @@ function onResizerPointerMove(event) {
   const deltaX = event.clientX - activeResizerDrag.startX;
   if (Math.abs(deltaX) < 1) return;
 
-  const { leftPanelId, rightPanelId } = activeResizerDrag;
-  if (leftPanelId !== "chat") {
-    dockLayout.widths[leftPanelId] = clamp(
-      panelCurrentWidth(leftPanelId) + deltaX,
-      panelMinWidth(leftPanelId),
-      panelMaxWidth(leftPanelId),
+  if (activeResizerDrag.kind === "flyout") {
+    dockLayout.widths.flyout = clamp(
+      Number(dockLayout.widths.flyout || DEFAULT_DOCK_LAYOUT.widths.flyout) + deltaX,
+      MIN_ACTIVITY_FLYOUT_WIDTH,
+      MAX_ACTIVITY_FLYOUT_WIDTH,
     );
-  }
-  if (rightPanelId !== "chat") {
-    dockLayout.widths[rightPanelId] = clamp(
-      panelCurrentWidth(rightPanelId) - deltaX,
-      panelMinWidth(rightPanelId),
-      panelMaxWidth(rightPanelId),
+    syncShellLayoutVars();
+  } else if (activeResizerDrag.kind === "browser") {
+    dockLayout.widths.browser = clamp(
+      Number(dockLayout.widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser) - deltaX,
+      360,
+      760,
     );
+    syncShellLayoutVars();
+  } else {
+    const { leftPanelId, rightPanelId } = activeResizerDrag;
+    if (leftPanelId !== "chat") {
+      dockLayout.widths[leftPanelId] = clamp(
+        panelCurrentWidth(leftPanelId) + deltaX,
+        panelMinWidth(leftPanelId),
+        panelMaxWidth(leftPanelId),
+      );
+    }
+    if (rightPanelId !== "chat") {
+      dockLayout.widths[rightPanelId] = clamp(
+        panelCurrentWidth(rightPanelId) - deltaX,
+        panelMinWidth(rightPanelId),
+        panelMaxWidth(rightPanelId),
+      );
+    }
   }
   activeResizerDrag.startX = event.clientX;
   saveDockLayout();
@@ -3098,7 +3742,9 @@ function applyWorkspaceMode(mode) {
   }
   if (currentWorkspaceMode !== "research") {
     researchDetailOpen = false;
-    dockLayout.hidden.research = true;
+    if (preferredDockRightSidebarPanelId === "research") {
+      preferredDockRightSidebarPanelId = isWorkspaceCodeOpen ? "code" : "tree";
+    }
   }
   modeButtons.forEach((button) => {
     const active = (button.dataset.mode || "chat") === currentWorkspaceMode;
@@ -3108,20 +3754,20 @@ function applyWorkspaceMode(mode) {
   if (messageInput) {
     messageInput.placeholder = currentWorkspaceMode === "research"
       ? (currentLanguage === "zh"
-          ? "Agent 默认做轻量实现；输入 /spec 开头可强制进入科研流程，Enter 发送。"
+          ? "Agent 默认走轻量实现。输入 /spec 可强制进入研究流程。按 Enter 发送。"
           : "Agent defaults to lightweight implementation. Start with /spec to force a research workflow. Press Enter to send.")
       : t("composerPlaceholder");
   }
   if (composerStop) {
     composerStop.textContent = currentWorkspaceMode === "research"
-      ? (currentLanguage === "zh" ? "中止研究" : "Stop research")
+      ? (currentLanguage === "zh" ? "停止研究" : "Stop research")
       : "Stop";
   }
   if (activityLabel) {
     if (currentWorkspaceMode === "research" && activityLabel === t("activityReviewing")) {
-      setActivity(currentLanguage === "zh" ? "正在研究" : "Researching");
+      setActivity(currentLanguage === "zh" ? "研究中" : "Researching");
     } else if (currentWorkspaceMode === "chat" && (
-      activityLabel === "姝ｅ湪鐮旂┒" || activityLabel === "Researching"
+      activityLabel === "研究中" || activityLabel === "Researching"
     )) {
       setActivity(t("activityReviewing"));
     }
@@ -3138,9 +3784,12 @@ function setResearchDetailOpen(open) {
     return;
   }
   researchDetailOpen = Boolean(open) && currentWorkspaceMode === "research";
-  dockLayout.hidden.research = !researchDetailOpen;
   if (researchDetailOpen) {
     researchFloatingDismissed = false;
+    preferredDockRightSidebarPanelId = "research";
+    rightSidebarCollapsed = false;
+  } else if (preferredDockRightSidebarPanelId === "research") {
+    preferredDockRightSidebarPanelId = isWorkspaceCodeOpen ? "code" : "tree";
   }
   saveDockLayout();
   applyDockLayout();
@@ -3189,17 +3838,17 @@ function clipText(value, maxLength = 48) {
     .trim();
   if (!clean) return "";
   if (clean.length <= maxLength) return clean;
-  return `${clean.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+  return `${clean.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
 }
 
 function looksLikeCorruptedText(value) {
   const text = String(value || "").trim();
   if (!text) return false;
   const countChars = (chars) => [...text].filter((char) => chars.includes(char)).length;
-  const replacementCount = countChars(["锟", "絔"]);
-  const questionCount = countChars(["?", "锛", "焆"]);
-  const mojibakePunctuation = countChars(["閳", "ラ", "妴", "閿", "涢", "敓"]);
-  const mojibakeMarkers = countChars(["閸", "欏", "", "缂", "侀", "弬", "瀵", "伴", "梼", "闁", "玗"]);
+  const replacementCount = countChars(["�"]);
+  const questionCount = countChars(["?"]);
+  const mojibakePunctuation = countChars(["闂", "閵", "婵", "濞", "閺"]);
+  const mojibakeMarkers = countChars(["闂", "濞", "椤", "缂", "娓", "瀵", "閻", "娴", "濮"]);
   if (replacementCount > 0) return true;
   if (questionCount >= 4 && questionCount / text.length > 0.18) return true;
   if (questionCount >= 6 && questionCount / text.length > 0.3) return true;
@@ -3231,10 +3880,19 @@ function prettifyRuntimeBranchNote(value) {
   if (!raw) return "";
   const decoded = decodeEscapedRuntimeText(raw);
   const readField = (name) => {
-    const match = decoded.match(new RegExp(`"${name}":"([^"]*)"`, "i"));
-    return match ? cleanDisplayText(match[1]) : "";
+    try {
+      const parsed = JSON.parse(decoded);
+      return cleanDisplayText(parsed?.[name] || "");
+    } catch (_error) {
+      const token = '"' + String(name || "") + '":"';
+      const start = decoded.toLowerCase().indexOf(token.toLowerCase());
+      if (start < 0) return "";
+      const rest = decoded.slice(start + token.length);
+      const end = rest.indexOf("\"");
+      return cleanDisplayText(end >= 0 ? rest.slice(0, end) : rest);
+    }
   };
-  const prefixMatch = decoded.match(/^([^"{]+失败)[：:]/);
+  const prefixMatch = decoded.match(/^([^"{]+)/);
   const prefix = cleanDisplayText(prefixMatch ? prefixMatch[1] : "");
   const operation = readField("operation");
   const path = readField("path");
@@ -3244,20 +3902,21 @@ function prettifyRuntimeBranchNote(value) {
 
   if (message || suggestion || operation) {
     const operationLabel = cleanDisplayText(prefix || operation);
-    if (/系统找不到指定的路径|os error 3/i.test(message || decoded)) {
+    const targetSuffix = target ? (" " + target) : "";
+    if (/os error 3/i.test(message || decoded)) {
       return currentLanguage === "zh"
-        ? `${operationLabel || "路径检查"}：目标目录${target ? ` ${target}` : ""} 还没准备好，我会先把路径修正后再继续。`
-        : `${operationLabel || "Path check"}: the target path${target ? ` ${target}` : ""} is not ready yet, so I’m correcting it before continuing.`;
+        ? (operationLabel || "路径检查") + ": 目标路径" + targetSuffix + " 暂不可用，我会先修正路径再继续。"
+        : (operationLabel || "Path check") + ": the target path" + targetSuffix + " is not ready yet, so I am correcting it before continuing.";
     }
-    if (/无效的编辑模式/i.test(message || decoded)) {
+    if (/unsupported|not supported/i.test(message || decoded)) {
       return currentLanguage === "zh"
-        ? `${operationLabel || "文件编辑"}：刚才用了不支持的编辑模式，我正在换成正确方式继续。`
-        : `${operationLabel || "File edit"}: that edit mode was not supported, so I’m switching to a valid one and continuing.`;
+        ? (operationLabel || "文件编辑") + ": 当前编辑方式不受支持，我会切换到可用方式后继续。"
+        : (operationLabel || "File edit") + ": that edit mode was not supported, so I am switching to a valid one and continuing.";
     }
-    if (/未找到要替换的文本/i.test(message || decoded)) {
+    if (/did not match|not match exactly|source text/i.test(message || decoded)) {
       return currentLanguage === "zh"
-        ? `${operationLabel || "文件编辑"}：原始文本没有精确匹配上，我先重新定位再继续修改。`
-        : `${operationLabel || "File edit"}: the source text did not match exactly, so I’m re-locating it before editing again.`;
+        ? (operationLabel || "文件编辑") + ": 原始文本未精确匹配，我会重新定位后再继续编辑。"
+        : (operationLabel || "File edit") + ": the source text did not match exactly, so I am re-locating it before editing again.";
     }
     const parts = [
       operationLabel,
@@ -3265,7 +3924,7 @@ function prettifyRuntimeBranchNote(value) {
       cleanDisplayText(suggestion),
     ].filter(Boolean);
     if (parts.length) {
-      return parts.join(currentLanguage === "zh" ? "：": ": ");
+      return parts.join(currentLanguage === "zh" ? "： " : ": ");
     }
   }
 
@@ -3284,7 +3943,7 @@ function isNarrationMergeCandidate(text) {
   const source = String(text || "");
   if (!source.trim()) return false;
   if (source.length > 600) return false;
-  return !/```|^\s*[-*]\s+/m.test(source);
+  return !(new RegExp("```|^\\s*[-*]\\s+", "m")).test(source);
 }
 
 function splitNarrationClauses(text) {
@@ -3292,7 +3951,7 @@ function splitNarrationClauses(text) {
     .replace(/\r\n/g, "\n")
     .split(/\n+/)
     .flatMap((line) => line
-      .split(/(?<=[。！？!?])/)
+      .split(/(?<=[。！？.!?])/)
       .map((item) => item.trim())
       .filter(Boolean))
     .map((raw) => ({ raw, normalized: normalizeNarrationClause(raw) }))
@@ -3303,14 +3962,10 @@ function normalizeNarrationClause(text) {
   return sanitizeMessageContent(String(text || ""))
     .toLowerCase()
     .replace(/^#+\s*/g, "")
-    .replace(/^(好(?:的)?|然后|接下来|现在|我先|我会|让我|目前)[，。:\s]*/u, "")
-    .replace(/(所有|全部)/g, "")
-    .replace(/(齐备|齐全|就绪|准备好了)/g, "就绪")
-    .replace(/(工作区状态和依赖情况|当前工作区状态和依赖情况|工作区和依赖情况)/g, "工作区依赖")
-    .replace(/(开始创建工程文件|现在创建工程文件|开始创建目录和脚本|现在创建目录和脚本)/g, "创建工程文件")
-    .replace(/(开始创建并运行脚本|现在创建并运行脚本)/g, "创建并运行脚本")
     .replace(/[`*_#]/g, " ")
-    .replace(/[，。！？!:\s]+/g, "")
+    .replace(/^(?:let me|i am|i'm|i will|i'll|next|first|starting|continuing)\b[:\s-]*/g, "")
+    .replace(/^(?:正在|先|我来|我会|继续)\s*/g, "")
+    .replace(/[:：,\s]+/g, "")
     .trim();
 }
 
@@ -3365,6 +4020,340 @@ function mergeNarrationClauses(existing, next) {
   ]);
 }
 
+function isAssistantProcessPreambleParagraph(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  if (/^#{1,6}\s/.test(raw) || /^[-*+]\s/.test(raw) || /^\d+\.\s/.test(raw)) return false;
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  const leadSignal = /^(?:let me|i am|i'm|i will|i'll|i found|i've found|i located|i'm going to|next,? i|first,? i|现在|接下来|我先|我会|我来|先|首先)/i;
+  if (!leadSignal.test(normalized)) return false;
+  const processSignal = /\b(?:stream|workspace|tool|command|search|inspect|read|edit|write|build|run|verify|check|scan|file|directory|repo|git)\b/i;
+  return processSignal.test(normalized) || /(?:工作区|文件|目录|工具|步骤|验证|检查|编辑|读取|扫描|仓库|代码)/.test(normalized);
+}
+
+function isAssistantProcessNarrationParagraph(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  if (/^#{1,6}\s/.test(raw) || /^[-*+]\s/.test(raw) || /^\d+\.\s/.test(raw) || /^\|.+\|$/.test(raw) || /^```/.test(raw)) {
+    return false;
+  }
+  if (raw.length > 220) return false;
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  const compact = normalizeText(raw).replace(/\s+/g, "");
+  const leadSignal = /^(?:let me|first i|i will|i'm going to|next|now|现在|接下来|我先|我会|我来|继续)/i;
+  if (!leadSignal.test(normalized) && !/letmefirstcheck|workspace|工作区/.test(compact)) return false;
+  const processSignal = /\b(?:workspace|report|script|result|tool|file|directory|inspect|check|scan|edit|read|write|verify)\b/i;
+  return processSignal.test(normalized) || /(?:工作区|文件|目录|工具|结果|脚本|检查|扫描|编辑|读取|验证)/.test(normalized);
+}
+
+function isAssistantOperationalStatusParagraph(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  if (/^#{1,6}\s/.test(raw) || /^[-*+]\s/.test(raw) || /^\d+\.\s/.test(raw) || /^\|.+\|$/.test(raw) || /^```/.test(raw)) {
+    return false;
+  }
+  if (raw.length > 220) return false;
+  const workspaceSignal = /\b(?:csv|workspace|directory|file|script|report|repo|git)\b/i.test(raw)
+    || /(?:工作区|目录|文件|脚本|报告|仓库|Git)/.test(raw);
+  const actionSignal = /\b(?:from scratch|create|write|run|generate|inspect|check|scan|edit|read|verify)\b/i.test(raw)
+    || /(?:创建|写入|运行|生成|检查|扫描|编辑|读取|验证)/.test(raw);
+  return workspaceSignal && actionSignal;
+}
+
+function stripAssistantProcessPreamble(text) {
+  const source = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!source) return "";
+  const paragraphs = source.split(/\n{2,}/);
+  let start = 0;
+  while (
+    start < paragraphs.length
+    && (
+      isAssistantProcessPreambleParagraph(paragraphs[start])
+      || isAssistantProcessNarrationParagraph(paragraphs[start])
+      || isAssistantOperationalStatusParagraph(paragraphs[start])
+    )
+  ) {
+    start += 1;
+  }
+  return paragraphs.slice(start).join("\n\n").trim();
+}
+
+function stripAssistantProcessNarration(text) {
+  const source = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!source) return "";
+  const paragraphs = source.split(/\n{2,}/);
+  if (paragraphs.length <= 1) return source;
+  const filtered = paragraphs.filter((paragraph) =>
+    !isAssistantProcessNarrationParagraph(paragraph)
+    && !isAssistantOperationalStatusParagraph(paragraph),
+  );
+  return filtered.length > 0 ? filtered.join("\n\n").trim() : source;
+}
+
+function normalizeAssistantConversationContent(value, { preserveNarrationFallback = true } = {}) {
+  const sanitized = sanitizeMessageContent(String(value || ""));
+  if (!sanitized.trim()) return "";
+  const withoutRuntime = stripAssistantRuntimeSummaryPreamble(sanitized);
+  const withoutPreamble = stripAssistantProcessPreamble(withoutRuntime);
+  const withoutNarration = stripAssistantProcessNarration(withoutPreamble);
+  if (withoutNarration.trim()) return withoutNarration.trim();
+  return preserveNarrationFallback ? withoutPreamble.trim() : "";
+}
+
+function normalizedAssistantSubstantiveContent(value) {
+  return normalizeAssistantConversationContent(value, { preserveNarrationFallback: false }).trim();
+}
+
+function assistantTextLooksLikeProcessNarration(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (!raw) return false;
+  if (normalizedAssistantSubstantiveContent(raw) && !isAssistantOperationalStatusParagraph(raw)) return false;
+  const paragraphs = raw.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (!paragraphs.length) return false;
+  return paragraphs.every((paragraph) =>
+    isAssistantProcessPreambleParagraph(paragraph)
+    || isAssistantProcessNarrationParagraph(paragraph)
+    || isAssistantOperationalStatusParagraph(paragraph)
+    || !normalizeAssistantConversationContent(paragraph, { preserveNarrationFallback: false }).trim(),
+  );
+}
+
+function looksLikeToolPayloadDump(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (!raw) return false;
+  const normalized = raw.toLowerCase();
+
+  if (
+    /"children"\s*:/.test(normalized)
+    && /"kind"\s*:\s*"file"/.test(normalized)
+    && /"path"\s*:/.test(normalized)
+  ) {
+    return true;
+  }
+
+  if (
+    /\b(?:list_dir|find_files|read_file(?:_range)?|tree_dir|search_files|mkdir|rename_path|apply_patch|search_and_replace(?:_multi)?)\b/.test(normalized)
+    && /(?:^|[\s{"])data(?:[\s"]|:)/.test(normalized)
+  ) {
+    return true;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return false;
+    const payload = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    if (
+      payload
+      && typeof payload === "object"
+      && (
+        Array.isArray(payload.children)
+        || Array.isArray(payload.tree?.children)
+        || (typeof payload.directory === "string" && (payload.tree || payload.children))
+      )
+    ) {
+      return true;
+    }
+  } catch (_error) {
+    // Non-JSON text can still be classified by the heuristics above.
+  }
+
+  return false;
+}
+
+function looksLikeDirectoryTreeDump(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (!raw) return false;
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 3) return false;
+
+  const boxDrawingLines = lines.filter((line) => /[鈹溾敂鈹傗攢]/.test(line)).length;
+  if (boxDrawingLines >= 2) return true;
+
+  const treeLikeLines = lines.filter((line) =>
+    /(?:^|[\\/|])[\w.\- ]+\s*(?:#.*)?$/.test(line)
+    && /[\\/|]/.test(line)
+  ).length;
+  if (treeLikeLines >= 4) return true;
+
+  const pathHeavyLines = lines.filter((line) =>
+    (line.match(/[\\/]/g) || []).length >= 2
+    || /\b(?:readme|requirements\.txt|package\.json|main\.py|config\.py|src|data|models|utils)\b/i.test(line)
+  ).length;
+  return pathHeavyLines >= 5;
+}
+
+function looksLikeOperationalContentDump(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (!raw) return false;
+  if (looksLikeToolPayloadDump(raw) || looksLikeDirectoryTreeDump(raw)) return true;
+
+  const normalized = raw.toLowerCase();
+  if (
+    /\b(?:list_dir|find_files|read_file(?:_range)?|tree_dir|search_files|mkdir|rename_path|apply_patch|search_and_replace(?:_multi)?)\b/.test(normalized)
+    && /(?:鍙傛暟|args?|call_id|tool_result|宸插畬鎴恷completed|success|status)/i.test(raw)
+  ) {
+    return true;
+  }
+
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length >= 4) {
+    const pathLikeLines = lines.filter((line) =>
+      /(?:^|[\s(])(?:[A-Za-z]:[\\/]|\.{0,2}[\\/]|\/)/.test(line)
+      || /(?:\.(?:rs|js|ts|tsx|jsx|py|toml|json|md|yaml|yml|txt))\b/i.test(line)
+    ).length;
+    if (pathLikeLines >= 4) return true;
+  }
+
+  return false;
+}
+
+function looksLikeStructuredAssistantReport(value) {
+  const text = normalizedAssistantSubstantiveContent(value);
+  if (!text) return false;
+  if (looksLikeOperationalContentDump(text)) return false;
+  if (text.length < 120) return false;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const codeyLineCount = lines.filter((line) =>
+    /^(?:def |class |function |import |from |const |let |var |pub |fn |use |if __name__ ==|for\s+\w+\s+in\s+|while\s+|return\b)/.test(line)
+  ).length;
+  const csvLikeCount = lines.slice(0, Math.min(lines.length, 6)).filter((line) =>
+    (line.match(/,/g) || []).length >= 3
+    && !/[#*`|]/.test(line)
+    && !/\s{2,}/.test(line)
+  ).length;
+  if (codeyLineCount >= 3 || csvLikeCount >= 4) return false;
+  if (/(?:^|\n)#{1,6}\s/m.test(text)) return true;
+  if (/^\|.+\|$/m.test(text)) return true;
+  if (/[*_]{2}.+[*_]{2}/.test(text)) return true;
+  const cues = ["analysis", "discussion", "results", "conclusion", "summary", "findings"];
+  const normalized = normalizeText(text);
+  return cues.filter((cue) => normalized.includes(normalizeText(cue))).length >= 2;
+}
+
+function isAssistantFailureSummaryText(value) {
+  const text = sanitizeMessageContent(String(value || "")).trim();
+  if (!text) return false;
+  return /research turn stopped because verification did not pass|verification did not pass|resumable checkpoint|safe checkpoint/i.test(text);
+}
+
+function isAssistantVerificationAppendixText(value) {
+  const text = sanitizeMessageContent(String(value || "")).trim();
+  if (!text) return false;
+  return /(?:^|\n)##\s*(?:verification report)\b/i.test(text)
+    || /(?:^|\n)###\s*(?:verification target)\b/i.test(text);
+}
+
+function assistantPrimaryReplyCore(value) {
+  return normalizedAssistantSubstantiveContent(stripAssistantReplyAppendices(value));
+}
+
+function isAssistantPrimaryReplyText(value) {
+  const core = assistantPrimaryReplyCore(value);
+  if (!core) return false;
+  if (isAssistantFailureSummaryText(value) || isAssistantVerificationAppendixText(value)) return false;
+  if (assistantTextLooksLikeProcessNarration(core)) return false;
+  if (looksLikeOperationalContentDump(core)) return false;
+  return looksLikeStructuredAssistantReport(core) || core.length >= 120;
+}
+
+function extractStructuredToolResultContent(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (looksLikeOperationalContentDump(raw)) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    const candidates = [
+      parsed?.data?.content,
+      parsed?.content,
+      parsed?.result?.content,
+      parsed?.message,
+    ];
+    for (const candidate of candidates) {
+      const text = cleanDisplayText(String(candidate || ""), "");
+      if (
+        !looksLikeOperationalContentDump(text)
+        && (
+        looksLikeStructuredAssistantReport(text)
+        && !assistantTextLooksLikeProcessNarration(text)
+        && !/\b(?:list_dir|find_files|read_file(?:_range)?|tree_dir|search_files|mkdir|rename_path|apply_patch|search_and_replace(?:_multi)?)\b/i.test(text)
+        )
+      ) {
+        return text;
+      }
+    }
+  } catch (_error) {
+    const text = cleanDisplayText(raw, "");
+    if (
+      !looksLikeOperationalContentDump(text)
+      && (
+      looksLikeStructuredAssistantReport(text)
+      && !assistantTextLooksLikeProcessNarration(text)
+      && !/\b(?:list_dir|find_files|read_file(?:_range)?|tree_dir|search_files|mkdir|rename_path|apply_patch|search_and_replace(?:_multi)?)\b/i.test(text)
+      )
+    ) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function preferAssistantMessageContent(existing, next) {
+  const left = String(existing || "");
+  const right = String(next || "");
+  if (!left) return right;
+  if (!right) return left;
+
+  const leftSubstantive = normalizedAssistantSubstantiveContent(left);
+  const rightSubstantive = normalizedAssistantSubstantiveContent(right);
+  const leftNarration = assistantTextLooksLikeProcessNarration(left);
+  const rightNarration = assistantTextLooksLikeProcessNarration(right);
+  const leftPrimary = isAssistantPrimaryReplyText(left);
+  const rightPrimary = isAssistantPrimaryReplyText(right);
+  const leftFailure = isAssistantFailureSummaryText(left);
+  const rightFailure = isAssistantFailureSummaryText(right);
+  const leftAppendix = isAssistantVerificationAppendixText(left);
+  const rightAppendix = isAssistantVerificationAppendixText(right);
+  const leftCore = assistantPrimaryReplyCore(left);
+  const rightCore = assistantPrimaryReplyCore(right);
+
+  if ((rightFailure || rightAppendix) && leftPrimary) {
+    return left;
+  }
+  if ((leftFailure || leftAppendix) && rightPrimary) {
+    return right;
+  }
+
+  if (leftNarration && rightSubstantive) {
+    return right;
+  }
+  if (rightNarration && leftSubstantive) {
+    return left;
+  }
+  if (leftCore && rightCore) {
+    if (leftCore === rightCore) {
+      return right;
+    }
+    if (leftCore.includes(rightCore)) {
+      return left;
+    }
+    if (rightCore.includes(leftCore)) {
+      return right;
+    }
+  }
+  if (leftSubstantive && rightSubstantive && leftSubstantive !== rightSubstantive) {
+    const rightPrefersReplace =
+      /(?:^|\n)(?:#{1,6}\s|\|.+\|)/m.test(rightSubstantive)
+      && rightSubstantive.length >= Math.max(120, Math.floor(leftSubstantive.length * 0.7));
+    if (rightPrefersReplace && !leftSubstantive.includes(rightSubstantive)) {
+      return right;
+    }
+    if (looksLikeStructuredAssistantReport(left) && looksLikeStructuredAssistantReport(right)) {
+      return right;
+    }
+  }
+  return combineAssistantSegments(left, right);
+}
+
 function cleanDisplayMarkdown(value, fallback = "") {
   const text = sanitizeMessageContent(String(value ?? ""));
   if (!text.trim()) return "";
@@ -3379,7 +4368,7 @@ function cleanDisplayList(values) {
 
 function corruptedTextFallback() {
   return currentLanguage === "zh"
-    ? "历史文本编码异常，已省略。"
+    ? "旧文本因编码损坏已省略。"
     : "Legacy text omitted due to corrupted encoding.";
 }
 
@@ -3387,12 +4376,6 @@ function isLowValueSummaryText(value) {
   const text = sanitizeMessageContent(String(value || "")).trim();
   if (!text || looksLikeCorruptedText(text)) return true;
   const markers = [
-    "鏃犳硶鐞嗚В鎮ㄥ彂閫佺殑鍐呭",
-    "无法正常显示的内容",
-    "您的输入仍然显示为无法识别的字符",
-    "涔辩爜瀛楃",
-    "请重新描述您的需求",
-    "重新发送一条",
     "cannot understand your message",
     "unable to understand your message",
     "corrupted encoding",
@@ -3425,6 +4408,17 @@ function latestConversationSummary(messages, maxLength = 42) {
   return cleaned ? clipDisplayText(cleaned, maxLength) : "";
 }
 
+function visibleMessagesSignature(messages) {
+  const visible = Array.isArray(messages) ? messages : [];
+  return visible.map((message) => {
+    const kind = String(message?.kind || "");
+    const role = String(message?.role || "");
+    const callId = String(message?.call_id || "");
+    const content = sanitizeMessageContent(String(message?.content || "")).trim();
+    return `${kind}|${role}|${callId}|${content}`;
+  }).join("\n");
+}
+
 function displayMarkdownText(value, fallback = corruptedTextFallback()) {
   return cleanDisplayMarkdown(value, fallback);
 }
@@ -3447,6 +4441,73 @@ function sanitizeHref(rawHref) {
   if (!href) return "#";
   if (/^(https?:\/\/|\/)/i.test(href)) return href;
   return "#";
+}
+
+async function openUrlInAppBrowser(rawHref, options = {}) {
+  const href = sanitizeHref(rawHref);
+  if (!href || href === "#") {
+    showToast(t("searchNoUrl"));
+    return;
+  }
+  if (!/^https?:\/\//i.test(href)) {
+    showToast(t("searchNoUrl"));
+    return;
+  }
+
+  const pushHistory = options.pushHistory !== false;
+  const fallbackViewUrl = `/api/browser/view?url=${encodeURIComponent(href)}`;
+  browserState.currentUrl = href;
+  browserState.currentTitle = "";
+  browserState.currentViewUrl = fallbackViewUrl;
+  if (pushHistory) {
+    browserState.history = browserState.history.slice(0, browserState.historyIndex + 1);
+    browserState.history.push(browserState.currentUrl);
+    browserState.historyIndex = browserState.history.length - 1;
+  }
+  browserState.loading = true;
+  if (browserToolbarAddress) {
+    browserToolbarAddress.textContent = href;
+  }
+  rightSidebarCollapsed = false;
+  setMainView("browser");
+  applyDockLayout();
+  try {
+    const response = await hostClient.search.browserOpen(href);
+    if (response.ok) {
+      const payload = await response.json();
+      const data = payload?.data || {};
+      browserState.currentUrl = cleanDisplayText(data.url || href);
+      browserState.currentTitle = cleanDisplayText(data.title || "");
+      browserState.currentViewUrl = cleanDisplayText(
+        data.view_url || fallbackViewUrl,
+      );
+      if (pushHistory) {
+        browserState.history[browserState.historyIndex] = browserState.currentUrl;
+      }
+      await loadInAppBrowserDocument(data, href);
+      scheduleBrowserBlankCheck(browserState.currentUrl);
+      if (browserToolbarAddress) {
+        browserToolbarAddress.textContent = browserState.currentTitle
+          ? `${browserState.currentTitle} - ${browserState.currentUrl}`
+          : browserState.currentUrl;
+      }
+      return;
+    }
+    const errorText = await response.text();
+    console.warn(errorText || `browser open metadata failed: ${response.status}`);
+  } catch (error) {
+    console.warn("browser metadata lookup failed", error);
+  }
+  try {
+    await loadInAppBrowserDocument({}, href);
+    scheduleBrowserBlankCheck(browserState.currentUrl);
+  } finally {
+    browserState.loading = false;
+  }
+}
+
+function preserveMainViewDuringFlyout() {
+  return currentMainView === "git" || currentMainView === "browser";
 }
 
 function workspaceAssetUrl(rawPath) {
@@ -3833,7 +4894,7 @@ function renderInlineMarkdown(text) {
   });
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
     const safeHref = sanitizeHref(href);
-    return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${label}</a>`;
+    return `<a href="${escapeHtml(safeHref)}" data-inline-link="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${label}</a>`;
   });
   return restoreMathSegments(html, extracted.segments);
 }
@@ -3850,7 +4911,7 @@ function renderMarkdown(input) {
 
   const isListLine = (line) => /^(\s*[-*+]\s+|\s*\d+\.\s+)/.test(line);
   const isQuoteLine = (line) => /^\s*>\s?/.test(line);
-  const isHeadingLine = (line) => /^(#{1,6})\s+/.test(line);
+  const isHeadingLine = (line) => /^(#{1,6})(\s+|\S)/.test(line);
   const isFenceLine = (line) => /^```/.test(line);
   const splitTableRow = (line) =>
     String(line || "")
@@ -3934,7 +4995,7 @@ function renderMarkdown(input) {
     }
 
     if (isHeadingLine(line)) {
-      const [, hashes, content] = line.match(/^(#{1,6})\s+(.*)$/) || [];
+      const [, hashes, content] = line.match(/^(#{1,6})\s*(.*)$/) || [];
       const level = Math.min(6, hashes.length);
       html.push(`<h${level}>${renderInlineMarkdown(content)}</h${level}>`);
       index += 1;
@@ -3983,6 +5044,714 @@ function renderMarkdown(input) {
   return restoreMathSegments(html.join(""), extracted.segments);
 }
 
+const ASSISTANT_SECTION_CUES = new Set([
+  "summary",
+  "overview",
+  "conclusion",
+  "conclusions",
+  "finding",
+  "findings",
+  "result",
+  "results",
+  "validation",
+  "verify",
+  "verification",
+  "test",
+  "tests",
+  "check",
+  "checks",
+  "change",
+  "changes",
+  "impact",
+  "impacts",
+  "reason",
+  "reasons",
+  "risk",
+  "risks",
+  "status",
+  "note",
+  "notes",
+  "plan",
+  "output",
+  "outputs",
+  "deliverable",
+  "deliverables",
+  "nextstep",
+  "nextsteps",
+  "followup",
+  "followups",
+  "whatchanged",
+  "why",
+  "summary",
+  "findings",
+  "analysis",
+  "discussion",
+  "results",
+  "conclusion",
+  "statusupdate",
+  "notesummary",
+  "verificationreport",
+  "nextaction",
+  "nextactions",
+  "changedfiles",
+  "rationale",
+  "impactsummary",
+  "riskreview",
+  "outputsummary",
+]);
+
+function normalizeAssistantSectionCue(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\s:_/()[\]{}-]+/g, "");
+}
+
+function protectFencedMarkdownBlocks(text) {
+  const blocks = [];
+  const protectedText = String(text || "").replace(/```[\s\S]*?```/g, (block) => {
+    const token = `@@ASSISTANT_FENCE_${blocks.length}@@`;
+    blocks.push({ token, block });
+    return token;
+  });
+  return { text: protectedText, blocks };
+}
+
+function restoreFencedMarkdownBlocks(text, blocks) {
+  let output = String(text || "");
+  (blocks || []).forEach((entry) => {
+    output = output.replace(entry.token, entry.block);
+  });
+  return output;
+}
+
+function normalizeAssistantStructuralLine(line) {
+  const raw = String(line || "");
+  if (/^\s*(#{1,6})\s*#+\s+/.test(raw)) {
+    return raw.replace(/^\s*(#{1,6})\s*#+\s+/, (_match, hashes) => `${hashes} `);
+  }
+  if (/^\s*(#{1,6})([^\s#].*)$/.test(raw)) {
+    return raw.replace(/^\s*(#{1,6})([^\s#].*)$/, (_match, hashes, rest) => `${hashes} ${rest}`);
+  }
+  if (/^\s*[閳モ懇妫岃矾閳活亖妫埢绯曟煙]\s+/.test(raw)) {
+    return raw.replace(/^\s*[閳モ懇妫岃矾閳活亖妫埢绯曟煙]\s+/, "- ");
+  }
+  if (/^\s*(\d+)[\)\uff09]\s+/.test(raw)) {
+    return raw.replace(/^\s*(\d+)[\)\uff09]\s+/, (_match, index) => `${index}. `);
+  }
+  return raw;
+}
+
+function stripAssistantRuntimeSummaryPreamble(text) {
+  let source = String(text || "").replace(/\r\n/g, "\n");
+  if (!source.trim()) return "";
+  const runtimeLeadPattern = /^\s*(?:runtime summary|verification report|verification target|research turn stopped because verification did not pass)[^\n]*(?:\n+|$)/i;
+  let next = source.replace(runtimeLeadPattern, "");
+  while (next !== source) {
+    source = next;
+    next = source.replace(runtimeLeadPattern, "");
+  }
+  return source.trimStart();
+}
+
+function splitResearchStepNarrationLine(line) {
+  const raw = String(line || "");
+  if (!raw.trim()) return [raw];
+  const markers = [
+    "Step 1",
+    "Step 2",
+    "Step 3",
+    "Step 4",
+    "首先",
+    "接下来",
+    "然后",
+    "最后",
+    "我先",
+    "我会",
+    "现在",
+  ];
+  let boundary = -1;
+  for (const marker of markers) {
+    const index = raw.indexOf(marker);
+    if (index > 12 && (boundary === -1 || index < boundary)) {
+      boundary = index;
+    }
+  }
+  if (boundary === -1) return [raw];
+  return [raw.slice(0, boundary).trimEnd(), raw.slice(boundary).trimStart()].filter(Boolean);
+}
+
+function repairCollapsedStreamingStructure(text) {
+  const source = String(text || "");
+  if (!source) return "";
+
+  let repaired = source
+    .replace(/([^\n])\s*(#{1,6})(?=\S)/g, "$1\n\n$2 ")
+    .replace(/([^\n])\s*(#{1,6})\s+/g, "$1\n\n$2 ");
+
+  repaired = repaired.replace(
+    /^(#{1,6}\s*)([^\n#]{1,18}?)(?=(This\b|In\b|For\b|A\b|An\b))/,
+    (_match, prefix, title, starter) => `${prefix}${title}\n\n${starter}`,
+  );
+
+  return repaired;
+}
+
+function matchAssistantSectionLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return null;
+
+  const numberedSection = trimmed.match(/^\d+\.\s*(.{1,24})$/);
+  if (numberedSection) {
+    return {
+      title: numberedSection[1].trim(),
+      body: "",
+    };
+  }
+
+  const inlineSection = trimmed.match(/^([^:\n]{1,18})[:：]\s+(.+)$/);
+  if (inlineSection) {
+    const title = inlineSection[1].trim();
+    const body = inlineSection[2].trim();
+    const normalizedTitle = normalizeAssistantSectionCue(title);
+    if (ASSISTANT_SECTION_CUES.has(normalizedTitle) && body.length >= 22) {
+      return {
+        title,
+        body,
+      };
+    }
+  }
+
+  const standaloneTitle = trimmed.replace(/[:：]\s*$/, "");
+  const normalizedStandalone = normalizeAssistantSectionCue(standaloneTitle);
+  if (standaloneTitle.length <= 24 && ASSISTANT_SECTION_CUES.has(normalizedStandalone)) {
+    return {
+      title: standaloneTitle,
+      body: "",
+    };
+  }
+
+  return null;
+}
+
+function parseAssistantKeyValueLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^([^:閿涙瓡n]{1,20})[閿?]\s+(.+)$/);
+  if (!match) return null;
+  const label = match[1].trim();
+  const value = match[2].trim();
+  if (!label || !value) return null;
+  const normalizedLabel = normalizeAssistantSectionCue(label);
+  const labelWordCount = label.split(/\s+/).filter(Boolean).length;
+  if (label.length > 18 && labelWordCount > 4) return null;
+  return {
+    label,
+    value,
+    normalizedLabel,
+  };
+}
+
+function stripAssistantReplyAppendices(input) {
+  const source = String(input || "").replace(/\r\n/g, "\n").trim();
+  if (!source) return "";
+  const inlineFailureMatch = /research turn stopped because verification did not pass/i.exec(source);
+  if (inlineFailureMatch && typeof inlineFailureMatch.index === "number" && inlineFailureMatch.index > 0) {
+    const head = source.slice(0, inlineFailureMatch.index).trim();
+    if (normalizedAssistantSubstantiveContent(head)) {
+      return head;
+    }
+  }
+  const markers = [
+    /##\s*verification report\b/i,
+    /(?:^|\n)validation (?:evidence )?summary[閿?]/i,
+    /(?:^|\n)the output above satisfies all constraints/i,
+    /research turn stopped because verification did not pass/i,
+    /verification did not pass/i,
+    /resumable checkpoint/i,
+    /safe checkpoint/i,
+  ];
+  let cutIndex = -1;
+  markers.forEach((pattern) => {
+    const match = pattern.exec(source);
+    if (!match || typeof match.index !== "number" || match.index <= 0) return;
+    if (cutIndex === -1 || match.index < cutIndex) {
+      cutIndex = match.index;
+    }
+  });
+  if (cutIndex <= 0) return source;
+  const head = source.slice(0, cutIndex).trim();
+  return normalizedAssistantSubstantiveContent(head) ? head : source;
+}
+
+function dedupeAssistantDisplayParagraphs(input) {
+  const paragraphs = String(input || "")
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (paragraphs.length <= 1) return String(input || "").trim();
+  const seen = new Set();
+  const kept = [];
+  paragraphs.forEach((paragraph) => {
+    const normalized = normalizeText(paragraph).replace(/\s+/g, "");
+    const isLongDuplicateCandidate = normalized.length >= 80;
+    if (isLongDuplicateCandidate && seen.has(normalized)) {
+      return;
+    }
+    if (isLongDuplicateCandidate) {
+      seen.add(normalized);
+    }
+    kept.push(paragraph);
+  });
+  return kept.join("\n\n").trim();
+}
+
+function structureAssistantDisplayText(input) {
+  const source = dedupeAssistantDisplayParagraphs(
+    stripAssistantReplyAppendices(
+      normalizeAssistantConversationContent(String(input || "")),
+    ),
+  )
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+---+\s+/g, "\n\n")
+    .replace(/([閵嗗偊绱掗敍?!?])\s*(#{1,6})(?=\S)/g, "$1\n\n$2 ")
+    .replace(/([閵嗗偊绱掗敍?!?])\s*(#{1,6})\s+/g, "$1\n\n$2 ")
+    .trim();
+  if (!source) return "";
+
+  const protectedBlocks = protectFencedMarkdownBlocks(source);
+  const lines = protectedBlocks.text.split("\n");
+  const output = [];
+  const keyValueBuffer = [];
+
+  const flushKeyValueBuffer = () => {
+    if (!keyValueBuffer.length) return;
+    if (keyValueBuffer.length === 1) {
+      const entry = keyValueBuffer[0];
+      if (ASSISTANT_SECTION_CUES.has(entry.normalizedLabel) && entry.value.length > 30) {
+        output.push(`### ${entry.label}`);
+        output.push(entry.value);
+      } else {
+        output.push(`- **${entry.label}**: ${entry.value}`);
+      }
+    } else {
+      keyValueBuffer.forEach((entry) => {
+        output.push(`- **${entry.label}**: ${entry.value}`);
+      });
+    }
+    keyValueBuffer.length = 0;
+  };
+
+  lines.forEach((line) => {
+    splitResearchStepNarrationLine(line).forEach((part) => {
+      const normalizedLine = normalizeAssistantStructuralLine(part);
+      const trimmed = normalizedLine.trim();
+
+      if (!trimmed) {
+        flushKeyValueBuffer();
+        output.push("");
+        return;
+      }
+
+      if (/^@@ASSISTANT_FENCE_\d+@@$/.test(trimmed)) {
+        flushKeyValueBuffer();
+        output.push(trimmed);
+        return;
+      }
+
+      if (/^(#{1,6}\s|>\s?|[-*+]\s+|\d+\.\s+|\|.+\|)/.test(trimmed)) {
+        flushKeyValueBuffer();
+        output.push(normalizedLine);
+        return;
+      }
+
+      const section = matchAssistantSectionLine(trimmed);
+      if (section) {
+        flushKeyValueBuffer();
+        output.push(`### ${section.title}`);
+        if (section.body) {
+          output.push(section.body);
+        }
+        return;
+      }
+
+      const keyValue = parseAssistantKeyValueLine(trimmed);
+      if (keyValue) {
+        keyValueBuffer.push(keyValue);
+        return;
+      }
+
+      flushKeyValueBuffer();
+      output.push(normalizedLine);
+    });
+  });
+
+  flushKeyValueBuffer();
+  const normalizedOutput = [];
+  const blockStarters = /^(#{1,6}\s|[-*+]\s|>\s?|\d+\.\s|```|@@ASSISTANT_FENCE_\d+@@|\|.+\|)/;
+  const sentenceBoundary = /[.!?。！？]$/;
+  output.forEach((line, index) => {
+    const current = String(line || "");
+    const trimmed = current.trim();
+    const previous = normalizedOutput.length ? String(normalizedOutput[normalizedOutput.length - 1] || "") : "";
+    const prevTrimmed = previous.trim();
+    const nextRaw = index + 1 < output.length ? String(output[index + 1] || "") : "";
+    const nextTrimmed = nextRaw.trim();
+
+    if (!trimmed) {
+      if (prevTrimmed) normalizedOutput.push("");
+      return;
+    }
+
+    const looksDenseParagraph =
+      trimmed.length > 90 &&
+      !blockStarters.test(trimmed) &&
+      !blockStarters.test(prevTrimmed) &&
+      !blockStarters.test(nextTrimmed);
+
+    if (
+      normalizedOutput.length &&
+      prevTrimmed &&
+      looksDenseParagraph &&
+      sentenceBoundary.test(prevTrimmed)
+    ) {
+      normalizedOutput.push("");
+    }
+
+    normalizedOutput.push(current);
+  });
+  return restoreFencedMarkdownBlocks(
+    normalizedOutput.join("\n").replace(/\n{3,}/g, "\n\n").trim(),
+    protectedBlocks.blocks,
+  );
+}
+
+function renderRuntimeSectionCard(title, countLabel, bodyMarkup, options = {}) {
+  if (!bodyMarkup) return "";
+  const shouldOpen = options.open === true;
+  const tone = cleanDisplayText(options.tone || "", "");
+  const extraClass = cleanDisplayText(options.className || "", "");
+  return `
+    <details class="codex-runtime-card ${escapeHtml(extraClass)}${tone ? ` is-${escapeHtml(tone)}` : ""}"${shouldOpen ? " open" : ""}>
+      <summary class="codex-runtime-card-summary">
+        <span class="codex-runtime-card-title">${escapeHtml(title)}</span>
+        <span class="codex-runtime-card-count">${escapeHtml(countLabel || "")}</span>
+      </summary>
+      <div class="codex-runtime-card-body">
+        ${bodyMarkup}
+      </div>
+    </details>
+  `;
+}
+
+function summarizeOperationTools(tools) {
+  const list = Array.isArray(tools) ? tools : [];
+  if (!list.length) return null;
+  const names = list.map((tool) => String(tool?.name || "").trim().toLowerCase());
+  const hasWorkspaceScan = names.some((name) => ["list_dir", "find_files", "search_files", "tree_dir", "read_file", "read_file_range"].includes(name));
+  const hasEdit = names.some((name) => ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name));
+  const hasGit = names.some((name) => name.startsWith("git_"));
+  if (hasWorkspaceScan && !hasEdit && !hasGit) {
+    return {
+      title: currentLanguage === "zh" ? "我先查看工作区结构和关键文档。" : "I will first inspect the workspace structure and design docs.",
+      meta: currentLanguage === "zh" ? "正在查看工作区文件" : "Viewing workspace files",
+    };
+  }
+  if (hasEdit && !hasGit) {
+    return {
+      title: currentLanguage === "zh" ? "我来修改这段逻辑。" : "I will update this logic.",
+      meta: currentLanguage === "zh" ? "正在编辑文件" : "Editing files",
+    };
+  }
+  if (hasGit) {
+    return {
+      title: currentLanguage === "zh" ? "我先检查改动和仓库状态。" : "I will check the changes and repository state first.",
+      meta: currentLanguage === "zh" ? "正在查看 Git 状态" : "Checking Git status",
+    };
+  }
+  return {
+    title: currentLanguage === "zh" ? "我继续推进当前步骤。" : "I am continuing the current step.",
+    meta: currentLanguage === "zh" ? "正在执行工具" : "Running tools",
+  };
+}
+function renderAssistantRuntimePanel(content, options = {}) {
+  if (!content) return "";
+  const title = options.title || zhLabel("Execution", "Execution");
+  const meta = cleanDisplayText(options.meta || "", "");
+  const open = options.open !== false;
+  const tone = cleanDisplayText(options.tone || "", "");
+  const toneClass = tone ? ` is-${escapeHtml(tone)}` : "";
+  return `
+    <section class="codex-runtime-panel${toneClass}">
+      <details class="codex-runtime-panel-shell" data-runtime-panel${open ? " open" : ""}>
+        <summary class="codex-runtime-panel-summary" data-runtime-toggle>
+          <span class="codex-runtime-panel-title">${escapeHtml(title)}</span>
+          ${meta ? `<span class="codex-runtime-panel-meta">${escapeHtml(meta)}</span>` : ""}
+        </summary>
+        <div class="codex-runtime-panel-body">
+          ${content}
+        </div>
+      </details>
+    </section>
+  `;
+}
+
+function renderOperationSection(title, bodyMarkup) {
+  if (!bodyMarkup) return "";
+  return `
+    <section class="codex-operation-section">
+      <div class="codex-operation-section-title">${escapeHtml(title)}</div>
+      ${bodyMarkup}
+    </section>
+  `;
+}
+
+function extractAssistantDecisionCard(text) {
+  const source = cleanDisplayText(String(text || ""), "");
+  if (!source) return { body: "", card: null };
+  const normalized = source.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n").map((line) => line.trim());
+  const highLevelContext = /\b(?:please confirm|which direction|direction you prefer|implementation direction|design direction|architecture|approach|strategy|options?)\b/i;
+  const strategicOptionLine = /^(?:#{2,3}\s*)?(?:direction|approach|strategy|option)\b|^(?:\d+\.\s*)(?:direction|approach|strategy|option)\b/i;
+  const lowLevelExecution = /\b(?:file|folder|directory|script|path|create|add|generate|modify|edit|rename|delete|write)\b|\.(?:rs|py|js|ts|tsx|jsx|toml|json|yaml|yml|md)\b/i;
+  if (!highLevelContext.test(normalized) && !lines.some((line) => strategicOptionLine.test(line))) {
+    return { body: normalized, card: null };
+  }
+  const alternativeOptionLines = [];
+  const bodyLines = [];
+
+  for (const line of lines) {
+    if (!line) {
+      continue;
+    }
+
+    if (/^please confirm[:?]?$/i.test(line) || /^preparing final message payload/i.test(line)) {
+      continue;
+    }
+
+    if (strategicOptionLine.test(line) || /^(?:[-*+]\s+|\d+\.\s+)/.test(line)) {
+      const cleaned = cleanDisplayText(
+        line
+          .replace(/^#{2,3}\s*/, "")
+          .replace(/^(?:\d+\.\s*|[-*+]\s*)/, "")
+          .replace(/[:：]\s*$/, ""),
+        "",
+      );
+      if (
+        cleaned &&
+        !lowLevelExecution.test(cleaned) &&
+        /\b(?:direction|approach|strategy|option)\b/i.test(cleaned) &&
+        !/\b(?:summary|comparison|compare)\b/i.test(cleaned)
+      ) {
+        alternativeOptionLines.push(cleaned);
+        continue;
+      }
+    }
+
+    bodyLines.push(line);
+  }
+
+  const options = alternativeOptionLines
+    .map((line) => cleanDisplayText(line, ""))
+    .filter((line, index, array) => line && array.indexOf(line) === index);
+
+  if (options.length < 2) {
+    return { body: normalized, card: null };
+  }
+
+  return {
+    body: bodyLines.join("\n").trim(),
+    card: {
+      title: currentLanguage === "zh" ? "选择下一步" : "Choose next step",
+      options,
+    },
+  };
+}
+
+function renderAssistantDecisionCard(card) {
+  if (!card || !Array.isArray(card.options) || !card.options.length) return "";
+  return `
+    <div class="codex-decision-card">
+      <div class="codex-decision-title">${escapeHtml(card.title || zhLabel("选择下一步", "Choose next step"))}</div>
+      <div class="codex-decision-options">
+        ${card.options.map((option) => `
+          <button class="codex-decision-option" type="button" data-decision-option="${escapeHtml(option)}">${escapeHtml(option)}</button>
+        `).join("")}
+      </div>
+      <div class="codex-decision-custom">
+        <textarea rows="2" placeholder="${escapeHtml(zhLabel("输入你的想法", "Enter your idea"))}" data-decision-custom-input></textarea>
+        <button class="codex-decision-submit" type="button" data-decision-custom-submit>${escapeHtml(zhLabel("发送", "Send"))}</button>
+      </div>
+    </div>
+  `;
+}
+
+function buildOperationTimeline(turn, { isStreaming = false } = {}) {
+  const items = [];
+  const seenLabels = new Set();
+  const pushItem = (label, timestamp = 0, extraClass = "") => {
+    const text = cleanDisplayText(String(label || "").trim(), "");
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (seenLabels.has(key)) return;
+    seenLabels.add(key);
+    items.push({
+      timestamp: Number(timestamp || 0) || 0,
+      body: `
+        <div class="codex-op-row ${escapeHtml(extraClass)}">
+          <span class="codex-op-dot" aria-hidden="true"></span>
+          <span class="codex-op-label">${escapeHtml(text)}</span>
+        </div>
+      `,
+    });
+  };
+
+  const progressNarration = summarizeOperationalText(String(turn?.progressNarration || "").trim(), "");
+  if (progressNarration) {
+    pushItem(progressNarration, 0, "is-primary");
+  }
+
+  const worklogEntries = Array.isArray(turn?.worklog) ? turn.worklog : [];
+  worklogEntries.forEach((entry) => {
+    const text = cleanDisplayText(entry?.text || "", "");
+    if (!text) return;
+    if (progressNarration && (text === progressNarration || progressNarration.includes(text) || text.includes(progressNarration))) {
+      return;
+    }
+    pushItem(text, Number(entry?.timestamp || 0) || 0);
+  });
+
+  const tools = Array.isArray(turn?.tools) ? turn.tools : [];
+  const visibleTools = tools.slice(isStreaming ? -3 : -4);
+  const groupedToolSummary = summarizeOperationTools(visibleTools);
+  if (groupedToolSummary) {
+    pushItem(groupedToolSummary.title, Date.now(), "is-primary");
+    pushItem(groupedToolSummary.meta, Date.now() + 1, isStreaming ? "is-active" : "");
+  }
+  visibleTools.forEach((tool, index) => {
+    const statusKey = String(tool.status || "pending");
+    const active = isStreaming && index === Math.max(0, visibleTools.length - 1) && ["pending", "approved", "executing"].includes(statusKey);
+    pushItem(
+      summarizeRuntimeToolNarration(tool),
+      Date.parse(String(tool?.updated_at || "")) || (Date.now() + index),
+      active ? "is-active" : "",
+    );
+  });
+
+  const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
+  diffs.forEach((diff) => {
+    pushItem(
+      summarizeRuntimeDiffNarration(diff),
+      Date.parse(String(diff.updated_at || "")) || Number(diff.updated_at || 0) || Date.now(),
+    );
+  });
+
+  const verifierReport = turn?.verifierReport || null;
+  if (verifierReport) {
+    pushItem(
+      verifierReport.summary || (currentLanguage === "zh" ? "正在验证结果" : "Verifying results."),
+      Date.now() + 1000,
+    );
+  }
+
+  const subagents = dedupeSubagentEntries(turn?.subagents);
+  subagents.forEach((subagent, index) => {
+    pushItem(
+      subagent.output || subagent.purpose || subagent.name || (currentLanguage === "zh" ? "子代理正在执行" : "Subagent running."),
+      Date.parse(String(subagent.completed_at || subagent.started_at || "")) || (Date.now() + 2000 + index),
+    );
+  });
+
+  return items
+    .sort((a, b) => (Number(a.timestamp || 0) || 0) - (Number(b.timestamp || 0) || 0))
+    .map((item) => item.body)
+    .join("");
+}
+
+function buildOperationDetailPanels(turn, { isStreaming = false } = {}) {
+  if (!turn) return "";
+  const sections = [];
+
+  const visibleProcess = Array.isArray(turn.process) ? turn.process.slice(-6) : [];
+  if (visibleProcess.length) {
+    sections.push(`
+      <details class="codex-operation-detail-card">
+        <summary>${escapeHtml(currentLanguage === "zh" ? "查看过程详情" : "Process details")}</summary>
+        <div class="codex-process-list codex-steps-list">
+          ${visibleProcess
+            .map((event) => {
+              const detailLine = event.detail
+                ? `<div class="codex-process-detail">${escapeHtml(event.detail)}</div>`
+                : "";
+              const metaLine = event.meta
+                ? `<div class="codex-process-meta">${escapeHtml(event.meta)}</div>`
+                : "";
+              return `
+                <div class="codex-process-step codex-process-${escapeHtml(String(event.type || "activity"))}">
+                  <div class="codex-step-rail" aria-hidden="true">
+                    <span class="codex-step-dot"></span>
+                  </div>
+                  <div class="codex-process-main">
+                    <div class="codex-process-label">${escapeHtml(event.label || "")}</div>
+                    ${detailLine}
+                    ${metaLine}
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </details>
+    `);
+  }
+
+  const visibleTools = Array.isArray(turn.tools) ? turn.tools.slice(isStreaming ? -4 : -6) : [];
+  if (visibleTools.length) {
+    sections.push(`
+      <details class="codex-operation-detail-card">
+        <summary>${escapeHtml(currentLanguage === "zh" ? "查看工具详情" : "Tool details")}</summary>
+        <div class="codex-tool-list codex-steps-list">
+          ${visibleTools
+            .map((tool, index) => {
+              const argsPreview = compactToolArgs(tool.args);
+              const verb = toolStatusVerb(tool.status);
+              const pathLine = tool.file_path
+                ? `<div class="codex-tool-path">${escapeHtml(tool.file_path)}</div>`
+                : "";
+              const argsLine = argsPreview
+                ? `<div class="codex-tool-args">${escapeHtml(argsPreview)}</div>`
+                : "";
+              const resultLine =
+                tool.status === "failed" && tool.result
+                  ? `<div class="codex-tool-result is-error">${escapeHtml(String(tool.result).slice(0, 220))}</div>`
+                  : "";
+              const statusKey = String(tool.status || "pending");
+              const active = isStreaming && index === visibleTools.length - 1 && ["pending", "approved", "executing"].includes(statusKey);
+              return `
+                <div class="codex-tool-card codex-tool-step codex-tool-${escapeHtml(statusKey)}${active ? " is-active" : ""}">
+                  <div class="codex-step-rail" aria-hidden="true">
+                    <span class="codex-step-dot"></span>
+                  </div>
+                  <div class="codex-tool-main">
+                    <div class="codex-tool-title-row">
+                      <span class="codex-tool-title">${escapeHtml(verb)}</span>
+                      <span class="codex-tool-pill">${escapeHtml(toolStatusLabel(tool.status))}</span>
+                    </div>
+                    <div class="codex-tool-name">${escapeHtml(tool.name || "tool")}</div>
+                    ${pathLine}
+                    ${argsLine}
+                    ${resultLine}
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </details>
+    `);
+  }
+
+  return sections.join("");
+}
 function showToast(message) {
   if (!toast) return;
   toast.textContent = message;
@@ -4016,7 +5785,7 @@ function classifyAppError(error, context = "generic") {
   ) {
     return result(
       "session_not_ready",
-      zh ? "会话未就绪，请稍后重试。" : "Session is not ready yet. Please try again."
+      zh ? "会话还没准备好，请稍后再试。" : "Session is not ready yet. Please try again."
     );
   }
 
@@ -4032,7 +5801,7 @@ function classifyAppError(error, context = "generic") {
   ) {
     return result(
       "model_stream_failed",
-      zh ? "模型流式连接失败，请检查 API URL、API Key、模型名称与流式支持。" : "Model streaming connection failed. Check API URL, API key, model name, and streaming support."
+      zh ? "模型流式连接失败，请检查 API URL、API Key、模型名和流式支持配置。" : "Model streaming connection failed. Check API URL, API key, model name, and streaming support."
     );
   }
 
@@ -4044,7 +5813,7 @@ function classifyAppError(error, context = "generic") {
   ) {
     return result(
       "sse_interrupted",
-      zh ? "SSE 中断，请重试本轮或检查流式连接。" : "SSE stream was interrupted. Retry the turn or check the streaming connection."
+      zh ? "SSE 流被中断，请重试本轮或检查流式连接。" : "SSE stream was interrupted. Retry the turn or check the streaming connection."
     );
   }
 
@@ -4057,7 +5826,7 @@ function classifyAppError(error, context = "generic") {
   ) {
     return result(
       "tool_execution_failed",
-      zh ? "工具执行失败，请查看当前工具输出后重试。" : "Tool execution failed. Review the tool output and try again."
+      zh ? "工具执行失败，请检查工具输出后重试。" : "Tool execution failed. Review the tool output and try again."
     );
   }
 
@@ -4078,13 +5847,13 @@ function classifyAppError(error, context = "generic") {
   if (context === "send") {
     return result(
       "send_failed",
-      zh ? "发送失败，请稍后重试。" : "Send failed. Please try again."
+      zh ? "发送失败，请重试。" : "Send failed. Please try again."
     );
   }
 
   return result(
     "generic",
-    zh ? "出现了一个问题，请稍后再试。" : "Something went wrong. Please try again."
+    zh ? "出现了一些问题，请重试。" : "Something went wrong. Please try again."
   );
 }
 
@@ -4130,9 +5899,9 @@ function formatRunDependencyMessage(config) {
   const fallback = Array.isArray(config?.missing) ? config.missing.filter(Boolean) : [];
   const items = normalized.length ? normalized : fallback;
   if (!items.length) {
-    return currentLanguage === "zh" ? "缺少运行依赖。" : "Missing runtime dependency.";
+    return currentLanguage === "zh" ? "缺少运行时依赖。" : "Missing runtime dependency.";
   }
-  const prefix = currentLanguage === "zh" ? "缺少可执行文件：" : "Missing executable:";
+  const prefix = currentLanguage === "zh" ? "缺少可执行依赖:" : "Missing executable:";
   return `${prefix} ${items.join(", ")}`;
 }
 
@@ -4140,22 +5909,22 @@ function parseAgentInputProtocol(rawContent) {
   const content = String(rawContent || "");
   const trimmed = content.trim();
   const inAgentMode = currentWorkspaceMode === "research";
-  if (!inAgentMode) {
-    return {
-      outbound: trimmed,
-      display: trimmed,
-      mode: "chat",
-      forceResearch: false,
-    };
-  }
-
-  if (/^\/spec(?:\s|$)/i.test(trimmed)) {
+  const forceResearch = /^\/spec(?:\s|$)/i.test(trimmed);
+  if (forceResearch) {
     const stripped = trimmed.replace(/^\/spec(?:\s+)?/i, "").trim();
     return {
       outbound: stripped,
       display: stripped,
       mode: "research",
       forceResearch: true,
+    };
+  }
+  if (!inAgentMode) {
+    return {
+      outbound: trimmed,
+      display: trimmed,
+      mode: "chat",
+      forceResearch: false,
     };
   }
 
@@ -4292,10 +6061,48 @@ function combineAssistantSegments(existing, next) {
   if (!uniqueRight.trim()) {
     return left;
   }
+  const markdownBlockBoundary =
+    /(?:^|\n)\s*$/.test(left)
+    || /^\s*(?:#{1,6}\s|[-*+]\s|\d+\.\s|```|>|---\s*$)/m.test(uniqueRight);
   const needsBreak =
-    !/[\\n\\s]$/.test(left) &&
-    !/^[\\n\\s]/.test(uniqueRight);
+    markdownBlockBoundary ||
+    (!/[\n\s]$/.test(left) &&
+    !/^[\n\s]/.test(uniqueRight));
   return needsBreak ? `${left}\n\n${uniqueRight}` : `${left}${uniqueRight}`;
+}
+
+function joinStreamingTextFragments(existing, next) {
+  const left = String(existing || "");
+  const right = String(next || "");
+  if (!left) return right;
+  if (!right) return left;
+  if (/[\s\n]$/.test(left) || /^[\s\n]/.test(right)) {
+    return `${left}${right}`;
+  }
+  if (/[([{"'`/_#-]$/.test(left) || /^[\])}"'`.,!?;:]/.test(right)) {
+    return `${left}${right}`;
+  }
+  if (/[A-Za-z0-9]$/.test(left) && /^[A-Za-z0-9]/.test(right)) {
+    return `${left} ${right}`;
+  }
+  return `${left}${right}`;
+}
+
+function mergeStreamingTextDelta(existing, incoming) {
+  const left = String(existing || "");
+  const right = String(incoming || "");
+  if (!left) return right;
+  if (!right) return left;
+  if (right.startsWith(left)) return right;
+  if (left.endsWith(right)) return left;
+
+  const maxOverlap = Math.min(left.length, right.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    if (left.endsWith(right.slice(0, overlap))) {
+      return `${left}${right.slice(overlap)}`;
+    }
+  }
+  return `${left}${right}`;
 }
 
 function ensureActivityNodes() {
@@ -4501,35 +6308,48 @@ function renderAgentProcessStrip() {
     return;
   }
   const event = events[events.length - 1] || null;
+  const firstPersonActivity = describeActivityWorklog({
+    label: event?.label || "",
+    detail: event?.detail || "",
+    meta: event?.meta || "",
+    phase: event?.phase || "",
+    status: event?.status || "",
+    agent: event?.agent || "",
+  });
   const rawLabel = String(event?.label || event?.detail || "Running").trim();
   const labelMapZh = {
-    starting: "正在准备",
-    planning: "正在规划",
-    execution: "正在思考",
-    delegation: "正在调用工具",
-    review: "正在审查",
-    verifier: "正在验证",
-    subagent: "子代理处理中",
-    permission_required: "等待批准",
-    editing: "正在编辑",
-    tool_complete: "工具执行完成",
+    starting: "准备中",
+    planning: "规划中",
+    execution: "执行中",
+    delegation: "委派中",
+    review: "审查中",
+    verifier: "验证中",
+    subagent: "子代理执行中",
+    permission_required: "等待授权",
+    editing: "编辑中",
+    tool_complete: "工具已完成",
   };
   const labelMapEn = {
     starting: "Preparing",
     planning: "Planning",
+    execution: "Executing",
+    delegation: "Delegating",
+    review: "Reviewing",
+    verifier: "Verifying",
+    subagent: "Subagent running",
+    permission_required: "Permission required",
+    editing: "Editing",
+    tool_complete: "Tool complete",
   };
   const detailMapZh = {
     "Main agent is executing the current step": "主代理正在执行当前步骤",
-    "Dispatching tool work": "正在分派工具执行",
-    "Reviewer subagent is checking the turn": "审查子代理正在检查本轮结果",
+    "Dispatching tool work": "正在分派工具任务",
+    "Reviewer subagent is checking the turn": "审查子代理正在检查当前轮次",
   };
   const label = currentLanguage === "zh"
     ? (labelMapZh[rawLabel] || rawLabel)
     : (labelMapEn[rawLabel] || rawLabel);
-  const rawDetail = String(event?.detail || "").trim();
-  const detail = currentLanguage === "zh"
-    ? (detailMapZh[rawDetail] || rawDetail)
-    : rawDetail;
+  const detail = normalizeActivityDetail(firstPersonActivity?.text || "");
   const meta = [
     renderAgentName(event?.agent),
     renderActivityPhase(event?.phase),
@@ -4555,13 +6375,13 @@ function renderDelegateStatus(status) {
   const labels = {
     planned: currentLanguage === "zh" ? "已规划" : "Planned",
     ready: currentLanguage === "zh" ? "就绪" : "Ready",
-    running: currentLanguage === "zh" ? "进行中" : "Running",
+    running: currentLanguage === "zh" ? "执行中" : "Running",
     pass: currentLanguage === "zh" ? "通过" : "Pass",
     complete: currentLanguage === "zh" ? "完成" : "Complete",
-    repair: currentLanguage === "zh" ? "待修复" : "Repair",
+    repair: currentLanguage === "zh" ? "修复中" : "Repair",
     failed: currentLanguage === "zh" ? "失败" : "Failed",
   };
-  return labels[normalized] || status || (currentLanguage === "zh" ? "进行中" : "Running");
+  return labels[normalized] || status || (currentLanguage === "zh" ? "执行中" : "Running");
 }
 
 function renderAgentName(name) {
@@ -4572,8 +6392,8 @@ function renderAgentName(name) {
     reviewer: currentLanguage === "zh" ? "审查器" : "Reviewer",
     verifier: currentLanguage === "zh" ? "验证器" : "Verifier",
     repairer: currentLanguage === "zh" ? "修复器" : "Repairer",
-    critic: currentLanguage === "zh" ? "批判审查" : "Critic",
-    researcher: currentLanguage === "zh" ? "研究审查" : "Researcher",
+    critic: currentLanguage === "zh" ? "评审器" : "Critic",
+    researcher: currentLanguage === "zh" ? "研究器" : "Researcher",
     executor: currentLanguage === "zh" ? "执行器" : "Executor",
   };
   return labels[normalized] || cleanDisplayText(name, currentLanguage === "zh" ? "子代理" : "Subagent");
@@ -4593,6 +6413,46 @@ function renderActivityPhase(phase) {
   };
   return labels[normalized] || phase || "";
 }
+function normalizeActivityDetail(detail) {
+  const raw = cleanDisplayText(detail || "", "");
+  if (!raw) return "";
+  const normalized = raw.toLowerCase();
+  if (/\b(?:list_dir|find_files|search_files|tree_dir|read_file|read_file_range)\b/.test(normalized)) {
+    return zhLabel("正在查看工作区文件", "Viewing workspace files");
+  }
+  if (/\b(?:write_file|apply_patch|search_and_replace|search_and_replace_multi|rename_path|mkdir)\b/.test(normalized)) {
+    return zhLabel("正在编辑文件", "Editing files");
+  }
+  if (/\bgit_[a-z0-9_]+\b/.test(normalized)) {
+    return zhLabel("正在查看 Git 状态", "Checking Git status");
+  }
+  if (/main agent is executing the current step/i.test(raw)) {
+    return zhLabel("正在执行当前步骤", "Executing the current step");
+  }
+  return raw;
+}
+
+function summarizeOperationalText(value, fallback = "") {
+  const raw = cleanDisplayText(String(value || "").trim(), "");
+  if (!raw) return cleanDisplayText(fallback, "");
+  if (looksLikeDirectoryTreeDump(raw)) {
+    return "Viewing workspace files";
+  }
+  if (looksLikeOperationalContentDump(raw)) {
+    const normalized = raw.toLowerCase();
+    if (/\b(?:list_dir|find_files|search_files|tree_dir|read_file|read_file_range)\b/.test(normalized)) {
+      return "Viewing workspace files";
+    }
+    if (/\b(?:write_file|apply_patch|search_and_replace|search_and_replace_multi|rename_path|mkdir)\b/.test(normalized)) {
+      return "Editing files";
+    }
+    if (/\bgit_[a-z0-9_]+\b/.test(normalized)) {
+      return "Checking Git status";
+    }
+    return cleanDisplayText(fallback, "") || "Running tools";
+  }
+  return raw;
+}
 
 function displayFileNameOnly(filePath) {
   const raw = String(filePath || "").trim();
@@ -4605,7 +6465,7 @@ function displayFileNameOnly(filePath) {
 function normalizeWorklogFingerprint(text) {
   return cleanDisplayText(text || "")
     .toLowerCase()
-    .replace(/[`"'()[\]{}:;,，。！？!?.、\-_/\\|]+/g, " ")
+    .replace(/[`"'()[\]{}:;,._/\\|-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -4639,6 +6499,32 @@ function dedupeSubagentEntries(items) {
   return [...deduped.values()];
 }
 
+function pushTurnWorklogEntry(turn, entry) {
+  if (!turn || !entry) return;
+  const text = cleanDisplayText(entry.text || "");
+  if (!text) return;
+  const kind = String(entry.kind || "activity").trim() || "activity";
+  const dedupeKey = String(entry.dedupeKey || `${kind}:${text}`).trim();
+  const items = Array.isArray(turn.worklog) ? turn.worklog.slice() : [];
+  const last = items[items.length - 1] || null;
+  if (last && last.dedupeKey === dedupeKey) {
+    last.timestamp = Date.now();
+    turn.worklog = items.slice(-8);
+    return;
+  }
+  items.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    text,
+    dedupeKey,
+    filePath: cleanDisplayText(entry.filePath || "", ""),
+    added: Number(entry.added || 0) || 0,
+    removed: Number(entry.removed || 0) || 0,
+    timestamp: Date.now(),
+  });
+  turn.worklog = items.slice(-8);
+}
+
 function pushAssistantWorklog(entry) {
   if (!activeAssistantTurn || !entry) return;
   const text = cleanDisplayText(entry.text || "");
@@ -4660,14 +6546,23 @@ function pushAssistantWorklog(entry) {
     kind,
     text,
     dedupeKey,
+    filePath: cleanDisplayText(entry.filePath || "", ""),
+    added: Number(entry.added || 0) || 0,
+    removed: Number(entry.removed || 0) || 0,
     timestamp: Date.now(),
   });
   activeAssistantTurn.worklog = items.slice(-6);
 }
 
 function pushAssistantProgressWorklogText(text) {
-  const cleanText = cleanDisplayText(text || "");
+  const cleanText = normalizeAgentStageNarration(text);
   if (!cleanText) return;
+  if (activeAssistantTurn) {
+    const currentNarration = cleanDisplayText(String(activeAssistantTurn.progressNarration || "").trim(), "");
+    activeAssistantTurn.progressNarration = currentNarration
+      ? mergeAssistantText(currentNarration, cleanText)
+      : cleanText;
+  }
   const items = Array.isArray(activeAssistantTurn?.worklog) ? activeAssistantTurn.worklog : [];
   if (isNearDuplicateWorklogEntry(cleanText, items, { limit: 4, maxAgeMs: 14000, minLength: 8 })) {
     return;
@@ -4687,6 +6582,17 @@ function pushAssistantProgressWorklogText(text) {
   });
 }
 
+function captureAssistantOperationNarration(text) {
+  if (!activeAssistantTurn) return;
+  const cleanText = cleanDisplayText(String(text || "").trim(), "");
+  if (!cleanText) return;
+  if (!assistantTextLooksLikeProcessNarration(cleanText)) return;
+  const currentNarration = cleanDisplayText(String(activeAssistantTurn.progressNarration || "").trim(), "");
+  if (!currentNarration || cleanText.includes(currentNarration) || cleanText.length > currentNarration.length) {
+    activeAssistantTurn.progressNarration = cleanText;
+  }
+}
+
 function ensurePendingAssistantBubbleForRuntime() {
   if (!activeAssistantTurn || pendingAssistantBubble) return;
   const currentSessionId = String(currentStreamingSessionId || bootstrapData?.current_session_id || "").trim();
@@ -4696,73 +6602,24 @@ function ensurePendingAssistantBubbleForRuntime() {
 
 function describeActivityWorklog(event) {
   const label = String(event?.label || "").trim();
-  const detail = cleanDisplayText(event?.detail || "");
+  const detail = normalizeActivityDetail(event?.detail || "");
   const phase = String(event?.phase || "").trim().toLowerCase();
-  const agent = renderAgentName(event?.agent);
   const meta = cleanDisplayText(event?.meta || "");
-
-  if (label === "execution") {
-    return {
-      kind: "execution",
-      text: currentLanguage === "zh"
-        ? `我开始处理当前步骤了。`
-        : `I’m starting the current step.`,
-      dedupeKey: `activity:${label}:${detail || phase || "execution"}`,
-    };
-  }
-  if (label === "delegation") {
-    return {
-      kind: "delegation",
-      text: currentLanguage === "zh"
-        ? `我正在分派工具执行${meta ? `：${meta}` : "。"}`
-        : `I’m dispatching tool work${meta ? `: ${meta}` : "."}`,
-      dedupeKey: `activity:${label}:${meta || detail || ""}`,
-    };
-  }
-  if (label === "review") {
-    return {
-      kind: "review",
-      text: currentLanguage === "zh"
-        ? `我先做一轮审查。`
-        : `I’m running a review pass.`,
-      dedupeKey: `activity:${label}:${detail || meta || ""}`,
-    };
-  }
-  if (label === "repair") {
-    return {
-      kind: "repair",
-      text: currentLanguage === "zh"
-        ? `我发现还有缺口，正在补修后再验证。`
-        : `I found a gap, so I’m repairing it before verifying again.`,
-      dedupeKey: `activity:${label}:${detail || meta || ""}`,
-    };
-  }
-  if (label === "permission_required") {
-    return {
-      kind: "approval",
-      text: currentLanguage === "zh"
-        ? `这里需要你的批准，我先停在这一步。`
-        : `I need your approval here, so I’m pausing at this step.`,
-      dedupeKey: "activity:permission_required",
-    };
-  }
-  if (phase === "finalize") {
-    return {
-      kind: "finalize",
-      text: currentLanguage === "zh"
-        ? `我在做最后收尾，把结果整理进当前会话。`
-        : `I’m wrapping things up and persisting the result into this session.`,
-      dedupeKey: `activity:finalize:${detail || label}`,
-    };
-  }
-  if (!label && !detail) return null;
+  if (!label && !detail && !meta) return null;
+  if (!detail && !meta) return null;
   return {
     kind: phase || label || "activity",
-    text: currentLanguage === "zh"
-      ? `${agent || "我"}正在推进这一步。`
-      : `${agent || "I’m"} moving this step forward.`,
+    text: detail || meta,
     dedupeKey: `activity:${label}:${detail}:${meta}`,
   };
+}
+
+function describeActivityNarration(event) {
+  return cleanDisplayText(describeActivityWorklog(event)?.text || "", "");
+}
+
+function normalizeAgentStageNarration(text) {
+  return summarizeOperationalText(text, "Executing the current step");
 }
 
 function describeToolWorklog(tool) {
@@ -4770,30 +6627,25 @@ function describeToolWorklog(tool) {
   const name = cleanDisplayText(tool.name || "", currentLanguage === "zh" ? "工具" : "tool");
   const status = String(tool.status || "").trim().toLowerCase();
   const fileName = displayFileNameOnly(tool.file_path || "");
+  const resultSummary = summarizeOperationalText(String(tool.result || "").trim(), "");
   if (status === "pending" || status === "running") {
     return {
       kind: "tool",
-      text: currentLanguage === "zh"
-        ? `我正在调用 ${name}${fileName ? `，目标是 ${fileName}` : ""}。`
-        : `I’m calling ${name}${fileName ? ` for ${fileName}` : ""}.`,
+      text: fileName ? `${name} ${fileName}` : name,
       dedupeKey: `tool:${tool.call_id || name}:running:${fileName}`,
     };
   }
   if (status === "complete") {
     return {
       kind: "tool",
-      text: currentLanguage === "zh"
-        ? `${name} 已经跑完了，我继续往下处理。`
-        : `${name} finished, and I’m continuing from there.`,
+      text: resultSummary || summarizeRuntimeToolNarration(tool) || (fileName ? `${name} ${fileName}` : name),
       dedupeKey: `tool:${tool.call_id || name}:complete`,
     };
   }
   if (status === "failed") {
     return {
       kind: "tool",
-      text: currentLanguage === "zh"
-        ? `${name} 这一步出错了，我会根据结果调整下一步。`
-        : `${name} failed here, so I’ll adjust the next step based on that result.`,
+      text: resultSummary || summarizeRuntimeToolNarration(tool) || (fileName ? `${name} ${fileName}` : name),
       dedupeKey: `tool:${tool.call_id || name}:failed`,
     };
   }
@@ -4802,13 +6654,13 @@ function describeToolWorklog(tool) {
 
 function describeEditedFileWorklog(file) {
   if (!file?.path) return null;
-  const fileName = displayFileNameOnly(file.path);
   return {
     kind: "edit",
-    text: currentLanguage === "zh"
-      ? `我开始修改 ${fileName}，当前变更是 +${Number(file.added || 0)} / -${Number(file.removed || 0)}。`
-      : `I’m updating ${fileName}, currently at +${Number(file.added || 0)} / -${Number(file.removed || 0)}.`,
+    text: `${file.path} (+${Number(file.added || 0)} / -${Number(file.removed || 0)})`,
     dedupeKey: `edit:${file.path}:${Number(file.added || 0)}:${Number(file.removed || 0)}`,
+    filePath: file.path,
+    added: Number(file.added || 0) || 0,
+    removed: Number(file.removed || 0) || 0,
   };
 }
 
@@ -4820,18 +6672,14 @@ function describeSubagentWorklog(subagent) {
   if (status === "running") {
     return {
       kind: "subagent",
-      text: currentLanguage === "zh"
-        ? `${name} 已经开始处理它负责的部分了。`
-        : `${name} has started on its part of the task.`,
+      text: name,
       dedupeKey: `subagent:${subagent.id || name}:running`,
     };
   }
   if (status === "complete" || status === "pass") {
     return {
       kind: "subagent",
-      text: currentLanguage === "zh"
-        ? `${name} 已经返回结果了${output ? `：${output}` : "。"}`
-        : `${name} returned a result${output ? `: ${output}` : "."}`,
+      text: output || name,
       dedupeKey: `subagent:${subagent.id || name}:${status}:${output}`,
     };
   }
@@ -4845,27 +6693,21 @@ function describeVerifierWorklog(report) {
   if (status === "running") {
     return {
       kind: "verifier",
-      text: currentLanguage === "zh"
-        ? "我正在做硬验证，确认文件、输出和实验结果都对得上。"
-        : "I’m running hard verification to make sure files, outputs, and experiment results all line up.",
+      text: summary || status,
       dedupeKey: "verifier:running",
     };
   }
   if (status === "pass" || status === "complete") {
     return {
       kind: "verifier",
-      text: currentLanguage === "zh"
-        ? `验证已经通过了${summary ? `：${summary}` : "。"}`
-        : `Verification passed${summary ? `: ${summary}` : "."}`,
+      text: summary || status,
       dedupeKey: `verifier:${status}:${summary}`,
     };
   }
   if (status === "repair" || status === "failed") {
     return {
       kind: "verifier",
-      text: currentLanguage === "zh"
-        ? `验证发现了问题${summary ? `：${summary}` : "，我继续修。"}`
-        : `Verification found an issue${summary ? `: ${summary}` : ", so I’m continuing with a repair pass."}`,
+      text: summary || status,
       dedupeKey: `verifier:${status}:${summary}`,
     };
   }
@@ -4875,44 +6717,33 @@ function describeVerifierWorklog(report) {
 function describeCompletionWorklog(event) {
   const detail = cleanDisplayText(event?.activity?.detail || "");
   if (!detail) return null;
-  if (/resumable checkpoint|safe checkpoint/i.test(detail)) {
-    return {
-      kind: "checkpoint",
-      text: currentLanguage === "zh"
-        ? "我先停在一个可继续的检查点，当前工作区里的内容已经保留下来了。"
-        : "I’m pausing at a resumable checkpoint, and the current workspace state has been preserved.",
-      dedupeKey: "complete:checkpoint",
-    };
-  }
-  if (/verification did not pass/i.test(detail)) {
-    return {
-      kind: "verifier",
-      text: currentLanguage === "zh"
-        ? "这一轮先停下来了，因为验证还没有通过。"
-        : "This turn stopped here because verification has not passed yet.",
-      dedupeKey: "complete:verification_failed",
-    };
-  }
-  return null;
+  return {
+    kind: "complete",
+    text: detail,
+    dedupeKey: `complete:${detail}`,
+  };
 }
 
 function renderAgentRuntimeStrip() {
   if (!agentRuntimeStrip) return;
-  const file = Array.isArray(liveEditedFiles) && liveEditedFiles.length
-    ? liveEditedFiles[liveEditedFiles.length - 1]
-    : null;
   const currentSessionId = String(currentStreamingSessionId || bootstrapData?.current_session_id || "").trim();
   const isRunning = Boolean(getSessionRunState(currentSessionId)?.running);
-  const hasLiveDiffs = Boolean(activeAssistantTurn?.diffs?.length);
+  const recentFiles = Array.isArray(liveEditedFiles) ? liveEditedFiles.filter((item) => item?.path) : [];
+  const fallbackFiles = Array.isArray(activeAssistantTurn?.diffs)
+    ? activeAssistantTurn.diffs
+        .filter((item) => item?.path)
+        .map((item) => ({
+          path: item.path,
+          added: Number(item.added || 0),
+          removed: Number(item.removed || 0),
+        }))
+    : [];
+  const sourceFiles = recentFiles.length ? recentFiles : fallbackFiles;
+  const file = sourceFiles.length
+    ? sourceFiles[sourceFiles.length - 1]
+    : null;
 
-  if ((!file && !hasLiveDiffs) || (!isRunning && !file)) {
-    agentRuntimeStrip.hidden = true;
-    agentRuntimeStrip.innerHTML = "";
-    return;
-  }
-
-  const displayFile = file || activeAssistantTurn?.diffs?.[activeAssistantTurn.diffs.length - 1] || null;
-  if (!displayFile) {
+  if (!isRunning || !file) {
     agentRuntimeStrip.hidden = true;
     agentRuntimeStrip.innerHTML = "";
     return;
@@ -4922,22 +6753,25 @@ function renderAgentRuntimeStrip() {
     upsertDiffEntry(file);
   }
 
+  const orderedFiles = sourceFiles.slice(-3).reverse();
   agentRuntimeStrip.hidden = false;
   agentRuntimeStrip.innerHTML = `
     <div class="agent-runtime-chip-wrap">
-      <button
-        class="agent-runtime-chip agent-runtime-chip-action"
-        type="button"
-        data-open-workspace-file="${escapeHtml(displayFile.path || "")}"
-        data-open-workspace-line="1"
-        data-open-workspace-column="1"
-      >
-        <span class="agent-runtime-label">${escapeHtml(currentLanguage === "zh" ? "编辑中" : "Editing")}</span>
-        <div class="agent-runtime-value">
-          <span class="agent-runtime-path">${escapeHtml(displayFileNameOnly(displayFile.path || ""))}</span>
-          <span class="agent-runtime-stats">+${escapeHtml(String(displayFile.added || 0))} / -${escapeHtml(String(displayFile.removed || 0))}</span>
-        </div>
-      </button>
+      ${orderedFiles.map((item, index) => `
+        <button
+          class="agent-runtime-chip agent-runtime-chip-action${index === 0 ? " is-active" : ""}"
+          type="button"
+          data-open-workspace-file="${escapeHtml(item.path || "")}"
+          data-open-workspace-line="1"
+          data-open-workspace-column="1"
+        >
+          <span class="agent-runtime-label">${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}</span>
+          <div class="agent-runtime-value">
+            <span class="agent-runtime-path">${escapeHtml(displayFileNameOnly(item.path || ""))}</span>
+            <span class="agent-runtime-stats">+${escapeHtml(String(item.added || 0))} / -${escapeHtml(String(item.removed || 0))}</span>
+          </div>
+        </button>
+      `).join("")}
     </div>
   `;
   bindTurnInteractionHandlers(agentRuntimeStrip);
@@ -4962,7 +6796,7 @@ function renderPermissionStrip() {
   permissionStrip.innerHTML = `
     <div class="permission-card">
       <div>
-        <div class="permission-title">${escapeHtml(currentLanguage === "zh" ? "等待工具批准" : "Awaiting tool approval")}</div>
+        <div class="permission-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
       </div>
       <pre class="permission-args">${escapeHtml(JSON.stringify(pendingPermissionRequest.args || {}, null, 2))}</pre>
       <div class="permission-actions">
@@ -5057,6 +6891,9 @@ function closeSettingsPanels() {
 function setActivityPanel(panelId, { preserveMainView = false } = {}) {
   const nextPanel = panelId || null;
   activeActivityPanel = nextPanel;
+  if (nextPanel) {
+    preferredLeftActivityPanel = nextPanel;
+  }
   activityRailButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.activityPanel === nextPanel);
   });
@@ -5069,6 +6906,8 @@ function setActivityPanel(panelId, { preserveMainView = false } = {}) {
   if (appShell) {
     appShell.classList.toggle("has-activity-flyout", Boolean(nextPanel));
   }
+  activityFlyout?.classList.toggle("is-search-github-preview", isSearchGitHubPreviewActive());
+  appShell?.classList.toggle("has-search-github-preview", isSearchGitHubPreviewActive());
 
   if (!preserveMainView) {
     if (nextPanel === "git") {
@@ -5077,6 +6916,8 @@ function setActivityPanel(panelId, { preserveMainView = false } = {}) {
       setMainView("chat");
     }
   }
+  syncShellLayoutVars();
+  syncLayoutCornerControls();
 }
 
 function renderExtensionList(query = "") {
@@ -5104,6 +6945,1324 @@ function renderExtensionList(query = "") {
     : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "\u6ca1\u6709\u5339\u914d\u7684\u6269\u5c55\u3002" : "No matching extensions.")}</div>`;
 }
 
+function searchPlaceholderForMode(mode = searchMode) {
+  if (mode === "papers") return t("searchPlaceholderPapers");
+  if (mode === "tracking") return t("searchPlaceholderTracking");
+  if (mode === "benchmarks") return t("searchPlaceholderBenchmarks");
+  if (mode === "models") return t("searchPlaceholderModels");
+  if (mode === "datasets") return t("searchPlaceholderDatasets");
+  if (mode === "github") return t("searchPlaceholderGitHub");
+  return t("searchPlaceholderWeb");
+}
+
+function searchStatusLabel(status) {
+  if (status === "ready") return t("searchHealthReady");
+  if (status === "degraded") return t("searchHealthDegraded");
+  if (status === "down") return t("searchHealthDown");
+  return t("searchHealthUnknown");
+}
+
+function searchStatusClass(status) {
+  if (status === "ready") return "is-ready";
+  if (status === "degraded") return "is-degraded";
+  if (status === "down") return "is-down";
+  return "is-unknown";
+}
+
+function normalizeSearchResults(mode, payload) {
+  if (!payload || typeof payload !== "object") return [];
+  if (mode === "papers") return Array.isArray(payload.results) ? payload.results : [];
+  if (mode === "tracking") return Array.isArray(payload.results) ? payload.results : [];
+  if (mode === "benchmarks") return Array.isArray(payload.results) ? payload.results : [];
+  if (mode === "models") return Array.isArray(payload.results) ? payload.results : [];
+  if (mode === "datasets") return Array.isArray(payload.datasets) ? payload.datasets : [];
+  if (mode === "github") {
+    if (Array.isArray(payload.results)) return payload.results;
+    if (Array.isArray(payload?.fallback?.results)) return payload.fallback.results;
+    return [];
+  }
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+function normalizeSearchHints(payload) {
+  if (!payload || typeof payload !== "object") return [];
+  return Array.isArray(payload.hints) ? payload.hints.filter(Boolean).map((item) => cleanDisplayText(item)) : [];
+}
+
+function githubPreviewSelectionKey(item) {
+  const repo = cleanDisplayText(
+    item?.repository_full_name || item?.full_name || item?.html_url || item?.repository_url || "",
+    "",
+  );
+  const path = cleanDisplayText(item?.path || "", "");
+  return path ? `${repo}::${path}` : repo;
+}
+
+function githubPreviewParentPath(path) {
+  const normalized = cleanDisplayText(path || "", "").replace(/^\/+|\/+$/g, "");
+  if (!normalized) return "";
+  const parts = normalized.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function currentGitHubPreviewSourceItem() {
+  const items = normalizeSearchResults("github", searchState.results);
+  const index = Number(searchState.githubPreviewSourceIndex ?? -1);
+  if (!Number.isFinite(index) || index < 0 || index >= items.length) return null;
+  return items[index] || null;
+}
+
+function normalizeGitHubPreviewCommit(commitSha) {
+  return cleanDisplayText(commitSha || "", "") || null;
+}
+
+function normalizeGitHubCompareSelection(compareBaseSha, compareHeadSha, fallbackHeadSha = null) {
+  const baseSha = normalizeGitHubPreviewCommit(compareBaseSha);
+  const headSha = normalizeGitHubPreviewCommit(compareHeadSha) || normalizeGitHubPreviewCommit(fallbackHeadSha);
+  return { baseSha, headSha };
+}
+
+function buildGitHubSideBySideRows(lines) {
+  const source = Array.isArray(lines) ? lines : [];
+  const rows = [];
+  let index = 0;
+  while (index < source.length) {
+    const line = source[index];
+    const kind = cleanDisplayText(line?.kind || "context", "context");
+    if (kind === "removed") {
+      const removed = [];
+      while (index < source.length && cleanDisplayText(source[index]?.kind || "", "") === "removed") {
+        removed.push(source[index]);
+        index += 1;
+      }
+      const added = [];
+      while (index < source.length && cleanDisplayText(source[index]?.kind || "", "") === "added") {
+        added.push(source[index]);
+        index += 1;
+      }
+      const width = Math.max(removed.length, added.length);
+      for (let cursor = 0; cursor < width; cursor += 1) {
+        rows.push({
+          kind: removed[cursor] && added[cursor]
+            ? "changed"
+            : removed[cursor]
+              ? "removed"
+              : "added",
+          left: removed[cursor] || null,
+          right: added[cursor] || null,
+        });
+      }
+      continue;
+    }
+    if (kind === "added") {
+      rows.push({
+        kind: "added",
+        left: null,
+        right: line,
+      });
+      index += 1;
+      continue;
+    }
+    rows.push({
+      kind: "context",
+      left: line,
+      right: line,
+    });
+    index += 1;
+  }
+  return rows;
+}
+
+function renderGitHubPreviewDiff(diff, options = {}) {
+  if (!diff || typeof diff !== "object" || diff.available !== true) {
+    const detail = cleanDisplayText(diff?.detail || "", "");
+    return `<div class="search-preview-empty">${escapeHtml(detail || zhLabel("当前选择没有可用的 commit diff。", "No commit diff is available for the current selection."))}</div>`;
+  }
+  const hunks = Array.isArray(diff.hunks) ? diff.hunks : [];
+  if (!hunks.length) {
+    const detail = cleanDisplayText(diff?.detail || "", "");
+    return `<div class="search-preview-empty">${escapeHtml(detail || zhLabel("当前选择没有可用的 diff hunk。", "No diff hunks are available for the current selection."))}</div>`;
+  }
+  const sideBySide = options.sideBySide === true;
+  return hunks.map((hunk) => {
+    const rows = sideBySide
+      ? buildGitHubSideBySideRows(hunk.lines).map((row) => `
+        <div class="search-preview-diff-side-row is-${escapeHtml(cleanDisplayText(row.kind || "context", "context"))}">
+          <span class="review-code-gutter">${row.left?.old_number ?? ""}</span>
+          <span class="search-preview-diff-side-content is-left">${escapeHtml(displayPlainText(row.left?.content || "", row.left?.content || ""))}</span>
+          <span class="review-code-gutter">${row.right?.new_number ?? ""}</span>
+          <span class="search-preview-diff-side-content is-right">${escapeHtml(displayPlainText(row.right?.content || "", row.right?.content || ""))}</span>
+        </div>
+      `).join("")
+      : (Array.isArray(hunk.lines) ? hunk.lines : []).map((line) => {
+          const kind = cleanDisplayText(line?.kind || "context", "context");
+          return `
+            <div class="review-code-row is-${escapeHtml(kind)}">
+              <span class="review-code-gutter">${line?.old_number ?? ""}</span>
+              <span class="review-code-gutter">${line?.new_number ?? ""}</span>
+              <span class="review-code-content">${escapeHtml(displayPlainText(line?.content || "", line?.content || ""))}</span>
+            </div>
+          `;
+        }).join("");
+    return `
+      <section class="search-preview-diff-hunk">
+        <div class="review-hunk-header">${escapeHtml(cleanDisplayText(hunk.header || "", ""))}</div>
+        <div class="${sideBySide ? "search-preview-diff-side-grid" : "review-code"}">${rows}</div>
+      </section>
+    `;
+  }).join("");
+}
+
+async function loadGitHubPreview(repoFullName, branch = null, path = null, options = {}) {
+  const normalizedRepo = cleanDisplayText(repoFullName || "", "");
+  if (!normalizedRepo) return;
+  const normalizedBranch = cleanDisplayText(branch || "", "") || null;
+  const normalizedPath = cleanDisplayText(path || "", "") || null;
+  const normalizedCommitSha = normalizeGitHubPreviewCommit(options.commitSha);
+  const normalizedCompareBaseSha = normalizeGitHubPreviewCommit(options.compareBaseSha);
+  const normalizedCompareHeadSha = normalizeGitHubPreviewCommit(options.compareHeadSha);
+  const normalizedHistoryScopeMode = cleanDisplayText(options.historyScopeMode || "", "") || null;
+  searchState.githubPreviewLoading = true;
+  searchState.githubPreviewError = "";
+  renderSearchPanel();
+  try {
+    const response = await hostClient.search.githubPreview(
+      normalizedRepo,
+      normalizedBranch,
+      normalizedPath,
+      normalizedCommitSha,
+      normalizedCompareBaseSha,
+      normalizedCompareHeadSha,
+      normalizedHistoryScopeMode,
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `github preview failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    searchState.githubPreview = payload?.data || payload || null;
+    if (Number.isFinite(options.sourceIndex)) {
+      searchState.githubPreviewSourceIndex = Number(options.sourceIndex);
+    }
+    const historyEntry = {
+      repoFullName: normalizedRepo,
+      branch: normalizedBranch,
+      path: normalizedPath,
+      commitSha: normalizedCommitSha,
+      compareBaseSha: normalizedCompareBaseSha,
+      compareHeadSha: normalizedCompareHeadSha,
+      historyScopeMode: normalizedHistoryScopeMode,
+      selectionKey: cleanDisplayText(searchState.githubPreview?.selection_key || "", ""),
+    };
+    const shouldPushHistory = options.pushHistory !== false;
+    const currentHistory = searchState.githubPreviewHistory[searchState.githubPreviewHistoryIndex] || null;
+    if (shouldPushHistory) {
+      const sameAsCurrent = currentHistory
+        && currentHistory.repoFullName === historyEntry.repoFullName
+        && currentHistory.branch === historyEntry.branch
+        && currentHistory.path === historyEntry.path
+        && currentHistory.commitSha === historyEntry.commitSha
+        && currentHistory.compareBaseSha === historyEntry.compareBaseSha
+        && currentHistory.compareHeadSha === historyEntry.compareHeadSha;
+      if (!sameAsCurrent) {
+        searchState.githubPreviewHistory = searchState.githubPreviewHistory.slice(0, searchState.githubPreviewHistoryIndex + 1);
+        searchState.githubPreviewHistory.push(historyEntry);
+        searchState.githubPreviewHistoryIndex = searchState.githubPreviewHistory.length - 1;
+      }
+    } else if (Number.isFinite(options.historyIndex)) {
+      searchState.githubPreviewHistoryIndex = Number(options.historyIndex);
+    }
+  } catch (error) {
+    searchState.githubPreview = null;
+    searchState.githubPreviewError = cleanDisplayText(error?.message || "", "") || t("searchError");
+    if (options.resetSourceIndex !== false) {
+      searchState.githubPreviewSourceIndex = Number.isFinite(options.sourceIndex) ? Number(options.sourceIndex) : -1;
+    }
+  } finally {
+    searchState.githubPreviewLoading = false;
+    renderSearchPanel();
+  }
+}
+
+function githubPreviewCanGoBack() {
+  return Number(searchState.githubPreviewHistoryIndex) > 0;
+}
+
+function githubPreviewCanGoForward() {
+  return Number(searchState.githubPreviewHistoryIndex) >= 0
+    && Number(searchState.githubPreviewHistoryIndex) < searchState.githubPreviewHistory.length - 1;
+}
+
+function githubPreviewHistoryLabel(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const repo = cleanDisplayText(entry.repoFullName || "", "");
+  const path = cleanDisplayText(entry.path || "", "");
+  const commitSha = cleanDisplayText(entry.commitSha || "", "");
+  const compareBaseSha = cleanDisplayText(entry.compareBaseSha || "", "");
+  const compareHeadSha = cleanDisplayText(entry.compareHeadSha || "", "");
+  const base = path ? `${repo}:${path}` : repo;
+  if (compareBaseSha && compareHeadSha) {
+    return `${base}@${compareBaseSha.slice(0, 7)}..${compareHeadSha.slice(0, 7)}`;
+  }
+  return commitSha ? `${base}@${commitSha.slice(0, 7)}` : base;
+}
+
+function renderSearchPreviewPanel() {
+  if (!searchPreviewPanel) return;
+  if (searchMode !== "github") {
+    searchPreviewPanel.innerHTML = "";
+    return;
+  }
+  if (searchState.githubPreviewLoading) {
+    searchPreviewPanel.innerHTML = `<div class="search-preview-empty">${escapeHtml(t("searchLoading"))}</div>`;
+    return;
+  }
+  if (searchState.githubPreviewError) {
+    searchPreviewPanel.innerHTML = `<div class="search-preview-empty">${escapeHtml(searchState.githubPreviewError)}</div>`;
+    return;
+  }
+  const preview = searchState.githubPreview;
+  if (!preview || typeof preview !== "object") {
+    searchPreviewPanel.innerHTML = `<div class="search-preview-empty">${escapeHtml(zhLabel("选择一个 GitHub 结果以查看 README、目录树和文件命中。", "Select a GitHub result to inspect README, tree, and file hits."))}</div>`;
+    return;
+  }
+  const repository = preview.repository || {};
+  const entries = Array.isArray(preview.entries) ? preview.entries.slice(0, 16) : [];
+  const readme = preview.readme && typeof preview.readme === "object" ? preview.readme : null;
+  const selectedFile = preview.selected_file && typeof preview.selected_file === "object" ? preview.selected_file : null;
+  const history = preview.history && typeof preview.history === "object" ? preview.history : {};
+  const commitList = Array.isArray(history.commits) ? history.commits : [];
+  const selectedCommit = history.selected_commit && typeof history.selected_commit === "object" ? history.selected_commit : null;
+  const selectedCommitSha = cleanDisplayText(history.selected_commit_sha || selectedCommit?.sha || "", "");
+  const historyScopeMode = cleanDisplayText(history.scope_mode || "", "") || "selection";
+  const selectedDiff = history.diff && typeof history.diff === "object" ? history.diff : null;
+  const compareSelection = normalizeGitHubCompareSelection(
+    cleanDisplayText(history.compare_base_sha || "", ""),
+    cleanDisplayText(history.compare_head_sha || "", ""),
+    selectedCommitSha,
+  );
+  const compareBaseSha = compareSelection.baseSha;
+  const compareHeadSha = compareSelection.headSha;
+  const compare = history.compare && typeof history.compare === "object" ? history.compare : null;
+  const compareFiles = Array.isArray(compare?.files) ? compare.files : [];
+  const sourceItem = currentGitHubPreviewSourceItem();
+  const textMatches = Array.isArray(sourceItem?.text_matches)
+    ? sourceItem.text_matches.map((item) => cleanDisplayText(item || "", "")).filter(Boolean).slice(0, 3)
+    : [];
+  const branch = cleanDisplayText(repository.default_branch || "", "");
+  const activeRef = cleanDisplayText(preview.active_ref || branch, "") || branch;
+  const activeRefKind = cleanDisplayText(preview.active_ref_kind || "branch", "branch");
+  const previewPath = cleanDisplayText(preview.path || "", "");
+  const parentPath = githubPreviewParentPath(
+    selectedFile && cleanDisplayText(selectedFile.path || "", "")
+      ? cleanDisplayText(selectedFile.path || "", "")
+      : previewPath,
+  );
+  const repoUrl = cleanDisplayText(repository.html_url || "", "");
+  const selectedFileHtml = cleanDisplayText(selectedFile?.html_url || "", "");
+  const selectedFileRaw = cleanDisplayText(selectedFile?.download_url || "", "");
+  const selectedFileContent = String(selectedFile?.content || "");
+  const selectedFileLanguage = cleanDisplayText(selectedFile?.language || selectedFile?.path || "text", "text");
+  const readmeHtml = cleanDisplayText(readme?.html_url || "", "");
+  const readmeRaw = cleanDisplayText(readme?.download_url || "", "");
+  const readmeContent = String(readme?.content || "");
+  const readmeLanguage = cleanDisplayText(readme?.language || readme?.path || "markdown", "markdown");
+  const pathLabel = previewPath || cleanDisplayText(selectedFile?.path || "", "") || "/";
+  const historyEntry = searchState.githubPreviewHistory[searchState.githubPreviewHistoryIndex] || null;
+  const activeCommitContextSha = selectedCommitSha || compareHeadSha || null;
+  const historyPath = cleanDisplayText(history.scope_path || selectedFile?.path || preview.path || "", "");
+  const historyTitle = selectedFile && cleanDisplayText(selectedFile.path || "", "")
+    ? historyScopeMode === "repository"
+      ? zhLabel("仓库提交历史", "Repository commit history")
+      : zhLabel("文件提交历史", "File commit history")
+    : historyScopeMode === "repository"
+      ? zhLabel("仓库提交历史", "Repository commit history")
+      : zhLabel("当前选择的提交历史", "Selection commit history");
+  const selectedDiffFiles = Array.isArray(selectedDiff?.files) ? selectedDiff.files : [];
+
+  searchPreviewPanel.innerHTML = `
+    <div class="search-preview-section">
+      <div class="search-preview-title">${escapeHtml(cleanDisplayText(repository.full_name || "", "GitHub repository"))}</div>
+      <div class="search-preview-meta">${escapeHtml([
+        activeRefKind === "commit"
+          ? `${zhLabel("commit", "commit")} ${activeRef.slice(0, 7)}`
+          : cleanDisplayText(repository.default_branch || ""),
+        Number.isFinite(repository.stargazers_count) ? `★${repository.stargazers_count}` : "",
+        cleanDisplayText(repository.language || ""),
+        cleanDisplayText(preview.target_kind || "", ""),
+      ].filter(Boolean).join(" / "))}</div>
+      <div class="search-preview-snippet">${escapeHtml(cleanDisplayText(repository.description || "", ""))}</div>
+      <div class="search-preview-breadcrumb">${escapeHtml(zhLabel("当前位置", "Current path"))}: ${escapeHtml(pathLabel)}</div>
+      <div class="search-preview-action-row">
+        <button type="button" class="git-inline-action" data-search-github-history="back" ${githubPreviewCanGoBack() ? "" : "disabled"}>
+          ${escapeHtml(zhLabel("返回", "Back"))}
+        </button>
+        <button type="button" class="git-inline-action" data-search-github-history="forward" ${githubPreviewCanGoForward() ? "" : "disabled"}>
+          ${escapeHtml(zhLabel("前进", "Forward"))}
+        </button>
+        <button type="button" class="git-inline-action" data-search-open="${escapeHtml(repoUrl)}" ${repoUrl ? "" : "disabled"}>
+          ${escapeHtml(zhLabel("打开仓库", "Open repo"))}
+        </button>
+        <button
+          type="button"
+          class="git-inline-action"
+          data-search-github-root="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+          data-search-github-branch="${escapeHtml(branch)}"
+          data-search-github-commit-sha="${escapeHtml(activeCommitContextSha || "")}"
+        >
+          ${escapeHtml(zhLabel("根目录", "Root"))}
+        </button>
+        <button
+          type="button"
+          class="git-inline-action${historyScopeMode === "repository" ? " is-active" : ""}"
+          data-search-github-history-scope="repository"
+          data-search-github-repo="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+          data-search-github-branch="${escapeHtml(branch)}"
+          data-search-github-path="${escapeHtml(cleanDisplayText(selectedFile?.path || preview.path || "", ""))}"
+          data-search-github-commit-sha="${escapeHtml(activeCommitContextSha || "")}"
+        >
+          ${escapeHtml(zhLabel("仓库提交", "Repo commits"))}
+        </button>
+        <button
+          type="button"
+          class="git-inline-action${historyScopeMode !== "repository" ? " is-active" : ""}"
+          data-search-github-history-scope="selection"
+          data-search-github-repo="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+          data-search-github-branch="${escapeHtml(branch)}"
+          data-search-github-path="${escapeHtml(cleanDisplayText(selectedFile?.path || preview.path || "", ""))}"
+          data-search-github-commit-sha="${escapeHtml(activeCommitContextSha || "")}"
+        >
+          ${escapeHtml(zhLabel("当前选择提交", "Selection commits"))}
+        </button>
+        ${
+          parentPath || selectedFile
+            ? `
+              <button
+                type="button"
+                class="git-inline-action"
+                data-search-github-path="${escapeHtml(parentPath)}"
+                data-search-github-repo="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+                data-search-github-branch="${escapeHtml(branch)}"
+                data-search-github-commit-sha="${escapeHtml(activeCommitContextSha || "")}"
+              >
+                ${escapeHtml(zhLabel("上一级", "Up"))}
+              </button>
+            `
+            : ""
+        }
+      </div>
+      ${historyEntry ? `<div class="search-preview-meta">${escapeHtml(zhLabel("预览历史", "Preview history"))}: ${escapeHtml(githubPreviewHistoryLabel(historyEntry))}</div>` : ""}
+    </div>
+    ${
+      selectedFile && cleanDisplayText(selectedFile.path || "", "")
+        ? `
+          <div class="search-preview-section">
+            <div class="search-preview-title">${escapeHtml(cleanDisplayText(selectedFile.path || "", "Selected file"))}</div>
+            <div class="search-preview-meta">${escapeHtml([
+              selectedFileLanguage,
+              `${Number(selectedFile?.size || 0)} B`,
+              activeCommitContextSha ? `${zhLabel("版本", "Version")} ${activeCommitContextSha.slice(0, 7)}` : "",
+            ].filter(Boolean).join(" / "))}</div>
+            <div class="search-preview-action-row">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(selectedFileHtml)}" ${selectedFileHtml ? "" : "disabled"}>
+                ${escapeHtml(zhLabel("打开文件页", "Open blob"))}
+              </button>
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(selectedFileRaw)}" ${selectedFileRaw ? "" : "disabled"}>
+                ${escapeHtml(zhLabel("打开原始内容", "Open raw"))}
+              </button>
+            </div>
+            <div class="search-preview-code-block markdown-body">${renderHighlightedCodeBlock(selectedFileContent, selectedFileLanguage, "search-preview-code")}</div>
+          </div>
+        `
+        : ""
+    }
+    ${
+      commitList.length
+        ? `
+          <div class="search-preview-section">
+            <div class="search-preview-title">${escapeHtml(historyTitle)}</div>
+            <div class="search-preview-meta">${escapeHtml(
+              historyScopeMode === "repository"
+                ? zhLabel("仓库根目录", "Repository root")
+                : (historyPath || zhLabel("仓库根目录", "Repository root"))
+            )}</div>
+            <div class="git-commit-list search-preview-commit-list">
+              ${commitList.map((commit) => {
+                const commitSha = cleanDisplayText(commit?.sha || "", "");
+                const selected = commitSha && commitSha === selectedCommitSha;
+                const isCompareBase = commitSha && commitSha === compareBaseSha;
+                const isCompareHead = commitSha && commitSha === compareHeadSha;
+                return `
+                  <div class="search-preview-commit-shell">
+                    <button
+                      type="button"
+                      class="git-commit-item search-preview-commit-item${selected ? " is-selected" : ""}${isCompareBase ? " is-compare-base" : ""}${isCompareHead ? " is-compare-head" : ""}"
+                      data-search-github-commit="${escapeHtml(commitSha)}"
+                      data-search-github-repo="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+                      data-search-github-branch="${escapeHtml(branch)}"
+                      data-search-github-path="${escapeHtml(historyPath)}"
+                    >
+                      <div class="git-commit-main">
+                        <div class="git-commit-subject">${escapeHtml(cleanDisplayText(commit?.subject || "", zhLabel("提交", "Commit")))}</div>
+                        <div class="git-commit-meta">${escapeHtml([
+                          cleanDisplayText(commit?.short_sha || "", ""),
+                          cleanDisplayText(commit?.date || "", ""),
+                        ].filter(Boolean).join(" / "))}</div>
+                      </div>
+                      <div class="git-commit-author">${escapeHtml(cleanDisplayText(commit?.author || "", ""))}</div>
+                    </button>
+                    <div class="search-preview-commit-actions">
+                      <button type="button" class="git-inline-action${isCompareBase ? " is-active" : ""}" data-search-github-compare-base="${escapeHtml(commitSha)}">${escapeHtml(zhLabel("Base", "Base"))}</button>
+                      <button type="button" class="git-inline-action${isCompareHead ? " is-active" : ""}" data-search-github-compare-head="${escapeHtml(commitSha)}">${escapeHtml(zhLabel("Head", "Head"))}</button>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        `
+        : ""
+    }
+    ${
+      commitList.length
+        ? `
+          <div class="search-preview-section search-preview-compare-shell">
+            <div class="search-preview-compare-head">
+              <div>
+                <div class="search-preview-title">${escapeHtml(zhLabel("Commit Compare", "Commit Compare"))}</div>
+                <div class="search-preview-meta">${escapeHtml(
+                  compareBaseSha && compareHeadSha
+                    ? `${compareBaseSha.slice(0, 7)} .. ${compareHeadSha.slice(0, 7)}`
+                    : zhLabel("从历史列表中选择 Base 和 Head 来比较两个提交。", "Choose Base / Head from the history list to compare any two commits."),
+                )}</div>
+              </div>
+              <div class="search-preview-action-row">
+                <button
+                  type="button"
+                  class="git-inline-action"
+                  data-search-open="${escapeHtml(cleanDisplayText(compare?.html_url || compare?.permalink_url || "", ""))}"
+                  ${cleanDisplayText(compare?.html_url || compare?.permalink_url || "", "") ? "" : "disabled"}
+                >${escapeHtml(zhLabel("打开对比页", "Open compare"))}</button>
+                <button
+                  type="button"
+                  class="git-inline-action"
+                  data-search-github-clear-compare="true"
+                  ${compareBaseSha || compareHeadSha ? "" : "disabled"}
+                >${escapeHtml(zhLabel("清除对比", "Clear compare"))}</button>
+              </div>
+            </div>
+            ${
+              compareBaseSha && compareHeadSha
+                ? compare?.available === true
+                  ? `
+                    <div class="search-preview-meta">${escapeHtml([
+                      compare?.status ? `${zhLabel("状态", "Status")}: ${cleanDisplayText(compare.status, "")}` : "",
+                      Number.isFinite(compare?.ahead_by) ? `${zhLabel("Ahead", "Ahead")} ${Number(compare.ahead_by || 0)}` : "",
+                      Number.isFinite(compare?.behind_by) ? `${zhLabel("Behind", "Behind")} ${Number(compare.behind_by || 0)}` : "",
+                      Number.isFinite(compare?.file_count) ? zhLabel(`${Number(compare.file_count || 0)} 个文件`, `${Number(compare.file_count || 0)} files`) : "",
+                    ].filter(Boolean).join(" / "))}</div>
+                    <div class="search-preview-compare-file-list">
+                      ${compareFiles.map((file) => `
+                        <section class="search-preview-compare-file">
+                          <div class="search-preview-compare-file-head">
+                            <div class="search-preview-title">${escapeHtml(cleanDisplayText(file?.path || "", "file"))}</div>
+                            <div class="search-preview-meta">${escapeHtml([
+                              cleanDisplayText(file?.status || "", ""),
+                              Number.isFinite(file?.additions) || Number.isFinite(file?.deletions)
+                                ? `+${Number(file?.additions || 0)} / -${Number(file?.deletions || 0)}`
+                                : "",
+                            ].filter(Boolean).join(" / "))}</div>
+                          </div>
+                          <div class="search-preview-diff-shell">${renderGitHubPreviewDiff(file, { sideBySide: true })}</div>
+                        </section>
+                      `).join("")}
+                    </div>
+                  `
+                  : `<div class="search-preview-empty">${escapeHtml(cleanDisplayText(compare?.detail || "", zhLabel("当前选择没有可用的多文件对比 diff。", "No multi-file compare diff is available for the current selection.")))}</div>`
+                : `<div class="search-preview-empty">${escapeHtml(zhLabel("请在历史列表中选择一个 Base 和一个 Head 提交。", "Pick one commit as Base and another as Head from the history list."))}</div>`
+            }
+          </div>
+        `
+        : ""
+    }
+    ${
+      selectedCommitSha
+        ? `
+          <div class="search-preview-section">
+            <div class="search-preview-title">${escapeHtml(
+              selectedFile && cleanDisplayText(selectedFile.path || "", "")
+                ? zhLabel("提交 diff", "Commit diff")
+                : zhLabel("仓库提交 diff", "Repository commit diff"),
+            )}</div>
+            <div class="search-preview-meta">${escapeHtml([
+              cleanDisplayText(selectedCommit?.short_sha || selectedCommitSha.slice(0, 7), ""),
+              cleanDisplayText(selectedCommit?.subject || "", ""),
+              selectedDiff?.status ? `${zhLabel("状态", "Status")}: ${cleanDisplayText(selectedDiff.status, "")}` : "",
+              Number.isFinite(selectedDiff?.additions) || Number.isFinite(selectedDiff?.deletions)
+                ? `+${Number(selectedDiff?.additions || 0)} / -${Number(selectedDiff?.deletions || 0)}`
+                : "",
+              Number.isFinite(selectedDiff?.file_count) ? zhLabel(`${Number(selectedDiff.file_count || 0)} 个文件`, `${Number(selectedDiff.file_count || 0)} files`) : "",
+            ].filter(Boolean).join(" / "))}</div>
+            <div class="search-preview-action-row">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(cleanDisplayText(selectedCommit?.html_url || "", ""))}" ${cleanDisplayText(selectedCommit?.html_url || "", "") ? "" : "disabled"}>
+                ${escapeHtml(zhLabel("打开提交页", "Open commit"))}
+              </button>
+              <button type="button" class="git-inline-action" data-search-github-clear-commit="true">
+                ${escapeHtml(zhLabel("回到分支头部", "Back to branch head"))}
+              </button>
+            </div>
+            ${
+              selectedFile && cleanDisplayText(selectedFile.path || "", "")
+                ? `<div class="search-preview-diff-shell">${renderGitHubPreviewDiff(selectedDiff)}</div>`
+                : selectedDiff?.available === true && selectedDiffFiles.length
+                  ? `
+                    <div class="search-preview-compare-file-list">
+                      ${selectedDiffFiles.map((file) => `
+                        <section class="search-preview-compare-file">
+                          <div class="search-preview-compare-file-head">
+                            <div class="search-preview-title">${escapeHtml(cleanDisplayText(file?.path || "", "file"))}</div>
+                            <div class="search-preview-meta">${escapeHtml([
+                              cleanDisplayText(file?.status || "", ""),
+                              Number.isFinite(file?.additions) || Number.isFinite(file?.deletions)
+                                ? `+${Number(file?.additions || 0)} / -${Number(file?.deletions || 0)}`
+                                : "",
+                            ].filter(Boolean).join(" / "))}</div>
+                          </div>
+                          <div class="search-preview-diff-shell">${renderGitHubPreviewDiff(file, { sideBySide: true })}</div>
+                        </section>
+                      `).join("")}
+                    </div>
+                  `
+                  : `<div class="search-preview-empty">${escapeHtml(cleanDisplayText(selectedDiff?.detail || "", zhLabel("所选提交没有可用的仓库级 diff。", "No repository-wide diff is available for the selected commit.")))}</div>`
+            }
+          </div>
+        `
+        : ""
+    }
+    ${
+      readme && readmeContent.trim()
+        ? `
+          <div class="search-preview-section">
+            <div class="search-preview-title">${escapeHtml(cleanDisplayText(readme.path || "README", "README"))}</div>
+            <div class="search-preview-meta">${escapeHtml(readmeLanguage)}</div>
+            <div class="search-preview-action-row">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(readmeHtml)}" ${readmeHtml ? "" : "disabled"}>
+                ${escapeHtml(zhLabel("打开 README", "Open README"))}
+              </button>
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(readmeRaw)}" ${readmeRaw ? "" : "disabled"}>
+                ${escapeHtml(zhLabel("打开原始内容", "Open raw"))}
+              </button>
+            </div>
+            <div class="search-preview-code-block markdown-body">${renderHighlightedCodeBlock(readmeContent, readmeLanguage, "search-preview-code")}</div>
+          </div>
+        `
+        : ""
+    }
+    ${
+      textMatches.length
+        ? `
+          <div class="search-preview-section">
+            <div class="search-preview-title">${escapeHtml(zhLabel("命中片段", "Match snippets"))}</div>
+            <div class="search-preview-hit-list">
+              ${textMatches.map((snippet) => `
+                <pre class="search-preview-hit">${escapeHtml(snippet)}</pre>
+              `).join("")}
+            </div>
+          </div>
+        `
+        : ""
+    }
+    <div class="search-preview-section">
+      <div class="search-preview-title">${escapeHtml(zhLabel("仓库目录树", "Repository tree"))}</div>
+      <div class="search-preview-entry-list">
+        ${entries.length
+          ? entries.map((entry) => `
+            <div class="search-preview-entry-shell">
+              <button
+                type="button"
+                class="search-preview-entry search-preview-entry-button"
+                data-search-github-path="${escapeHtml(cleanDisplayText(entry?.path || "", ""))}"
+                data-search-github-repo="${escapeHtml(cleanDisplayText(repository.full_name || "", ""))}"
+                data-search-github-branch="${escapeHtml(branch)}"
+                data-search-github-commit-sha="${escapeHtml(activeCommitContextSha || "")}"
+                data-search-github-kind="${escapeHtml(cleanDisplayText(entry?.kind || "", ""))}"
+              >
+                <div class="search-preview-entry-head">
+                  <div class="search-preview-title">${escapeHtml(cleanDisplayText(entry?.path || entry?.name || "", "entry"))}</div>
+                  <div class="search-preview-entry-kind">${escapeHtml(cleanDisplayText(entry?.kind || "", ""))}</div>
+                </div>
+                <div class="search-preview-entry-main">${escapeHtml(cleanDisplayText(entry?.html_url || entry?.download_url || "", ""))}</div>
+              </button>
+              <div class="search-preview-entry-actions">
+                <button type="button" class="git-inline-action" data-search-open="${escapeHtml(cleanDisplayText(entry?.html_url || "", ""))}" ${cleanDisplayText(entry?.html_url || "", "") ? "" : "disabled"}>
+                  ${escapeHtml(cleanDisplayText(entry?.kind || "", "") === "dir" ? zhLabel("打开目录", "Open dir") : zhLabel("打开文件页", "Open blob"))}
+                </button>
+                <button type="button" class="git-inline-action" data-search-open="${escapeHtml(cleanDisplayText(entry?.download_url || "", ""))}" ${cleanDisplayText(entry?.download_url || "", "") ? "" : "disabled"}>
+                  ${escapeHtml(zhLabel("打开原始内容", "Open raw"))}
+                </button>
+              </div>
+            </div>
+          `).join("")
+          : `<div class="search-preview-empty">${escapeHtml(zhLabel("当前预览路径下没有可显示的条目。", "No entries available for the selected preview path."))}</div>`}
+      </div>
+    </div>
+  `;
+
+  searchPreviewPanel.querySelectorAll("[data-search-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const href = cleanDisplayText(button.getAttribute("data-search-open") || "", "");
+      if (!href) {
+        showToast(t("searchNoUrl"));
+        return;
+      }
+      try {
+        await openUrlInAppBrowser(href);
+      } catch (error) {
+        console.error(error);
+        showToast(cleanDisplayText(error?.message || "", "") || t("toastSendFailed"));
+      }
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-root]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(button.getAttribute("data-search-github-root") || "", "");
+      const buttonBranch = cleanDisplayText(button.getAttribute("data-search-github-branch") || "", "");
+      const commitSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-commit-sha") || "");
+      if (!repoFullName) return;
+        await loadGitHubPreview(repoFullName, buttonBranch || null, null, {
+          sourceIndex: searchState.githubPreviewSourceIndex,
+          resetSourceIndex: false,
+          commitSha,
+          compareBaseSha,
+          compareHeadSha,
+          historyScopeMode,
+        });
+      });
+    });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-path]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(button.getAttribute("data-search-github-repo") || "", "");
+      const buttonBranch = cleanDisplayText(button.getAttribute("data-search-github-branch") || "", "");
+      const path = cleanDisplayText(button.getAttribute("data-search-github-path") || "", "");
+      const commitSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-commit-sha") || "");
+      if (!repoFullName) return;
+        await loadGitHubPreview(repoFullName, buttonBranch || null, path || null, {
+          sourceIndex: searchState.githubPreviewSourceIndex,
+          resetSourceIndex: false,
+          commitSha,
+          compareBaseSha,
+          compareHeadSha,
+          historyScopeMode,
+        });
+      });
+    });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-commit]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(button.getAttribute("data-search-github-repo") || "", "");
+      const buttonBranch = cleanDisplayText(button.getAttribute("data-search-github-branch") || "", "");
+      const path = cleanDisplayText(button.getAttribute("data-search-github-path") || "", "");
+      const commitSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-commit") || "");
+      if (!repoFullName || !commitSha) return;
+        await loadGitHubPreview(repoFullName, buttonBranch || null, path || null, {
+          sourceIndex: searchState.githubPreviewSourceIndex,
+          resetSourceIndex: false,
+          commitSha,
+          compareBaseSha,
+          compareHeadSha,
+          historyScopeMode,
+        });
+      });
+    });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-compare-base]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const nextBaseSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-compare-base") || "");
+      if (!nextBaseSha) return;
+      let nextHeadSha = normalizeGitHubPreviewCommit(compareHeadSha || selectedCommitSha);
+      if (!nextHeadSha || nextHeadSha === nextBaseSha) {
+        nextHeadSha = commitList
+          .map((entry) => normalizeGitHubPreviewCommit(entry?.sha || ""))
+          .find((value) => value && value !== nextBaseSha) || "";
+      }
+      if (!nextHeadSha || nextHeadSha === nextBaseSha) return;
+      await loadGitHubPreview(cleanDisplayText(repository.full_name || "", ""), branch || null, cleanDisplayText(selectedFile?.path || preview.path || "", "") || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha: nextHeadSha,
+        compareBaseSha: nextBaseSha,
+        compareHeadSha: nextHeadSha,
+        historyScopeMode,
+      });
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-compare-head]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const nextHeadSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-compare-head") || "");
+      if (!nextHeadSha) return;
+      let nextBaseSha = normalizeGitHubPreviewCommit(compareBaseSha);
+      if (!nextBaseSha || nextBaseSha === nextHeadSha) {
+        nextBaseSha = commitList
+          .map((entry) => normalizeGitHubPreviewCommit(entry?.sha || ""))
+          .find((value) => value && value !== nextHeadSha) || "";
+      }
+      if (!nextBaseSha || nextBaseSha === nextHeadSha) return;
+      await loadGitHubPreview(cleanDisplayText(repository.full_name || "", ""), branch || null, cleanDisplayText(selectedFile?.path || preview.path || "", "") || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha: nextHeadSha,
+        compareBaseSha: nextBaseSha,
+        compareHeadSha: nextHeadSha,
+        historyScopeMode,
+      });
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-clear-compare]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(repository.full_name || "", "");
+      if (!repoFullName) return;
+      await loadGitHubPreview(repoFullName, branch || null, cleanDisplayText(selectedFile?.path || preview.path || "", "") || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha: selectedCommitSha || null,
+        compareBaseSha: null,
+        compareHeadSha: null,
+        historyScopeMode,
+      });
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-clear-commit]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(repository.full_name || "", "");
+      if (!repoFullName) return;
+      await loadGitHubPreview(repoFullName, branch || null, cleanDisplayText(selectedFile?.path || preview.path || "", "") || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha: null,
+        compareBaseSha,
+        compareHeadSha,
+        historyScopeMode,
+      });
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-history-scope]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const repoFullName = cleanDisplayText(button.getAttribute("data-search-github-repo") || "", "");
+      const buttonBranch = cleanDisplayText(button.getAttribute("data-search-github-branch") || "", "");
+      const path = cleanDisplayText(button.getAttribute("data-search-github-path") || "", "");
+      const commitSha = normalizeGitHubPreviewCommit(button.getAttribute("data-search-github-commit-sha") || "");
+      const nextHistoryScopeMode = cleanDisplayText(button.getAttribute("data-search-github-history-scope") || "", "");
+      if (!repoFullName || !nextHistoryScopeMode || nextHistoryScopeMode === historyScopeMode) return;
+      await loadGitHubPreview(repoFullName, buttonBranch || null, path || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha,
+        compareBaseSha,
+        compareHeadSha,
+        historyScopeMode: nextHistoryScopeMode,
+      });
+    });
+  });
+
+  searchPreviewPanel.querySelectorAll("[data-search-github-history]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const direction = cleanDisplayText(button.getAttribute("data-search-github-history") || "", "");
+      const delta = direction === "back" ? -1 : direction === "forward" ? 1 : 0;
+      if (!delta) return;
+      const nextIndex = Number(searchState.githubPreviewHistoryIndex) + delta;
+      if (nextIndex < 0 || nextIndex >= searchState.githubPreviewHistory.length) return;
+      const entry = searchState.githubPreviewHistory[nextIndex];
+      if (!entry) return;
+      await loadGitHubPreview(entry.repoFullName, entry.branch || null, entry.path || null, {
+        sourceIndex: searchState.githubPreviewSourceIndex,
+        resetSourceIndex: false,
+        commitSha: entry.commitSha || null,
+        compareBaseSha: entry.compareBaseSha || null,
+        compareHeadSha: entry.compareHeadSha || null,
+        historyScopeMode: entry.historyScopeMode || null,
+        pushHistory: false,
+        historyIndex: nextIndex,
+      });
+    });
+  });
+}
+
+function deriveSearchHref(mode, item) {
+  if (!item || typeof item !== "object") return "";
+  if (mode === "papers") {
+    return cleanDisplayText(item?.urls?.landing_page || item?.urls?.pdf || item?.urls?.local_path || "");
+  }
+  if (mode === "tracking" || mode === "benchmarks") {
+    return cleanDisplayText(item?.url || "");
+  }
+  if (mode === "datasets") {
+    return cleanDisplayText(item?.url || item?.path || item?.source_url || "");
+  }
+  if (mode === "models") {
+    return cleanDisplayText(item?.url || item?.download_url || item?.path || "");
+  }
+  if (mode === "github") {
+    return cleanDisplayText(item?.html_url || item?.repository_url || item?.url || "");
+  }
+  return cleanDisplayText(item?.url || "");
+}
+
+function renderSearchHealthStrip() {
+  if (!searchHealthStrip) return;
+  const health = searchState.health || {};
+  const entries = [
+    ["searchWebHealth", health.web_search],
+    ["searchPapersHealth", health.paper_search],
+    ["searchTrackingHealth", health.tracking_search],
+    ["searchBenchmarksHealth", health.benchmark_search],
+    ["searchModelsHealth", health.models_search],
+    ["searchDatasetHealth", health.dataset_entrypoint],
+    ["searchGitHubHealth", health.github_search],
+  ];
+  searchHealthStrip.innerHTML = entries
+    .map(([labelKey, item]) => {
+      const status = cleanDisplayText(item?.status || "unknown", "unknown");
+      const detail = cleanDisplayText(item?.detail || "");
+      const providers = Array.isArray(item?.providers) ? item.providers : [];
+      const providerMarkup = providers.length
+        ? `
+          <div class="search-health-provider-list">
+            ${providers
+              .map((provider) => {
+                const providerStatus = cleanDisplayText(provider?.status || "unknown", "unknown");
+                const providerDetail = cleanDisplayText(provider?.detail || "");
+                const providerName = cleanDisplayText(provider?.name || "", "provider");
+                return `
+                  <div class="search-health-provider ${searchStatusClass(providerStatus)}">
+                    <div class="search-health-provider-top">
+                      <span class="search-health-provider-name">${escapeHtml(providerName)}</span>
+                      <span class="search-health-provider-state">${escapeHtml(searchStatusLabel(providerStatus))}</span>
+                    </div>
+                    <div class="search-health-provider-detail">${escapeHtml(providerDetail || "-")}</div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `
+        : "";
+      return `
+        <article class="search-health-card ${searchStatusClass(status)}">
+          <div class="search-health-card-top">
+            <span class="search-health-name">${escapeHtml(t(labelKey))}</span>
+            <span class="search-health-state">${escapeHtml(searchStatusLabel(status))}</span>
+          </div>
+          <div class="search-health-detail">${escapeHtml(detail || "-")}</div>
+          ${providerMarkup}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderSearchResults() {
+  if (!searchResults) return;
+  const mode = searchMode;
+  const payload = searchState.results;
+  const items = normalizeSearchResults(mode, payload);
+  if (searchState.loading) {
+    searchResults.innerHTML = `<div class="git-empty">${escapeHtml(t("searchLoading"))}</div>`;
+    return;
+  }
+  if (searchState.error) {
+    searchResults.innerHTML = `
+      <article class="search-result-card is-error">
+        <div class="search-result-title">${escapeHtml(t("searchError"))}</div>
+        <div class="search-result-snippet">${escapeHtml(searchState.error)}</div>
+      </article>
+    `;
+    return;
+  }
+  if (!items.length) {
+    const hints = normalizeSearchHints(payload);
+    searchResults.innerHTML = `
+      <article class="search-result-card is-error">
+        <div class="search-result-title">${escapeHtml(t("searchEmpty"))}</div>
+        ${
+          hints.length
+            ? `<div class="search-result-snippet">${escapeHtml(hints.join(" | "))}</div>`
+            : ""
+        }
+      </article>
+    `;
+    return;
+  }
+
+  searchResults.innerHTML = items
+    .map((item, index) => {
+      if (mode === "papers") {
+        const href = deriveSearchHref(mode, item);
+        const authors = Array.isArray(item.authors) ? item.authors.filter(Boolean).slice(0, 4).join(", ") : "";
+        const year = item?.year ? String(item.year) : "";
+        const provider = cleanDisplayText(item?.provider || "");
+        const snippet = cleanDisplayText(item?.abstract_text || item?.snippet || "");
+        return `
+          <article class="search-result-card">
+            <div class="search-result-topline">
+              <div class="search-result-title">${escapeHtml(cleanDisplayText(item?.title || "", "Untitled paper"))}</div>
+              ${provider ? `<span class="search-result-badge">${escapeHtml(provider)}</span>` : ""}
+            </div>
+            <div class="search-result-meta">${escapeHtml([authors, year].filter(Boolean).join(" / "))}</div>
+            <div class="search-result-snippet">${escapeHtml(snippet)}</div>
+            <div class="search-result-actions">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+                ${escapeHtml(t("searchOpen"))}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      if (mode === "tracking" || mode === "benchmarks") {
+        const href = deriveSearchHref(mode, item);
+        const provider = cleanDisplayText(item?.provider || "");
+        const kind = cleanDisplayText(item?.kind || item?.benchmark_family || "");
+        const rank = Number.isFinite(item?.rank) ? `#${item.rank}` : "";
+        const snippet = cleanDisplayText(item?.snippet || href || "");
+        return `
+          <article class="search-result-card">
+            <div class="search-result-topline">
+              <div class="search-result-title">${escapeHtml(cleanDisplayText(item?.title || "", mode === "tracking" ? "Tracking result" : "Benchmark result"))}</div>
+              ${provider ? `<span class="search-result-badge">${escapeHtml(provider)}</span>` : ""}
+            </div>
+            <div class="search-result-meta">${escapeHtml([kind, rank].filter(Boolean).join(" / "))}</div>
+            <div class="search-result-snippet">${escapeHtml(snippet)}</div>
+            <div class="search-result-actions">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+                ${escapeHtml(t("searchOpen"))}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      if (mode === "datasets") {
+        const href = deriveSearchHref(mode, item);
+        const datasetId = cleanDisplayText(item?.dataset_id || "");
+        const provider = cleanDisplayText(item?.provider || "");
+        const taskHint = cleanDisplayText(item?.task_hint || "");
+        const manifest = href ? searchState.manifests[href] : null;
+        const manifestReady = manifest && manifest.status === "success";
+        return `
+          <article class="search-result-card">
+            <div class="search-result-topline">
+              <div class="search-result-title">${escapeHtml(cleanDisplayText(item?.title || datasetId || "Dataset"))}</div>
+              ${provider ? `<span class="search-result-badge">${escapeHtml(provider)}</span>` : ""}
+            </div>
+            <div class="search-result-meta">${escapeHtml([datasetId, taskHint].filter(Boolean).join(" / "))}</div>
+            <div class="search-result-snippet">${escapeHtml(href)}</div>
+            ${
+              manifestReady
+                ? `<pre class="search-manifest-block">${escapeHtml(JSON.stringify(manifest, null, 2))}</pre>`
+                : ""
+            }
+            <div class="search-result-actions">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+                ${escapeHtml(t("searchOpen"))}
+              </button>
+              <button
+                type="button"
+                class="git-inline-action"
+                data-search-dataset-manifest="${escapeHtml(String(index))}"
+                ${href ? "" : "disabled"}
+              >
+                ${escapeHtml(manifestReady ? t("searchManifestReady") : t("searchUseDataset"))}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      if (mode === "models") {
+        const href = deriveSearchHref(mode, item);
+        const badge = cleanDisplayText(item?.provider || "", "onnx-model-zoo");
+        const meta = [
+          cleanDisplayText(item?.category || ""),
+          cleanDisplayText(item?.family || ""),
+          item?.opset_version ? `opset ${item.opset_version}` : "",
+        ].filter(Boolean).join(" / ");
+        const tags = Array.isArray(item?.tags) ? item.tags.filter(Boolean).slice(0, 4).join(", ") : "";
+        const snippet = cleanDisplayText(item?.snippet || item?.path || "");
+        const secondary = [tags, cleanDisplayText(item?.path || "")].filter(Boolean).join(" / ");
+        return `
+          <article class="search-result-card">
+            <div class="search-result-topline">
+              <div class="search-result-title">${escapeHtml(cleanDisplayText(item?.title || item?.model_name || "", "ONNX model"))}</div>
+              ${badge ? `<span class="search-result-badge">${escapeHtml(badge)}</span>` : ""}
+            </div>
+            <div class="search-result-meta">${escapeHtml(meta || secondary || href)}</div>
+            <div class="search-result-snippet">${escapeHtml(snippet)}</div>
+            ${secondary && secondary !== meta ? `<div class="search-result-meta">${escapeHtml(secondary)}</div>` : ""}
+            <div class="search-result-actions">
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+                ${escapeHtml(t("searchOpen"))}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      if (mode === "github") {
+        const href = deriveSearchHref("github", item);
+        const selectionKey = githubPreviewSelectionKey(item);
+        const isSelected = (selectionKey && selectionKey === cleanDisplayText(searchState.githubPreview?.selection_key || "", ""))
+          || index === Number(searchState.githubPreviewSourceIndex ?? -1);
+        const title = cleanDisplayText(
+          item?.full_name || item?.repository_full_name || item?.title || "",
+          "GitHub result",
+        );
+        const badge = cleanDisplayText(item?.language || item?.match_reason || "");
+        const meta = [
+          cleanDisplayText(item?.path || ""),
+          cleanDisplayText(item?.default_branch || ""),
+          Number.isFinite(item?.stargazers_count) ? `★${item.stargazers_count}` : "",
+        ].filter(Boolean).join(" / ");
+        const snippet = cleanDisplayText(
+          item?.repository_description || item?.description || payload?.detail || "",
+        );
+        return `
+          <article class="search-result-card${isSelected ? " is-selected" : ""}">
+            <div class="search-result-topline">
+              <div class="search-result-title">${escapeHtml(title)}</div>
+              ${badge ? `<span class="search-result-badge">${escapeHtml(badge)}</span>` : ""}
+            </div>
+            <div class="search-result-meta">${escapeHtml(meta || href)}</div>
+            <div class="search-result-snippet">${escapeHtml(snippet)}</div>
+            <div class="search-result-actions">
+              <button
+                type="button"
+                class="git-inline-action"
+                data-search-github-preview="${escapeHtml(String(index))}"
+              >
+                ${escapeHtml(zhLabel("预览", "Preview"))}
+              </button>
+              <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+                ${escapeHtml(t("searchOpen"))}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      const href = deriveSearchHref(mode, item);
+      const engine = cleanDisplayText(item?.engine || "");
+      return `
+        <article class="search-result-card">
+          <div class="search-result-topline">
+            <div class="search-result-title">${escapeHtml(cleanDisplayText(item?.title || "", "Untitled result"))}</div>
+            ${engine ? `<span class="search-result-badge">${escapeHtml(engine)}</span>` : ""}
+          </div>
+          <div class="search-result-meta">${escapeHtml(href)}</div>
+          <div class="search-result-snippet">${escapeHtml(cleanDisplayText(item?.snippet || ""))}</div>
+          <div class="search-result-actions">
+            <button type="button" class="git-inline-action" data-search-open="${escapeHtml(href)}" ${href ? "" : "disabled"}>
+              ${escapeHtml(t("searchOpen"))}
+            </button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  searchResults.querySelectorAll("[data-search-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const href = cleanDisplayText(button.getAttribute("data-search-open") || "");
+      if (!href) {
+        showToast(t("searchNoUrl"));
+        return;
+      }
+      try {
+        await openUrlInAppBrowser(href);
+      } catch (error) {
+        console.error(error);
+        showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+      }
+    });
+  });
+
+  searchResults.querySelectorAll("[data-search-dataset-manifest]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const index = Number(button.getAttribute("data-search-dataset-manifest") || "-1");
+      if (!Number.isFinite(index) || index < 0) return;
+      try {
+        await buildDatasetManifest(index);
+      } catch (error) {
+        console.error(error);
+        showToast(appErrorMessage(error, "search", "searchError"));
+      }
+    });
+  });
+
+  searchResults.querySelectorAll("[data-search-github-preview]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const index = Number(button.getAttribute("data-search-github-preview") || "-1");
+      if (!Number.isFinite(index) || index < 0) return;
+      const githubItems = normalizeSearchResults("github", searchState.results);
+      const item = githubItems[index];
+      if (!item) return;
+      const repoFullName = cleanDisplayText(item?.repository_full_name || item?.full_name || "", "");
+      const path = cleanDisplayText(item?.path || "", "");
+      if (!repoFullName) return;
+      searchState.githubPreviewSourceIndex = index;
+      await loadGitHubPreview(
+        repoFullName,
+        cleanDisplayText(item?.default_branch || "", "") || null,
+        path || null,
+        { sourceIndex: index },
+      );
+    });
+  });
+}
+
+function renderSearchPanel() {
+  if (searchQueryInput) {
+    searchQueryInput.placeholder = searchPlaceholderForMode(searchMode);
+  }
+  if (searchModeSwitch) {
+    setSegmentedValue(searchModeSwitch, searchMode);
+  }
+  if (searchRunButton) {
+    searchRunButton.disabled = searchState.loading;
+    searchRunButton.textContent = searchState.loading ? t("searchLoading") : t("searchRun");
+  }
+  const searchWorkspace = document.getElementById("search-workspace");
+  if (searchWorkspace) {
+    searchWorkspace.classList.toggle("is-github-preview", isSearchGitHubPreviewActive());
+  }
+  activityFlyout?.classList.toggle("is-search-github-preview", isSearchGitHubPreviewActive());
+  appShell?.classList.toggle("has-search-github-preview", isSearchGitHubPreviewActive());
+  syncShellLayoutVars();
+  renderSearchHealthStrip();
+  renderSearchResults();
+  renderSearchPreviewPanel();
+}
+
+async function loadSearchHealth({ force = false } = {}) {
+  if (searchState.health && !force) {
+    renderSearchPanel();
+    return searchState.health;
+  }
+  const response = await hostClient.search.health();
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `search health failed: ${response.status}`);
+  }
+  const payload = await response.json();
+  searchState.health = payload?.data || null;
+  renderSearchPanel();
+  return searchState.health;
+}
+
+async function runSearch({ query = null, mode = searchMode, force = false } = {}) {
+  const resolvedMode = normalizeChoice(mode, ["web", "papers", "tracking", "benchmarks", "models", "datasets", "github"], "web");
+  const nextQuery = String(query ?? searchQueryInput?.value ?? searchState.lastQuery ?? "").trim();
+  searchMode = resolvedMode;
+  if (searchQueryInput && nextQuery !== searchQueryInput.value) {
+    searchQueryInput.value = nextQuery;
+  }
+  if (!nextQuery) {
+    searchState.error = currentLanguage === "zh" ? "请输入搜索词。" : "Enter a search query.";
+    searchState.results = null;
+    renderSearchPanel();
+    return;
+  }
+
+  if (resolvedMode === "datasets" || resolvedMode === "github" || resolvedMode === "models" || resolvedMode === "tracking" || resolvedMode === "benchmarks") {
+    await loadSearchHealth({ force });
+  }
+
+  searchState.loading = true;
+  searchState.error = "";
+  searchState.lastQuery = nextQuery;
+  if (resolvedMode !== "datasets") {
+    searchState.activeManifestUrl = "";
+  }
+  if (resolvedMode === "github") {
+    searchState.githubPreview = null;
+    searchState.githubPreviewLoading = false;
+    searchState.githubPreviewError = "";
+    searchState.githubPreviewSourceIndex = -1;
+  } else {
+    searchState.githubPreview = null;
+    searchState.githubPreviewLoading = false;
+    searchState.githubPreviewError = "";
+    searchState.githubPreviewSourceIndex = -1;
+  }
+  renderSearchPanel();
+
+  try {
+    let response;
+    if (resolvedMode === "papers") {
+      response = await hostClient.search.papers(nextQuery, "auto", 8);
+    } else if (resolvedMode === "tracking") {
+      response = await hostClient.search.tracking(nextQuery, "auto", 8);
+    } else if (resolvedMode === "benchmarks") {
+      response = await hostClient.search.benchmarks(nextQuery, "mlperf", 8);
+    } else if (resolvedMode === "models") {
+      response = await hostClient.search.models(nextQuery, 8);
+    } else if (resolvedMode === "github") {
+      const githubMode = /\b(path:|filename:|extension:|language:|repo:)\b/i.test(nextQuery) ? "code" : "repositories";
+      response = await hostClient.search.github(nextQuery, githubMode, 8);
+    } else if (resolvedMode === "datasets") {
+      response = await hostClient.search.datasets(nextQuery, 8);
+    } else {
+      response = await hostClient.search.web(nextQuery, 8);
+    }
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `search failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    searchState.results = payload?.data || null;
+    searchState.error = "";
+    renderSearchPanel();
+    showToast(t("toastSearchCopied"));
+  } catch (error) {
+    searchState.results = null;
+    searchState.error = cleanDisplayText(error?.message || "") || appErrorMessage(error, "search", "searchError");
+    renderSearchPanel();
+    throw error;
+  } finally {
+    searchState.loading = false;
+    renderSearchPanel();
+  }
+}
+
+async function buildDatasetManifest(index) {
+  const items = normalizeSearchResults("datasets", searchState.results);
+  const item = items[index];
+  const datasetUrl = deriveSearchHref("datasets", item);
+  if (!datasetUrl) {
+    showToast(t("searchNoUrl"));
+    return;
+  }
+  const title = cleanDisplayText(item?.title || item?.dataset_id || "");
+  const response = await hostClient.search.datasetManifest(datasetUrl, title || null);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `dataset manifest failed: ${response.status}`);
+  }
+  const payload = await response.json();
+  searchState.manifests = {
+    ...searchState.manifests,
+    [datasetUrl]: payload?.data || null,
+  };
+  searchState.activeManifestUrl = datasetUrl;
+  renderSearchPanel();
+}
+
 function renderRunDebugLegacy(state) {
   if (!runDebugList || !runDebugSession) return;
   const configs = Array.isArray(state?.configs) ? state.configs : [];
@@ -5127,13 +8286,13 @@ function renderRunDebugLegacy(state) {
                   ? `<span class="run-card-task run-card-dependency">${escapeHtml(formatRunDependencyMessage(config))}</span>`
                   : ""
               }
-              <span class="extension-card-desc">${escapeHtml(config.category || "")}${config.file_hint ? ` 路 ${escapeHtml(config.file_hint)}` : ""}</span>
-              <span class="run-card-task">${escapeHtml(config.task_type || "launch")} 路 ${escapeHtml(config.detail || "")}</span>
+              <span class="extension-card-desc">${escapeHtml(config.category || "")}${config.file_hint ? ` · ${escapeHtml(config.file_hint)}` : ""}</span>
+              <span class="run-card-task">${escapeHtml(config.task_type || "launch")}${config.detail ? ` · ${escapeHtml(config.detail || "")}` : ""}</span>
             </button>
           `,
         )
         .join("")
-    : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "当前项目没有检测到可运行配置。" : "No runnable configuration detected.")}</div>`;
+    : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "未检测到可运行配置。" : "No runnable configuration detected.")}</div>`;
 
   runDebugSession.hidden = !active;
   runDebugSession.innerHTML = active
@@ -5142,7 +8301,7 @@ function renderRunDebugLegacy(state) {
         <strong>${escapeHtml(active.title || "")}</strong>
         <button class="git-inline-action is-danger" type="button" data-run-debug-stop="true">${escapeHtml(currentLanguage === "zh" ? "停止" : "Stop")}</button>
       </div>
-      <div class="run-session-meta">PID ${escapeHtml(String(active.pid || ""))} 路 ${escapeHtml(active.started_at || "")}</div>
+      <div class="run-session-meta">PID ${escapeHtml(String(active.pid || ""))}${active.started_at ? ` · ${escapeHtml(active.started_at || "")}` : ""}</div>
       <div class="run-session-meta">${escapeHtml(active.command || "")}</div>
       <button class="run-session-cwd" type="button" data-open-workspace-file=".">${escapeHtml(active.cwd || "")}</button>
       <div class="run-session-log">
@@ -5237,7 +8396,7 @@ function renderRunDebug(state) {
           `;
         })
         .join("")
-    : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "当前项目没有检测到可运行配置。" : "No runnable configuration detected.")}</div>`;
+    : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "未检测到可运行配置。" : "No runnable configuration detected.")}</div>`;
 
   runDebugSession.hidden = !active;
   runDebugSession.innerHTML = active
@@ -5322,9 +8481,9 @@ function sanitizeMessageContent(text) {
     "<||DSML",
     "</||DSML",
     "||DSML||",
-    "<锝滐綔DSML",
-    "</锝滐綔DSML",
-    "锝滐綔DSML锝滐綔",
+    "<闁挎繃绮ｇ紞鎿燬ML",
+    "</闁挎繃绮ｇ紞鎿燬ML",
+    "闁挎繃绮ｇ紞鎿燬ML闁挎繃绮ｇ紞",
     "<DSML",
     "</DSML",
   ];
@@ -5366,6 +8525,10 @@ function sanitizeMessageContent(text) {
 function createEmptyAssistantTurn() {
   return {
     text: "",
+    runtimeNarration: "",
+    progressNarration: "",
+    assistantChoices: null,
+    auto_skills: [],
     thinking: [],
     process: [],
     worklog: [],
@@ -5388,6 +8551,10 @@ function cloneAssistantTurnState(turn) {
   if (!turn) return null;
   return {
     ...turn,
+    runtimeNarration: String(turn.runtimeNarration || ""),
+    progressNarration: String(turn.progressNarration || ""),
+    assistantChoices: turn.assistantChoices ? { ...turn.assistantChoices, options: Array.isArray(turn.assistantChoices.options) ? turn.assistantChoices.options.slice() : [] } : null,
+    auto_skills: Array.isArray(turn.auto_skills) ? turn.auto_skills.map((item) => ({ ...item })) : [],
     thinking: Array.isArray(turn.thinking) ? turn.thinking.map((item) => ({ ...item })) : [],
     process: Array.isArray(turn.process) ? turn.process.map((item) => ({ ...item })) : [],
     worklog: Array.isArray(turn.worklog) ? turn.worklog.map((item) => ({ ...item })) : [],
@@ -5460,6 +8627,10 @@ function mergeAssistantTurnData(baseTurn, liveTurn, options = {}) {
   if (!live) return base;
   return {
     ...base,
+    runtimeNarration: mergeAssistantText(base.runtimeNarration, live.runtimeNarration, options),
+    progressNarration: mergeAssistantText(base.progressNarration, live.progressNarration, options),
+    assistantChoices: live.assistantChoices || base.assistantChoices || null,
+    auto_skills: richerAssistantCollection(base.auto_skills, live.auto_skills),
     text: mergeAssistantText(base.text, live.text, options),
     thinking: richerAssistantCollection(base.thinking, live.thinking),
     process: richerAssistantCollection(base.process, live.process),
@@ -5503,12 +8674,19 @@ function shouldSuppressInlineAssistantCode(text, diffs = []) {
 
 function visibleAssistantWorkspaceNotice() {
   return currentLanguage === "zh"
-    ? "本轮实现已直接写入工作区文件，详细代码不在对话区展开。"
+    ? "本轮结果已直接写入工作区文件，聊天区域不再展开完整源码。"
     : "This turn was written directly into workspace files. Full source is not expanded in chat.";
 }
 
 function zhLabel(zh, en) {
   return currentLanguage === "zh" ? zh : en;
+}
+
+function autoSkillKindLabel(kind) {
+  const normalized = cleanDisplayText(kind || "", "general").toLowerCase();
+  if (normalized === "workflow") return t("autoSkillsKindWorkflow");
+  if (normalized === "subfield") return t("autoSkillsKindSubfield");
+  return t("autoSkillsKindGeneral");
 }
 
 function registerUndoSnapshot(diff) {
@@ -5540,7 +8718,118 @@ function renderDiffReviewStatus(status) {
   if (normalized === "reverted") {
     return currentLanguage === "zh" ? "已撤销" : "Reverted";
   }
-  return currentLanguage === "zh" ? "待审阅" : "Pending review";
+  return currentLanguage === "zh" ? "待审查" : "Pending review";
+}
+
+function renderAssistantDiffCard(diff, options = {}) {
+  if (!diff?.path) return "";
+  const inline = options.inline === true;
+  const undoKey = registerUndoSnapshot(diff);
+  const reviewOpen = activeReviewFilePath === diff.path;
+  const reviewDetail = reviewOpen ? reviewDetailCache.get(diff.path) : null;
+  const reviewStatus = getDiffReviewStatus(diff);
+  const reviewMarkup = reviewOpen
+    ? reviewDetail && !reviewDetail.error
+      ? renderReviewDetail(reviewDetail, {
+          path: diff.path,
+          additions: Number(diff.added || 0),
+          deletions: Number(diff.removed || 0),
+        })
+      : reviewDetail?.error
+        ? `<div class="review-detail-error">${escapeHtml(reviewDetail.error)}</div>`
+        : `<div class="review-detail-empty">${escapeHtml(t("reviewLoading"))}</div>`
+    : "";
+  const fileName = displayFileNameOnly(diff.path);
+  const showPathMeta = fileName && fileName !== diff.path;
+
+  if (inline) {
+    return `
+      <div class="codex-diff-card codex-diff-card-inline codex-diff-card-${escapeHtml(reviewStatus)}">
+        <div class="codex-diff-card-head">
+          <button
+            class="codex-diff-chip codex-diff-chip-inline"
+            type="button"
+            data-open-workspace-file="${escapeHtml(diff.path)}"
+            data-open-workspace-line="1"
+            data-open-workspace-column="1"
+            title="${escapeHtml(diff.path)}"
+          >
+            <span class="codex-diff-path">${escapeHtml(fileName || diff.path)}</span>
+            <span class="codex-diff-stats">+${escapeHtml(String(diff.added || 0))} / -${escapeHtml(String(diff.removed || 0))}</span>
+          </button>
+          <span class="codex-diff-status codex-diff-status-${escapeHtml(reviewStatus)}">${escapeHtml(renderDiffReviewStatus(reviewStatus))}</span>
+        </div>
+        ${showPathMeta ? `<div class="codex-diff-path-meta">${escapeHtml(diff.path)}</div>` : ""}
+        <div class="codex-diff-actions">
+          <button class="codex-diff-open" type="button" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "查看 diff" : "View diff")}</button>
+          ${reviewStatus === "accepted"
+            ? ""
+            : `<button class="codex-diff-open" type="button" data-accept-path="${escapeHtml(diff.path)}" data-accept-updated-at="${escapeHtml(String(diff.updated_at || 0))}">${escapeHtml(currentLanguage === "zh" ? "接受" : "Accept")}</button>`}
+          <button class="codex-diff-open codex-diff-undo" type="button" data-undo-key="${escapeHtml(undoKey)}">${escapeHtml(currentLanguage === "zh" ? "撤销" : "Undo")}</button>
+        </div>
+        <details class="codex-diff-review-panel"${reviewOpen ? " open" : ""}>
+          <summary class="codex-diff-review-summary" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "展开详细 diff" : "Expand detailed diff")}</summary>
+          <div class="codex-diff-review-body">${reviewMarkup || `<div class="review-detail-empty">${escapeHtml(t("reviewLoading"))}</div>`}</div>
+        </details>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="codex-diff-step">
+      <div class="codex-step-rail" aria-hidden="true">
+        <span class="codex-step-dot"></span>
+      </div>
+      <div class="codex-diff-card codex-diff-card-${escapeHtml(reviewStatus)}">
+        <div class="codex-diff-card-head">
+          <button
+            class="codex-diff-chip"
+            type="button"
+            data-open-workspace-file="${escapeHtml(diff.path)}"
+            data-open-workspace-line="1"
+            data-open-workspace-column="1"
+          >
+            <span class="codex-diff-path">${escapeHtml(diff.path)}</span>
+            <span class="codex-diff-stats">+${escapeHtml(String(diff.added || 0))} / -${escapeHtml(String(diff.removed || 0))}</span>
+          </button>
+          <span class="codex-diff-status codex-diff-status-${escapeHtml(reviewStatus)}">${escapeHtml(renderDiffReviewStatus(reviewStatus))}</span>
+          <div class="codex-diff-actions">
+            <button class="codex-diff-open" type="button" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "Review" : "Review")}</button>
+            ${reviewStatus === "accepted"
+              ? ""
+              : `<button class="codex-diff-open" type="button" data-accept-path="${escapeHtml(diff.path)}" data-accept-updated-at="${escapeHtml(String(diff.updated_at || 0))}">${escapeHtml(currentLanguage === "zh" ? "接受" : "Accept")}</button>`}
+            <button class="codex-diff-open codex-diff-undo" type="button" data-undo-key="${escapeHtml(undoKey)}">${escapeHtml(currentLanguage === "zh" ? "撤销" : "Undo")}</button>
+          </div>
+        </div>
+        <div class="codex-diff-meta">${escapeHtml(currentLanguage === "zh" ? "Agent 刚更新了这个文件" : "Agent just updated this file")}</div>
+        <details class="codex-diff-review-panel"${reviewOpen ? " open" : ""}>
+          <summary class="codex-diff-review-summary" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "查看 diff" : "View diff")}</summary>
+          <div class="codex-diff-review-body">${reviewMarkup || `<div class="review-detail-empty">${escapeHtml(t("reviewLoading"))}</div>`}</div>
+        </details>
+      </div>
+    </div>
+  `;
+}
+
+function renderAssistantDiffMarkup(diffs, options = {}) {
+  const visibleDiffs = Array.isArray(diffs) ? diffs.filter((diff) => diff?.path) : [];
+  if (!visibleDiffs.length) return "";
+  const inline = options.inline === true;
+  const totalAdded = visibleDiffs.reduce((sum, diff) => sum + Number(diff.added || 0), 0);
+  const totalRemoved = visibleDiffs.reduce((sum, diff) => sum + Number(diff.removed || 0), 0);
+  return `
+    <div class="codex-diff-list codex-steps-list${inline ? " codex-diff-list-inline" : ""}">
+      <div class="codex-diff-summary${inline ? " is-inline" : ""}">
+        <span class="codex-diff-summary-title">${escapeHtml(
+          currentLanguage === "zh"
+            ? (inline ? `刚刚更新了 ${visibleDiffs.length} 个文件` : `已修改 ${visibleDiffs.length} 个文件`)
+            : (inline ? `${visibleDiffs.length} files just changed` : `${visibleDiffs.length} files changed`),
+        )}</span>
+        <span class="codex-diff-summary-stats">+${escapeHtml(String(totalAdded))} / -${escapeHtml(String(totalRemoved))}</span>
+      </div>
+      ${visibleDiffs.map((diff) => renderAssistantDiffCard(diff, { inline })).join("")}
+    </div>
+  `;
 }
 
 function syncAcceptedDiffStatuses(turn) {
@@ -5614,6 +8903,16 @@ function endSessionRun(sessionId) {
   renderSessionList(bootstrapData?.sessions || [], bootstrapData?.current_session_id || null);
 }
 
+function bootstrapHasLiveSession(data, sessionId) {
+  const targetSessionId = String(sessionId || "").trim();
+  if (!targetSessionId) return false;
+  const activeMatch = (Array.isArray(data?.active_sessions) ? data.active_sessions : [])
+    .some((item) => String(item?.session_id || "").trim() === targetSessionId);
+  if (activeMatch) return true;
+  return (Array.isArray(data?.runtime_snapshots) ? data.runtime_snapshots : [])
+    .some((item) => String(item?.session_id || "").trim() === targetSessionId);
+}
+
 function clearVisibleRuntimeSnapshot(sessionId = null) {
   const targetSessionId = String(sessionId || bootstrapData?.current_session_id || "").trim();
   if (!targetSessionId || !bootstrapData) return;
@@ -5632,7 +8931,9 @@ function syncActiveSessionsFromBootstrap(data, options = {}) {
       .map((item) => String(item?.session_id || "").trim())
       .filter(Boolean),
   );
-  const preservedRunningSessionId = String(options.preserveRunningSessionId || "").trim();
+  const preservedRunningSessionId = activeIds.has(String(options.preserveRunningSessionId || "").trim())
+    ? String(options.preserveRunningSessionId || "").trim()
+    : "";
   sessionRunState.forEach((state, sessionId) => {
     if (!activeIds.has(sessionId)) {
       if (preservedRunningSessionId && preservedRunningSessionId === sessionId && state.running) {
@@ -5691,11 +8992,32 @@ function hydrateVisibleRuntimeSnapshot() {
     ? snapshot.latest_activity.delegates.map((delegate) => ({ ...delegate }))
     : [];
   activeAssistantTurn.worklog = [];
+  activeAssistantTurn.runtimeNarration = "";
+  const snapshotActivityWorklog = snapshot.latest_activity
+    ? describeActivityWorklog({
+        label: snapshot.latest_activity.label || "",
+        detail: snapshot.latest_activity.detail || "",
+        meta: [snapshot.latest_activity.agent, snapshot.latest_activity.phase, snapshot.latest_activity.status]
+          .filter(Boolean)
+          .join(" / "),
+        phase: snapshot.latest_activity.phase || "",
+        status: snapshot.latest_activity.status || "",
+        agent: snapshot.latest_activity.agent || "",
+      })
+    : null;
+  if (snapshotActivityWorklog) {
+    pushAssistantWorklog(snapshotActivityWorklog);
+    updateRuntimeNarration(snapshot.latest_activity?.detail || snapshot.latest_activity?.meta || "");
+  }
   (Array.isArray(snapshot.progress_updates) ? snapshot.progress_updates : []).forEach((entry) => {
     pushAssistantProgressWorklogText(entry);
+    updateRuntimeNarration(entry);
   });
   activeAssistantTurn.subagents = Array.isArray(snapshot.subagents)
     ? dedupeSubagentEntries(snapshot.subagents)
+    : [];
+  activeAssistantTurn.auto_skills = Array.isArray(snapshot.auto_skills)
+    ? snapshot.auto_skills.map((item) => ({ ...item }))
     : [];
   activeAssistantTurn.verifierReport = snapshot.verifier ? { ...snapshot.verifier } : null;
   activeAssistantTurn.runtimeCheckpoints = Array.isArray(snapshot.checkpoints)
@@ -5718,6 +9040,9 @@ function hydrateVisibleRuntimeSnapshot() {
         updated_at: Date.now(),
       }))
     : [];
+  if (!activeAssistantTurn.runtimeNarration) {
+    updateRuntimeNarration(snapshot.latest_activity?.detail || snapshot.latest_activity?.label || "");
+  }
   activeAssistantTurn.permission = snapshot.permission || null;
   pendingPermissionRequest = snapshot.permission || null;
   liveProcessEvents = activeAssistantTurn.process.map((event) => ({
@@ -5730,9 +9055,15 @@ function hydrateVisibleRuntimeSnapshot() {
     added: diff.added,
     removed: diff.removed,
   }));
+  const hasStreamingRenderableContent = Boolean(
+    String(activeAssistantTurn.text || "").trim() ||
+    String(activeAssistantTurn.runtimeNarration || "").trim() ||
+    activeAssistantTurn.worklog.length ||
+    activeAssistantTurn.auto_skills.length
+  );
   if (
     getSessionRunState(currentSessionId)?.running &&
-    (String(activeAssistantTurn.text || "").trim() ||
+    (hasStreamingRenderableContent ||
       activeAssistantTurn.process.length ||
       activeAssistantTurn.processDelegates.length ||
       activeAssistantTurn.subagents.length ||
@@ -5764,17 +9095,35 @@ function syncActiveTurnRuntime(runtime) {
   activeAssistantTurn.timeline = Array.isArray(runtime.timeline)
     ? runtime.timeline.map((item) => ({ ...item }))
     : activeAssistantTurn.timeline;
+  activeAssistantTurn.auto_skills = Array.isArray(runtime.auto_skills)
+    ? runtime.auto_skills.map((item) => ({ ...item }))
+    : activeAssistantTurn.auto_skills;
 }
 
 function captureMessageScrollPosition() {
   if (!messageStream) return;
-  preservedMessageScrollTop = messageStream.scrollTop;
+  const scrollTop = messageStream.scrollTop;
+  const distanceFromBottom = Math.max(
+    0,
+    messageStream.scrollHeight - messageStream.clientHeight - scrollTop,
+  );
+  preservedMessageScrollState = {
+    scrollTop,
+    distanceFromBottom,
+    stickToBottom: distanceFromBottom <= 72,
+  };
 }
 
 function restoreMessageScrollPosition() {
-  if (!messageStream || preservedMessageScrollTop == null) return;
-  messageStream.scrollTop = preservedMessageScrollTop;
-  preservedMessageScrollTop = null;
+  if (!messageStream || !preservedMessageScrollState) return;
+  const nextScrollTop = preservedMessageScrollState.stickToBottom
+    ? Math.max(0, messageStream.scrollHeight - messageStream.clientHeight - preservedMessageScrollState.distanceFromBottom)
+    : Math.min(
+      preservedMessageScrollState.scrollTop,
+      Math.max(0, messageStream.scrollHeight - messageStream.clientHeight),
+    );
+  messageStream.scrollTop = nextScrollTop;
+  preservedMessageScrollState = null;
 }
 
 function finalizeActiveAssistantTurn() {
@@ -5802,6 +9151,8 @@ function finalizeActiveAssistantTurn() {
   } else {
     pinnedEditedFiles = [];
   }
+  resetActiveAssistantTurn();
+  setStopButtonVisible(false);
   return snapshot;
 }
 
@@ -5811,6 +9162,7 @@ function visibleConversationMessages(messages) {
       message &&
       (message.kind === "message" ||
         message.kind === "thinking" ||
+        message.kind === "tool_result" ||
         message.kind === "diff" ||
         message.kind === "subagent" ||
         message.kind === "verification"),
@@ -5819,6 +9171,7 @@ function visibleConversationMessages(messages) {
 
 function persistConversationMessages(messages, { sessionId = null } = {}) {
   const visibleMessages = visibleConversationMessages(messages);
+  lastVisibleCompletionSignature = visibleMessagesSignature(visibleMessages);
   clearPendingAssistantFrames();
   bootstrapData = {
     ...(bootstrapData || {}),
@@ -5846,7 +9199,7 @@ function commitStreamFailure(error) {
 
   const classified = classifyAppError(error, "send");
   const failureText = currentLanguage === "zh"
-    ? `本轮执行已中断：${classified.message || "发送失败"}`
+    ? `本轮提前中断：${classified.message || "发送失败。"}`
     : `This turn stopped early: ${classified.message || "Send failed."}`;
   nextMessages.push({
     kind: "message",
@@ -5854,6 +9207,57 @@ function commitStreamFailure(error) {
     content: failureText,
   });
   persistConversationMessages(nextMessages, { sessionId: currentStreamingSessionId });
+}
+
+function materializePendingConversationMessages({ sessionId = null } = {}) {
+  const visibleMessages = [...visibleConversationMessages(bootstrapData?.messages || [])];
+  const content = completionFallbackAssistantContent(activeAssistantTurn);
+  const fallbackChoices = activeAssistantTurn?.assistantChoices
+    && Array.isArray(activeAssistantTurn.assistantChoices.options)
+    && activeAssistantTurn.assistantChoices.options.length
+      ? {
+          title: cleanDisplayText(activeAssistantTurn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")),
+          options: activeAssistantTurn.assistantChoices.options
+            .map((item) => cleanDisplayText(item || "", ""))
+            .filter(Boolean),
+        }
+      : null;
+  if (content || fallbackChoices) {
+    const contentCore = cleanDisplayText(assistantPrimaryReplyCore(content), "");
+    const alreadyPresent = visibleMessages.some((message) =>
+      messageHasAssistantChoices(message)
+      || (message
+        && message.kind === "message"
+        && message.role === "assistant"
+        && (() => {
+          const messageText = cleanDisplayText(String(message.content || "").trim(), "");
+          const messageCore = cleanDisplayText(assistantPrimaryReplyCore(messageText), "");
+          return messageText === content
+            || messageText.includes(content)
+            || content.includes(messageText)
+            || (contentCore && messageCore && (contentCore === messageCore || contentCore.includes(messageCore) || messageCore.includes(contentCore)));
+        })()),
+    );
+    if (!alreadyPresent) {
+      const message = {
+        kind: "message",
+        role: "assistant",
+        content: content || "",
+      };
+      if (fallbackChoices) {
+        message.assistant_choices = fallbackChoices;
+      }
+      visibleMessages.push(message);
+    }
+  }
+  bootstrapData = {
+    ...(bootstrapData || {}),
+    messages: visibleMessages,
+    current_session_id: sessionId || bootstrapData?.current_session_id || null,
+  };
+  renderReview(buildReviewFromMessages(visibleMessages));
+  syncAgentPreludeBackground(visibleMessages);
+  renderMessages(visibleMessages, { preserveScroll: true });
 }
 
 function resetConversationRuntimeState({ preserveInputFocus = false } = {}) {
@@ -5877,6 +9281,7 @@ function resetConversationRuntimeState({ preserveInputFocus = false } = {}) {
   liveEditedFiles = [];
   liveProcessEvents = [];
   pinnedEditedFiles = [];
+  lastVisibleCompletionSignature = "";
   resetPendingAssistantRenderState();
   clearPendingAssistantFrames();
   if (pendingUserBubble) {
@@ -5906,61 +9311,128 @@ function pendingAssistantPlaceholderText() {
 }
 
 function bindPendingAssistantNodes(scope = pendingAssistantBubble) {
+  pendingAssistantRuntimeNode = scope?.querySelector("[data-streaming-runtime]") || null;
   pendingAssistantTextNode = scope?.querySelector("[data-streaming-markdown]") || null;
-  pendingAssistantStableNode = scope?.querySelector("[data-streaming-stable]") || null;
-  pendingAssistantTailNode = scope?.querySelector("[data-streaming-tail]") || null;
+  pendingAssistantStableNode = scope?.querySelector("[data-streaming-markdown-stable]") || null;
+  pendingAssistantTailNode = scope?.querySelector("[data-streaming-markdown-tail]") || null;
   pendingAssistantStatusTextNode = scope?.querySelector("[data-turn-activity]") || null;
   pendingAssistantStatusTimeNode = scope?.querySelector("[data-turn-elapsed]") || null;
+  pendingAssistantRenderedRuntimeText = null;
   pendingAssistantRenderedStableText = null;
   pendingAssistantRenderedTailText = null;
 }
 
+function isStreamingBlockLine(line) {
+  const trimmed = String(line || "").trimStart();
+  if (!trimmed) return false;
+  return /^(#{1,6})(\s|$)/.test(trimmed)
+    || /^[-*+]\s+/.test(trimmed)
+    || /^\d+\.\s+/.test(trimmed)
+    || /^>\s?/.test(trimmed)
+    || /^\|.+\|?$/.test(trimmed)
+    || /^(?:---+|___+|\*\*\*+)\s*$/.test(trimmed);
+}
+
 function findStreamingRenderableBoundary(text) {
-  const source = String(text || "");
+  const source = String(text || "").replace(/\r\n/g, "\n");
   if (!source) return 0;
+
+  const lines = source.split("\n");
+  let cursor = 0;
+  let inFence = false;
+  let openFenceIndex = -1;
+
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      if (!inFence) {
+        inFence = true;
+        openFenceIndex = cursor;
+      } else {
+        inFence = false;
+        openFenceIndex = -1;
+      }
+    }
+    cursor += line.length + 1;
+  }
+
+  if (inFence && openFenceIndex >= 0) {
+    return openFenceIndex;
+  }
+
+  if (source.endsWith("\n")) {
+    return source.length;
+  }
+
+  const lastLineBreak = source.lastIndexOf("\n");
+  const trailingLine = lastLineBreak >= 0 ? source.slice(lastLineBreak + 1) : source;
+  if (isStreamingBlockLine(trailingLine)) {
+    return Math.max(0, lastLineBreak + 1);
+  }
+  if (lastLineBreak >= 0) {
+    return lastLineBreak + 1;
+  }
+
   return source.length;
 }
 
+function prepareStreamingMarkdownContent(input) {
+  const source = sanitizeMessageContent(String(input || ""))
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+---+\s+/g, "\n\n")
+    .trimStart();
+  if (!source) return "";
+
+  const protectedBlocks = protectFencedMarkdownBlocks(repairCollapsedStreamingStructure(source));
+  const normalized = protectedBlocks.text
+    .split("\n")
+    .flatMap((line) => splitResearchStepNarrationLine(line))
+    .map((line) => normalizeAssistantStructuralLine(line))
+    .join("\n");
+  return restoreFencedMarkdownBlocks(normalized, protectedBlocks.blocks);
+}
+
 function renderStreamingAssistantContent(content, options = {}) {
-  const text = String(content || "");
+  const streaming = Boolean(options.streaming);
+  const text = streaming
+    ? prepareStreamingMarkdownContent(String(content || ""))
+    : structureAssistantDisplayText(String(content || ""));
   const placeholder = options.placeholder || pendingAssistantPlaceholderText();
   if (!text) {
     return {
-      stableText: "",
+      html: escapeHtml(placeholder),
       stableHtml: "",
       tailText: "",
-      tailHtml: escapeHtml(placeholder),
       isEmpty: true,
-      tailVisible: true,
     };
   }
-
-  const boundary = findStreamingRenderableBoundary(text);
-  const stableText = text.slice(0, boundary).trimEnd();
-  const tailText = text.slice(boundary);
-  const tailHtml = tailText
-    ? tailText
-        .replace(/\r\n/g, "\n")
-        .split("\n")
-        .map((line) => renderInlineMarkdown(line))
-        .join("<br>")
-    : "";
+  if (streaming) {
+    const boundary = Math.max(0, Math.min(findStreamingRenderableBoundary(text), text.length));
+    const stableSource = text.slice(0, boundary).trimEnd();
+    const tailText = text.slice(boundary);
+    const stableHtml = stableSource ? renderMarkdown(stableSource) : "";
+    return {
+      html: `${stableHtml}${tailText ? `<pre class="codex-streaming-tail">${escapeHtml(tailText)}</pre>` : ""}`,
+      stableHtml,
+      tailText,
+      isEmpty: !stableHtml && !tailText,
+    };
+  }
   return {
-    stableText,
-    stableHtml: stableText ? renderMarkdown(stableText) : "",
-    tailText,
-    tailHtml,
+    html: renderMarkdown(text),
+    stableHtml: renderMarkdown(text),
+    tailText: "",
     isEmpty: false,
-    tailVisible: Boolean(tailText),
   };
 }
 
 function resetPendingAssistantRenderState() {
+  pendingAssistantRuntimeNode = null;
   pendingAssistantTextNode = null;
   pendingAssistantStableNode = null;
   pendingAssistantTailNode = null;
   pendingAssistantStatusTextNode = null;
   pendingAssistantStatusTimeNode = null;
+  pendingAssistantRenderedRuntimeText = null;
   pendingAssistantRenderedStableText = null;
   pendingAssistantRenderedTailText = null;
 }
@@ -5989,31 +9461,262 @@ function syncPendingAssistantStatus() {
 
 function latestRuntimeNarration(turn) {
   if (!turn) return "";
+  const existingNarration = cleanDisplayText(String(turn.runtimeNarration || "").trim(), "");
+  if (existingNarration) {
+    return existingNarration;
+  }
+  const segments = [];
+  const pushSegment = (value) => {
+    const text = normalizeAgentStageNarration(value);
+    if (!text) return;
+    if (!segments.includes(text)) {
+      segments.push(text);
+    }
+  };
   const worklog = Array.isArray(turn.worklog) ? turn.worklog : [];
   if (worklog.length) {
     const latest = worklog[worklog.length - 1] || null;
     const previous = worklog.length > 1 ? worklog[worklog.length - 2] : null;
-    const parts = [previous?.text, latest?.text]
-      .map((item) => cleanDisplayText(String(item || "").trim()))
-      .filter(Boolean);
-    return [...new Set(parts)].join(currentLanguage === "zh" ? "\n\n" : "\n\n");
+    [previous?.text, latest?.text].forEach(pushSegment);
+  }
+  if (segments.length) {
+    return segments.slice(-2).join(currentLanguage === "zh" ? "\n\n" : "\n\n");
   }
   const latestProcess = Array.isArray(turn.process) && turn.process.length
     ? turn.process[turn.process.length - 1]
     : null;
   if (latestProcess?.detail) {
-    return cleanDisplayText(String(latestProcess.detail || "").trim());
+    pushSegment(latestProcess.detail);
   }
-  if (latestProcess?.label) {
-    return cleanDisplayText(String(latestProcess.label || "").trim());
+  if (segments.length < 2 && latestProcess?.label) {
+    pushSegment(latestProcess.label);
   }
-  return "";
+  const latestTool = Array.isArray(turn.tools) && turn.tools.length
+    ? turn.tools[turn.tools.length - 1]
+    : null;
+  if (segments.length < 2) {
+    pushSegment(summarizeRuntimeToolNarration(latestTool));
+  }
+  const latestDiff = Array.isArray(turn.diffs) && turn.diffs.length
+    ? turn.diffs[turn.diffs.length - 1]
+    : null;
+  if (segments.length < 2) {
+    pushSegment(summarizeRuntimeDiffNarration(latestDiff));
+  }
+  return segments.slice(-2).join(currentLanguage === "zh" ? "\n\n" : "\n\n");
+}
+
+function latestStreamingNarrationSegments(turn, limit = 3) {
+  const segments = [];
+  const pushSegment = (value) => {
+    const text = summarizeOperationalText(value, "");
+    if (!text) return;
+    const duplicated = segments.some((existing) =>
+      existing === text
+      || existing.includes(text)
+      || text.includes(existing)
+    );
+    if (!duplicated) {
+      segments.push(text);
+    }
+  };
+  const worklog = Array.isArray(turn?.worklog) ? turn.worklog : [];
+  worklog.slice(-Math.max(1, limit)).forEach((entry) => pushSegment(entry?.text));
+  return segments;
+}
+
+function latestStreamingWorklogNarration(turn, limit = 3) {
+  return latestStreamingNarrationSegments(turn, limit).join("\n\n");
+}
+
+function inlineStreamingNarrationText(turn, explicitContent = "") {
+  if (!turn) return "";
+  const explicit = String(explicitContent || "");
+  const explicitCore = cleanDisplayText(normalizedAssistantSubstantiveContent(explicit), "");
+  const narration = summarizeOperationalText(String(turn.progressNarration || "").trim(), "")
+    || latestStreamingWorklogNarration(turn, explicitCore ? 2 : 3)
+    || summarizeOperationalText(latestRuntimeNarration(turn), "");
+  if (!narration) return "";
+  if (!explicitCore) return narration;
+  if (
+    explicitCore === narration
+    || explicitCore.includes(narration)
+    || narration.includes(explicitCore)
+  ) {
+    return "";
+  }
+  return narration;
+}
+
+function composeStreamingAssistantVisibleContent(turn) {
+  if (!turn) return "";
+  const explicitContent = String(turn.text || "");
+  const cleaned = cleanDisplayText(explicitContent, "").trim();
+  if (!cleaned) return "";
+  if (assistantTextLooksLikeProcessNarration(cleaned)) return "";
+  return explicitContent;
+}
+
+function completionFallbackAssistantContent(turn) {
+  const assistantText = sanitizeMessageContent(String(turn?.text || "")).trim();
+  if (!assistantText) return "";
+  if (assistantTextLooksLikeProcessNarration(assistantText)) return "";
+  return assistantText;
+}
+
+function hasRenderableAssistantText(turn) {
+  return Boolean(completionFallbackAssistantContent(turn));
+}
+
+function messageHasAssistantChoices(message) {
+  return Boolean(
+    message
+    && message.kind === "message"
+    && message.role === "assistant"
+    && message.assistant_choices
+    && Array.isArray(message.assistant_choices.options)
+    && message.assistant_choices.options.some((item) => cleanDisplayText(item || "", "")),
+  );
+}
+
+function turnHasRenderableAssistantContent(turn) {
+  if (!turn) return false;
+  if (hasRenderableAssistantText(turn)) return true;
+  return Boolean(
+    turn.assistantChoices
+    && Array.isArray(turn.assistantChoices.options)
+    && turn.assistantChoices.options.some((item) => cleanDisplayText(item || "", "")),
+  );
+}
+
+function latestVisibleAssistantTurn(messages) {
+  const turns = groupMessagesIntoTurns(visibleConversationMessages(messages || []));
+  return [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data)?.data || null;
+}
+
+function shouldPreferPersistedAssistantTurn(messages, fallbackTurn = activeAssistantTurn) {
+  const fallbackText = cleanDisplayText(completionFallbackAssistantContent(fallbackTurn), "");
+  const fallbackCore = cleanDisplayText(assistantPrimaryReplyCore(fallbackText), "");
+  const persistedTurn = latestVisibleAssistantTurn(messages);
+  const persistedText = cleanDisplayText(String(persistedTurn?.text || "").trim(), "");
+  const persistedCore = cleanDisplayText(assistantPrimaryReplyCore(persistedText), "");
+  if (!turnHasRenderableAssistantContent(persistedTurn)) return false;
+  if (!persistedText) {
+    return Boolean(
+      persistedTurn?.assistantChoices
+      && Array.isArray(persistedTurn.assistantChoices.options)
+      && persistedTurn.assistantChoices.options.length,
+    );
+  }
+  if (!fallbackText) return true;
+  if (persistedText === fallbackText) return true;
+  if (persistedText.includes(fallbackText)) return true;
+  if (fallbackCore && persistedCore && (persistedCore === fallbackCore || persistedCore.includes(fallbackCore) || fallbackCore.includes(persistedCore))) {
+    return true;
+  }
+  if (looksLikeStructuredAssistantReport(persistedText) && !looksLikeStructuredAssistantReport(fallbackText)) {
+    return true;
+  }
+  return false;
+}
+
+function reconcileVisibleSessionCompletion(nextData, { sessionId = null, preserveScroll = true } = {}) {
+  const targetSessionId = String(sessionId || nextData?.current_session_id || bootstrapData?.current_session_id || "").trim();
+  if (!targetSessionId) return false;
+  const visibleSessionId = String(bootstrapData?.current_session_id || "").trim();
+  const isVisibleSession = visibleSessionId && visibleSessionId === targetSessionId;
+  const runtimeEnded = !bootstrapHasLiveSession(nextData, targetSessionId);
+  if (!isVisibleSession || !runtimeEnded) {
+    return false;
+  }
+
+  const currentState = getSessionRunState(targetSessionId);
+  if (!currentState?.running && !pendingAssistantBubble) {
+    return false;
+  }
+
+  const incomingMessages = visibleConversationMessages(nextData?.messages || []);
+  const preferPersistedAssistant = shouldPreferPersistedAssistantTurn(incomingMessages);
+  endSessionRun(targetSessionId);
+
+  if (incomingMessages.length) {
+    bootstrapData = {
+      ...(bootstrapData || {}),
+      ...nextData,
+      messages: incomingMessages,
+      current_session_id: targetSessionId,
+    };
+    renderReview(buildReviewFromMessages(incomingMessages));
+    syncAgentPreludeBackground(incomingMessages);
+    if (pendingAssistantBubble) {
+      const finalizedInPlace = finalizeVisibleAssistantBubble(incomingMessages);
+      if (!finalizedInPlace) {
+        renderMessages(incomingMessages, { preserveScroll });
+      }
+    } else {
+      renderMessages(incomingMessages, { preserveScroll });
+    }
+  }
+
+  if (!preferPersistedAssistant && turnHasRenderableAssistantContent(activeAssistantTurn)) {
+    materializePendingConversationMessages({ sessionId: targetSessionId });
+  }
+
+  finalizeActiveAssistantTurn();
+  pendingPermissionRequest = null;
+  liveToolEvents = [];
+  liveEditedFiles = [];
+  liveProcessEvents = [];
+  renderAgentRuntimeStrip();
+  renderAgentProcessStrip();
+  renderPermissionStrip();
+  return true;
+}
+
+function visibleStreamingRuntimeNarration(turn) {
+  if (!turn) return "";
+  const narration = structureAssistantDisplayText(latestRuntimeNarration(turn));
+  if (!narration) return "";
+  const composed = structureAssistantDisplayText(composeStreamingAssistantVisibleContent(turn));
+  const normalizedComposed = cleanDisplayText(composed, "");
+  const normalizedNarration = cleanDisplayText(narration, "");
+  if (normalizedComposed) {
+    if (
+      normalizedComposed === normalizedNarration
+      || normalizedComposed.includes(normalizedNarration)
+      || normalizedNarration.includes(normalizedComposed)
+    ) {
+      return "";
+    }
+  }
+  const inlineNarration = structureAssistantDisplayText(inlineStreamingNarrationText(turn, String(turn.text || "")));
+  const normalizedInline = cleanDisplayText(inlineNarration, "");
+  if (normalizedInline) {
+    if (
+      normalizedInline === normalizedNarration
+      || normalizedInline.includes(normalizedNarration)
+      || normalizedNarration.includes(normalizedInline)
+    ) {
+      return "";
+    }
+  }
+  const explicit = structureAssistantDisplayText(String(turn.text || ""));
+  const normalizedExplicit = cleanDisplayText(explicit, "");
+  if (!normalizedExplicit) return normalizedNarration;
+  if (
+    normalizedNarration === normalizedExplicit
+    || normalizedExplicit.includes(normalizedNarration)
+    || normalizedNarration.includes(normalizedExplicit)
+  ) {
+    return "";
+  }
+  return normalizedNarration;
 }
 
 function syncPendingAssistantText() {
   if (!pendingAssistantTextNode) return;
-  const explicitContent = String(activeAssistantTurn?.text || "");
-  const content = explicitContent.trim() ? explicitContent : "";
+  const content = composeStreamingAssistantVisibleContent(activeAssistantTurn);
+  const runtimeNarration = visibleStreamingRuntimeNarration(activeAssistantTurn);
   const shouldSuppressInlineCode = shouldSuppressInlineAssistantCode(
     content,
     activeAssistantTurn?.diffs || [],
@@ -6023,33 +9726,44 @@ function syncPendingAssistantText() {
     : content;
   const parts = renderStreamingAssistantContent(visibleContent, {
     placeholder: pendingAssistantPlaceholderText(),
+    streaming: true,
   });
-  if (!pendingAssistantStableNode || !pendingAssistantTailNode) {
-    pendingAssistantTextNode.innerHTML = visibleContent
-      ? renderMarkdown(visibleContent)
-      : escapeHtml(pendingAssistantPlaceholderText());
-  } else {
-    if (pendingAssistantRenderedStableText !== parts.stableText) {
-      pendingAssistantStableNode.innerHTML = parts.stableHtml;
-      pendingAssistantRenderedStableText = parts.stableText;
+  if (pendingAssistantStableNode || pendingAssistantTailNode) {
+    if (pendingAssistantStableNode && pendingAssistantRenderedStableText !== parts.stableHtml) {
+      pendingAssistantStableNode.innerHTML = parts.stableHtml || "";
+      pendingAssistantRenderedStableText = parts.stableHtml || "";
     }
-    if (pendingAssistantRenderedTailText !== parts.tailText) {
-      pendingAssistantTailNode.innerHTML = parts.tailHtml;
-      pendingAssistantRenderedTailText = parts.tailText;
+    if (pendingAssistantTailNode && pendingAssistantRenderedTailText !== parts.tailText) {
+      pendingAssistantTailNode.textContent = parts.tailText || "";
+      pendingAssistantTailNode.hidden = !parts.tailText;
+      pendingAssistantRenderedTailText = parts.tailText || "";
     }
-    pendingAssistantTailNode.hidden = !parts.tailVisible;
-    pendingAssistantStableNode.hidden = !parts.stableText;
+  } else if (pendingAssistantRenderedStableText !== parts.html) {
+    pendingAssistantTextNode.innerHTML = parts.html;
+    pendingAssistantRenderedStableText = parts.html;
+  }
+  if (pendingAssistantRuntimeNode) {
+    const runtimeParts = runtimeNarration
+      ? renderStreamingAssistantContent(runtimeNarration, { placeholder: "", streaming: true })
+      : { html: "", isEmpty: true };
+    if (pendingAssistantRenderedRuntimeText !== runtimeParts.html) {
+      pendingAssistantRuntimeNode.innerHTML = runtimeParts.html;
+      pendingAssistantRenderedRuntimeText = runtimeParts.html;
+    }
+    pendingAssistantRuntimeNode.hidden = runtimeParts.isEmpty;
   }
   pendingAssistantTextNode.parentElement?.classList.toggle("codex-answer-empty", parts.isEmpty);
 }
 
-function schedulePendingAssistantTextSync() {
+function schedulePendingAssistantTextSync({ keepBottom = false } = {}) {
   if (pendingAssistantTextFrame != null) return;
   pendingAssistantTextFrame = window.requestAnimationFrame(() => {
     pendingAssistantTextFrame = null;
     syncPendingAssistantText();
     syncPendingAssistantStatus();
-    scrollMessageStreamToBottom();
+    if (keepBottom) {
+      scrollMessageStreamToBottom(true);
+    }
   });
 }
 
@@ -6059,12 +9773,20 @@ function schedulePendingAssistantStatusSync() {
     pendingAssistantStatusFrame = null;
     if (!pendingAssistantBubble || !activeAssistantTurn) return;
     syncPendingAssistantStatus();
-    scrollMessageStreamToBottom();
   });
 }
 
 function refreshPendingAssistantBubble() {
   if (!pendingAssistantBubble || !activeAssistantTurn) return;
+  if (pendingAssistantTextNode) {
+    const keepBottom = isNearMessageStreamBottom();
+    syncPendingAssistantText();
+    syncPendingAssistantStatus();
+    if (keepBottom) {
+      scrollMessageStreamToBottom(true);
+    }
+    return;
+  }
   if (pendingAssistantBubbleFrame != null) return;
   pendingAssistantBubbleFrame = window.requestAnimationFrame(() => {
     pendingAssistantBubbleFrame = null;
@@ -6142,8 +9864,8 @@ function toolStatusLabel(status) {
     pending: currentLanguage === "zh" ? "排队中" : "Queued",
     approved: currentLanguage === "zh" ? "已批准" : "Approved",
     denied: currentLanguage === "zh" ? "已拒绝" : "Denied",
-    executing: currentLanguage === "zh" ? "进行中" : "Running",
-    complete: currentLanguage === "zh" ? "已完成" : "Done",
+    executing: currentLanguage === "zh" ? "执行中" : "Running",
+    complete: currentLanguage === "zh" ? "完成" : "Done",
     failed: currentLanguage === "zh" ? "失败" : "Failed",
   };
   return labels[key] || status || "Running";
@@ -6162,13 +9884,84 @@ function compactToolArgs(args) {
 function toolStatusVerb(status) {
   const key = String(status || "").toLowerCase();
   const labels = {
-    pending: currentLanguage === "zh" ? "准备调用工具" : "Preparing tool call",
+    pending: currentLanguage === "zh" ? "准备工具调用" : "Preparing tool call",
     approved: currentLanguage === "zh" ? "工具已批准" : "Tool approved",
     denied: currentLanguage === "zh" ? "工具已拒绝" : "Tool denied",
-    executing: currentLanguage === "zh" ? "正在执行" : "Running",
+    executing: currentLanguage === "zh" ? "执行中" : "Running",
     failed: currentLanguage === "zh" ? "执行失败" : "Failed",
   };
   return labels[key] || (currentLanguage === "zh" ? "工具调用" : "Tool call");
+}
+
+function summarizeRuntimeToolNarration(tool) {
+  if (!tool) return "";
+  const name = cleanDisplayText(tool?.name || "", "");
+  if (!name) return "";
+  const status = String(tool?.status || "").toLowerCase();
+  const workspaceScanTools = new Set([
+    "list_dir",
+    "find_files",
+    "read_file",
+    "read_file_range",
+    "tree_dir",
+    "search_files",
+  ]);
+  const editTools = new Set([
+    "write_file",
+    "apply_patch",
+    "search_and_replace",
+    "search_and_replace_multi",
+    "rename_path",
+    "mkdir",
+  ]);
+  const gitLike = name.startsWith("git_");
+  const isWorkspaceScan = workspaceScanTools.has(name);
+  const isEdit = editTools.has(name);
+  if (currentLanguage === "zh") {
+    if (status === "failed") {
+      if (isWorkspaceScan) return "查看工作区文件失败。";
+      if (isEdit) return "编辑文件失败。";
+      if (gitLike) return "检查 Git 状态失败。";
+      return "工具执行失败。";
+    }
+    if (["pending", "approved", "executing"].includes(status)) {
+      if (isWorkspaceScan) return "正在查看工作区文件。";
+      if (isEdit) return "正在编辑文件。";
+      if (gitLike) return "正在检查 Git 状态。";
+      return "正在执行工具。";
+    }
+    if (isWorkspaceScan) return "已完成工作区查看。";
+    if (isEdit) return "已完成文件编辑。";
+    if (gitLike) return "已完成 Git 状态检查。";
+    return "工具执行完成。";
+  }
+  if (status === "failed") {
+    if (isWorkspaceScan) return "Workspace inspection failed.";
+    if (isEdit) return "File editing failed.";
+    if (gitLike) return "Git inspection failed.";
+    return "Tool execution failed.";
+  }
+  if (["pending", "approved", "executing"].includes(status)) {
+    if (isWorkspaceScan) return "Inspecting workspace files.";
+    if (isEdit) return "Editing files.";
+    if (gitLike) return "Checking Git state.";
+    return "Running tools.";
+  }
+  if (isWorkspaceScan) return "Workspace inspection finished.";
+  if (isEdit) return "File editing finished.";
+  if (gitLike) return "Git inspection finished.";
+  return "Tool execution finished.";
+}
+
+function summarizeRuntimeDiffNarration(diff) {
+  if (!diff?.path) return "";
+  const path = displayFileNameOnly(diff.path || "");
+  const added = Number(diff.added || 0);
+  const removed = Number(diff.removed || 0);
+  if (currentLanguage === "zh") {
+    return `已更新 ${path} (+${added} / -${removed})。`;
+  }
+  return `Updated ${path} (+${added} / -${removed}).`;
 }
 
 function isCommandLikeTool(name) {
@@ -6195,19 +9988,19 @@ function summarizeTurnRuntime(turn) {
   const verifierChecks = Array.isArray(verifier?.checks) ? verifier.checks.length : 0;
   const parts = [];
   if (totalTools > 0) {
-    parts.push(currentLanguage === "zh" ? `调用 ${totalTools} 个工具` : `${totalTools} tools`);
+    parts.push(currentLanguage === "zh" ? `${totalTools} 个工具` : `${totalTools} tools`);
   }
   if (commandCount > 0) {
-    parts.push(currentLanguage === "zh" ? `执行 ${commandCount} 个命令` : `${commandCount} commands`);
+    parts.push(currentLanguage === "zh" ? `${commandCount} 条命令` : `${commandCount} commands`);
   }
   if (changedFiles > 0) {
-    parts.push(currentLanguage === "zh" ? `修改 ${changedFiles} 个文件` : `${changedFiles} files changed`);
+    parts.push(currentLanguage === "zh" ? `${changedFiles} 个文件已修改` : `${changedFiles} files changed`);
   }
   if (subagents.length > 0) {
     parts.push(currentLanguage === "zh" ? `${subagents.length} 个子代理` : `${subagents.length} subagents`);
   }
   if (verifierChecks > 0) {
-    parts.push(currentLanguage === "zh" ? `${verifierChecks} 项验证` : `${verifierChecks} checks`);
+    parts.push(currentLanguage === "zh" ? `${verifierChecks} 项检查` : `${verifierChecks} checks`);
   }
   return parts;
 }
@@ -6226,6 +10019,7 @@ function renderAssistantTurn(turn, options = {}) {
   const runtimeCheckpoints = Array.isArray(turn?.runtimeCheckpoints) ? turn.runtimeCheckpoints : [];
   const branchNotes = Array.isArray(turn?.branchNotes) ? turn.branchNotes : [];
   const timeline = Array.isArray(turn?.timeline) ? turn.timeline : [];
+  const autoSkills = Array.isArray(turn?.auto_skills) ? turn.auto_skills : [];
   const tools = Array.isArray(turn?.tools) ? turn.tools : [];
   const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
   const thinking = Array.isArray(turn?.thinking) ? turn.thinking : [];
@@ -6233,6 +10027,19 @@ function renderAssistantTurn(turn, options = {}) {
   const text = turn?.text || "";
   const cleanedText = displayMarkdownText(text);
   const isStreaming = Boolean(options.streaming);
+  const decisionPresentation = !isStreaming
+    ? (
+      turn?.assistantChoices && Array.isArray(turn.assistantChoices.options) && turn.assistantChoices.options.length
+        ? {
+            body: cleanedText,
+            card: {
+              title: cleanDisplayText(turn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")) || zhLabel("选择下一步", "Choose next step"),
+              options: turn.assistantChoices.options.slice(),
+            },
+          }
+        : { body: cleanedText, card: null }
+    )
+    : { body: "", card: null };
   const runtimeSummaryParts = summarizeTurnRuntime(turn);
   const hasRuntimeArtifacts = Boolean(
     process.length
@@ -6256,10 +10063,15 @@ function renderAssistantTurn(turn, options = {}) {
     : [];
   const visibleDiffs = diffs;
   const showRuntimeHead = false;
-  const shouldSuppressInlineCode = shouldSuppressInlineAssistantCode(text, diffs);
+  const fallbackNarration = latestRuntimeNarration(turn);
+  const runtimeLeadText = "";
+  const displayedText = isStreaming
+    ? composeStreamingAssistantVisibleContent(turn)
+    : (decisionPresentation.body || cleanedText.trim());
+  const shouldSuppressInlineCode = shouldSuppressInlineAssistantCode(displayedText, diffs);
   const visibleText = shouldSuppressInlineCode
     ? visibleAssistantWorkspaceNotice()
-    : cleanedText;
+    : structureAssistantDisplayText(displayedText);
 
   const runtimeHead = showRuntimeHead
     ? `
@@ -6283,34 +10095,7 @@ function renderAssistantTurn(turn, options = {}) {
     `
     : "";
 
-  const processMarkup = visibleProcess.length
-    ? `
-      <div class="codex-process-list codex-steps-list">
-        ${visibleProcess
-          .map((event) => {
-            const detailLine = event.detail
-              ? `<div class="codex-process-detail">${escapeHtml(event.detail)}</div>`
-              : "";
-            const metaLine = event.meta
-              ? `<div class="codex-process-meta">${escapeHtml(event.meta)}</div>`
-              : "";
-            return `
-              <div class="codex-process-step codex-process-${escapeHtml(String(event.type || "activity"))}">
-                <div class="codex-step-rail" aria-hidden="true">
-                  <span class="codex-step-dot"></span>
-                </div>
-                <div class="codex-process-main">
-                  <div class="codex-process-label">${escapeHtml(event.label || "")}</div>
-                  ${detailLine}
-                  ${metaLine}
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    `
-    : "";
+  const processMarkup = "";
 
   const delegateMarkup = streamingInlineRuntime && processDelegates.length
     ? `
@@ -6323,7 +10108,7 @@ function renderAssistantTurn(turn, options = {}) {
                 <span class="codex-delegate-pill">${escapeHtml(renderDelegateStatus(delegate.status || ""))}</span>
               </summary>
               <div class="codex-delegate-body">
-                ${delegate.purpose ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("职责", "Purpose"))}</span><span class="codex-delegate-value">${escapeHtml(delegate.purpose)}</span></div>` : ""}
+                ${delegate.purpose ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("目的", "Purpose"))}</span><span class="codex-delegate-value">${escapeHtml(delegate.purpose)}</span></div>` : ""}
                 ${delegate.input ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输入", "Input"))}</span><span class="codex-delegate-value">${escapeHtml(delegate.input)}</span></div>` : ""}
                 ${delegate.output ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输出", "Output"))}</span><span class="codex-delegate-value">${escapeHtml(delegate.output)}</span></div>` : ""}
               </div>
@@ -6334,18 +10119,20 @@ function renderAssistantTurn(turn, options = {}) {
     `
     : "";
 
-  const subagentMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && subagents.length
+  const subagentBodyMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && subagents.length
     ? `
       <div class="codex-delegate-list codex-steps-list codex-subagent-list">
         ${subagents
-          .map((subagent, index) => `
-            <details class="codex-delegate-card codex-subagent-card"${isStreaming ? (index === subagents.length - 1 ? " open" : "") : ""}>
-              <summary class="codex-delegate-summary">
+          .map((subagent, index) => {
+            const active = isStreaming && index === subagents.length - 1 && String(subagent.status || "").toLowerCase() === "running";
+            return `
+            <div class="codex-delegate-card codex-subagent-card${active ? " is-active" : ""}">
+              <div class="codex-delegate-summary">
                 <span class="codex-delegate-name">${escapeHtml(subagent.name || "subagent")}</span>
                 <span class="codex-delegate-pill">${escapeHtml(renderDelegateStatus(subagent.status || ""))}</span>
-              </summary>
+              </div>
               <div class="codex-delegate-body">
-                ${subagent.purpose ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("职责", "Purpose"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.purpose)}</span></div>` : ""}
+                ${subagent.purpose ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("目的", "Purpose"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.purpose)}</span></div>` : ""}
                 ${subagent.input ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输入", "Input"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.input)}</span></div>` : ""}
                 ${subagent.output ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输出", "Output"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.output)}</span></div>` : ""}
                 ${
@@ -6354,22 +10141,56 @@ function renderAssistantTurn(turn, options = {}) {
                     : ""
                 }
               </div>
-            </details>
-          `)
+            </div>
+          `;
+          })
           .join("")}
       </div>
     `
     : "";
 
-  const verifierMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && verifierReport
+  const autoSkillsMarkup = autoSkills.length
     ? `
-      <details class="codex-delegate-card codex-verifier-card"${isStreaming ? " open" : ""}>
-        <summary class="codex-delegate-summary">
+      <section class="auto-skills-card" aria-label="${escapeHtml(t("autoSkillsTitle"))}">
+        <div class="auto-skills-head">
+          <div class="auto-skills-title">${escapeHtml(t("autoSkillsTitle"))}</div>
+        </div>
+        <div class="auto-skills-list">
+          ${autoSkills
+            .map((skill) => `
+              <article class="auto-skills-item">
+                <div class="auto-skills-item-top">
+                  <strong>${escapeHtml(cleanDisplayText(skill?.name || "", "skill"))}</strong>
+                  <span class="auto-skills-kind">${escapeHtml(autoSkillKindLabel(skill?.kind || ""))}</span>
+                </div>
+                ${skill?.description ? `<div class="auto-skills-desc">${escapeHtml(cleanDisplayText(skill.description || ""))}</div>` : ""}
+              </article>
+            `)
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
+  const subagentMarkup = renderRuntimeSectionCard(
+    currentLanguage === "zh" ? "子代理" : "Subagents",
+    String(subagents.length || ""),
+    subagentBodyMarkup,
+    {
+      open: subagents.some((item) => String(item?.status || "").toLowerCase() === "running"),
+      tone: subagents.some((item) => String(item?.status || "").toLowerCase() === "running") ? "running" : "",
+      className: "codex-runtime-section codex-runtime-subagents",
+    },
+  );
+
+  const verifierBodyMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && verifierReport
+    ? `
+      <div class="codex-delegate-card codex-verifier-card${isStreaming ? " is-active" : ""}">
+        <div class="codex-delegate-summary">
           <span class="codex-delegate-name">${escapeHtml(currentLanguage === "zh" ? "验证器" : "Verifier")}</span>
           <span class="codex-delegate-pill">${escapeHtml(renderDelegateStatus(verifierReport.status || ""))}</span>
-        </summary>
+        </div>
         <div class="codex-delegate-body">
-          ${verifierReport.summary ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(currentLanguage === "zh" ? "总结" : "Summary")}</span><span class="codex-delegate-value">${escapeHtml(verifierReport.summary)}</span></div>` : ""}
+          ${verifierReport.summary ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(currentLanguage === "zh" ? "摘要" : "Summary")}</span><span class="codex-delegate-value">${escapeHtml(verifierReport.summary)}</span></div>` : ""}
           ${
             Array.isArray(verifierReport.checks) && verifierReport.checks.length
               ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(currentLanguage === "zh" ? "检查项" : "Checks")}</span><span class="codex-delegate-value">${verifierReport.checks.map((item) => `${escapeHtml(item.title || "check")} [${escapeHtml(item.status || "")}]${item.detail ? ` · ${escapeHtml(item.detail)}` : ""}`).join("<br>")}</span></div>`
@@ -6386,9 +10207,19 @@ function renderAssistantTurn(turn, options = {}) {
               : ""
           }
         </div>
-      </details>
+      </div>
     `
     : "";
+  const verifierMarkup = renderRuntimeSectionCard(
+    currentLanguage === "zh" ? "验证器" : "Verifier",
+    verifierReport ? renderDelegateStatus(verifierReport.status || "") : "",
+    verifierBodyMarkup,
+    {
+      open: ["running", "repair", "failed"].includes(String(verifierReport?.status || "").toLowerCase()),
+      tone: ["running", "repair", "failed"].includes(String(verifierReport?.status || "").toLowerCase()) ? "running" : "",
+      className: "codex-runtime-section codex-runtime-verifier",
+    },
+  );
 
   const checkpointMarkup = streamingInlineRuntime && (runtimeCheckpoints.length || branchNotes.length)
     ? `
@@ -6398,7 +10229,7 @@ function renderAssistantTurn(turn, options = {}) {
           .map((item) => `
             <div class="codex-process-step codex-process-checkpoint">
               <div class="codex-step-rail" aria-hidden="true"><span class="codex-step-dot"></span></div>
-              <div class="codex-process-main">
+                <div class="codex-process-main">
                 <div class="codex-process-label">${escapeHtml(currentLanguage === "zh" ? "检查点" : "Checkpoint")}</div>
               </div>
             </div>
@@ -6431,7 +10262,7 @@ function renderAssistantTurn(turn, options = {}) {
                 <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(subagent.status || ""))}</span>
               </summary>
               <div class="research-runtime-body">
-                ${subagent.purpose ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("职责", "Purpose"))}</span><strong>${escapeHtml(subagent.purpose)}</strong></div>` : ""}
+                ${subagent.purpose ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("目的", "Purpose"))}</span><strong>${escapeHtml(subagent.purpose)}</strong></div>` : ""}
                 ${subagent.input ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输入", "Input"))}</span><strong>${escapeHtml(subagent.input)}</strong></div>` : ""}
                 ${subagent.output ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输出", "Output"))}</span><strong>${escapeHtml(subagent.output)}</strong></div>` : ""}
                 ${
@@ -6455,7 +10286,7 @@ function renderAssistantTurn(turn, options = {}) {
           <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(verifierReport.status || ""))}</span>
         </summary>
         <div class="research-runtime-body">
-          ${verifierReport.summary ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("总结", "Summary"))}</span><strong>${escapeHtml(verifierReport.summary)}</strong></div>` : ""}
+          ${verifierReport.summary ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("摘要", "Summary"))}</span><strong>${escapeHtml(verifierReport.summary)}</strong></div>` : ""}
           ${
             Array.isArray(verifierReport.checks) && verifierReport.checks.length
               ? `<div class="research-runtime-list">${verifierReport.checks.map((item) => `<div class="research-review-item">${escapeHtml(item.title || "check")} [${escapeHtml(item.status || "")}]${item.detail ? ` - ${escapeHtml(item.detail)}` : ""}</div>`).join("")}</div>`
@@ -6471,19 +10302,11 @@ function renderAssistantTurn(turn, options = {}) {
     `
     : "";
 
-  const runtimeTimelineMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && timeline.length
-    ? renderRuntimeTimeline(timeline, {
-        limit: isStreaming ? 8 : 18,
-        title: currentLanguage === "zh" ? "运行时间线" : "Runtime timeline",
-        forceOpen: isStreaming,
-      })
-    : "";
-
-  const toolMarkup = visibleTools.length
+  const toolBodyMarkup = visibleTools.length
     ? `
       <div class="codex-tool-list codex-steps-list">
         ${visibleTools
-          .map((tool) => {
+          .map((tool, index) => {
             const argsPreview = compactToolArgs(tool.args);
             const verb = toolStatusVerb(tool.status);
             const pathLine = tool.file_path
@@ -6495,9 +10318,11 @@ function renderAssistantTurn(turn, options = {}) {
             const resultLine =
               tool.status === "failed" && tool.result
                 ? `<div class="codex-tool-result is-error">${escapeHtml(String(tool.result).slice(0, 220))}</div>`
-              : "";
+                : "";
+            const statusKey = String(tool.status || "pending");
+            const active = isStreaming && index === visibleTools.length - 1 && ["pending", "approved", "executing"].includes(statusKey);
             return `
-              <div class="codex-tool-card codex-tool-step codex-tool-${escapeHtml(String(tool.status || "pending"))}">
+              <div class="codex-tool-card codex-tool-step codex-tool-${escapeHtml(statusKey)}${active ? " is-active" : ""}">
                 <div class="codex-step-rail" aria-hidden="true">
                   <span class="codex-step-dot"></span>
                 </div>
@@ -6518,74 +10343,16 @@ function renderAssistantTurn(turn, options = {}) {
       </div>
     `
     : "";
-
-  const diffMarkup = visibleDiffs.length
-    ? `
-      <div class="codex-diff-list codex-steps-list">
-        <div class="codex-diff-summary">
-          <span class="codex-diff-summary-title">${escapeHtml(
-            currentLanguage === "zh"
-              ? `已修改 ${visibleDiffs.length} 个文件`
-              : `${visibleDiffs.length} files changed`,
-          )}</span>
-          <span class="codex-diff-summary-stats">+${escapeHtml(String(visibleDiffs.reduce((sum, diff) => sum + Number(diff.added || 0), 0)))} / -${escapeHtml(String(visibleDiffs.reduce((sum, diff) => sum + Number(diff.removed || 0), 0)))}</span>
-        </div>
-        ${visibleDiffs
-          .map((diff) => {
-            const undoKey = registerUndoSnapshot(diff);
-            const reviewOpen = activeReviewFilePath === diff.path;
-            const reviewDetail = reviewOpen ? reviewDetailCache.get(diff.path) : null;
-            const reviewStatus = getDiffReviewStatus(diff);
-            const reviewMarkup = reviewOpen
-              ? reviewDetail && !reviewDetail.error
-                ? renderReviewDetail(reviewDetail, {
-                    path: diff.path,
-                    additions: Number(diff.added || 0),
-                    deletions: Number(diff.removed || 0),
-                  })
-                : reviewDetail?.error
-                  ? `<div class="review-detail-error">${escapeHtml(reviewDetail.error)}</div>`
-                  : `<div class="review-detail-empty">${escapeHtml(t("reviewLoading"))}</div>`
-              : "";
-            return `
-              <div class="codex-diff-step">
-                <div class="codex-step-rail" aria-hidden="true">
-                  <span class="codex-step-dot"></span>
-                </div>
-                <div class="codex-diff-card codex-diff-card-${escapeHtml(reviewStatus)}">
-                  <div class="codex-diff-card-head">
-                    <button
-                      class="codex-diff-chip"
-                      type="button"
-                      data-open-workspace-file="${escapeHtml(diff.path)}"
-                      data-open-workspace-line="1"
-                      data-open-workspace-column="1"
-                    >
-                      <span class="codex-diff-path">${escapeHtml(diff.path)}</span>
-                      <span class="codex-diff-stats">+${escapeHtml(String(diff.added || 0))} / -${escapeHtml(String(diff.removed || 0))}</span>
-                    </button>
-                    <span class="codex-diff-status codex-diff-status-${escapeHtml(reviewStatus)}">${escapeHtml(renderDiffReviewStatus(reviewStatus))}</span>
-                    <div class="codex-diff-actions">
-                      <button class="codex-diff-open" type="button" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "Review" : "Review")}</button>
-                      ${reviewStatus === "accepted"
-                        ? ""
-                        : `<button class="codex-diff-open" type="button" data-accept-path="${escapeHtml(diff.path)}" data-accept-updated-at="${escapeHtml(String(diff.updated_at || 0))}">${escapeHtml(currentLanguage === "zh" ? "接受" : "Accept")}</button>`}
-                      <button class="codex-diff-open codex-diff-undo" type="button" data-undo-key="${escapeHtml(undoKey)}">${escapeHtml(currentLanguage === "zh" ? "撤销" : "Undo")}</button>
-                    </div>
-                  </div>
-                  <div class="codex-diff-meta">${escapeHtml(currentLanguage === "zh" ? "Agent 刚刚修改了这个文件" : "Agent just updated this file")}</div>
-                  <details class="codex-diff-review-panel"${reviewOpen ? " open" : ""}>
-                    <summary class="codex-diff-review-summary" data-review-path="${escapeHtml(diff.path)}">${escapeHtml(currentLanguage === "zh" ? "查看差异" : "View diff")}</summary>
-                    <div class="codex-diff-review-body">${reviewMarkup || `<div class="review-detail-empty">${escapeHtml(t("reviewLoading"))}</div>`}</div>
-                  </details>
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    `
-    : "";
+  const toolMarkup = renderRuntimeSectionCard(
+    currentLanguage === "zh" ? "工具调用" : "Tool calls",
+    String(visibleTools.length || ""),
+    toolBodyMarkup,
+    {
+      open: visibleTools.some((item) => ["pending", "approved", "executing"].includes(String(item?.status || "").toLowerCase())),
+      tone: visibleTools.some((item) => ["pending", "approved", "executing"].includes(String(item?.status || "").toLowerCase())) ? "running" : "",
+      className: "codex-runtime-section codex-runtime-tools",
+    },
+  );
 
   const permissionMarkup = streamingInlineRuntime && permission
     ? `
@@ -6594,8 +10361,8 @@ function renderAssistantTurn(turn, options = {}) {
           <span class="codex-step-dot"></span>
         </div>
         <div class="codex-approval-copy">
-          <div class="codex-approval-title">${escapeHtml(currentLanguage === "zh" ? "等待工具批准" : "Awaiting tool approval")}</div>
-          <div class="codex-approval-meta">${escapeHtml(permission.name || "")} 路 ${escapeHtml(permission.risk || "")}</div>
+          <div class="codex-approval-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
+          <div class="codex-approval-meta">${escapeHtml(permission.name || "")}${permission.risk ? ` · ${escapeHtml(permission.risk || "")}` : ""}</div>
         </div>
         <div class="codex-approval-actions">
           <button class="codex-approval-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
@@ -6605,20 +10372,18 @@ function renderAssistantTurn(turn, options = {}) {
     `
     : "";
 
-  const worklogMarkup = isStreaming && Array.isArray(turn?.worklog) && turn.worklog.length
-    ? `
-      <div class="codex-worklog-list">
-        ${turn.worklog
-          .slice(isStreaming ? -4 : -6)
-          .map((entry) => `
-            <div class="codex-worklog-item codex-worklog-${escapeHtml(String(entry.kind || "activity"))}">
-              <div class="codex-worklog-copy">${renderInlineMarkdown(entry.text || "")}</div>
-            </div>
-          `)
-          .join("")}
-      </div>
-    `
+  const diffMarkup = !isStreaming && visibleDiffs.length
+    ? renderAssistantDiffMarkup(visibleDiffs, { inline: true })
     : "";
+  const operationTimelineMarkup = buildOperationTimeline(turn, { isStreaming });
+  const operationDetailPanels = buildOperationDetailPanels(turn, { isStreaming });
+  const operationBodyMarkup = [
+    operationTimelineMarkup ? `<div class="codex-operation-timeline">${operationTimelineMarkup}</div>` : "",
+    permissionMarkup,
+    (operationDetailPanels || checkpointMarkup || diffMarkup)
+      ? `<div class="codex-operation-detail-stack">${operationDetailPanels}${checkpointMarkup}${diffMarkup}</div>`
+      : "",
+  ].filter(Boolean).join("");
 
   const thinkingMarkup = thinking.length
     ? thinking
@@ -6636,38 +10401,50 @@ function renderAssistantTurn(turn, options = {}) {
   const streamingParts = isStreaming
     ? renderStreamingAssistantContent(visibleText, {
         placeholder: pendingAssistantPlaceholderText(),
+        streaming: true,
       })
     : null;
+  const runtimeNarration = isStreaming ? visibleStreamingRuntimeNarration(turn) : "";
+  const runtimeNarrationParts = runtimeNarration
+    ? renderStreamingAssistantContent(runtimeNarration, { placeholder: "", streaming: true })
+    : null;
+  const showStreamingRuntimePanel = Boolean(runtimeNarrationParts && !streamingParts?.stableHtml && !streamingParts?.tailText);
 
   const textMarkup = isStreaming
     ? `
       <div class="codex-answer codex-answer-streaming${streamingParts?.isEmpty ? " codex-answer-empty" : ""}">
+        <div class="codex-streaming-runtime markdown-body"${showStreamingRuntimePanel ? "" : " hidden"} data-streaming-runtime>${runtimeNarrationParts?.html || ""}</div>
         <div class="codex-streaming-text markdown-body" data-streaming-markdown>
-          <div class="codex-streaming-stable" data-streaming-stable${streamingParts?.stableText ? "" : " hidden"}>${streamingParts?.stableHtml || ""}</div>
-          <span class="codex-streaming-tail" data-streaming-tail${streamingParts?.tailVisible ? "" : " hidden"}>${streamingParts?.tailHtml || ""}</span>
+          <div data-streaming-markdown-stable>${streamingParts?.stableHtml || ""}</div>
+          <pre class="codex-streaming-tail"${streamingParts?.tailText ? "" : " hidden"} data-streaming-markdown-tail>${escapeHtml(streamingParts?.tailText || "")}</pre>
         </div>
       </div>
     `
     : visibleText
       ? `<div class="codex-answer markdown-body">${renderMarkdown(visibleText)}</div>`
       : "";
+  const decisionCardMarkup = !isStreaming ? renderAssistantDecisionCard(decisionPresentation.card) : "";
 
+  const runtimePanelContent = [
+    operationBodyMarkup,
+  ].filter(Boolean).join("");
+  const runtimePanelMarkup = runtimePanelContent
+    ? renderAssistantRuntimePanel(runtimePanelContent, {
+        title: currentLanguage === "zh" ? "操作" : "Activity",
+        meta: runtimeSummaryParts.join(" / "),
+        open: isStreaming,
+        tone: isStreaming ? "running" : "",
+      })
+    : "";
   return `
     <article class="message-row assistant-row assistant-message-row codex-turn-row">
       <div class="codex-turn-shell">
         ${runtimeHead}
-        ${runtimeSummaryMarkup}
-        ${processMarkup}
-        ${delegateMarkup}
-        ${subagentMarkup}
-        ${verifierMarkup}
-        ${checkpointMarkup}
-        ${runtimeTimelineMarkup}
-        ${worklogMarkup}
         ${thinkingMarkup}
+        ${autoSkillsMarkup}
         ${textMarkup}
-        ${permissionMarkup}
-        ${diffMarkup}
+        ${runtimePanelMarkup}
+        ${decisionCardMarkup}
       </div>
     </article>
   `;
@@ -6709,47 +10486,33 @@ function updateAssistantBubble(content) {
     pendingAssistantBubble = appendAssistantBubble(content);
   }
   if (!activeAssistantTurn) resetActiveAssistantTurn();
+  const keepBottom = isNearMessageStreamBottom();
   const deltaContent = sanitizeMessageContent(String(content || ""));
   const currentContent = String(activeAssistantTurn.text || "");
   activeAssistantTurn.receivedDelta = true;
-  if (!currentContent) {
-    activeAssistantTurn.text = deltaContent;
-  } else if (!deltaContent) {
-    activeAssistantTurn.text = currentContent;
-  } else if (deltaContent === currentContent) {
-    activeAssistantTurn.text = currentContent;
-  } else if (deltaContent.startsWith(currentContent)) {
-    activeAssistantTurn.text = deltaContent;
-  } else if (currentContent.startsWith(deltaContent)) {
-    activeAssistantTurn.text = currentContent;
-  } else {
-    const overlapLimit = Math.min(currentContent.length, deltaContent.length);
-    let overlap = 0;
-    for (let index = overlapLimit; index > 0; index -= 1) {
-      if (currentContent.endsWith(deltaContent.slice(0, index))) {
-        overlap = index;
-        break;
-      }
-    }
-    const commonPrefix = (() => {
-      const limit = Math.min(currentContent.length, deltaContent.length);
-      let count = 0;
-      while (count < limit && currentContent[count] === deltaContent[count]) {
-        count += 1;
-      }
-      return count;
-    })();
-    const looksLikeSnapshot =
-      commonPrefix >= 24 &&
-      commonPrefix * 10 >= Math.min(currentContent.length, deltaContent.length) * 7;
-    activeAssistantTurn.text = looksLikeSnapshot
-      ? deltaContent
-      : `${currentContent}${deltaContent.slice(overlap)}`;
+  if (deltaContent.trim()) {
+    activeAssistantTurn.runtimeNarration = "";
   }
-  schedulePendingAssistantTextSync();
-  if (messageStream) {
-    scrollMessageStreamToBottom(true);
+  activeAssistantTurn.text = mergeStreamingTextDelta(currentContent, deltaContent);
+  captureAssistantOperationNarration(deltaContent);
+  if (activeAssistantTurn && assistantTextLooksLikeProcessNarration(deltaContent)) {
+    pushAssistantWorklog({
+      kind: "progress",
+      text: deltaContent,
+      dedupeKey: `delta-progress:${normalizeText(deltaContent)}`,
+    });
   }
+  schedulePendingAssistantTextSync({ keepBottom });
+}
+
+function updateRuntimeNarration(text) {
+  if (!activeAssistantTurn) return;
+  const next = normalizeAgentStageNarration(text);
+  if (!next) return;
+  const current = cleanDisplayText(String(activeAssistantTurn.runtimeNarration || "").trim(), "");
+  activeAssistantTurn.runtimeNarration = current
+    ? combineAssistantSegments(current, next)
+    : next;
 }
 
 function createThinkingBlock(message) {
@@ -6772,22 +10535,82 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
   const finalAssistantTurn = [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data);
   if (!finalAssistantTurn?.data) return false;
   const finalData = runtimeTurn
-    ? {
-        ...mergeAssistantTurnData(finalAssistantTurn.data, runtimeTurn, { preferLiveText: false }),
-        text: String(finalAssistantTurn.data?.text || runtimeTurn?.text || ""),
-        receivedDelta: false,
-      }
+      ? (() => {
+        const persistedText = cleanDisplayText(String(finalAssistantTurn.data?.text || ""), "");
+        const runtimeText = cleanDisplayText(String(runtimeTurn?.text || ""), "");
+        const merged = mergeAssistantTurnData(finalAssistantTurn.data, runtimeTurn, {
+          preferLiveText: !persistedText,
+        });
+        const selectedText = String(persistedText || merged?.text || runtimeText || "");
+        return {
+          ...merged,
+          text: selectedText,
+          receivedDelta: false,
+        };
+      })()
     : finalAssistantTurn.data;
   const keepBottom = isNearMessageStreamBottom();
   pendingAssistantBubble.innerHTML = renderAssistantTurn(finalData, { streaming: false });
   bindTurnInteractionHandlers(pendingAssistantBubble);
+  pendingAssistantBubble.querySelectorAll(".codex-runtime-panel-shell[open]").forEach((details) => {
+    animateDetailsToggle(details, false);
+  });
   resetPendingAssistantRenderState();
   pendingAssistantBubble = null;
   pendingUserBubble = null;
+  lastVisibleCompletionSignature = visibleMessagesSignature(visibleConversationMessages(messages || []));
   if (keepBottom) {
     scrollMessageStreamToBottom(true);
   }
   return true;
+}
+
+function ensureVisibleAssistantCompletionMessage(messages, fallbackTurn = activeAssistantTurn) {
+  const nextMessages = Array.isArray(messages) ? messages.slice() : [];
+  const fallbackText = completionFallbackAssistantContent(fallbackTurn);
+  const fallbackChoices = fallbackTurn?.assistantChoices
+    && Array.isArray(fallbackTurn.assistantChoices.options)
+    && fallbackTurn.assistantChoices.options.length
+      ? {
+          title: cleanDisplayText(fallbackTurn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")),
+          options: fallbackTurn.assistantChoices.options
+            .map((item) => cleanDisplayText(item || "", ""))
+            .filter(Boolean),
+        }
+      : null;
+  if (!fallbackText && !fallbackChoices) return nextMessages;
+  const fallbackCore = cleanDisplayText(assistantPrimaryReplyCore(fallbackText), "");
+
+  const turns = groupMessagesIntoTurns(visibleConversationMessages(nextMessages));
+  const lastAssistantTurn = [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data);
+  const lastAssistantText = cleanDisplayText(String(lastAssistantTurn?.data?.text || "").trim());
+  const lastAssistantCore = cleanDisplayText(assistantPrimaryReplyCore(lastAssistantText), "");
+  const lastAssistantHasChoices = Boolean(
+    lastAssistantTurn?.data?.assistantChoices
+    && Array.isArray(lastAssistantTurn.data.assistantChoices.options)
+    && lastAssistantTurn.data.assistantChoices.options.length,
+  );
+  if (
+    (lastAssistantHasChoices && fallbackChoices)
+    || (lastAssistantText &&
+    (lastAssistantText === fallbackText
+      || lastAssistantText.includes(fallbackText)
+      || fallbackText.includes(lastAssistantText)
+      || (fallbackCore && lastAssistantCore && (lastAssistantCore === fallbackCore || lastAssistantCore.includes(fallbackCore) || fallbackCore.includes(lastAssistantCore)))))
+  ) {
+    return nextMessages;
+  }
+
+  const fallbackMessage = {
+    kind: "message",
+    role: "assistant",
+    content: fallbackText || "",
+  };
+  if (fallbackChoices) {
+    fallbackMessage.assistant_choices = fallbackChoices;
+  }
+  nextMessages.push(fallbackMessage);
+  return nextMessages;
 }
 
 function createMessageRow(message) {
@@ -6824,6 +10647,7 @@ function createMessageRow(message) {
 function groupMessagesIntoTurns(messages) {
   const turns = [];
   let currentAssistant = null;
+  let lastStructuredToolResultContent = "";
 
   const flushAssistant = () => {
     if (currentAssistant) {
@@ -6851,14 +10675,63 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "message" && (message.role === "assistant" || message.role === "system" || message.role === "error")) {
-      currentAssistant.text = combineAssistantSegments(
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
+      if (message.assistant_choices && Array.isArray(message.assistant_choices.options) && message.assistant_choices.options.length) {
+        currentAssistant.assistantChoices = {
+          title: cleanDisplayText(message.assistant_choices.title || "", zhLabel("选择下一步", "Choose next step")),
+          options: message.assistant_choices.options.map((item) => cleanDisplayText(item || "", "")).filter(Boolean),
+        };
+      }
+      const nextContent = displayMarkdownText(message.content || "");
+      const nextLooksOperational = !isAssistantPrimaryReplyText(nextContent)
+        && !isAssistantFailureSummaryText(nextContent)
+        && !isAssistantVerificationAppendixText(nextContent);
+      if (nextLooksOperational) {
+        const currentNarration = cleanDisplayText(String(currentAssistant.progressNarration || "").trim(), "");
+        currentAssistant.progressNarration = currentNarration
+          ? mergeAssistantText(currentNarration, nextContent)
+          : nextContent;
+        pushTurnWorklogEntry(currentAssistant, {
+          kind: assistantTextLooksLikeProcessNarration(nextContent) ? "progress" : "activity",
+          text: nextContent,
+          dedupeKey: `message-progress:${normalizeText(nextContent)}`,
+        });
+      }
+      const hasPrimaryAssistantText = isAssistantPrimaryReplyText(currentAssistant.text || "");
+      const nextLooksAncillary = isAssistantFailureSummaryText(nextContent) || isAssistantVerificationAppendixText(nextContent);
+      if (hasPrimaryAssistantText && nextLooksAncillary) {
+        lastStructuredToolResultContent = "";
+        return;
+      }
+      if (lastStructuredToolResultContent) {
+        const normalizedNext = normalizedAssistantSubstantiveContent(nextContent);
+        const shouldReplaceWithToolResult =
+          !normalizedNext
+          || assistantTextLooksLikeProcessNarration(nextContent)
+          || isAssistantFailureSummaryText(nextContent);
+        if (shouldReplaceWithToolResult) {
+          currentAssistant.text = preferAssistantMessageContent(
+            currentAssistant.text || "",
+            lastStructuredToolResultContent,
+          );
+          lastStructuredToolResultContent = "";
+          return;
+        }
+      }
+      currentAssistant.text = preferAssistantMessageContent(
         currentAssistant.text || "",
-        displayMarkdownText(message.content || ""),
+        nextContent,
       );
+      lastStructuredToolResultContent = "";
       return;
     }
 
     if (message.kind === "thinking") {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       currentAssistant.thinking.push({
         content: message.content || "",
         collapsed: Boolean(message.collapsed),
@@ -6867,6 +10740,9 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "tool") {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       const callId = message.call_id || `${Date.now()}`;
       const existingTool = currentAssistant.tools.find((item) => item.call_id === callId);
       if (existingTool) {
@@ -6890,16 +10766,26 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "tool_result") {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       const tool = currentAssistant.tools.find((item) => item.call_id === message.call_id);
       if (tool) {
         tool.result = message.content || "";
         tool.success = message.success ?? null;
         tool.status = message.status || tool.status || "complete";
       }
+      const structuredToolResult = extractStructuredToolResultContent(message.content || "");
+      if (structuredToolResult) {
+        lastStructuredToolResultContent = structuredToolResult;
+      }
       return;
     }
 
     if (message.kind === "diff") {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       const diffPath = message.file_path || "";
       if (!diffPath) return;
       const existingDiff = currentAssistant.diffs.find((item) => item.path === diffPath);
@@ -6919,6 +10805,9 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "subagent" && message.subagent) {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       const id = String(message.subagent?.id || message.subagent?.name || "").trim() || `${Date.now()}`;
       const existing = currentAssistant.subagents.find((item) => String(item.id || "") === id);
       if (existing) {
@@ -6930,6 +10819,9 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "verification" && message.verifier) {
+      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
+        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
+      }
       currentAssistant.verifierReport = { ...message.verifier };
     }
   });
@@ -6939,7 +10831,12 @@ function groupMessagesIntoTurns(messages) {
 }
 
 function mergeActiveRuntimeIntoTurns(turns) {
-  if (!Array.isArray(turns) || !activeAssistantTurn) return turns;
+  if (
+    !Array.isArray(turns)
+    || !activeAssistantTurn
+    || !isVisibleSessionRunning()
+    || pendingAssistantBubble
+  ) return turns;
   const lastAssistantIndex = turns.map((item) => item?.kind).lastIndexOf("assistant_turn");
   if (lastAssistantIndex < 0) return turns;
   const entry = turns[lastAssistantIndex];
@@ -6951,6 +10848,19 @@ function mergeActiveRuntimeIntoTurns(turns) {
 }
 
 function bindTurnInteractionHandlers(scope = document) {
+  scope.querySelectorAll("[data-runtime-toggle]").forEach((summary) => {
+    if (!(summary instanceof HTMLElement)) return;
+    if (summary.dataset.boundRuntimeToggle === "true") return;
+    summary.dataset.boundRuntimeToggle = "true";
+    summary.addEventListener("click", (event) => {
+      const details = summary.closest("details[data-runtime-panel]");
+      if (!(details instanceof HTMLDetailsElement)) return;
+      event.preventDefault();
+      if (details.dataset.animating === "true") return;
+      animateDetailsToggle(details, !details.open);
+    });
+  });
+
   scope.querySelectorAll("[data-open-workspace-file]").forEach((button) => {
     if (button.dataset.boundWorkspaceOpen === "true") return;
     button.dataset.boundWorkspaceOpen = "true";
@@ -7011,7 +10921,7 @@ function bindTurnInteractionHandlers(scope = document) {
           activeReviewFilePath = null;
         }
         await loadBootstrap();
-        showToast(currentLanguage === "zh" ? "已撤销本次修改" : "Edit undone");
+        showToast(currentLanguage === "zh" ? "已撤销本次编辑" : "Edit undone");
       } catch (error) {
         console.error(error);
         showToast(error?.message || t("toastSendFailed"));
@@ -7062,11 +10972,88 @@ function bindTurnInteractionHandlers(scope = document) {
       }
     });
   });
+
+  scope.querySelectorAll("[data-paper-workspace-section]").forEach((button) => {
+    if (button.dataset.boundPaperWorkspaceSection === "true") return;
+    button.dataset.boundPaperWorkspaceSection = "true";
+    button.addEventListener("click", () => {
+      paperWorkspaceState.sectionId = cleanDisplayText(button.getAttribute("data-paper-workspace-section") || "", "");
+      paperWorkspaceState.label = cleanDisplayText(button.getAttribute("data-paper-workspace-title") || "", "");
+      renderResearch(bootstrapData?.research || null);
+    });
+  });
+
+  scope.querySelectorAll("[data-decision-option]").forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    if (button.dataset.boundDecisionOption === "true") return;
+    button.dataset.boundDecisionOption = "true";
+    button.addEventListener("click", async () => {
+      const value = button.getAttribute("data-decision-option") || "";
+      if (!value || !messageInput) return;
+      if (isSending) return;
+      messageInput.value = value;
+      await sendMessage();
+    });
+  });
+
+  scope.querySelectorAll("[data-decision-custom-submit]").forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    if (button.dataset.boundDecisionSubmit === "true") return;
+    button.dataset.boundDecisionSubmit = "true";
+    button.addEventListener("click", async () => {
+      const card = button.closest(".codex-decision-card");
+      const input = card?.querySelector("[data-decision-custom-input]");
+      if (!(input instanceof HTMLTextAreaElement) || !messageInput) return;
+      const value = String(input.value || "").trim();
+      if (!value) return;
+      messageInput.value = value;
+      await sendMessage();
+    });
+  });
+}
+
+function animateDetailsToggle(details, open) {
+  if (!(details instanceof HTMLDetailsElement)) return;
+  const content = details.querySelector(".codex-runtime-panel-body, .codex-runtime-card-body");
+  if (!(content instanceof HTMLElement)) {
+    details.open = open;
+    return;
+  }
+  const startHeight = details.offsetHeight;
+  details.open = true;
+  const expandedHeight = details.offsetHeight;
+  const summary = details.querySelector("summary");
+  if (summary instanceof HTMLElement) {
+    summary.style.pointerEvents = "none";
+  }
+  if (!open) {
+    details.open = true;
+  }
+  const endHeight = open ? expandedHeight : (summary instanceof HTMLElement ? summary.offsetHeight : Math.min(startHeight, 44));
+  details.style.height = `${startHeight}px`;
+  details.style.overflow = "clip";
+  details.dataset.animating = "true";
+  requestAnimationFrame(() => {
+    details.style.transition = "height 220ms cubic-bezier(0.2, 0.82, 0.2, 1), opacity 220ms cubic-bezier(0.2, 0.82, 0.2, 1)";
+    details.style.height = `${endHeight}px`;
+    details.style.opacity = open ? "1" : "0.98";
+  });
+  window.setTimeout(() => {
+    details.open = open;
+    details.style.removeProperty("height");
+    details.style.removeProperty("overflow");
+    details.style.removeProperty("transition");
+    details.style.removeProperty("opacity");
+    delete details.dataset.animating;
+    if (summary instanceof HTMLElement) {
+      summary.style.removeProperty("pointer-events");
+    }
+  }, 240);
 }
 
 function renderEmptyState() {
-  const researchText = currentLanguage === "zh" ? "今天想研究点什么？" : "What would you like to explore today?";
-  const chatText = currentLanguage === "zh" ? "告诉我你的想法" : "Tell me what you're thinking";
+  const researchText = currentLanguage === "zh" ? "今天想探索什么？" : "What would you like to explore today?";
+  const chatText = currentLanguage === "zh" ? "告诉我你在想什么" : "Tell me what you're thinking";
   return `
     <div class="empty-state">
       <div class="empty-state-perspective" aria-hidden="true">
@@ -7165,10 +11152,41 @@ function renderMessages(messages, options = {}) {
       const wrapper = document.createElement("div");
       wrapper.className = "codex-turn-anchor";
       wrapper.innerHTML = renderAssistantTurn(turn.data, { streaming: false });
+      wrapper.querySelectorAll(".codex-runtime-panel-shell[open]").forEach((details) => {
+        const shell = details;
+        if (shell instanceof HTMLDetailsElement) {
+          shell.open = false;
+        }
+      });
       messageStream.appendChild(wrapper);
     }
   });
+  const conversationPaperPrompt = renderConversationPaperWorkflowPrompt(bootstrapData?.research || null);
+  if (conversationPaperPrompt) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "codex-turn-anchor conversation-paper-entry-anchor";
+    wrapper.innerHTML = conversationPaperPrompt;
+    messageStream.appendChild(wrapper);
+  }
+  const conversationPdfEntry = renderConversationPaperPdfEntry(bootstrapData?.research || null);
+  if (conversationPdfEntry) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "codex-turn-anchor conversation-paper-entry-anchor";
+    wrapper.innerHTML = conversationPdfEntry;
+    messageStream.appendChild(wrapper);
+  }
   bindTurnInteractionHandlers(messageStream);
+  messageStream.querySelectorAll("[data-inline-link]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      const href = cleanDisplayText(link.getAttribute("data-inline-link") || "");
+      if (!href) return;
+      event.preventDefault();
+      openUrlInAppBrowser(href).catch((error) => {
+        console.error(error);
+        showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+      });
+    });
+  });
   resetPendingAssistantRenderState();
   requestAnimationFrame(() => {
     if (preserveScroll) {
@@ -7404,6 +11422,9 @@ function renderWorkspaceFile(file, options = {}) {
     workspaceCodePath.textContent = "Select a file";
     workspaceCodeMeta.textContent = "";
     document.querySelector(".workspace-code-panel")?.classList.add("is-closed");
+    if (workspaceLauncher) {
+      workspaceLauncher.hidden = !preserveWorkspaceSlotWhenCodeClosed;
+    }
     disposeWorkspaceMonaco();
     updateWorkspaceCodeView();
     return;
@@ -7425,13 +11446,15 @@ function renderWorkspaceFile(file, options = {}) {
         : (workspaceRenderModeByPath.get(file.path) || "rendered"))
     : "source";
   markWorkspaceEditorDirty(workspaceFileDisplayContent(file) !== String(file.content || ""));
-  if (!preservePanelVisibility) {
-    ensureCodePanelVisible();
-    document.querySelector(".workspace-code-panel")?.classList.remove("is-closed");
+  ensureCodePanelVisible();
+  document.querySelector(".workspace-code-panel")?.classList.remove("is-closed");
+  if (workspaceLauncher) {
+    workspaceLauncher.hidden = true;
   }
   workspaceCodePath.textContent = file.path || file.name || "";
   workspaceCodeMeta.textContent = workspaceFileMetaText(file);
   updateWorkspaceCodeView();
+  scheduleWorkspaceMonacoLayout();
 }
 
 async function loadWorkspaceFile(path, options = {}) {
@@ -7543,7 +11566,7 @@ function renderReviewDetail(detail, file) {
             ? `<img class="review-artifact-image" src="${escapeHtml(rawUrl)}" alt="${escapeHtml(reviewPath || "artifact")}" />`
             : previewKind === "pdf" && rawUrl
               ? `<iframe class="review-artifact-frame" src="${escapeHtml(rawUrl)}" title="${escapeHtml(reviewPath || "artifact")}"></iframe>`
-              : `<div class="review-detail-empty">${escapeHtml(currentLanguage === "zh" ? "该产物为二进制文件，请在工作区中打开预览。" : "This artifact is binary. Open it in the workspace preview.")}</div>`
+              : `<div class="review-detail-empty">${escapeHtml(currentLanguage === "zh" ? "该产物为二进制文件，请在工作区预览中打开。" : "This artifact is binary. Open it in the workspace preview.")}</div>`
         }
       </div>
     `
@@ -7762,10 +11785,10 @@ function researchSecurityClass(level) {
 function researchWorkflowLabel(kind) {
   const key = String(kind || "").trim().toLowerCase();
   const labels = {
-    deep_learning: currentLanguage === "zh" ? "深度学习研究" : "Deep learning",
+    deep_learning: currentLanguage === "zh" ? "深度学习" : "Deep learning",
     experimental_design: currentLanguage === "zh" ? "实验设计" : "Experimental design",
     literature_review: currentLanguage === "zh" ? "文献综述" : "Literature review",
-    simulation: currentLanguage === "zh" ? "仿真研究" : "Simulation",
+    simulation: currentLanguage === "zh" ? "仿真" : "Simulation",
     data_analysis: currentLanguage === "zh" ? "数据分析" : "Data analysis",
     adaptive_research: currentLanguage === "zh" ? "自适应研究" : "Adaptive research",
   };
@@ -7776,7 +11799,7 @@ function researchStateLabel(state) {
   const key = String(state || "").trim().toLowerCase();
   const labels = {
     active: currentLanguage === "zh" ? "进行中" : "Active",
-    blocked: currentLanguage === "zh" ? "受阻" : "Blocked",
+    blocked: currentLanguage === "zh" ? "已阻塞" : "Blocked",
     resumable: currentLanguage === "zh" ? "可恢复" : "Resumable",
     complete: currentLanguage === "zh" ? "已完成" : "Complete",
   };
@@ -7930,7 +11953,7 @@ function renderResearchRuntimeSubagents(items, options = {}) {
               <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(item.status || ""))}</span>
             </summary>
             <div class="research-runtime-body">
-              ${cleanDisplayText(item.purpose) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("职责", "Purpose"))}</span><strong>${escapeHtml(cleanDisplayText(item.purpose))}</strong></div>` : ""}
+              ${cleanDisplayText(item.purpose) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("目的", "Purpose"))}</span><strong>${escapeHtml(cleanDisplayText(item.purpose))}</strong></div>` : ""}
               ${cleanDisplayText(item.input) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输入", "Input"))}</span><strong>${escapeHtml(cleanDisplayText(item.input))}</strong></div>` : ""}
               ${cleanDisplayText(String(item.output || "").slice(0, options.outputLimit || 220)) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输出", "Output"))}</span><strong>${escapeHtml(cleanDisplayText(String(item.output || "").slice(0, options.outputLimit || 220)))}</strong></div>` : ""}
               ${
@@ -7961,7 +11984,7 @@ function renderResearchRuntimeVerifier(report, options = {}) {
         <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(report.status || ""))}</span>
       </summary>
       <div class="research-runtime-body">
-        ${cleanDisplayText(report.summary) ? `<div class="research-runtime-line"><span>${escapeHtml(currentLanguage === "zh" ? "总结" : "Summary")}</span><strong>${escapeHtml(cleanDisplayText(report.summary))}</strong></div>` : ""}
+        ${cleanDisplayText(report.summary) ? `<div class="research-runtime-line"><span>${escapeHtml(currentLanguage === "zh" ? "摘要" : "Summary")}</span><strong>${escapeHtml(cleanDisplayText(report.summary))}</strong></div>` : ""}
         ${
           Array.isArray(report.checks) && report.checks.length
             ? `<div class="research-runtime-list">${report.checks.slice(0, options.checkLimit || 6).map((item) => {
@@ -8029,8 +12052,1341 @@ function renderRuntimeTimeline(items, options = {}) {
   `;
 }
 
+function reviewerFeedbackSessionId() {
+  return String(bootstrapData?.current_session_id || "").trim();
+}
+
+function currentReviewerFeedbackDraft(sessionId = reviewerFeedbackSessionId()) {
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    return {
+      reviewer: "",
+      score: "",
+      comment: "",
+      linkedRunId: "",
+    };
+  }
+  if (!reviewerFeedbackDrafts.has(id)) {
+    reviewerFeedbackDrafts.set(id, {
+      reviewer: "",
+      score: "",
+      comment: "",
+      linkedRunId: "",
+    });
+  }
+  return reviewerFeedbackDrafts.get(id);
+}
+
+function syncReviewerFeedbackDraftFromResearch(research) {
+  const sessionId = reviewerFeedbackSessionId();
+  if (!sessionId) return;
+  const draft = currentReviewerFeedbackDraft(sessionId);
+  const currentRunId = cleanDisplayText(research?.reviewer_feedback?.current_run_id || "");
+  if (currentRunId && !String(draft.linkedRunId || "").trim()) {
+    draft.linkedRunId = currentRunId;
+  }
+}
+
+function resetReviewerFeedbackDraft(sessionId = reviewerFeedbackSessionId(), research = bootstrapData?.research || null) {
+  const id = String(sessionId || "").trim();
+  if (!id) return;
+  const nextRunId = cleanDisplayText(research?.reviewer_feedback?.current_run_id || "");
+  reviewerFeedbackDrafts.set(id, {
+    reviewer: "",
+    score: "",
+    comment: "",
+    linkedRunId: nextRunId,
+  });
+}
+
+function renderConversationPaperPdfEntry(research) {
+  if (currentWorkspaceMode !== "research") return "";
+  const paperWorkflow = research?.paper_workflow || null;
+  const pdfPath = cleanDisplayText(paperWorkflow?.paper_pdf_path || "", "");
+  const pdfStatus = cleanDisplayText(paperWorkflow?.pdf_compile_status || "", "");
+  if (!pdfPath || normalizeText(pdfStatus) !== "compiled") return "";
+  const sourceRunId = cleanDisplayText(paperWorkflow?.source_run_id || "", "");
+  const summary = cleanDisplayText(
+    paperWorkflow?.summary || research?.summary || "",
+    zhLabel("论文 PDF 已可打开。", "Paper PDF is ready to open."),
+  ) || zhLabel("论文 PDF 已可打开。", "Paper PDF is ready to open.");
+  const statusLabel = paperPdfStatusLabel(pdfStatus);
+  const runLabel = sourceRunId
+    ? zhLabel(`来源运行 ${sourceRunId}`, `Source run ${sourceRunId}`)
+    : zhLabel("研究产物", "Research deliverable");
+  return `
+    <section class="conversation-paper-entry" aria-label="${escapeHtml(zhLabel("论文 PDF 条目", "Paper PDF entry"))}">
+      <div class="conversation-paper-entry-head">
+        <span class="conversation-paper-entry-kicker">${escapeHtml(zhLabel("论文输出", "Paper output"))}</span>
+        <span class="paper-workflow-pill ${escapeHtml(paperPdfStatusClass(pdfStatus))}">${escapeHtml(statusLabel)}</span>
+      </div>
+      <button
+        class="conversation-paper-entry-card"
+        type="button"
+        data-open-workspace-file="${escapeHtml(pdfPath)}"
+      >
+        <span class="conversation-paper-entry-main">
+          <strong>${escapeHtml(zhLabel("打开论文 PDF", "Open paper PDF"))}</strong>
+          <span>${escapeHtml(summary)}</span>
+          <span class="conversation-paper-entry-path">${escapeHtml(basename(pdfPath))}</span>
+        </span>
+        <span class="conversation-paper-entry-meta">${escapeHtml(runLabel)}</span>
+      </button>
+    </section>
+  `;
+}
+
+function renderConversationPaperWorkflowPrompt(research) {
+  if (currentWorkspaceMode !== "research") return "";
+  if (!shouldShowPaperWorkflowPrompt(research)) return "";
+  const sessionId = String(bootstrapData?.current_session_id || "").trim();
+  const pending = Boolean(sessionId) && paperWorkflowPendingSessions.has(sessionId);
+  const primaryLabel = pending ? t("paperWorkflowRunning") : t("paperWorkflowPromptGenerate");
+  const metaLabel = zhLabel("研究闭环完成", "Research loop complete");
+  return `
+    <section class="conversation-paper-entry" aria-label="${escapeHtml(t("paperWorkflowPromptTitle"))}">
+      <div class="conversation-paper-entry-card conversation-paper-prompt-card">
+        <div class="conversation-paper-entry-head">
+          <span class="conversation-paper-entry-kicker">${escapeHtml(t("paperWorkflowPromptTitle"))}</span>
+          <span class="paper-workflow-pill is-ready">${escapeHtml(metaLabel)}</span>
+        </div>
+        <div class="conversation-paper-entry-main">
+          <strong>${escapeHtml(t("paperWorkflowPromptReady"))}</strong>
+          <span>${escapeHtml(t("paperWorkflowPromptHint"))}</span>
+        </div>
+        <div class="conversation-paper-prompt-actions">
+          <button
+            class="paper-workflow-run"
+            type="button"
+            data-paper-workflow-run="true"
+            ${pending ? "disabled" : ""}
+          >${escapeHtml(primaryLabel)}</button>
+          <button
+            class="paper-workflow-link conversation-paper-prompt-dismiss"
+            type="button"
+            data-paper-workflow-dismiss="${escapeHtml(sessionId)}"
+          >${escapeHtml(t("paperWorkflowPromptLater"))}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function updateReviewerFeedbackDraft(field, value, sessionId = reviewerFeedbackSessionId()) {
+  const id = String(sessionId || "").trim();
+  if (!id) return;
+  const draft = currentReviewerFeedbackDraft(id);
+  draft[field] = value;
+}
+
+function reviewerFeedbackStateText(entry) {
+  return entry?.resolved ? t("reviewerFeedbackResolved") : t("reviewerFeedbackOpen");
+}
+
+function reviewerFeedbackStateClass(entry) {
+  return entry?.resolved ? "resolved" : "open";
+}
+
+function formatReviewerFeedbackScore(score) {
+  if (score == null || Number.isNaN(Number(score))) return "";
+  return String(Number(score));
+}
+
+function normalizeReviewerFeedbackPayload(payload) {
+  const feedback = payload?.reviewer_feedback || payload || {};
+  return {
+    session_id: cleanDisplayText(feedback.session_id || ""),
+    current_run_id: cleanDisplayText(feedback.current_run_id || ""),
+    unresolved_count: Number(feedback.unresolved_count || 0),
+    entries: Array.isArray(feedback.entries)
+      ? feedback.entries.map((entry) => ({
+          reviewer: cleanDisplayText(entry?.reviewer || ""),
+          linked_run_id: cleanDisplayText(entry?.linked_run_id || ""),
+          score: entry?.score == null ? null : Number(entry.score),
+          comment: cleanDisplayText(entry?.comment || ""),
+          resolved: Boolean(entry?.resolved),
+          created_at: cleanDisplayText(entry?.created_at || ""),
+          resolved_at: cleanDisplayText(entry?.resolved_at || ""),
+        }))
+      : [],
+  };
+}
+
+function commitReviewerFeedbackPayload(payload, { render = true } = {}) {
+  const normalized = normalizeReviewerFeedbackPayload(payload);
+  bootstrapData = {
+    ...(bootstrapData || {}),
+    research: {
+      ...(bootstrapData?.research || {}),
+      reviewer_feedback: normalized,
+    },
+  };
+  syncReviewerFeedbackDraftFromResearch(bootstrapData.research);
+  if (render) {
+    renderResearch(bootstrapData?.research || null);
+  }
+  return normalized;
+}
+
+async function refreshReviewerFeedback(options = {}) {
+  const { silent = false } = options;
+  const sessionId = await ensureSessionReady();
+  if (!sessionId || reviewerFeedbackPendingSessions.has(sessionId)) {
+    return bootstrapData?.research?.reviewer_feedback || null;
+  }
+  reviewerFeedbackPendingSessions.add(sessionId);
+  try {
+    const response = await hostClient.reviewerFeedback.state();
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `reviewer feedback state failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    const next = commitReviewerFeedbackPayload(payload?.data || payload);
+    if (!silent) {
+      showToast(t("toastReviewerFeedbackRefreshed"));
+    }
+    return next;
+  } finally {
+    reviewerFeedbackPendingSessions.delete(sessionId);
+  }
+}
+
+async function submitReviewerFeedback() {
+  const sessionId = await ensureSessionReady();
+  const draft = currentReviewerFeedbackDraft(sessionId);
+  const reviewer = String(draft.reviewer || "").trim();
+  const comment = String(draft.comment || "").trim();
+  const linkedRunId = String(draft.linkedRunId || "").trim();
+  const scoreText = String(draft.score || "").trim();
+
+  if (!reviewer || !comment) {
+    showToast(t("reviewerFeedbackValidation"));
+    return;
+  }
+
+  let score = null;
+  if (scoreText) {
+    score = Number(scoreText);
+    if (!Number.isFinite(score) || score < 0 || score > 100) {
+      showToast(t("reviewerFeedbackScoreInvalid"));
+      return;
+    }
+    score = Math.round(score);
+  }
+
+  const response = await hostClient.reviewerFeedback.add({
+    reviewer,
+    linked_run_id: linkedRunId || null,
+    score,
+    comment,
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `reviewer feedback add failed: ${response.status}`);
+  }
+  const payload = await response.json();
+  commitReviewerFeedbackPayload(payload?.data || payload);
+  resetReviewerFeedbackDraft(sessionId, bootstrapData?.research || null);
+  renderResearch(bootstrapData?.research || null);
+  showToast(t("toastReviewerFeedbackSaved"));
+}
+
+async function resolveReviewerFeedback(index) {
+  const response = await hostClient.reviewerFeedback.resolve(index);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `reviewer feedback resolve failed: ${response.status}`);
+  }
+  const payload = await response.json();
+  commitReviewerFeedbackPayload(payload?.data || payload);
+  showToast(t("toastReviewerFeedbackResolved"));
+}
+
+function renderReviewerFeedbackPanel(reviewerFeedback, options = {}) {
+  const compact = options.compact === true;
+  const allowForm = options.allowForm !== false;
+  const entries = Array.isArray(reviewerFeedback?.entries) ? reviewerFeedback.entries : [];
+  const unresolvedCount = Number(reviewerFeedback?.unresolved_count || 0);
+  const currentRunId = cleanDisplayText(reviewerFeedback?.current_run_id || "");
+  const sessionId = reviewerFeedbackSessionId();
+  const draft = currentReviewerFeedbackDraft(sessionId);
+  if (currentRunId && !String(draft.linkedRunId || "").trim()) {
+    draft.linkedRunId = currentRunId;
+  }
+  const visibleEntries = compact ? entries.slice(0, 2) : entries;
+  const metaText = template("reviewerFeedbackMeta", {
+    count: unresolvedCount,
+    total: entries.length,
+  });
+  const panelClass = compact ? "reviewer-feedback-panel is-compact" : "reviewer-feedback-panel";
+  const currentRunLine = currentRunId
+    ? `
+      <div class="reviewer-feedback-current-run">
+        <span>${escapeHtml(t("reviewerFeedbackCurrentRun"))}</span>
+        <strong>${escapeHtml(currentRunId)}</strong>
+      </div>
+    `
+    : "";
+  const listMarkup = visibleEntries.length
+    ? `
+      <div class="reviewer-feedback-list">
+        ${visibleEntries
+          .map((entry, index) => `
+            <article class="reviewer-feedback-item is-${escapeHtml(reviewerFeedbackStateClass(entry))}">
+              <div class="reviewer-feedback-item-head">
+                <div class="reviewer-feedback-item-main">
+                  <strong>${escapeHtml(entry.reviewer || t("reviewerFeedbackReviewer"))}</strong>
+                  ${entry.linked_run_id ? `<span class="reviewer-feedback-item-run">${escapeHtml(entry.linked_run_id)}</span>` : ""}
+                </div>
+                <div class="reviewer-feedback-item-side">
+                  ${entry.score != null ? `<span class="reviewer-feedback-score">${escapeHtml(formatReviewerFeedbackScore(entry.score))}</span>` : ""}
+                  <span class="reviewer-feedback-badge is-${escapeHtml(reviewerFeedbackStateClass(entry))}">${escapeHtml(reviewerFeedbackStateText(entry))}</span>
+                </div>
+              </div>
+              <div class="reviewer-feedback-comment">${escapeHtml(entry.comment || "")}</div>
+              ${
+                !compact
+                  ? `
+                    <div class="reviewer-feedback-item-meta">
+                      ${entry.created_at ? `<span>${escapeHtml(formatSessionTime(entry.created_at))}</span>` : "<span></span>"}
+                      ${entry.resolved ? "" : `<button class="reviewer-feedback-action" type="button" data-reviewer-feedback-resolve="${index}">${escapeHtml(t("reviewerFeedbackResolve"))}</button>`}
+                    </div>
+                  `
+                  : ""
+              }
+            </article>
+          `)
+          .join("")}
+      </div>
+    `
+    : `<div class="reviewer-feedback-empty">${escapeHtml(t("reviewerFeedbackEmpty"))}</div>`;
+
+  const formMarkup = allowForm && !compact
+    ? `
+      <form class="reviewer-feedback-form" data-reviewer-feedback-form="true">
+        <div class="reviewer-feedback-form-head">
+          <div class="reviewer-feedback-hint">${escapeHtml(t("reviewerFeedbackDraftHint"))}</div>
+          <button class="reviewer-feedback-refresh" type="button" data-reviewer-feedback-refresh="true">${escapeHtml(t("reviewerFeedbackRefresh"))}</button>
+        </div>
+        <div class="reviewer-feedback-form-grid">
+          <label class="reviewer-feedback-field">
+            <span>${escapeHtml(t("reviewerFeedbackReviewer"))}</span>
+            <input type="text" value="${escapeHtml(draft.reviewer || "")}" data-reviewer-feedback-field="reviewer" />
+          </label>
+          <label class="reviewer-feedback-field">
+            <span>${escapeHtml(t("reviewerFeedbackScore"))}</span>
+            <input type="number" min="0" max="100" placeholder="${escapeHtml(t("reviewerFeedbackScoreHint"))}" value="${escapeHtml(String(draft.score || ""))}" data-reviewer-feedback-field="score" />
+          </label>
+          <label class="reviewer-feedback-field reviewer-feedback-field-wide">
+            <span>${escapeHtml(t("reviewerFeedbackRunId"))}</span>
+            <input type="text" value="${escapeHtml(draft.linkedRunId || currentRunId || "")}" data-reviewer-feedback-field="linkedRunId" />
+          </label>
+          <label class="reviewer-feedback-field reviewer-feedback-field-wide">
+            <span>${escapeHtml(t("reviewerFeedbackComment"))}</span>
+            <textarea rows="3" data-reviewer-feedback-field="comment">${escapeHtml(draft.comment || "")}</textarea>
+          </label>
+        </div>
+        <div class="reviewer-feedback-form-actions">
+          <button class="reviewer-feedback-submit" type="submit">${escapeHtml(t("reviewerFeedbackAdd"))}</button>
+        </div>
+      </form>
+    `
+    : "";
+
+  const actionBar = compact
+    ? `<div class="reviewer-feedback-compact-actions"><button class="reviewer-feedback-refresh" type="button" data-reviewer-feedback-refresh="true">${escapeHtml(t("reviewerFeedbackRefresh"))}</button></div>`
+    : "";
+
+  return `
+    <section class="${panelClass}">
+      <div class="reviewer-feedback-head">
+        <div>
+          <div class="reviewer-feedback-title">${escapeHtml(t("reviewerFeedbackTitle"))}</div>
+          <div class="reviewer-feedback-meta">${escapeHtml(metaText)}</div>
+        </div>
+      </div>
+      ${currentRunLine}
+      ${listMarkup}
+      ${actionBar}
+      ${formMarkup}
+    </section>
+  `;
+}
+
+function pushPaperWorkflowArtifact(items, seen, label, kind, rawPath) {
+  const path = cleanDisplayText(rawPath || "", "");
+  if (!path) return;
+  const normalizedPath = path.replace(/\\/g, "/");
+  if (seen.has(normalizedPath)) return;
+  seen.add(normalizedPath);
+  items.push({
+    label: cleanDisplayText(label || "", zhLabel("论文产物", "Paper artifact")) || zhLabel("论文产物", "Paper artifact"),
+    kind: cleanDisplayText(kind || "", ""),
+    path,
+  });
+}
+
+function paperWorkflowArtifacts(research) {
+  const paperWorkflow = research?.paper_workflow || null;
+  const items = [];
+  const seen = new Set();
+  if (Array.isArray(paperWorkflow?.artifacts)) {
+    paperWorkflow.artifacts.forEach((artifact) => {
+      pushPaperWorkflowArtifact(
+        items,
+        seen,
+        artifact?.label || "",
+        artifact?.kind || "",
+        artifact?.path || "",
+      );
+    });
+  }
+  pushPaperWorkflowArtifact(items, seen, zhLabel("论文 PDF", "Paper PDF"), "pdf", paperWorkflow?.paper_pdf_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("论文 LaTeX", "Paper LaTeX"), "latex", paperWorkflow?.paper_latex_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("论文 Markdown", "Paper Markdown"), "markdown", paperWorkflow?.paper_markdown_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("参考文献 BibTeX", "References BibTeX"), "bibtex", paperWorkflow?.references_bib_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("产物附录", "Artifact Appendix"), "markdown", paperWorkflow?.appendix_markdown_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("结果包", "Result Bundle"), "json", paperWorkflow?.result_bundle_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("审查回复", "Review Response"), "json", paperWorkflow?.review_response_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("修订执行计划", "Revision Execution Plan"), "json", paperWorkflow?.revision_execution_plan_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("Workflow Checkpoint", "Workflow Checkpoint"), "json", paperWorkflow?.workflow_checkpoint_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("Rebuttal", "Reviewer Rebuttal"), "markdown", paperWorkflow?.rebuttal_markdown_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("论文章节", "Paper Sections"), "json", paperWorkflow?.section_bundle_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("修订前稿件", "Manuscript Before"), "json", paperWorkflow?.manuscript_bundle_before_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("修订后稿件", "Manuscript After"), "json", paperWorkflow?.manuscript_bundle_after_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("稿件 Diff", "Manuscript Diff"), "json", paperWorkflow?.manuscript_diff_path || "");
+  pushPaperWorkflowArtifact(items, seen, zhLabel("论文打包", "Paper Bundle"), "json", paperWorkflow?.payload_path || "");
+  return items;
+}
+
+function paperWorkflowPrimaryPath(research) {
+  const paperWorkflow = research?.paper_workflow || null;
+  return cleanDisplayText(
+    paperWorkflow?.paper_pdf_path
+      || paperWorkflow?.paper_latex_path
+      || paperWorkflow?.paper_markdown_path
+      || "",
+    "",
+  );
+}
+
+function paperWorkflowArtifactKindLabel(kind) {
+  const key = normalizeText(kind);
+  const labels = {
+    markdown: "Markdown",
+    latex: "LaTeX",
+    pdf: "PDF",
+    bibtex: "BibTeX",
+    json: "JSON",
+  };
+  return labels[key] || cleanDisplayText(kind || "", zhLabel("文件", "File")) || zhLabel("文件", "File");
+}
+
+function paperWorkflowLifecycleBadge(research) {
+  const workflow = research?.paper_workflow || null;
+  const ready = research?.paper_ready || null;
+  if (!workflow) {
+    return {
+      label: zhLabel("草稿待生成", "Draft pending"),
+      className: "is-pending",
+    };
+  }
+  if (ready?.ready) {
+    return {
+      label: zhLabel("论文已就绪", "Paper ready"),
+      className: "is-ready",
+    };
+  }
+  return {
+    label: zhLabel("需要修订", "Needs revision"),
+    className: "is-attention",
+  };
+}
+
+function paperRevisionModeLabel(mode) {
+  const key = normalizeText(mode);
+  const labels = {
+    fresh_draft: zhLabel("初始草稿", "Initial draft"),
+    reviewer_guided_revision: zhLabel("审稿意见引导修订", "Reviewer-guided revision"),
+    targeted_revision: zhLabel("鐎规艾鎮滄穱顔款吂", "Targeted revision"),
+    force_rewrite: zhLabel("瀵搫鍩楅柌宥呭晸", "Forced rewrite"),
+    rewrite: zhLabel("重写", "Rewrite"),
+  };
+  return labels[key] || cleanDisplayText(mode || "", zhLabel("修订", "Revision"));
+}
+
+function paperPdfStatusClass(status) {
+  const key = normalizeText(status);
+  if (key === "compiled") return "is-ready";
+  if (key === "missing_toolchain") return "is-pending";
+  if (key === "failed" || key === "error") return "is-attention";
+  return "is-neutral";
+}
+
+function paperPdfStatusLabel(status) {
+  const key = normalizeText(status);
+  const labels = {
+    compiled: zhLabel("PDF 已编译", "PDF compiled"),
+    missing_toolchain: zhLabel("缺少 TeX 工具链", "TeX toolchain missing"),
+    failed: zhLabel("PDF 编译失败", "PDF compile failed"),
+    error: zhLabel("PDF 编译失败", "PDF compile failed"),
+    pending: zhLabel("PDF 编译中", "PDF compiling"),
+    running: zhLabel("PDF 编译中", "PDF compiling"),
+  };
+  return labels[key] || cleanDisplayText(status || "", zhLabel("PDF 状态未知", "PDF status unknown"));
+}
+
+function paperWorkflowTriggerLabel(mode) {
+  const key = normalizeText(mode);
+  const labels = {
+    manual: zhLabel("手动", "Manual"),
+    auto_finalize: zhLabel("自动收尾", "Auto finalize"),
+    auto_bootstrap: zhLabel("自动引导", "Auto bootstrap"),
+    auto_feedback_add: zhLabel("收到反馈后自动触发", "Auto on feedback add"),
+    auto_feedback_resolve: zhLabel("反馈解决后自动触发", "Auto on feedback resolve"),
+  };
+  if (labels[key]) return labels[key];
+  if (key.startsWith("auto")) return zhLabel("自动", "Auto");
+  return cleanDisplayText(mode || "", zhLabel("未知触发器", "Unknown trigger"));
+}
+
+function renderPaperWorkflowMetaRows(rows) {
+  const visibleRows = rows.filter((row) => row && cleanDisplayText(row.value || "", ""));
+  if (!visibleRows.length) return "";
+  return `
+    <div class="paper-workflow-meta-list">
+      ${visibleRows.map((row) => `
+        <div class="paper-workflow-meta-row">
+          <span class="paper-workflow-meta-label">${escapeHtml(row.label)}</span>
+          <span class="paper-workflow-meta-value">${escapeHtml(cleanDisplayText(row.value || "", ""))}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPaperRevisionQueue(paperWorkflow, compact = false) {
+  const queueSize = Number(paperWorkflow?.revision_queue_size || 0) || 0;
+  const preview = Array.isArray(paperWorkflow?.revision_queue_preview)
+    ? paperWorkflow.revision_queue_preview
+      .map((item) => cleanDisplayText(item || "", ""))
+      .filter(Boolean)
+    : [];
+  if (!queueSize && !preview.length) return "";
+  const visibleItems = compact ? preview.slice(0, 2) : preview.slice(0, 4);
+  return `
+    <div class="paper-revision-queue">
+      <div class="paper-revision-queue-head">
+        <span class="paper-revision-queue-title">${escapeHtml(zhLabel("修订队列", "Revision queue"))}</span>
+        <span class="paper-revision-queue-count">${escapeHtml(
+          queueSize > 0
+            ? zhLabel(`${queueSize} 项排队中`, `${queueSize} queued`)
+            : zhLabel("没有排队中的修改", "No queued edits"),
+        )}</span>
+      </div>
+      ${visibleItems.length ? `
+        <div class="paper-revision-queue-list">
+          ${visibleItems.map((item) => `
+            <div class="paper-revision-queue-item">${escapeHtml(item)}</div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function paperWorkflowGateChecks(paperWorkflow) {
+  return Array.isArray(paperWorkflow?.paper_ready_gate?.manuscript_evidence_coverage?.checks)
+    ? paperWorkflow.paper_ready_gate.manuscript_evidence_coverage.checks
+    : [];
+}
+
+function paperWorkflowClaimGateChecks(paperWorkflow) {
+  const coverage = paperWorkflow?.paper_ready_gate?.manuscript_evidence_coverage || null;
+  if (Array.isArray(coverage?.claim_evidence_semantics?.checks)) {
+    return coverage.claim_evidence_semantics.checks;
+  }
+  return Array.isArray(coverage?.checks)
+    ? coverage.checks
+      .find((item) => normalizeText(item?.check_id || "") === "claim_evidence_semantic_alignment")
+      ?.evidence?.claim_evidence_gate?.checks || []
+    : [];
+}
+
+function paperWorkflowProgressPrompts(research) {
+  const paperWorkflow = research?.paper_workflow || null;
+  const source = Array.isArray(paperWorkflow?.progress_prompts)
+    ? paperWorkflow.progress_prompts
+    : Array.isArray(research?.progress_prompts)
+      ? research.progress_prompts
+      : [];
+  return source
+    .map((item) => ({
+      stageId: cleanDisplayText(item?.stage_id || "", ""),
+      stageLabel: cleanDisplayText(item?.stage_label || "", ""),
+      message: cleanDisplayText(item?.message || "", ""),
+      evidenceContract: cleanDisplayList(item?.evidence_contract || []),
+    }))
+    .filter((item) => item.message || item.stageLabel);
+}
+
+function paperWorkflowClosureChecks(research) {
+  const paperWorkflow = research?.paper_workflow || null;
+  const source = Array.isArray(paperWorkflow?.closure_checks)
+    ? paperWorkflow.closure_checks
+    : Array.isArray(research?.closure_checks)
+      ? research.closure_checks
+      : [];
+  return source
+    .map((item) => ({
+      id: cleanDisplayText(item?.id || "", ""),
+      label: cleanDisplayText(item?.label || "", zhLabel("检查项", "Check")),
+      status: normalizeText(item?.status || "attention") === "pass" ? "pass" : "attention",
+      detail: cleanDisplayText(item?.detail || "", ""),
+    }))
+    .filter((item) => item.label || item.detail);
+}
+
+function renderResearchProgressPrompts(research, compact = false) {
+  const prompts = paperWorkflowProgressPrompts(research);
+  if (!prompts.length) return "";
+  const visiblePrompts = compact ? prompts.slice(0, 2) : prompts;
+  return `
+    <div class="research-progress-prompts">
+      <div class="research-progress-prompts-head">
+        <span class="research-progress-prompts-title">${escapeHtml(zhLabel("研究进度提示", "Research progress prompts"))}</span>
+        <span class="research-progress-prompts-count">${escapeHtml(`${visiblePrompts.length}/${prompts.length}`)}</span>
+      </div>
+      <div class="research-progress-prompts-list">
+        ${visiblePrompts.map((item) => `
+          <div class="research-progress-prompt">
+            <div class="research-progress-prompt-head">
+              <span class="research-progress-prompt-stage">${escapeHtml(item.stageLabel || item.stageId || zhLabel("阶段", "Stage"))}</span>
+            </div>
+            <div class="research-progress-prompt-message">${escapeHtml(item.message)}</div>
+            ${item.evidenceContract.length ? `
+              <div class="research-progress-prompt-contract">
+                ${item.evidenceContract.slice(0, compact ? 3 : 6).map((contract) => `<span>${escapeHtml(contract)}</span>`).join("")}
+              </div>
+            ` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderResearchClosureChecks(research, compact = false) {
+  const checks = paperWorkflowClosureChecks(research);
+  if (!checks.length) return "";
+  const visibleChecks = compact ? checks.slice(0, 4) : checks;
+  const passed = checks.filter((item) => item.status === "pass").length;
+  return `
+    <div class="research-closure-checks">
+      <div class="research-closure-checks-head">
+        <span class="research-closure-checks-title">${escapeHtml(zhLabel("研究闭环审查", "Research closure audit"))}</span>
+        <span class="research-closure-checks-count">${escapeHtml(`${passed}/${checks.length}`)}</span>
+      </div>
+      <div class="research-closure-checks-list">
+        ${visibleChecks.map((item) => `
+          <div class="research-closure-check is-${escapeHtml(item.status)}">
+            <div class="research-closure-check-head">
+              <span class="paper-workflow-pill ${item.status === "pass" ? "is-ready" : "is-attention"}">${escapeHtml(item.status === "pass" ? zhLabel("通过", "Pass") : zhLabel("需处理", "Needs work"))}</span>
+              <span class="research-closure-check-title">${escapeHtml(item.label)}</span>
+            </div>
+            ${item.detail ? `<div class="research-closure-check-detail">${escapeHtml(item.detail)}</div>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function paperWorkflowSectionDiffItems(paperWorkflow) {
+  return Array.isArray(paperWorkflow?.section_diff_preview)
+    ? paperWorkflow.section_diff_preview
+    : [];
+}
+
+function paperWorkflowManuscriptDiffItems(paperWorkflow) {
+  return Array.isArray(paperWorkflow?.manuscript_diff_preview)
+    ? paperWorkflow.manuscript_diff_preview
+    : [];
+}
+
+function paperWorkflowManuscriptDiffMap(paperWorkflow) {
+  const index = new Map();
+  paperWorkflowManuscriptDiffItems(paperWorkflow).forEach((item) => {
+    const sectionId = cleanDisplayText(item?.section_id || "", "");
+    if (sectionId) {
+      index.set(normalizeText(sectionId), item);
+    }
+  });
+  return index;
+}
+
+function paperWorkflowSectionDiffMap(paperWorkflow) {
+  const index = new Map();
+  paperWorkflowSectionDiffItems(paperWorkflow).forEach((item) => {
+    const sectionId = cleanDisplayText(item?.section_id || "", "");
+    if (sectionId) {
+      index.set(normalizeText(sectionId), item);
+    }
+  });
+  return index;
+}
+
+function summarizeClaimAnchor(claimAnchor) {
+  const claimText = cleanDisplayText(claimAnchor?.claim_text || "", "");
+  const evidenceRefs = Array.isArray(claimAnchor?.evidence_refs)
+    ? claimAnchor.evidence_refs
+    : [];
+  const requiredSources = evidenceRefs
+    .filter((entry) => entry?.required === true)
+    .map((entry) => cleanDisplayText(entry?.source_key || "", ""))
+    .filter(Boolean);
+  if (claimText && requiredSources.length) {
+    return `${claimText} [${requiredSources.join(" / ")}]`;
+  }
+  return claimText || requiredSources.join(" / ");
+}
+
+function paperClaimSemanticStatusLabel(status) {
+  const normalized = normalizeText(status || "");
+  if (normalized === "strong") return zhLabel("强", "Strong");
+  if (normalized === "supported") return zhLabel("已落地", "Grounded");
+  if (normalized === "contradicted") return zhLabel("矛盾", "Contradicted");
+  if (normalized === "weak") return zhLabel("弱", "Weak");
+  if (normalized === "missing_section_text") return zhLabel("缺少章节文本", "No section text");
+  return zhLabel("缺少语义支持", "Missing semantic support");
+}
+
+function paperClaimSemanticRelationLabel(relation) {
+  const normalized = normalizeText(relation || "");
+  if (normalized === "entailed") return zhLabel("蕴含", "Entailed");
+  if (normalized === "supported") return zhLabel("支持", "Supported");
+  if (normalized === "contradicted") return zhLabel("矛盾", "Contradicted");
+  if (normalized === "mixed") return zhLabel("混合", "Mixed");
+  if (normalized === "missing_section_text") return zhLabel("缺少章节", "Missing section");
+  return zhLabel("不支持", "Unsupported");
+}
+
+function renderPaperClaimSentenceAlignments(claim, limit = 2) {
+  const alignments = Array.isArray(claim?.claim_sentence_alignments) ? claim.claim_sentence_alignments.slice(0, limit) : [];
+  if (!alignments.length) return "";
+  return `
+    <div class="paper-claim-sentence-list">
+      ${alignments.map((alignment) => `
+        <div class="paper-claim-sentence-card">
+          <div class="paper-claim-sentence-head">
+            <span>${escapeHtml(paperClaimSemanticRelationLabel(alignment?.relation || ""))}</span>
+            <span>${escapeHtml(zhLabel(`分数 ${Number(alignment?.support_score || 0) || 0}`, `score ${Number(alignment?.support_score || 0) || 0}`))}</span>
+          </div>
+          <div class="paper-claim-sentence-text">${escapeHtml(cleanDisplayText(alignment?.claim_unit || "", ""))}</div>
+          <div class="paper-claim-sentence-text is-grounded">${escapeHtml(cleanDisplayText(alignment?.grounded_sentence || "", zhLabel("该片段内没有捕获到更细粒度的落地句子。", "No finer-grained grounded sentence was captured inside the span.")))}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function paperWorkspaceSectionKey(sectionId, title) {
+  return normalizeText(sectionId || title || "");
+}
+
+function paperWorkflowWorkspaceSections(paperWorkflow) {
+  const sections = new Map();
+  const upsert = (sectionId, title, extra = {}) => {
+    const cleanId = cleanDisplayText(sectionId || "", "");
+    const cleanTitle = cleanDisplayText(title || "", "");
+    const key = paperWorkspaceSectionKey(cleanId, cleanTitle);
+    if (!key) return;
+    const current = sections.get(key) || {
+      key,
+      sectionId: cleanId,
+      title: cleanTitle || cleanId,
+      claimCount: 0,
+      feedbackCount: 0,
+      changed: false,
+    };
+    sections.set(key, {
+      ...current,
+      sectionId: current.sectionId || cleanId,
+      title: current.title || cleanTitle || cleanId,
+      claimCount: Math.max(Number(current.claimCount || 0), Number(extra.claimCount || 0)),
+      feedbackCount: Math.max(Number(current.feedbackCount || 0), Number(extra.feedbackCount || 0)),
+      changed: current.changed || extra.changed === true,
+    });
+  };
+
+  paperWorkflowClaimGateChecks(paperWorkflow).forEach((claim) => {
+    const sectionId = cleanDisplayText(claim?.section_id || "", "");
+    const title = cleanDisplayText(claim?.section_title || "", "");
+    const key = paperWorkspaceSectionKey(sectionId, title);
+    const current = sections.get(key);
+    upsert(sectionId, title, { claimCount: Number(current?.claimCount || 0) + 1 });
+  });
+
+  paperWorkflowSectionDiffItems(paperWorkflow).forEach((item) => {
+    upsert(item?.section_id, item?.title, { changed: item?.changed === true });
+  });
+  paperWorkflowManuscriptDiffItems(paperWorkflow).forEach((item) => {
+    upsert(item?.section_id, item?.title, { changed: item?.changed === true });
+  });
+  paperWorkflowFlowItems(paperWorkflow).forEach((item) => {
+    cleanDisplayList(item?.targetSections || []).forEach((sectionId) => {
+      const key = paperWorkspaceSectionKey(sectionId, sectionId);
+      const current = sections.get(key);
+      upsert(sectionId, sectionId, { feedbackCount: Number(current?.feedbackCount || 0) + 1 });
+    });
+    (Array.isArray(item?.diffCards) ? item.diffCards : []).forEach((diffItem) => {
+      const key = paperWorkspaceSectionKey(diffItem?.sectionId, diffItem?.title);
+      const current = sections.get(key);
+      upsert(diffItem?.sectionId, diffItem?.title, {
+        feedbackCount: Number(current?.feedbackCount || 0) + 1,
+        changed: diffItem?.changed === true,
+      });
+    });
+  });
+
+  return Array.from(sections.values());
+}
+
+function resolvePaperWorkspaceSelection(paperWorkflow) {
+  const sections = paperWorkflowWorkspaceSections(paperWorkflow);
+  const selectedKey = paperWorkspaceSectionKey(paperWorkspaceState.sectionId, paperWorkspaceState.label);
+  const activeSection = sections.find((item) => item.key === selectedKey) || sections[0] || null;
+  if (activeSection) {
+    paperWorkspaceState.sectionId = activeSection.sectionId || "";
+    paperWorkspaceState.label = activeSection.title || activeSection.sectionId || "";
+  }
+  return { sections, activeSection };
+}
+
+function paperWorkflowFeedbackItemsForSection(paperWorkflow, sectionId) {
+  const key = paperWorkspaceSectionKey(sectionId, sectionId);
+  return paperWorkflowFlowItems(paperWorkflow).filter((item) => {
+    const targets = Array.isArray(item?.targetSections) ? item.targetSections : [];
+    if (targets.some((entry) => paperWorkspaceSectionKey(entry, entry) === key)) {
+      return true;
+    }
+    const diffCards = Array.isArray(item?.diffCards) ? item.diffCards : [];
+    return diffCards.some((diffItem) => paperWorkspaceSectionKey(diffItem?.sectionId, diffItem?.title) === key);
+  });
+}
+
+function renderPaperWorkspaceViewer(paperWorkflow) {
+  const { sections, activeSection } = resolvePaperWorkspaceSelection(paperWorkflow);
+  if (!activeSection) {
+    return `
+      <div class="paper-workspace-viewer">
+        <div class="paper-workspace-viewer-empty">${escapeHtml(zhLabel("当前 workflow 暂无可同步的分节查看器。", "No synchronized section viewer is available for the current workflow yet."))}</div>
+      </div>
+    `;
+  }
+
+  const sectionKey = activeSection.key;
+  const claimChecks = paperWorkflowClaimGateChecks(paperWorkflow).filter((claim) => {
+    return paperWorkspaceSectionKey(claim?.section_id, claim?.section_title) === sectionKey;
+  });
+  const sectionDiff = paperWorkflowSectionDiffMap(paperWorkflow).get(sectionKey) || null;
+  const manuscriptDiff = paperWorkflowManuscriptDiffMap(paperWorkflow).get(sectionKey) || null;
+  const feedbackItems = paperWorkflowFeedbackItemsForSection(paperWorkflow, activeSection.sectionId);
+  const currentExcerpt = cleanDisplayText(
+    manuscriptDiff?.after?.markdown_excerpt
+      || manuscriptDiff?.afterText
+      || sectionDiff?.after?.markdown_excerpt
+      || sectionDiff?.afterText
+      || claimChecks[0]?.manuscript_excerpt
+      || claimChecks[0]?.grounded_section_span_excerpt
+      || "",
+    "",
+  );
+  const previousExcerpt = cleanDisplayText(
+    manuscriptDiff?.before?.markdown_excerpt
+      || manuscriptDiff?.beforeText
+      || sectionDiff?.before?.markdown_excerpt
+      || sectionDiff?.beforeText
+      || "",
+    "",
+  );
+  const changedFields = cleanDisplayList(
+    manuscriptDiff?.changed_fields || sectionDiff?.changed_fields || [],
+  );
+  const reverificationScope = cleanDisplayList(
+    manuscriptDiff?.after?.reverification_scope
+      || sectionDiff?.after?.reverification_scope
+      || sectionDiff?.before?.reverification_scope
+      || [],
+  );
+  const beforeClaims = Array.isArray(manuscriptDiff?.before?.claim_anchors)
+    ? manuscriptDiff.before.claim_anchors
+    : Array.isArray(sectionDiff?.before?.claim_anchors)
+      ? sectionDiff.before.claim_anchors
+      : [];
+  const afterClaims = Array.isArray(manuscriptDiff?.after?.claim_anchors)
+    ? manuscriptDiff.after.claim_anchors
+    : Array.isArray(sectionDiff?.after?.claim_anchors)
+      ? sectionDiff.after.claim_anchors
+      : [];
+
+  return `
+    <div class="paper-workspace-viewer">
+      <div class="paper-workspace-viewer-head">
+        <div>
+          <div class="paper-workspace-band-title">${escapeHtml(activeSection.title || activeSection.sectionId || zhLabel("章节", "Section"))}</div>
+          <div class="paper-workspace-meta">${escapeHtml([
+            activeSection.sectionId,
+            activeSection.claimCount ? zhLabel(`${activeSection.claimCount} 条 claim`, `${activeSection.claimCount} claims`) : "",
+            activeSection.feedbackCount ? zhLabel(`${activeSection.feedbackCount} 条反馈`, `${activeSection.feedbackCount} feedback items`) : "",
+            activeSection.changed ? zhLabel("已改写", "Rewritten") : zhLabel("未改动", "Unchanged"),
+          ].filter(Boolean).join(" / "))}</div>
+        </div>
+        ${reverificationScope.length ? `<div class="paper-workspace-meta">${escapeHtml(reverificationScope.join(" / "))}</div>` : ""}
+      </div>
+      <div class="paper-workspace-section-strip">
+        ${sections.map((section) => `
+          <button
+            type="button"
+            class="paper-workspace-section-pill${section.key === sectionKey ? " is-active" : ""}"
+            data-paper-workspace-section="${escapeHtml(section.sectionId || section.title || "")}"
+            data-paper-workspace-title="${escapeHtml(section.title || section.sectionId || "")}"
+          >
+            <strong>${escapeHtml(section.title || section.sectionId || zhLabel("章节", "Section"))}</strong>
+            <span>${escapeHtml([
+              section.claimCount ? String(section.claimCount) : "",
+              section.feedbackCount ? `R${section.feedbackCount}` : "",
+              section.changed ? zhLabel("Diff", "Diff") : "",
+            ].filter(Boolean).join(" / "))}</span>
+          </button>
+        `).join("")}
+      </div>
+      <div class="paper-workspace-viewer-grid">
+        <section class="paper-workspace-viewer-pane">
+          <div class="paper-workspace-viewer-label">${escapeHtml(zhLabel("当前稿件", "Current manuscript"))}</div>
+          <div class="paper-workspace-viewer-body markdown-body">${currentExcerpt ? renderMarkdown(currentExcerpt) : escapeHtml(zhLabel("该章节暂时没有可展示的当前稿件摘录。", "No current manuscript excerpt is available for this section yet."))}</div>
+          ${afterClaims.length ? `
+            <div class="paper-workspace-viewer-chip-list">
+              ${afterClaims.slice(0, 3).map((claimAnchor) => `<div class="paper-workspace-viewer-chip">${escapeHtml(summarizeClaimAnchor(claimAnchor))}</div>`).join("")}
+            </div>
+          ` : ""}
+        </section>
+        <section class="paper-workspace-viewer-pane">
+          <div class="paper-workspace-viewer-label">${escapeHtml(zhLabel("Review / Rebuttal", "Review / Rebuttal"))}</div>
+          <div class="paper-workspace-viewer-stack">
+            ${feedbackItems.length ? feedbackItems.map((item) => `
+              <div class="paper-workspace-review-card">
+                <div class="paper-workspace-review-head">
+                  <strong>${escapeHtml(item.reviewer || zhLabel("审稿人", "Reviewer"))}</strong>
+                  <span>${escapeHtml(item.closureStatus || item.closureState || zhLabel("未关闭", "Open"))}</span>
+                </div>
+                <div class="paper-workspace-review-text">${escapeHtml(item.comment || zhLabel("暂无评论内容", "No comment text"))}</div>
+                ${item.executionNote ? `<div class="paper-workspace-review-meta">${escapeHtml(item.executionNote)}</div>` : ""}
+                ${item.closureFollowup ? `<div class="paper-workspace-review-meta">${escapeHtml(item.closureFollowup)}</div>` : ""}
+              </div>
+            `).join("") : `<div class="paper-workspace-viewer-empty">${escapeHtml(zhLabel("该章节还没有关联的 reviewer closure 记录。", "No reviewer-closure records are linked to this section."))}</div>`}
+          </div>
+        </section>
+        <section class="paper-workspace-viewer-pane">
+          <div class="paper-workspace-viewer-label">${escapeHtml(zhLabel("Claim Gate", "Claim gate"))}</div>
+          <div class="paper-workspace-viewer-stack">
+            ${claimChecks.length ? claimChecks.map((claim) => `
+              <div class="paper-workspace-claim-card ${normalizeText(claim?.status || "") === "pass" ? "is-ready" : "is-attention"}">
+                <div class="paper-workspace-review-head">
+                  <strong>${escapeHtml(cleanDisplayText(claim?.claim_id || "", zhLabel("Claim", "Claim")))}</strong>
+                  <span>${escapeHtml(paperClaimSemanticRelationLabel(claim?.semantic_relation || claim?.semantic_support_status || ""))}</span>
+                </div>
+                <div class="paper-workspace-review-text">${escapeHtml(cleanDisplayText(claim?.claim_text || "", ""))}</div>
+                ${cleanDisplayText(claim?.semantic_relation_detail || "", "") ? `<div class="paper-workspace-review-meta">${escapeHtml(cleanDisplayText(claim?.semantic_relation_detail || "", ""))}</div>` : ""}
+                ${cleanDisplayText(claim?.grounded_section_span_excerpt || "", "") ? `<div class="paper-workspace-review-meta">${escapeHtml(cleanDisplayText(claim?.grounded_section_span_excerpt || "", ""))}</div>` : ""}
+                ${renderPaperClaimSentenceAlignments(claim, 2)}
+              </div>
+            `).join("") : `<div class="paper-workspace-viewer-empty">${escapeHtml(zhLabel("该章节暂时没有 claim-level gate 记录。", "No claim-level gate records are available for this section yet."))}</div>`}
+          </div>
+        </section>
+      </div>
+      <div class="paper-workspace-diff-grid">
+        <section class="paper-workspace-viewer-pane">
+          <div class="paper-workspace-viewer-label">${escapeHtml(zhLabel("Before", "Before"))}</div>
+          <div class="paper-workspace-viewer-body markdown-body">${previousExcerpt ? renderMarkdown(previousExcerpt) : escapeHtml(zhLabel("没有修订前摘录。", "No previous draft excerpt."))}</div>
+          ${beforeClaims.length ? `
+            <div class="paper-workspace-viewer-chip-list">
+              ${beforeClaims.slice(0, 3).map((claimAnchor) => `<div class="paper-workspace-viewer-chip">${escapeHtml(summarizeClaimAnchor(claimAnchor))}</div>`).join("")}
+            </div>
+          ` : ""}
+        </section>
+        <section class="paper-workspace-viewer-pane">
+          <div class="paper-workspace-viewer-label">${escapeHtml(zhLabel("After / Diff", "After / Diff"))}</div>
+          <div class="paper-workspace-viewer-body markdown-body">${currentExcerpt ? renderMarkdown(currentExcerpt) : escapeHtml(zhLabel("没有修订后摘录。", "No revised draft excerpt."))}</div>
+          ${changedFields.length ? `<div class="paper-workspace-viewer-chip-list">${changedFields.map((item) => `<div class="paper-workspace-viewer-chip">${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function paperWorkflowFlowItems(paperWorkflow) {
+  const trace = Array.isArray(paperWorkflow?.reviewer_feedback_trace)
+    ? paperWorkflow.reviewer_feedback_trace
+    : [];
+  const closureRecords = Array.isArray(paperWorkflow?.rebuttal_closure_records)
+    ? paperWorkflow.rebuttal_closure_records
+    : [];
+  const executionSections = Array.isArray(paperWorkflow?.revision_execution_trace?.executed_sections)
+    ? paperWorkflow.revision_execution_trace.executed_sections
+    : [];
+  const diffMap = paperWorkflowSectionDiffMap(paperWorkflow);
+  const manuscriptDiffMap = paperWorkflowManuscriptDiffMap(paperWorkflow);
+  return trace.map((entry, index) => {
+    const feedbackIndex = Number(entry?.feedback_index ?? index) || index;
+    const closure = closureRecords.find((item) => Number(item?.feedback_index ?? -1) === feedbackIndex) || null;
+    const execution = executionSections.find((item) => Number(item?.feedback_index ?? -1) === feedbackIndex) || null;
+    const targetSections = cleanDisplayList(entry?.target_sections || []);
+    const sectionDiffs = targetSections
+      .map((sectionId) => diffMap.get(normalizeText(sectionId)))
+      .filter(Boolean)
+      .map((diffItem) => ({
+        sectionId: cleanDisplayText(diffItem?.section_id || "", ""),
+        title: cleanDisplayText(diffItem?.title || "", ""),
+        changed: diffItem?.changed === true,
+        changedFields: cleanDisplayList(diffItem?.changed_fields || []),
+        beforeText: cleanDisplayText(diffItem?.before?.markdown_excerpt || diffItem?.before?.draft_seed || "", ""),
+        afterText: cleanDisplayText(diffItem?.after?.markdown_excerpt || diffItem?.after?.draft_seed || "", ""),
+        beforeWordCount: Number(diffItem?.before?.word_count || 0) || 0,
+        afterWordCount: Number(diffItem?.after?.word_count || 0) || 0,
+        beforeDirective: cleanDisplayText(diffItem?.before?.revision_directive || "", ""),
+        afterDirective: cleanDisplayText(diffItem?.after?.revision_directive || "", ""),
+        reverificationScope: cleanDisplayList(
+          diffItem?.after?.reverification_scope
+          || diffItem?.before?.reverification_scope
+          || [],
+        ),
+        beforeClaims: Array.isArray(diffItem?.before?.claim_anchors) ? diffItem.before.claim_anchors : [],
+        afterClaims: Array.isArray(diffItem?.after?.claim_anchors) ? diffItem.after.claim_anchors : [],
+      }));
+    const manuscriptDiffs = targetSections
+      .map((sectionId) => manuscriptDiffMap.get(normalizeText(sectionId)))
+      .filter(Boolean)
+      .map((diffItem) => ({
+        sectionId: cleanDisplayText(diffItem?.section_id || "", ""),
+        title: cleanDisplayText(diffItem?.title || "", ""),
+        changed: diffItem?.changed === true,
+        changedFields: cleanDisplayList(diffItem?.changed_fields || []),
+        beforeText: cleanDisplayText(diffItem?.before?.markdown_excerpt || "", ""),
+        afterText: cleanDisplayText(diffItem?.after?.markdown_excerpt || "", ""),
+        beforeWordCount: Number(diffItem?.before?.word_count || 0) || 0,
+        afterWordCount: Number(diffItem?.after?.word_count || 0) || 0,
+        beforeClaims: Array.isArray(diffItem?.before?.claim_anchors) ? diffItem.before.claim_anchors : [],
+        afterClaims: Array.isArray(diffItem?.after?.claim_anchors) ? diffItem.after.claim_anchors : [],
+      }));
+    const diffCardMap = new Map();
+    sectionDiffs.forEach((diffItem) => {
+      diffCardMap.set(normalizeText(diffItem.sectionId || diffItem.title || ""), { ...diffItem });
+    });
+    manuscriptDiffs.forEach((diffItem) => {
+      const key = normalizeText(diffItem.sectionId || diffItem.title || "");
+      const current = diffCardMap.get(key) || {};
+      diffCardMap.set(key, {
+        ...current,
+        ...diffItem,
+        changedFields: [...new Set([...(current.changedFields || []), ...(diffItem.changedFields || [])])],
+        beforeText: diffItem.beforeText || current.beforeText || "",
+        afterText: diffItem.afterText || current.afterText || "",
+        beforeWordCount: diffItem.beforeWordCount || current.beforeWordCount || 0,
+        afterWordCount: diffItem.afterWordCount || current.afterWordCount || 0,
+        beforeClaims: diffItem.beforeClaims?.length ? diffItem.beforeClaims : (current.beforeClaims || []),
+        afterClaims: diffItem.afterClaims?.length ? diffItem.afterClaims : (current.afterClaims || []),
+      });
+    });
+    return {
+      feedbackIndex,
+      reviewer: cleanDisplayText(entry?.reviewer || "", zhLabel("审稿人", "Reviewer")),
+      comment: cleanDisplayText(entry?.comment || "", ""),
+      closureState: cleanDisplayText(entry?.closure_state || "", ""),
+      targetSections,
+      reverificationRequired: entry?.reverification_required === true,
+      closureStatus: cleanDisplayText(closure?.response_status || "", ""),
+      closureFollowup: cleanDisplayText(closure?.required_followup || "", ""),
+      executionScope: cleanDisplayList(execution?.reverification_scope || []),
+      executionNote: cleanDisplayText(execution?.closure_note || "", ""),
+      rewriteActions: cleanDisplayList(execution?.rewrite_actions || []),
+      sectionDiffs,
+      manuscriptDiffs,
+      diffCards: Array.from(diffCardMap.values()),
+    };
+  });
+}
+
+function renderPaperReadyGate(paperWorkflow, compact = false) {
+  const checks = paperWorkflowGateChecks(paperWorkflow);
+  if (!checks.length || compact) return "";
+  const claimChecks = paperWorkflowClaimGateChecks(paperWorkflow);
+  return `
+    <div class="paper-ready-gate">
+      <div class="paper-ready-gate-head">
+        <span class="paper-ready-gate-title">${escapeHtml(zhLabel("Paper-ready 证据门禁", "Paper-ready evidence gate"))}</span>
+        <span class="paper-ready-gate-count">${escapeHtml(zhLabel(`${checks.length} 项检查`, `${checks.length} checks`))}</span>
+      </div>
+      <div class="paper-ready-gate-list">
+        ${checks.map((check) => {
+          const status = normalizeText(check?.status || "") === "pass" ? "is-ready" : "is-attention";
+          const label = cleanDisplayText(check?.check_id || "", zhLabel("门禁检查", "Gate check"));
+          const detail = cleanDisplayText(check?.detail || "", "");
+          return `
+            <div class="paper-ready-gate-item ${status}">
+              <div class="paper-ready-gate-item-head">
+                <span class="paper-workflow-pill ${status}">${escapeHtml(normalizeText(check?.status || "") === "pass" ? zhLabel("通过", "Pass") : zhLabel("失败", "Fail"))}</span>
+                <span class="paper-ready-gate-item-title">${escapeHtml(label)}</span>
+              </div>
+              <div class="paper-ready-gate-item-detail">${escapeHtml(detail)}</div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      ${claimChecks.length ? `
+        <div class="paper-claim-gate">
+          <div class="paper-claim-gate-head">
+            <span class="paper-claim-gate-title">${escapeHtml(zhLabel("逐条 claim 证据", "Claim-by-claim evidence"))}</span>
+            <span class="paper-claim-gate-count">${escapeHtml(zhLabel(`${claimChecks.length} 条 claim`, `${claimChecks.length} claims`))}</span>
+          </div>
+        <div class="paper-claim-gate-list">
+          ${claimChecks.map((claim) => {
+              const passed = normalizeText(claim?.status || "") === "pass";
+              const failureSources = cleanDisplayList(claim?.failure_sources || []);
+              const failureReasons = cleanDisplayList(claim?.semantic_failure_reasons || []);
+              const matchedFields = cleanDisplayList(claim?.matched_result_bundle_fields || []);
+              const matchedValues = cleanDisplayList(claim?.matched_result_bundle_values || []);
+              const supportLabel = paperClaimSemanticStatusLabel(claim?.semantic_support_status || "");
+              const relationLabel = paperClaimSemanticRelationLabel(claim?.semantic_relation || claim?.semantic_support_status || "");
+              const supportScore = Number(claim?.semantic_support_score || 0) || 0;
+              const claimOverlapMatched = Number(claim?.claim_anchor_overlap?.matched || 0) || 0;
+              const claimOverlapTotal = Number(claim?.claim_anchor_overlap?.total || 0) || 0;
+              const evidenceOverlapMatched = Number(claim?.evidence_overlap?.matched || 0) || 0;
+              const evidenceOverlapTotal = Number(claim?.evidence_overlap?.total || 0) || 0;
+              const groundedRequiredCount = Number(claim?.grounded_required_source_count || 0) || 0;
+              const requiredCount = Number(claim?.required_source_count || 0) || 0;
+              const groundedItemCount = Number(claim?.grounded_required_item_count || 0) || 0;
+              const groundedItemTargetCount = Number(claim?.required_item_grounding_target_count || 0) || 0;
+              const groundedSpanExcerpt = cleanDisplayText(claim?.grounded_section_span_excerpt || "", "");
+              const manuscriptExcerpt = cleanDisplayText(claim?.manuscript_excerpt || "", "");
+              return `
+                <div class="paper-claim-gate-item ${passed ? "is-ready" : "is-attention"}">
+                  <div class="paper-ready-gate-item-head">
+                    <span class="paper-workflow-pill ${passed ? "is-ready" : "is-attention"}">${escapeHtml(passed ? zhLabel("通过", "Pass") : zhLabel("缺少证据", "Missing evidence"))}</span>
+                    <span class="paper-ready-gate-item-title">${escapeHtml(cleanDisplayText(claim?.claim_id || "", zhLabel("Claim", "Claim")))}</span>
+                  </div>
+                  <div class="paper-claim-gate-meta-row">
+                    <span>${escapeHtml(cleanDisplayText(claim?.section_title || "", zhLabel("章节缺失", "Section missing")))}</span>
+                    <span>${escapeHtml(`${relationLabel} / ${supportLabel} / ${zhLabel("分数", "score")} ${supportScore}`)}</span>
+                  </div>
+                  <div class="paper-ready-gate-item-detail">${escapeHtml(cleanDisplayText(claim?.claim_text || "", ""))}</div>
+                  ${cleanDisplayText(claim?.semantic_relation_detail || "", "") ? `<div class="paper-claim-gate-support">${escapeHtml(cleanDisplayText(claim?.semantic_relation_detail || "", ""))}</div>` : ""}
+                  <div class="paper-claim-gate-meta-row">
+                    <span>${escapeHtml(zhLabel(`Claim 重叠 ${claimOverlapMatched}/${claimOverlapTotal}`, `Claim overlap ${claimOverlapMatched}/${claimOverlapTotal}`))}</span>
+                    <span>${escapeHtml(zhLabel(`证据重叠 ${evidenceOverlapMatched}/${evidenceOverlapTotal}`, `Evidence overlap ${evidenceOverlapMatched}/${evidenceOverlapTotal}`))}</span>
+                  </div>
+                  ${requiredCount || groundedItemTargetCount ? `
+                    <div class="paper-claim-gate-meta-row">
+                      <span>${escapeHtml(zhLabel(`同 span 来源 ${groundedRequiredCount}/${requiredCount}`, `Same-span sources ${groundedRequiredCount}/${requiredCount}`))}</span>
+                      <span>${escapeHtml(zhLabel(`同 span 证据项 ${groundedItemCount}/${groundedItemTargetCount}`, `Same-span evidence items ${groundedItemCount}/${groundedItemTargetCount}`))}</span>
+                    </div>
+                  ` : ""}
+                  ${matchedFields.length ? `<div class="paper-claim-gate-support">${escapeHtml(matchedFields.join(" / "))}</div>` : ""}
+                  ${matchedValues.length ? `<div class="paper-claim-gate-support">${escapeHtml(matchedValues.join(" / "))}</div>` : ""}
+                  ${groundedSpanExcerpt ? `<div class="paper-claim-gate-support">${escapeHtml(zhLabel("Grounded span", "Grounded span"))}</div><div class="paper-claim-gate-excerpt">${escapeHtml(groundedSpanExcerpt)}</div>` : ""}
+                  ${renderPaperClaimSentenceAlignments(claim, 2)}
+                  ${manuscriptExcerpt ? `<div class="paper-claim-gate-excerpt">${escapeHtml(manuscriptExcerpt)}</div>` : ""}
+                  ${failureReasons.length ? `<div class="paper-claim-gate-reasons">${escapeHtml(failureReasons.join(" / "))}</div>` : ""}
+                  ${failureSources.length ? `<div class="paper-review-flow-item-meta">${escapeHtml(failureSources.join(" / "))}</div>` : ""}
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderPaperReviewFlow(paperWorkflow, compact = false) {
+  const items = paperWorkflowFlowItems(paperWorkflow);
+  if (!items.length || compact) return "";
+  return `
+    <div class="paper-review-flow">
+      <div class="paper-review-flow-head">
+        <span class="paper-review-flow-title">${escapeHtml(zhLabel("审查闭环流程", "Review closure flow"))}</span>
+        <span class="paper-review-flow-count">${escapeHtml(zhLabel(`${items.length} 条反馈`, `${items.length} feedback items`))}</span>
+      </div>
+      <div class="paper-review-flow-list">
+        ${items.map((item) => {
+          const open = normalizeText(item.closureState) !== "resolved";
+          const sections = item.targetSections.length ? item.targetSections.join(", ") : zhLabel("讨论部分", "discussion");
+          const executionScope = item.executionScope.length ? item.executionScope.join(" / ") : zhLabel("无", "None");
+          return `
+            <article class="paper-review-flow-item ${open ? "is-open" : "is-closed"}">
+              <div class="paper-review-flow-item-head">
+                <span class="paper-workflow-pill ${open ? "is-attention" : "is-ready"}">${escapeHtml(open ? zhLabel("未关闭", "Open") : zhLabel("已关闭", "Closed"))}</span>
+                <span class="paper-review-flow-item-title">${escapeHtml(`${item.reviewer} #${item.feedbackIndex + 1}`)}</span>
+              </div>
+              <div class="paper-review-flow-item-comment">${escapeHtml(item.comment || zhLabel("暂无评论内容", "No comment text"))}</div>
+              <div class="paper-review-flow-item-grid">
+                <div class="paper-review-flow-item-row">
+                  <span class="paper-review-flow-label">${escapeHtml(zhLabel("目标章节", "Target sections"))}</span>
+                  <span class="paper-review-flow-value">${escapeHtml(sections)}</span>
+                </div>
+                <div class="paper-review-flow-item-row">
+                  <span class="paper-review-flow-label">${escapeHtml(zhLabel("复核范围", "Reverify"))}</span>
+                  <span class="paper-review-flow-value">${escapeHtml(executionScope)}</span>
+                </div>
+                <div class="paper-review-flow-item-row">
+                  <span class="paper-review-flow-label">${escapeHtml(zhLabel("闭环状态", "Closure"))}</span>
+                  <span class="paper-review-flow-value">${escapeHtml(item.closureStatus || item.closureState || "")}</span>
+                </div>
+              </div>
+              ${item.executionNote ? `<div class="paper-review-flow-item-meta">${escapeHtml(item.executionNote)}</div>` : ""}
+              ${item.closureFollowup ? `<div class="paper-review-flow-item-meta">${escapeHtml(item.closureFollowup)}</div>` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderPaperWorkflowPanel(research, options = {}) {
+  const compact = options.compact === true;
+  const paperWorkflow = research?.paper_workflow || null;
+  if (!paperWorkflow) return "";
+  const artifacts = compact ? paperWorkflowArtifacts(research).slice(0, 3) : paperWorkflowArtifacts(research);
+  const summary = cleanDisplayText(paperWorkflow?.summary || "", t("paperWorkflowSummaryFallback")) || t("paperWorkflowSummaryFallback");
+  const primaryPath = paperWorkflowPrimaryPath(research);
+  const lifecycleBadge = paperWorkflowLifecycleBadge(research);
+  return `
+    <section class="paper-workflow-panel${compact ? " is-compact" : ""}">
+      <div class="paper-workflow-head">
+        <div>
+          <div class="paper-workflow-title">${escapeHtml(t("paperWorkflowTitle"))}</div>
+          <div class="paper-workflow-summary">${escapeHtml(summary)}</div>
+        </div>
+        ${compact ? "" : `<button class="paper-workflow-run" type="button" data-paper-workflow-run="true">${escapeHtml(t("paperWorkflowRun"))}</button>`}
+      </div>
+      <div class="paper-workflow-status-row">
+        <span class="paper-workflow-pill ${escapeHtml(lifecycleBadge.className)}">${escapeHtml(lifecycleBadge.label)}</span>
+        ${paperWorkflow?.pdf_compile_status ? `<span class="paper-workflow-pill ${escapeHtml(paperPdfStatusClass(paperWorkflow.pdf_compile_status))}">${escapeHtml(paperPdfStatusLabel(paperWorkflow.pdf_compile_status))}</span>` : ""}
+      </div>
+      ${primaryPath ? `<button class="paper-workflow-primary" type="button" data-open-workspace-file="${escapeHtml(primaryPath)}">${escapeHtml(primaryPath)}</button>` : ""}
+      ${compact ? "" : renderPaperWorkspace(paperWorkflow)}
+      ${renderResearchProgressPrompts(research, compact)}
+      ${renderResearchClosureChecks(research, compact)}
+      ${renderPaperRevisionQueue(paperWorkflow, compact)}
+      ${renderPaperReadyGate(paperWorkflow, compact)}
+      ${renderPaperReviewFlow(paperWorkflow, compact)}
+      ${artifacts.length ? `
+        <div class="paper-workflow-artifact-list">
+          ${artifacts.map((artifact) => `
+            <button class="paper-workflow-artifact" type="button" data-open-workspace-file="${escapeHtml(cleanDisplayText(artifact.path || ""))}">
+              <span class="paper-workflow-artifact-main">
+                <strong>${escapeHtml(cleanDisplayText(artifact.label || "", t("paperWorkflowArtifacts")))}</strong>
+                <span>${escapeHtml(cleanDisplayText(artifact.path || ""))}</span>
+              </span>
+              <span class="paper-workflow-artifact-kind">${escapeHtml(paperWorkflowArtifactKindLabel(artifact.kind || ""))}</span>
+            </button>
+          `).join("")}
+        </div>
+      ` : `<div class="paper-workflow-empty">${escapeHtml(t("paperWorkflowEmpty"))}</div>`}
+    </section>
+  `;
+}
+
+function renderPaperWorkspace(paperWorkflow, context = {}) {
+  if (!paperWorkflow) return "";
+  const viewer = renderPaperWorkspaceViewer(paperWorkflow);
+  const links = [
+    cleanDisplayText(paperWorkflow?.paper_pdf_path || "", ""),
+    cleanDisplayText(paperWorkflow?.paper_latex_path || "", ""),
+    cleanDisplayText(paperWorkflow?.paper_markdown_path || "", ""),
+    cleanDisplayText(paperWorkflow?.review_response_path || "", ""),
+  ].filter(Boolean);
+  return `
+    <div class="paper-workspace-shell">
+      ${viewer}
+      ${links.length ? `
+        <div class="paper-workspace-band">
+          <div class="paper-workspace-band-title">${escapeHtml(zhLabel("相关文件", "Linked files"))}</div>
+          <div class="paper-workspace-link-row">
+            ${links.map((path) => `
+              <button class="paper-workspace-link" type="button" data-open-workspace-file="${escapeHtml(path)}">
+                <strong>${escapeHtml(basename(path))}</strong>
+                <span>${escapeHtml(path)}</span>
+              </button>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+async function runPaperWorkflow(options = {}) {
+  const silent = options.silent === true;
+  const autoTriggered = options.autoTriggered === true;
+  const sessionId = await ensureSessionReady();
+  const researchTopic = cleanDisplayText(bootstrapData?.research?.topic || "", "");
+  const normalizedResearchTopic = normalizeText(researchTopic);
+  const fallbackTopic = [...visibleConversationMessages(bootstrapData?.messages || [])]
+    .reverse()
+    .find((message) => message?.kind === "message" && message?.role === "user" && cleanDisplayText(message?.content || "", ""))
+    ?.content || "";
+  const topic = normalizedResearchTopic === normalizeText(t("researchTemplateTopic"))
+      || normalizedResearchTopic === normalizeText("general scientific inquiry")
+      || !researchTopic
+    ? cleanDisplayText(fallbackTopic, "")
+    : researchTopic;
+  if (!sessionId || !topic) {
+    showToast(t("toastSendFailed"));
+    return;
+  }
+  if (paperWorkflowPendingSessions.has(sessionId)) {
+    return;
+  }
+  paperWorkflowPendingSessions.add(sessionId);
+  try {
+    if (!silent) {
+      showToast(t("paperWorkflowRunning"));
+    }
+    const response = await hostClient.research.paperWorkflow({
+      topic,
+      session_id: sessionId,
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `paper workflow failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    const nextData = payload?.data || payload || {};
+    bootstrapData = {
+      ...(bootstrapData || {}),
+      current_session_id: nextData.session_id || bootstrapData?.current_session_id || sessionId,
+      research: nextData.research || bootstrapData?.research || null,
+    };
+    if (!autoTriggered) {
+      paperWorkflowAutoTriggeredSessions.add(sessionId);
+    }
+    renderResearch(bootstrapData?.research || null);
+    bindTurnInteractionHandlers(researchPanel || document);
+    bindTurnInteractionHandlers(researchDetailPanel || document);
+    if (!silent) {
+      showToast(t("toastPaperWorkflowDone"));
+    }
+  } finally {
+    paperWorkflowPendingSessions.delete(sessionId);
+  }
+}
+
 function renderResearch(research) {
   if (!researchPanel) return;
+  syncReviewerFeedbackDraftFromResearch(research);
   const topic =
     research?.topic && research.topic !== "General scientific inquiry"
       ? cleanDisplayText(research.topic, t("researchTemplateTopic"))
@@ -8044,6 +13400,10 @@ function renderResearch(research) {
   const runtimeVerifier = research?.runtime?.verifier || null;
   const runtimeCheckpoints = cleanDisplayList(research?.runtime?.checkpoints || []);
   const runtimeTimeline = Array.isArray(research?.runtime?.timeline) ? research.runtime.timeline : [];
+  const reviewerFeedbackMarkup = renderReviewerFeedbackPanel(research?.reviewer_feedback || null, {
+    allowForm: true,
+  });
+  const paperWorkflowMarkup = renderPaperWorkflowPanel(research, { compact: false });
   const resolvedResearchState = resolveResearchOverallState(research);
   const stateLabel = researchStateLabel(resolvedResearchState);
   const rationale = cleanDisplayText(
@@ -8065,7 +13425,7 @@ function renderResearch(research) {
         cleanDisplayText(research?.next_phase || "", t("researchStatusTemplate")) || t("researchStatusTemplate"),
       )}</div>
       <div class="research-meta">${escapeHtml(t("researchAssessment"))}: ${escapeHtml(rationale)}</div>
-      ${resourceSummary ? `<div class="research-meta">${escapeHtml(zhLabel("当前资源", "Resources"))}: ${escapeHtml(resourceSummary)}</div>` : ""}
+      ${resourceSummary ? `<div class="research-meta">${escapeHtml(zhLabel("资源", "Resources"))}: ${escapeHtml(resourceSummary)}</div>` : ""}
       ${blocker ? `<div class="research-review-item">${escapeHtml(blocker)}</div>` : ""}
       ${recoveryHint ? `<div class="research-review-item">${escapeHtml(recoveryHint)}</div>` : ""}
     </div>
@@ -8079,6 +13439,8 @@ function renderResearch(research) {
     }
     ${renderResearchRuntimeSubagents(runtimeSubagents, { limit: 4, outputLimit: 180, evidenceLimit: 3 })}
     ${renderResearchRuntimeVerifier(runtimeVerifier, { checkLimit: 4, issueLimit: 3 })}
+    ${paperWorkflowMarkup}
+    ${reviewerFeedbackMarkup}
     ${renderRuntimeTimeline(runtimeTimeline, { limit: 10, title: currentLanguage === "zh" ? "研究时间线" : "Research timeline" })}
     ${
       runtimeCheckpoints.length
@@ -8102,6 +13464,7 @@ function renderResearch(research) {
       research?.workspace || bootstrapData?.workspace_root || "",
     )}</div>
   `;
+  bindTurnInteractionHandlers(researchPanel);
   renderResearchFloatingBoard(research, graphMarkup);
   renderResearchDetailPanel(research, graphMarkup);
 }
@@ -8139,6 +13502,13 @@ function renderResearchFloatingBoard(research, graphMarkup = researchGraphMarkup
   const runtimeSubagents = Array.isArray(research?.runtime?.subagents) ? research.runtime.subagents : [];
   const runtimeVerifier = research?.runtime?.verifier || null;
   const runtimeTimeline = Array.isArray(research?.runtime?.timeline) ? research.runtime.timeline : [];
+  const paperWorkflowMarkup = renderPaperWorkflowPanel(research, {
+    compact: true,
+  });
+  const reviewerFeedbackMarkup = renderReviewerFeedbackPanel(research?.reviewer_feedback || null, {
+    compact: true,
+    allowForm: false,
+  });
   const blocker = cleanDisplayText(research?.blocker || "");
   researchFloatingBody.innerHTML = `
     <div class="research-floating-topic">${escapeHtml(topic)}</div>
@@ -8147,12 +13517,15 @@ function renderResearchFloatingBoard(research, graphMarkup = researchGraphMarkup
     ${graphMarkup.html}
     ${renderResearchRuntimeSubagents(runtimeSubagents, { limit: 2, outputLimit: 120, evidenceLimit: 2 })}
     ${renderResearchRuntimeVerifier(runtimeVerifier, { checkLimit: 2, issueLimit: 2 })}
+    ${paperWorkflowMarkup}
+    ${reviewerFeedbackMarkup}
     ${renderRuntimeTimeline(runtimeTimeline, { limit: 4, title: currentLanguage === "zh" ? "时间线" : "Timeline" })}
     <div class="research-review-list">
       ${resumePoints.map((item) => `<div class="research-review-item">${escapeHtml(item)}</div>`).join("")}
       ${reviewItems.map((item) => `<div class="research-review-item">${escapeHtml(item)}</div>`).join("")}
     </div>
   `;
+  bindTurnInteractionHandlers(researchFloatingBody);
 }
 
 function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(research, { minHeight: 420 })) {
@@ -8168,6 +13541,10 @@ function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(r
   const runtimeVerifier = research?.runtime?.verifier || null;
   const runtimeCheckpoints = cleanDisplayList(research?.runtime?.checkpoints || []);
   const runtimeTimeline = Array.isArray(research?.runtime?.timeline) ? research.runtime.timeline : [];
+  const reviewerFeedbackMarkup = renderReviewerFeedbackPanel(research?.reviewer_feedback || null, {
+    allowForm: true,
+  });
+  const paperWorkflowMarkup = renderPaperWorkflowPanel(research, { compact: false });
   const resourceSummary = cleanDisplayText(research?.resource_summary || "");
   const blocker = cleanDisplayText(research?.blocker || "");
   const recoveryHint = cleanDisplayText(research?.recovery_hint || "");
@@ -8190,6 +13567,8 @@ function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(r
       }
       ${renderResearchRuntimeSubagents(runtimeSubagents, { outputLimit: 220, evidenceLimit: 4 })}
       ${renderResearchRuntimeVerifier(runtimeVerifier, { checkLimit: 8, issueLimit: 5 })}
+      ${paperWorkflowMarkup}
+      ${reviewerFeedbackMarkup}
       ${renderRuntimeTimeline(runtimeTimeline, {
         title: currentLanguage === "zh" ? "研究时间线" : "Research timeline",
         forceOpen: true,
@@ -8206,6 +13585,7 @@ function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(r
       </div>
     </div>
   `;
+  bindTurnInteractionHandlers(researchDetailPanel);
 }
 
 function startResearchFloatingDrag(event) {
@@ -8372,8 +13752,8 @@ function collectSettingsPayload() {
     api_key: String(runtimeApiKey?.value || "").trim() || null,
     auto_approve_tools: Boolean(autoApproveTools?.checked),
     max_auto_approve_risk: String(getSegmentedValue(riskBoundary, config.max_auto_approve_risk || "safe")).trim().toLowerCase(),
-    max_tool_calls_per_minute: parseLimitValue(maxToolCalls, "30"),
-    burst_limit: parseLimitValue(burstLimit, "5"),
+    max_tool_calls_per_minute: parseLimitValue(maxToolCalls, "unlimited"),
+    burst_limit: parseLimitValue(burstLimit, "unlimited"),
     toolchains,
   };
 }
@@ -8394,7 +13774,7 @@ function syncSettingsFromConfig(config) {
     normalizeChoice(
       config.max_tool_calls_per_minute === 0 ? "unlimited" : String(config.max_tool_calls_per_minute ?? 30),
       ["10", "30", "unlimited"],
-      "30",
+      "unlimited",
     )
   );
   setSegmentedValue(
@@ -8402,7 +13782,7 @@ function syncSettingsFromConfig(config) {
     normalizeChoice(
       config.burst_limit === 0 ? "unlimited" : String(config.burst_limit ?? 5),
       ["1", "5", "unlimited"],
-      "5",
+      "unlimited",
     )
   );
   if (runtimeWorkspaceRoot) runtimeWorkspaceRoot.value = config.workspace_root || "";
@@ -8421,7 +13801,7 @@ function syncWorkspaceHeader(workspaceRoot) {
   const name = basename(root);
   if (sidebarWorkspaceTitle) sidebarWorkspaceTitle.textContent = name;
   if (workspaceRootLabel) workspaceRootLabel.textContent = root;
-  if (workspaceTitle) workspaceTitle.textContent = "";
+  if (workspaceTitle) workspaceTitle.textContent = currentLanguage === "zh" ? "工作区" : "Workspace";
   if (typeof document !== "undefined") {
     document.title = `${name} / Agent Workspace`;
   }
@@ -8453,12 +13833,12 @@ function formatGitStatusSummary(status) {
   if (status.branch) {
     parts.push(`${t("gitBranchCurrent")}: ${status.branch}`);
   }
-  if (status.upstream) {
-    if ((Number(status.ahead) || 0) > 0 || (Number(status.behind) || 0) > 0) {
-      parts.push(`${status.upstream} 路 ${template("gitAheadBehind", { ahead: Number(status.ahead) || 0, behind: Number(status.behind) || 0 })}`);
-    } else {
-      parts.push(status.upstream);
-    }
+    if (status.upstream) {
+      if ((Number(status.ahead) || 0) > 0 || (Number(status.behind) || 0) > 0) {
+      parts.push(`${status.upstream} · ${template("gitAheadBehind", { ahead: Number(status.ahead) || 0, behind: Number(status.behind) || 0 })}`);
+      } else {
+        parts.push(status.upstream);
+      }
   }
   parts.push(`${t("gitChangesSummary")}: ${changedFiles}`);
   if (status.repository_clean) parts.push(t("gitClean"));
@@ -8466,7 +13846,7 @@ function formatGitStatusSummary(status) {
   if (status.has_unstaged_changes) parts.push(t("gitModified"));
   if (status.has_untracked_files) parts.push(t("gitUntracked"));
   if (status.has_conflicts) parts.push(t("gitConflicted"));
-  return parts.join(" 路 ");
+  return parts.join(" · ");
 }
 
 function gitChangeTypeLabel(changeType) {
@@ -8632,7 +14012,7 @@ function renderGitChanges(git) {
         <div class="git-panel-head">${escapeHtml(t("gitDiffWorking"))}</div>
         <div class="git-diff-block markdown-body">${
           !diffLoaded
-            ? `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载差异..." : "Loading diff...")}</div>`
+            ? `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载 diff..." : "Loading diff...")}</div>`
             : workingDiff
               ? renderHighlightedCodeBlock(workingDiff, "diff")
               : `<div class="git-empty">${escapeHtml(t("gitNoDiff"))}</div>`
@@ -8642,7 +14022,7 @@ function renderGitChanges(git) {
         <div class="git-panel-head">${escapeHtml(t("gitDiffStaged"))}</div>
         <div class="git-diff-block markdown-body">${
           !diffLoaded
-            ? `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载差异..." : "Loading diff...")}</div>`
+            ? `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载 diff..." : "Loading diff...")}</div>`
             : stagedDiff
               ? renderHighlightedCodeBlock(stagedDiff, "diff")
               : `<div class="git-empty">${escapeHtml(t("gitNoDiff"))}</div>`
@@ -8875,10 +14255,10 @@ function renderGitGraph(git) {
   if (!gitGraphView) return;
   const rows = Array.isArray(git?.graph) ? git.graph : [];
   if (!gitDataLoadState.graph) {
-    gitGraphView.innerHTML = `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载 Graph..." : "Loading graph...")}</div>`;
+    gitGraphView.innerHTML = `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载图谱..." : "Loading graph...")}</div>`;
     return;
   }
-    gitGraphView.innerHTML = `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载 Graph..." : "Loading graph...")}</div>`;
+    gitGraphView.innerHTML = `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载图谱..." : "Loading graph...")}</div>`;
   gitGraphView.innerHTML = rows.length
     ? `
       <section class="git-panel git-graph-panel">
@@ -8979,18 +14359,25 @@ function renderGitWorkspace(git) {
 
 function setMainView(nextView) {
   captureMessageScrollPosition();
-  currentMainView = nextView === "git" ? "git" : "chat";
+  currentMainView = nextView === "git" ? "git" : nextView === "browser" ? "browser" : "chat";
+  const workspaceBody = document.getElementById("workspace-body");
   const workspaceChat = document.querySelector(".workspace-chat");
   const conversationStage = document.querySelector(".conversation-stage");
   const composer = document.querySelector(".composer-shell");
 
   if (workspaceChat) workspaceChat.hidden = currentMainView === "git";
   if (gitWorkspace) gitWorkspace.hidden = currentMainView !== "git";
+  if (browserWorkspace) browserWorkspace.hidden = currentMainView !== "browser";
+  if (workspaceBody) {
+    workspaceBody.classList.toggle("is-browser-split", currentMainView === "browser");
+  }
   if (conversationStage) conversationStage.hidden = false;
   if (composer) composer.hidden = currentMainView === "git";
   if (gitNav) {
     gitNav.classList.toggle("is-active", currentMainView === "git");
   }
+  applyDockLayout();
+  syncLayoutCornerControls();
   requestAnimationFrame(() => restoreMessageScrollPosition());
 }
 
@@ -9050,14 +14437,41 @@ function renderFromState() {
   renderGitWorkspace(bootstrapData.git || null);
   renderWorkspaceTree(bootstrapData.workspace_browser || null);
   renderExtensionList(extensionSearchInput?.value || "");
+  renderSearchPanel();
   renderTerminalDrawer();
 }
 
 function applyBootstrap(data) {
   const previousWorkspaceRoot = currentWorkspaceRoot;
+  const previousSessionId = String(bootstrapData?.current_session_id || "").trim();
+  const previousMessages = visibleConversationMessages(bootstrapData?.messages || []);
+  const nextSessionId = String(data?.current_session_id || "").trim();
   const showSandboxNotice = shouldShowSandboxNotice(data?.sandbox);
-  bootstrapData = data;
-  syncAcceptedDiffStatusesFromMessages(data?.messages || []);
+  const incomingVisibleMessages = visibleConversationMessages(data?.messages || []);
+  const incomingSignature = visibleMessagesSignature(incomingVisibleMessages);
+  const preserveCompletedVisibleMessages =
+    Boolean(
+      lastVisibleCompletionSignature &&
+      previousSessionId &&
+      previousSessionId === nextSessionId &&
+      !isVisibleSessionRunning() &&
+      incomingSignature &&
+      incomingSignature !== lastVisibleCompletionSignature,
+    );
+  bootstrapData = preserveCompletedVisibleMessages
+    ? {
+        ...data,
+        messages: previousMessages,
+      }
+    : data;
+  if (lastVisibleCompletionSignature && incomingSignature === lastVisibleCompletionSignature) {
+    lastVisibleCompletionSignature = "";
+  }
+  if (previousSessionId !== nextSessionId || !data?.research?.paper_workflow) {
+    resetPaperWorkspaceState();
+  }
+  syncReviewerFeedbackDraftFromResearch(data?.research || null);
+  syncAcceptedDiffStatusesFromMessages(bootstrapData?.messages || []);
   setGitLoadState();
   applyHostMeta(data?.host || null);
   currentWorkspaceRoot = String(data?.workspace_root || data?.config?.workspace_root || "");
@@ -9078,7 +14492,7 @@ function applyBootstrap(data) {
     workspaceDraftCache.clear();
     workspaceRenderModeByPath.clear();
   }
-  const review = data?.review || buildReviewFromMessages(data?.messages || []);
+  const review = data?.review || buildReviewFromMessages(bootstrapData?.messages || []);
   if (!review?.files?.some((file) => file.path === activeReviewFilePath)) {
     activeReviewFilePath = null;
   }
@@ -9132,11 +14546,11 @@ function applyTranslations() {
     langToggle.textContent = currentLanguage === "zh" ? "English" : "中文";
   }
   if (sessionMenuRename) sessionMenuRename.textContent = t("renameAction");
-    langToggle.textContent = currentLanguage === "zh" ? "English" : "中文";
   updateEffortUI();
   syncWorkspaceCodeRenderToggle();
   applyWorkspaceMode(currentWorkspaceMode);
   renderExtensionList(extensionSearchInput?.value || "");
+  renderSearchPanel();
   setActivityPanel(activeActivityPanel, { preserveMainView: true });
   setMainView(currentMainView);
   setGitView(currentGitView);
@@ -9234,7 +14648,7 @@ async function loadBootstrap() {
     preserveRunningSessionId: localStreamingSessionId(payload?.data?.current_session_id || ""),
   });
   if (payload?.data?.git) {
-    currentMainView = currentMainView === "git" ? "git" : currentMainView;
+    currentMainView = ["git", "browser"].includes(currentMainView) ? currentMainView : currentMainView;
     renderGitWorkspace(payload.data.git);
   }
 }
@@ -9253,13 +14667,29 @@ async function refreshBackgroundSessionState() {
     const currentVisibleSessionId = String(bootstrapData?.current_session_id || "").trim();
     const nextVisibleSessionId = String(nextData.current_session_id || "").trim();
     const preservedRunningSessionId = localStreamingSessionId(currentVisibleSessionId || nextVisibleSessionId);
+    if (reconcileVisibleSessionCompletion(nextData, {
+      sessionId: currentVisibleSessionId || nextVisibleSessionId,
+      preserveScroll: true,
+    })) {
+      return;
+    }
+    const nextVisibleSessionStillLive = bootstrapHasLiveSession(nextData, currentVisibleSessionId || nextVisibleSessionId);
     const shouldPreserveVisible =
       currentVisibleSessionId &&
       currentVisibleSessionId === nextVisibleSessionId &&
-      isVisibleSessionRunning();
+      isVisibleSessionRunning() &&
+      nextVisibleSessionStillLive;
 
     if (shouldPreserveVisible && bootstrapData) {
-      const preservedMessages = bootstrapData.messages || [];
+      const incomingMessages = visibleConversationMessages(nextData.messages || []);
+      const incomingSignature = visibleMessagesSignature(incomingMessages);
+      const preservedMessages = (
+        lastVisibleCompletionSignature &&
+        incomingSignature &&
+        incomingSignature !== lastVisibleCompletionSignature
+      )
+        ? incomingMessages
+        : (bootstrapData.messages || []);
       const preservedResearch = bootstrapData.research || nextData.research || null;
       bootstrapData = {
         ...nextData,
@@ -9296,7 +14726,7 @@ async function refreshBackgroundSessionState() {
       preserveRunningSessionId: preservedRunningSessionId,
     });
     if (nextData?.git) {
-      currentMainView = currentMainView === "git" ? "git" : currentMainView;
+      currentMainView = ["git", "browser"].includes(currentMainView) ? currentMainView : currentMainView;
       renderGitWorkspace(nextData.git);
     }
   })();
@@ -9510,6 +14940,9 @@ async function deleteSession(sessionId) {
     throw new Error(`delete session failed: ${response.status}`);
   }
   unmarkResearchStartedForSession(sessionId);
+  paperWorkflowPendingSessions.delete(String(sessionId || "").trim());
+  paperWorkflowAutoTriggeredSessions.delete(String(sessionId || "").trim());
+  paperWorkflowPromptDismissedSessions.delete(String(sessionId || "").trim());
   await loadBootstrap();
 }
 
@@ -9537,6 +14970,14 @@ async function consumeStream(response, sessionId) {
       if (!rawChunk) continue;
       const event = typeof rawChunk === "string" ? JSON.parse(rawChunk) : rawChunk;
       handleStreamEvent(event);
+    }
+    const finalState = getSessionRunState(sessionId);
+    if (finalState?.running) {
+      await refreshBackgroundSessionState().catch(() => {});
+      if (!getSessionRunState(sessionId)?.running) {
+        materializePendingConversationMessages({ sessionId });
+        endSessionRun(sessionId);
+      }
     }
     return;
   }
@@ -9578,6 +15019,15 @@ async function consumeStream(response, sessionId) {
     }
 
     if (done) break;
+  }
+
+  const finalState = getSessionRunState(sessionId);
+  if (finalState?.running) {
+    await refreshBackgroundSessionState().catch(() => {});
+    if (!getSessionRunState(sessionId)?.running) {
+      materializePendingConversationMessages({ sessionId });
+      endSessionRun(sessionId);
+    }
   }
 }
 
@@ -9621,37 +15071,14 @@ function handleStreamEvent(event, expectedSessionId = null) {
       resetActiveAssistantTurn();
     }
     pushAssistantProgressWorklogText(event.delta || "");
+    updateRuntimeNarration(event.delta || "");
     refreshPendingAssistantBubble();
     schedulePendingAssistantStatusSync();
     return;
   }
 
   if (event.type === "messages" || event.type === "complete") {
-    const visibleMessages = visibleConversationMessages(event.messages || []);
-    if (sessionId) {
-      const targetSession = (bootstrapData?.sessions || []).find((session) => session.id === sessionId);
-      if (targetSession) {
-        targetSession.updated_at = new Date().toISOString();
-        targetSession.message_count = visibleMessages.length;
-        const nextSummary = latestConversationSummary(visibleMessages, 42);
-        targetSession.summary = nextSummary || targetSession.summary || "";
-      }
-    }
-
-    if (event.type === "complete" && sessionId) {
-      endSessionRun(sessionId);
-    }
-
-    if (!isVisibleSession) {
-      return;
-    }
-
-    bootstrapData = {
-      ...(bootstrapData || {}),
-      messages: visibleMessages,
-      current_session_id: event.session_id || bootstrapData?.current_session_id || null,
-    };
-
+    const rawVisibleMessages = visibleConversationMessages(event.messages || []);
     if (event.type === "complete") {
       const finalizedRuntimeTurn = cloneAssistantTurnState(activeAssistantTurn);
       if (activeAssistantTurn) {
@@ -9664,6 +15091,33 @@ function handleStreamEvent(event, expectedSessionId = null) {
       const mergedRuntimeTurn = mergeAssistantTurnData(activeAssistantTurn, finalizedRuntimeTurn, {
         preferLiveText: true,
       });
+      const hasAssistantMessageInPayload = rawVisibleMessages.some((message) =>
+        (message && message.kind === "message" && message.role === "assistant" && cleanDisplayText(String(message.content || "").trim(), ""))
+        || messageHasAssistantChoices(message)
+      );
+      const visibleMessages = hasAssistantMessageInPayload
+        ? rawVisibleMessages
+        : ensureVisibleAssistantCompletionMessage(rawVisibleMessages, mergedRuntimeTurn);
+      if (sessionId) {
+        const targetSession = (bootstrapData?.sessions || []).find((session) => session.id === sessionId);
+        if (targetSession) {
+          targetSession.updated_at = new Date().toISOString();
+          targetSession.message_count = visibleMessages.length;
+          const nextSummary = latestConversationSummary(visibleMessages, 42);
+          targetSession.summary = nextSummary || targetSession.summary || "";
+        }
+      }
+      if (sessionId) {
+        endSessionRun(sessionId);
+      }
+      if (!isVisibleSession) {
+        return;
+      }
+      bootstrapData = {
+        ...(bootstrapData || {}),
+        messages: visibleMessages,
+        current_session_id: event.session_id || bootstrapData?.current_session_id || null,
+      };
       syncAcceptedDiffStatuses(mergedRuntimeTurn);
       clearVisibleRuntimeSnapshot(sessionId);
       finalizeActiveAssistantTurn();
@@ -9681,6 +15135,41 @@ function handleStreamEvent(event, expectedSessionId = null) {
         renderMessages(visibleMessages);
       }
       refreshBackgroundSessionState().catch(() => {});
+      return;
+    }
+
+    const visibleMessages = rawVisibleMessages;
+    if (sessionId) {
+      const targetSession = (bootstrapData?.sessions || []).find((session) => session.id === sessionId);
+      if (targetSession) {
+        targetSession.updated_at = new Date().toISOString();
+        targetSession.message_count = visibleMessages.length;
+        const nextSummary = latestConversationSummary(visibleMessages, 42);
+        targetSession.summary = nextSummary || targetSession.summary || "";
+      }
+    }
+
+    if (!isVisibleSession) {
+      return;
+    }
+    bootstrapData = {
+      ...(bootstrapData || {}),
+      messages: visibleMessages,
+      current_session_id: event.session_id || bootstrapData?.current_session_id || null,
+    };
+    if (pendingAssistantBubble && shouldPreferPersistedAssistantTurn(visibleMessages)) {
+      const finalizedInPlace = finalizeVisibleAssistantBubble(visibleMessages);
+      if (!finalizedInPlace) {
+        renderMessages(visibleMessages, { preserveScroll: true });
+      }
+      finalizeActiveAssistantTurn();
+      pendingPermissionRequest = null;
+      liveToolEvents = [];
+      liveEditedFiles = [];
+      liveProcessEvents = [];
+      renderAgentRuntimeStrip();
+      renderAgentProcessStrip();
+      renderPermissionStrip();
     }
     return;
   }
@@ -9693,6 +15182,12 @@ function handleStreamEvent(event, expectedSessionId = null) {
       });
     }
     if (!isVisibleSession) return;
+    if (!activeAssistantTurn) {
+      resetActiveAssistantTurn();
+    }
+    if (Array.isArray(event.auto_skills) && event.auto_skills.length) {
+      activeAssistantTurn.auto_skills = event.auto_skills.map((item) => ({ ...item }));
+    }
     const label = event.activity?.label || "";
     const detail = event.activity?.detail || "";
     const phase = event.activity?.phase || "";
@@ -9715,6 +15210,14 @@ function handleStreamEvent(event, expectedSessionId = null) {
       syncActiveTurnRuntime(event.research.runtime);
       refreshPendingAssistantBubble();
     }
+    updateRuntimeNarration(describeActivityNarration({
+      label,
+      detail,
+      meta,
+      phase,
+      status,
+      agent,
+    }));
     if (label === "permission_required" && activeAssistantTurn) {
       activeAssistantTurn.activity = currentLanguage === "zh" ? "等待批准" : "Awaiting approval";
     }
@@ -9737,6 +15240,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
         activeAssistantTurn.subagents.push({ ...subagent, id });
       }
       pushAssistantWorklog(describeSubagentWorklog({ ...subagent, id }));
+      updateRuntimeNarration(subagent?.output || subagent?.purpose || subagent?.name || "");
     });
     refreshPendingAssistantBubble();
     if (event.research?.runtime) {
@@ -9753,6 +15257,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     }
     activeAssistantTurn.verifierReport = event.verifier ? { ...event.verifier } : null;
     pushAssistantWorklog(describeVerifierWorklog(activeAssistantTurn.verifierReport));
+    updateRuntimeNarration(activeAssistantTurn.verifierReport?.summary || "");
     refreshPendingAssistantBubble();
     if (event.research?.runtime) {
       syncActiveTurnRuntime(event.research.runtime);
@@ -9770,6 +15275,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     }
     upsertToolEntry(tool);
     pushAssistantWorklog(describeToolWorklog(tool));
+    updateRuntimeNarration(summarizeRuntimeToolNarration(tool));
     liveToolEvents = [...liveToolEvents.filter((item) => item.call_id !== tool.call_id), tool].slice(-6);
     refreshPendingAssistantBubble();
     renderAgentRuntimeStrip();
@@ -9791,7 +15297,10 @@ function handleStreamEvent(event, expectedSessionId = null) {
       resetActiveAssistantTurn();
     }
     files.forEach((file) => upsertDiffEntry(file));
-    files.forEach((file) => pushAssistantWorklog(describeEditedFileWorklog(file)));
+    files.forEach((file) => {
+      pushAssistantWorklog(describeEditedFileWorklog(file));
+      updateRuntimeNarration(summarizeRuntimeDiffNarration(file));
+    });
     liveEditedFiles = [...liveEditedFiles, ...files].slice(-6);
     refreshPendingAssistantBubble();
     renderAgentRuntimeStrip();
@@ -9812,13 +15321,20 @@ function handleStreamEvent(event, expectedSessionId = null) {
       activeAssistantTurn.permission = pendingPermissionRequest;
       activeAssistantTurn.activity = "Awaiting approval";
     }
-    pushAssistantWorklog({
-      kind: "approval",
-      text: currentLanguage === "zh"
-        ? "这里触发了需要人工批准的操作，我先停下来等你确认。"
-        : "This step triggered a manual approval request, so I’m pausing here for your confirmation.",
-      dedupeKey: "permission:required",
-    });
+    const approvalText = cleanDisplayText(
+      pendingPermissionRequest?.reason
+      || pendingPermissionRequest?.name
+      || "",
+      "",
+    );
+    if (approvalText) {
+      pushAssistantWorklog({
+        kind: "approval",
+        text: approvalText,
+        dedupeKey: `permission:required:${approvalText}`,
+      });
+      updateRuntimeNarration(approvalText);
+    }
     refreshPendingAssistantBubble();
     renderPermissionStrip();
     schedulePendingAssistantStatusSync();
@@ -9853,6 +15369,7 @@ async function sendMessageFallback(content) {
 async function sendMessage() {
   const content = String(messageInput?.value || "").trim();
   if ((!content && !pendingFiles.length) || isSending) return;
+  const parsedInput = parseAgentInputProtocol(content);
   const targetSessionId = await ensureSessionReady();
   if (!targetSessionId) {
     showToast(classifyAppError(new Error("session not ready"), "send").message);
@@ -9863,7 +15380,7 @@ async function sendMessage() {
   suppressVisibleStreamBootstrap = true;
   if (messageInput) messageInput.disabled = true;
   setStopButtonVisible(true);
-  startActivity(currentLanguage === "zh" ? "正在思考" : "Thinking");
+  startActivity(currentLanguage === "zh" ? "思考中" : "Thinking");
   liveEditedFiles = [];
   liveProcessEvents = [];
   pinnedEditedFiles = [];
@@ -9873,10 +15390,9 @@ async function sendMessage() {
   renderPermissionStrip();
 
   try {
-    const parsedInput = parseAgentInputProtocol(content);
     if (!parsedInput.outbound) {
       if (currentWorkspaceMode === "research") {
-        showToast(currentLanguage === "zh" ? "请输入 /spec 后的研究课题内容" : "Add a research topic after /spec.");
+        showToast(currentLanguage === "zh" ? "请在 /spec 后补充研究主题。" : "Add a research topic after /spec.");
       }
       throw new Error("empty outbound content");
     }
@@ -9900,7 +15416,7 @@ async function sendMessage() {
     resetActiveAssistantTurn();
     activeAssistantTurn.startedAt = Date.now();
     activeAssistantTurn.activity = mode === "research"
-      ? (currentLanguage === "zh" ? "正在研究" : "Researching")
+      ? (currentLanguage === "zh" ? "研究中" : "Researching")
       : t("activityReviewing");
     pendingAssistantBubble = appendAssistantBubble("");
     bootstrapData = {
@@ -10051,6 +15567,63 @@ document.addEventListener("pointermove", moveResearchFloatingReopenDrag);
 document.addEventListener("pointerup", endResearchFloatingReopenDrag);
 
 document.addEventListener("click", (event) => {
+  const paperWorkflowButton = event.target instanceof HTMLElement
+    ? event.target.closest("[data-paper-workflow-run]")
+    : null;
+  if (paperWorkflowButton) {
+    event.preventDefault();
+    runPaperWorkflow().catch((error) => {
+      console.error(error);
+      showToast(error?.message || t("toastSendFailed"));
+    });
+    return;
+  }
+
+  const paperWorkflowDismissButton = event.target instanceof HTMLElement
+    ? event.target.closest("[data-paper-workflow-dismiss]")
+    : null;
+  if (paperWorkflowDismissButton) {
+    event.preventDefault();
+    const sessionId = cleanDisplayText(
+      paperWorkflowDismissButton.getAttribute("data-paper-workflow-dismiss") || "",
+      String(bootstrapData?.current_session_id || "").trim(),
+    );
+    if (sessionId) {
+      paperWorkflowPromptDismissedSessions.add(sessionId);
+      renderMessages(bootstrapData?.messages || [], { preserveScroll: true });
+      showToast(t("toastPaperWorkflowDismissed"));
+    }
+    return;
+  }
+
+  const feedbackRefreshButton = event.target instanceof HTMLElement
+    ? event.target.closest("[data-reviewer-feedback-refresh]")
+    : null;
+  if (feedbackRefreshButton) {
+    event.preventDefault();
+    refreshReviewerFeedback().catch((error) => {
+      console.error(error);
+      showToast(error?.message || t("toastSendFailed"));
+    });
+    return;
+  }
+
+  const feedbackResolveButton = event.target instanceof HTMLElement
+    ? event.target.closest("[data-reviewer-feedback-resolve]")
+    : null;
+  if (feedbackResolveButton) {
+    event.preventDefault();
+    const rawIndex = feedbackResolveButton.getAttribute("data-reviewer-feedback-resolve") || "";
+    const index = Number(rawIndex);
+    if (Number.isFinite(index) && index >= 0) {
+      resolveReviewerFeedback(index).catch((error) => {
+        console.error(error);
+        showToast(error?.message || t("toastSendFailed"));
+      });
+    }
+    return;
+  }
+
   if (
     effortDisclosure &&
     effortDisclosure.hasAttribute("open") &&
@@ -10069,9 +15642,7 @@ document.addEventListener("click", (event) => {
 
   if (
     !event.target.closest(".session-actions") &&
-    !event.target.closest(".session-floating-menu") &&
-    !event.target.closest(".dock-panel-grip") &&
-    !event.target.closest(".panel-floating-menu")
+    !event.target.closest(".session-floating-menu")
   ) {
     closeSessionMenus();
     closePanelMenu();
@@ -10100,12 +15671,39 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  const field = event.target instanceof HTMLElement
+    ? event.target.closest("[data-reviewer-feedback-field]")
+    : null;
+  if (!field) return;
+  const fieldName = field.getAttribute("data-reviewer-feedback-field") || "";
+  if (!fieldName) return;
+  const value = "value" in field ? field.value : "";
+  updateReviewerFeedbackDraft(fieldName, value);
+});
+
+document.addEventListener("submit", (event) => {
+  const form = event.target instanceof HTMLElement
+    ? event.target.closest("[data-reviewer-feedback-form]")
+    : null;
+  if (!form) return;
+  event.preventDefault();
+  submitReviewerFeedback().catch((error) => {
+    console.error(error);
+    showToast(error?.message || t("toastSendFailed"));
+  });
+});
+
 window.addEventListener("resize", () => {
+  captureMessageScrollPosition();
   stopDockDrag();
   stopResizerDrag();
+  syncShellLayoutVars();
+  applyDockLayout();
   if (activeSessionMenuAnchor && !sessionMenu?.hidden) {
     positionSessionMenu(activeSessionMenuAnchor);
   }
+  requestAnimationFrame(() => restoreMessageScrollPosition());
 });
 
 window.addEventListener(
@@ -10154,15 +15752,6 @@ panelGrips.forEach((grip) => {
     stopDockDrag();
     suppressNextGripClick = false;
   });
-  grip.addEventListener("click", (event) => {
-    if (suppressNextGripClick) {
-      suppressNextGripClick = false;
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    openPanelMenu(panelId, grip);
-  });
 });
 
 document.querySelectorAll(".dock-panel").forEach((panel) => {
@@ -10186,6 +15775,9 @@ document.querySelectorAll(".dock-panel").forEach((panel) => {
 panelResizers.forEach((resizer) => {
   resizer.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, resizer));
 });
+
+activityFlyoutResizer?.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, activityFlyoutResizer));
+browserSplitResizer?.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, browserSplitResizer));
 
 langToggle?.addEventListener("click", () => {
   setLanguage(currentLanguage === "zh" ? "en" : "zh");
@@ -10235,7 +15827,7 @@ activityRailButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const panel = button.dataset.activityPanel || "nav";
     if (activeActivityPanel === panel) {
-      setActivityPanel(null, { preserveMainView: currentMainView === "git" });
+      setActivityPanel(null, { preserveMainView: preserveMainViewDuringFlyout() });
       return;
     }
     setActivityPanel(panel);
@@ -10255,6 +15847,16 @@ activityRailButtons.forEach((button) => {
         showToast(error?.message || t("toastSendFailed"));
       }
     }
+    if (panel === "search") {
+      try {
+        await loadSearchHealth();
+      } catch (error) {
+        console.error(error);
+        searchState.error = cleanDisplayText(error?.message || "") || appErrorMessage(error, "search", "searchError");
+        renderSearchPanel();
+        showToast(searchState.error);
+      }
+    }
     if (panel === "run") {
       try {
         await loadRunDebugState();
@@ -10268,7 +15870,104 @@ activityRailButtons.forEach((button) => {
 
 activityCollapseButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    setActivityPanel(null, { preserveMainView: currentMainView === "git" });
+    setActivityPanel(null, { preserveMainView: preserveMainViewDuringFlyout() });
+  });
+});
+
+browserBackButton?.addEventListener("click", async () => {
+  const nextIndex = browserState.historyIndex - 1;
+  if (nextIndex < 0) return;
+  browserState.historyIndex = nextIndex;
+  const href = browserState.history[nextIndex] || "";
+  if (!href) return;
+  try {
+    await openUrlInAppBrowser(href, { pushHistory: false });
+  } catch (error) {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+  }
+});
+
+browserRefreshButton?.addEventListener("click", async () => {
+  if (!browserState.currentUrl) return;
+  try {
+    await openUrlInAppBrowser(browserState.currentUrl, { pushHistory: false });
+  } catch (error) {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+  }
+});
+
+browserExternalButton?.addEventListener("click", () => {
+  if (!browserState.currentUrl) return;
+  window.open(sanitizeHref(browserState.currentUrl), "_blank", "noopener");
+});
+
+browserCloseButton?.addEventListener("click", () => {
+  closeInAppBrowser();
+});
+
+workspaceLauncher?.querySelectorAll("[data-workspace-launch]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const action = button.getAttribute("data-workspace-launch") || "";
+    if (action === "git") {
+      setActivityPanel("git");
+      try {
+        await loadGitState(currentGitFetchOptions(currentGitView));
+      } catch (error) {
+        console.error(error);
+      }
+      return;
+    }
+    if (action === "terminal") {
+      try {
+        await createTerminal();
+        terminalInput?.focus();
+      } catch (error) {
+        console.error(error);
+      }
+      return;
+    }
+    if (action === "browser") {
+      rightSidebarCollapsed = false;
+      setMainView("browser");
+      return;
+    }
+    if (action === "files") {
+      rightSidebarCollapsed = false;
+      preferredDockRightSidebarPanelId = "tree";
+      saveDockLayout();
+      applyDockLayout();
+      return;
+    }
+    if (action === "side-chat") {
+      rightSidebarCollapsed = true;
+      saveDockLayout();
+      applyDockLayout();
+    }
+  });
+});
+
+leftSidebarToggleButton?.addEventListener("click", () => {
+  toggleLeftSidebarVisibility();
+});
+
+rightSidebarToggleButton?.addEventListener("click", () => {
+  toggleRightSidebarVisibility();
+});
+
+browserFrame?.addEventListener("load", () => {
+  syncBrowserStateFromFrame({ pushHistory: true });
+});
+
+window.addEventListener("message", (event) => {
+  const data = event?.data || null;
+  if (!data || data.type !== "tokitai-browser-navigate") return;
+  const href = sanitizeHref(data.url || "");
+  if (!/^https?:\/\//i.test(href)) return;
+  openUrlInAppBrowser(href).catch((error) => {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
   });
 });
 
@@ -10298,13 +15997,20 @@ terminalHideButton?.addEventListener("click", () => {
 });
 
 composerStop?.addEventListener("click", async () => {
-  if (!currentStreamingSessionId) return;
+  const sessionId = String(currentStreamingSessionId || "").trim();
+  if (!sessionId) return;
   try {
-    await hostClient.chat.stop(currentStreamingSessionId);
+    await hostClient.chat.stop(sessionId);
   } catch (error) {
     console.error(error);
   } finally {
-    endSessionRun(currentStreamingSessionId);
+    endSessionRun(sessionId);
+    materializePendingConversationMessages({ sessionId });
+    try {
+      await refreshBackgroundSessionState();
+    } catch (refreshError) {
+      console.error(refreshError);
+    }
     resetConversationRuntimeState({ preserveInputFocus: true });
   }
 });
@@ -10325,6 +16031,39 @@ terminalInput?.addEventListener("keydown", async (event) => {
 
 extensionSearchInput?.addEventListener("input", () => {
   renderExtensionList(extensionSearchInput.value || "");
+});
+
+searchModeSwitch?.querySelectorAll(".segment").forEach((button) => {
+  button.addEventListener("click", () => {
+    searchMode = normalizeChoice(button.dataset.value || "web", ["web", "papers", "models", "datasets", "github"], "web");
+    searchState.error = "";
+    renderSearchPanel();
+    if (searchMode === "datasets" || searchMode === "github" || searchMode === "models") {
+      loadSearchHealth().catch((error) => {
+        console.error(error);
+      });
+    }
+  });
+});
+
+searchRunButton?.addEventListener("click", async () => {
+  try {
+    await runSearch();
+  } catch (error) {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || appErrorMessage(error, "search", "searchError"));
+  }
+});
+
+searchQueryInput?.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  try {
+    await runSearch();
+  } catch (error) {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || appErrorMessage(error, "search", "searchError"));
+  }
 });
 
 workspacePickerToggle?.addEventListener("click", async () => {

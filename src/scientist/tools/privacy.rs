@@ -50,7 +50,10 @@ mod tests {
         let data = b"hello world";
         let b3 = blake3_hash(data);
         let s2 = sha256_digest(data);
-        assert_ne!(b3, s2, "BLAKE3 and SHA256 must produce different outputs for the same input");
+        assert_ne!(
+            b3, s2,
+            "BLAKE3 and SHA256 must produce different outputs for the same input"
+        );
     }
 
     #[test]

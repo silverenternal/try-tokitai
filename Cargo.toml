@@ -26,6 +26,7 @@ default = []
 # YAML 支持：用于 OpenAPI 规范解析
 yaml = ["serde_yaml"]
 desktop-shell = ["dep:wry", "dep:tao"]
+domain-science = ["dep:ai-scientist-science"]
 # Tensor 计算：实验性功能，提供张量计算和神经网络基础操作
 # 注意：此 feature 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 candle、tch-rs）
 tensor = ["dep:candle-core", "dep:candle-nn", "dep:safetensors", "dep:half", "dep:ndarray"]
@@ -46,7 +47,7 @@ tokitai-filekv = { path = "crates/tokitai-filekv" }
 ai-scientist-core = { path = "crates/ai-scientist-core" }
 ai-scientist-rag = { path = "crates/ai-scientist-rag" }
 ai-scientist-verify = { path = "crates/ai-scientist-verify" }
-ai-scientist-science = { path = "crates/ai-scientist-science" }
+ai-scientist-science = { path = "crates/ai-scientist-science", optional = true }
 
 # Hashing
 blake3 = "1"
@@ -163,6 +164,7 @@ ignored = [
     "half",          # optional tensor feature
     "safetensors",   # optional tensor feature
     "ndarray",       # optional tensor feature
+    "ai-scientist-science", # optional domain-science feature
     "serde_yaml",    # optional yaml feature
     "rand",          # used by experiments
 ]

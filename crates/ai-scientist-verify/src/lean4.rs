@@ -84,7 +84,11 @@ impl LeanVerifier {
 
         // Run lake env lean
         let result = std::process::Command::new(&self.lake_path)
-            .args(["env", "lean", temp_file.to_str().unwrap_or("_verify_temp.lean")])
+            .args([
+                "env",
+                "lean",
+                temp_file.to_str().unwrap_or("_verify_temp.lean"),
+            ])
             .current_dir(&self.work_dir)
             .output();
 
@@ -142,12 +146,7 @@ by
     }
 
     /// Verify a lemma
-    pub fn verify_lemma(
-        &self,
-        name: &str,
-        statement: &str,
-        proof: &str,
-    ) -> LeanVerificationResult {
+    pub fn verify_lemma(&self, name: &str, statement: &str, proof: &str) -> LeanVerificationResult {
         let code = format!(
             r#"import Mathlib
 
@@ -219,7 +218,8 @@ mod tests {
 
     #[test]
     fn test_parse_lean_errors() {
-        let stderr = "_verify_temp.lean:5:10: error: type mismatch\n  expected: Nat\n  given: String";
+        let stderr =
+            "_verify_temp.lean:5:10: error: type mismatch\n  expected: Nat\n  given: String";
         let errors = LeanVerifier::parse_lean_errors(stderr);
         assert!(!errors.is_empty());
         assert_eq!(errors[0].line, Some(5));

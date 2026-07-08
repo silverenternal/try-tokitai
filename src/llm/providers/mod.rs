@@ -106,9 +106,7 @@ impl LLMProvider for OpenAIProvider {
         Ok(ChatResponse {
             content: tool_calls_json
                 .as_ref()
-                .map(|tc: &Vec<serde_json::Value>| {
-                    serde_json::to_string(tc).unwrap_or_default()
-                })
+                .map(|tc: &Vec<serde_json::Value>| serde_json::to_string(tc).unwrap_or_default())
                 .unwrap_or_else(|| choice.message.content.clone()),
             model: response.model,
             usage: response.usage.map(|u| Usage {

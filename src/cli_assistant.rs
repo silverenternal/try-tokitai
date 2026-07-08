@@ -35,20 +35,53 @@ use crate::integration::IntegratedModulesConfig;
 use crate::llm::{LLMManager, ModelCommandHandler, ProviderInitializer};
 use crate::orchestrator::Orchestrator;
 use crate::path_resolver;
-use crate::tools::HttpClientTools;
-use crate::tools::{
-    CodeTools, DownloadTools, FileOperations, FileSearchTools,
-    GitOperations, JsonFormatTools, NetworkTools,
-    PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools, WikipediaTools,
-};
-use crate::tools::data::{DataConversionTools, JsonMergeTools, JsonQueryTools};
 use crate::scientist::tools::computation::ComputationTools;
 use crate::scientist::tools::data::DataTools;
+use crate::scientist::tools::github::GitHubTools;
 use crate::scientist::tools::literature::LiteratureTools;
 use crate::scientist::tools::sympy_tool::SymPyTool;
+use crate::tools::data::{DataConversionTools, JsonMergeTools, JsonQueryTools};
 use crate::tools::io::security::{SandboxConfig, SecurePathResolver};
-use std::sync::Arc;
+use crate::tools::HttpClientTools;
+use crate::tools::{
+    CodeTools, DownloadTools, FileOperations, FileSearchTools, GitOperations, JsonFormatTools,
+    NetworkTools, PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools,
+    WikipediaTools,
+};
 use crate::tui::components::message_block::{MessageBlock, ToolCallStatus};
+use crate::web::run_terminal_command_structured;
+use std::sync::Arc;
+
+fn is_path_recovery_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "inspect_path"
+            | "list_dir"
+            | "find_files"
+            | "read_file"
+            | "read_file_head"
+            | "read_file_range"
+    )
+}
+
+fn is_path_related_failure(message: &str) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    lowered.contains("file_not_found")
+        || lowered.contains("path_not_found")
+        || lowered.contains("not_a_directory")
+        || lowered.contains("os error 3")
+        || lowered.contains("system cannot find the path")
+        || message.contains("文件不存在")
+        || message.contains("路径不存在")
+        || message.contains("不是目录")
+        || message.contains("目标路径")
+}
+
+fn build_path_recovery_system_message(tool_name: &str, tool_error: &str) -> String {
+    format!(
+        "Path recovery rule:\n- The last {tool_name} call failed with a path-related error.\n- Do not continue using the failed path.\n- Do not infer sibling or child paths from design documents, TREE.md, README, or memory.\n- Your next step must be one of: inspect_path on the target or parent path, list_dir on a confirmed parent directory, or find_files in a confirmed ancestor directory.\n- Only after tool evidence confirms the real path may you call read_file or continue analysis.\n- Do not ask the user whether to continue until you have attempted path recovery.\n\nObserved error:\n{tool_error}"
+    )
+}
 
 /// CLI AI 助手 - 面向用户的交互式助手
 pub struct CliAssistant {
@@ -83,6 +116,7 @@ pub struct CliAssistant {
     literature_tools: LiteratureTools,
     computation_tools: ComputationTools,
     data_tools: DataTools,
+    github_tools: GitHubTools,
     /// SymPy 数学验证工具
     sympy_tool: SymPyTool,
     /// LLM 管理器（多提供商支持）
@@ -118,7 +152,10 @@ impl CliAssistant {
     /// # 参数
     /// - `config`: 助手配置
     /// - `security_config`: 安全配置（从 config.toml + 环境变量加载）
-    pub fn new(config: AssistantConfig, security_config: crate::security::SecurityConfig) -> Result<Self> {
+    pub fn new(
+        config: AssistantConfig,
+        security_config: crate::security::SecurityConfig,
+    ) -> Result<Self> {
         // 加载配置文件
         let config_file = Config::load(None).unwrap_or_else(|e| {
             warn!("加载配置文件失败：{}，使用默认配置", e);
@@ -234,6 +271,7 @@ impl CliAssistant {
             literature_tools: LiteratureTools,
             computation_tools: ComputationTools,
             data_tools: DataTools,
+            github_tools: GitHubTools,
             sympy_tool: SymPyTool::new(),
             llm_manager,
             model_handler,
@@ -248,6 +286,12 @@ impl CliAssistant {
             .get_tools_by_name(curated_ai_scientist_tool_names())
     }
 
+    pub fn get_tool_definitions_with_extra(&self, extra_tools: &[Value]) -> Vec<Value> {
+        let mut tools = self.get_tool_definitions();
+        tools.extend(extra_tools.iter().cloned());
+        tools
+    }
+
     /// 获取 LLM 管理器（用于 TUI 模式）
     pub fn get_llm_manager(&self) -> Arc<LLMManager> {
         self.llm_manager.clone()
@@ -259,13 +303,81 @@ impl CliAssistant {
 
         // 对文件操作类工具验证 path 参数
         let file_tools = [
-            "read_file", "write_file", "edit_file", "copy_file", "move_file",
-            "delete_file", "list_dir", "mkdir", "create_dir",
-            "read_pdf_text", "read_pdf",
+            "read_file",
+            "read_file_head",
+            "read_file_range",
+            "inspect_path",
+            "write_file",
+            "edit_file",
+            "search_and_replace_multi",
+            "apply_patch",
+            "copy_file",
+            "move_file",
+            "rename_path",
+            "delete_file",
+            "list_dir",
+            "mkdir",
+            "create_dir",
+            "grep",
+            "search_content",
+            "find_files",
+            "count_file_types",
+            "find_large_files",
+            "tree_dir",
+            "get_file_info",
+            "diagnostics",
+            "go_to_definition",
+            "symbol_search",
+            "references_search",
+            "find_implementations",
+            "document_symbols",
+            "workspace_symbols",
+            "hover",
+            "signature_help",
+            "rename_symbol",
+            "file_complexity",
+            "import_map",
+            "api_surface",
+            "project_dependency_graph",
+            "search_workspace_text",
+            "change_hierarchy",
+            "code_lens",
+            "diagnostic_summary",
+            "dependency_hotspots",
+            "test_impact_analysis",
+            "save_analysis_snapshot",
+            "compare_snapshots",
+            "workspace_risk_report",
+            "recent_change_report",
+            "git_add",
+            "git_commit",
+            "git_restore_file",
+            "git_reset_file",
+            "git_checkout",
+            "git_stash_push",
+            "git_stash_pop",
+            "git_push",
+            "git_pull",
+            "git_branch_create",
+            "git_branch_delete",
+            "git_log_file",
+            "format_file",
+            "test_target",
+            "read_pdf_text",
+            "read_pdf",
         ];
         if file_tools.contains(&name) {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
                 let validation = resolver.resolve(path);
+                if !validation.is_valid {
+                    return Err(anyhow::anyhow!(
+                        "路径安全验证失败：{}",
+                        validation.error.unwrap_or_else(|| "未知错误".to_string())
+                    ));
+                }
+            }
+            if let Some(directory) = args.get("directory").and_then(|v| v.as_str()) {
+                let validation = resolver.resolve(directory);
                 if !validation.is_valid {
                     return Err(anyhow::anyhow!(
                         "路径安全验证失败：{}",
@@ -315,11 +427,6 @@ impl CliAssistant {
         Ok(())
     }
 
-    /// 获取工具管理器（用于 TUI 模式）
-    pub fn get_tool_manager(&self) -> &ToolManager {
-        &self.tool_manager
-    }
-
     /// 获取工具箱统计信息
     pub fn get_toolbox_stats(&self) -> Value {
         self.tool_manager.get_toolbox_stats()
@@ -343,6 +450,22 @@ impl CliAssistant {
         // 对文件路径参数做路径验证
         if let Err(e) = self.validate_tool_args(name, args) {
             return Err(e);
+        }
+
+        if name == "terminal_run_structured" {
+            let command = args
+                .get("command")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| anyhow::anyhow!("terminal_run_structured requires command"))?;
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(20_000);
+            let workspace = std::env::current_dir()
+                .map_err(|err| anyhow::anyhow!("failed to determine current workspace: {}", err))?;
+            let result = run_terminal_command_structured(&workspace, command, timeout_ms)?;
+            self.tool_manager.tool_registry.record_usage(name, true, 0);
+            return Ok(result.to_string());
         }
 
         use tokitai_core::ToolErrorKind;
@@ -388,6 +511,7 @@ impl CliAssistant {
         try_tool!(self.literature_tools);
         try_tool!(self.computation_tools);
         try_tool!(self.data_tools);
+        try_tool!(self.github_tools);
         try_tool!(self.sympy_tool);
 
         warn!("❌ 未知工具：{}", name);
@@ -400,6 +524,21 @@ impl CliAssistant {
 
         if let Err(e) = self.validate_tool_args(name, args) {
             return Err(e);
+        }
+
+        if name == "terminal_run_structured" {
+            let command = args
+                .get("command")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| anyhow::anyhow!("terminal_run_structured requires command"))?;
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(20_000);
+            let workspace = std::env::current_dir()
+                .map_err(|err| anyhow::anyhow!("failed to determine current workspace: {}", err))?;
+            let result = run_terminal_command_structured(&workspace, command, timeout_ms)?;
+            return Ok(result.to_string());
         }
 
         use tokitai_core::ToolErrorKind;
@@ -443,6 +582,7 @@ impl CliAssistant {
         try_tool!(self.literature_tools);
         try_tool!(self.computation_tools);
         try_tool!(self.data_tools);
+        try_tool!(self.github_tools);
         try_tool!(self.sympy_tool);
 
         warn!("Unknown tool in no-auth path: {}", name);
@@ -460,21 +600,36 @@ impl CliAssistant {
 
     pub fn chat_with_trace(&self, messages: &mut Vec<Value>) -> Result<ChatRunResult> {
         let mut trace = Vec::new();
-        let content = self.chat_internal(messages, Some(&mut trace))?;
+        let content = self.chat_internal(messages, Some(&mut trace), None)?;
+        Ok(ChatRunResult { content, trace })
+    }
+
+    pub fn chat_with_trace_with_tools(
+        &self,
+        messages: &mut Vec<Value>,
+        extra_tools: &[Value],
+    ) -> Result<ChatRunResult> {
+        let mut trace = Vec::new();
+        let content = self.chat_internal(messages, Some(&mut trace), Some(extra_tools))?;
         Ok(ChatRunResult { content, trace })
     }
 
     /// 与 AI 对话
     pub fn chat(&self, messages: &mut Vec<Value>) -> Result<String> {
-        self.chat_internal(messages, None)
+        self.chat_internal(messages, None, None)
     }
 
     fn chat_internal(
         &self,
         messages: &mut Vec<Value>,
         mut trace: Option<&mut Vec<MessageBlock>>,
+        extra_tools: Option<&[Value]>,
     ) -> Result<String> {
-        let tools = self.get_tool_definitions();
+        let tools = if let Some(extra) = extra_tools {
+            self.get_tool_definitions_with_extra(extra)
+        } else {
+            self.get_tool_definitions()
+        };
 
         // 从环境变量读取最新配置（支持运行时切换供应商）
         let api_url = std::env::var("AI_API_URL").unwrap_or_else(|_| self.config.api_url.clone());
@@ -536,7 +691,11 @@ impl CliAssistant {
                         .and_then(|tc: &Value| tc.as_array());
                     if let Some(tool_calls) = tool_calls_opt {
                         if !tool_calls.is_empty() {
-                            return self.handle_tool_calls(tool_calls, messages, trace.as_deref_mut());
+                            return self.handle_tool_calls(
+                                tool_calls,
+                                messages,
+                                trace.as_deref_mut(),
+                            );
                         }
                     }
 
@@ -585,7 +744,11 @@ impl CliAssistant {
             let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
 
             println!("🔧 执行工具：{}", name);
-            let tool_call_id = tool_call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+            let tool_call_id = tool_call
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or("")
+                .to_string();
             if let Some(ref mut blocks) = trace {
                 blocks.push(MessageBlock::ToolCall {
                     name: name.to_string(),
@@ -623,7 +786,17 @@ impl CliAssistant {
                 continue;
             }
 
-            match self.call_tool(name, &args) {
+            let tool_result = self.call_tool(name, &args);
+            let path_recovery_message = tool_result.as_ref().err().and_then(|error| {
+                let error_text = error.to_string();
+                if is_path_recovery_tool(name) && is_path_related_failure(&error_text) {
+                    Some(build_path_recovery_system_message(name, &error_text))
+                } else {
+                    None
+                }
+            });
+
+            match tool_result {
                 Ok(result) => {
                     println!("✅ 工具执行成功");
                     if let Some(ref mut blocks) = trace {
@@ -665,10 +838,17 @@ impl CliAssistant {
                     }));
                 }
             }
+
+            if let Some(system_message) = path_recovery_message {
+                results.push(json!({
+                    "role": "system",
+                    "content": system_message
+                }));
+            }
         }
 
         messages.extend(results);
-        self.chat_internal(messages, trace)
+        self.chat_internal(messages, trace, None)
     }
 
     /// 运行交互式 CLI
@@ -680,9 +860,9 @@ impl CliAssistant {
         println!();
 
         let mut messages: Vec<Value> = vec![json!({
-            "role": "system",
-        "content": science_expert_system_prompt()
-    })];
+                "role": "system",
+            "content": science_expert_system_prompt()
+        })];
 
         let mut stdout = io::stdout();
 

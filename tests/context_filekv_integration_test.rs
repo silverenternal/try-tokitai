@@ -20,7 +20,11 @@ fn test_parallel_context_branch_workflow() {
     manager.checkout(&feature_id).unwrap();
 
     let current = manager.get_current_branch().unwrap();
-    std::fs::write(current.short_term_dir.join("note.txt"), "feature branch note").unwrap();
+    std::fs::write(
+        current.short_term_dir.join("note.txt"),
+        "feature branch note",
+    )
+    .unwrap();
 
     manager.checkout("main").unwrap();
     let merge = manager.merge(&feature_id, "main", None).unwrap();

@@ -34,6 +34,19 @@ impl FileOperations {
     pub fn with_resolver(resolver: SecurePathResolver) -> Self {
         Self { resolver }
     }
+
+    pub(crate) fn resolver(&self) -> &SecurePathResolver {
+        &self.resolver
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PatchChange {
+    pub path: String,
+    pub old_text: String,
+    pub new_text: String,
+    #[serde(default)]
+    pub replace_all: bool,
 }
 
 #[tool]
@@ -516,6 +529,92 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err["error"]["code"], "text_not_found");
+
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_read_file_range() {
+        let test_file = get_test_temp_path("test_range.txt");
+        std::fs::write(&test_file, "a\nb\nc\nd").unwrap();
+
+        let ops = FileOperations::new();
+        let result = ops
+            .read_file_range(test_file.to_string_lossy().to_string(), 2, 3)
+            .unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["data"]["content"], "b\nc");
+
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_mkdir_and_rename_path() {
+        let base = get_test_temp_path("test_mkdir");
+        let _ = std::fs::remove_dir_all(&base);
+        let ops = FileOperations::new();
+
+        let dir = base.join("nested");
+        let mkdir_result = ops.mkdir(dir.to_string_lossy().to_string(), Some(true)).unwrap();
+        assert_eq!(mkdir_result["status"], "success");
+        assert!(dir.exists());
+
+        let src = dir.join("src.txt");
+        std::fs::write(&src, "hello").unwrap();
+        let dst = dir.join("dst.txt");
+        let rename_result = ops
+            .rename_path(src.to_string_lossy().to_string(), dst.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(rename_result["status"], "success");
+        assert!(dst.exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_search_and_replace_multi() {
+        let test_file = get_test_temp_path("test_multi_replace.txt");
+        std::fs::write(&test_file, "foo\nbar\nfoo").unwrap();
+
+        let ops = FileOperations::new();
+        let result = ops
+            .search_and_replace_multi(
+                test_file.to_string_lossy().to_string(),
+                vec![PatchChange {
+                    path: test_file.to_string_lossy().to_string(),
+                    old_text: "foo".to_string(),
+                    new_text: "baz".to_string(),
+                    replace_all: true,
+                }],
+            )
+            .unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "baz\nbar\nbaz");
+
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_apply_patch_basic() {
+        let test_file = get_test_temp_path("test_patch.txt");
+        std::fs::write(&test_file, "one\ntwo\nthree").unwrap();
+
+        let ops = FileOperations::new();
+        let patch = "\
+--- a/test_patch.txt
++++ b/test_patch.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+ three"
+        .to_string();
+        let result = ops.apply_patch(test_file.to_string_lossy().to_string(), patch).unwrap();
+
+        assert_eq!(result["status"], "success");
+        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "one\nTWO\nthree");
 
         let _ = std::fs::remove_file(&test_file);
     }

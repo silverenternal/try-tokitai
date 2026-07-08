@@ -10,8 +10,8 @@
 use bytes::Bytes;
 use moka::sync::Cache;
 use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 

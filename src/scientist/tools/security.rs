@@ -39,39 +39,45 @@ impl Rbac {
         role_permissions.insert(
             Role::Admin,
             HashSet::from_iter([
-                Permission::ToolExecute, Permission::ToolCreate,
-                Permission::ConfigModify, Permission::DataRead,
-                Permission::DataWrite, Permission::PaperDownload,
-                Permission::CodeExecute, Permission::NetworkAccess,
+                Permission::ToolExecute,
+                Permission::ToolCreate,
+                Permission::ConfigModify,
+                Permission::DataRead,
+                Permission::DataWrite,
+                Permission::PaperDownload,
+                Permission::CodeExecute,
+                Permission::NetworkAccess,
             ]),
         );
 
         role_permissions.insert(
             Role::Researcher,
             HashSet::from_iter([
-                Permission::ToolExecute, Permission::DataRead,
-                Permission::DataWrite, Permission::PaperDownload,
+                Permission::ToolExecute,
+                Permission::DataRead,
+                Permission::DataWrite,
+                Permission::PaperDownload,
                 Permission::NetworkAccess,
             ]),
         );
 
-        role_permissions.insert(
-            Role::Viewer,
-            HashSet::from_iter([Permission::DataRead]),
-        );
+        role_permissions.insert(Role::Viewer, HashSet::from_iter([Permission::DataRead]));
 
         Self { role_permissions }
     }
 
     pub fn has_permission(&self, role: &Role, perm: &Permission) -> bool {
-        self.role_permissions.get(role)
+        self.role_permissions
+            .get(role)
             .map(|perms| perms.contains(perm))
             .unwrap_or(false)
     }
 }
 
 impl Default for Rbac {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ============================================================================
@@ -85,15 +91,21 @@ pub struct ToolPermission {
 
 impl ToolPermission {
     pub fn new(rbac: Rbac) -> Self {
-        Self { tool_risk_map: HashMap::new(), rbac }
+        Self {
+            tool_risk_map: HashMap::new(),
+            rbac,
+        }
     }
 
     pub fn register_tool(&mut self, name: &str, risk_level: &str) {
-        self.tool_risk_map.insert(name.to_string(), risk_level.to_string());
+        self.tool_risk_map
+            .insert(name.to_string(), risk_level.to_string());
     }
 
     pub fn can_execute(&self, role: &Role, tool_name: &str) -> bool {
-        let risk = self.tool_risk_map.get(tool_name)
+        let risk = self
+            .tool_risk_map
+            .get(tool_name)
             .map(|s| s.as_str())
             .unwrap_or("safe");
 
@@ -133,7 +145,10 @@ impl PromptInjectionDetector {
         for pattern in &self.patterns {
             // Simple substring match for known injection patterns
             let p = pattern.to_lowercase();
-            let clean_p = p.replace("(?i)", "").replace("\\s+", " ").replace("\\s*", " ");
+            let clean_p = p
+                .replace("(?i)", "")
+                .replace("\\s+", " ")
+                .replace("\\s*", " ");
             if lower.contains(&clean_p.split_whitespace().collect::<Vec<_>>().join(" "))
                 || lower.contains("ignore previous")
                 || lower.contains("system prompt")
@@ -146,7 +161,9 @@ impl PromptInjectionDetector {
 }
 
 impl Default for PromptInjectionDetector {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ============================================================================
@@ -159,7 +176,9 @@ pub struct SecretManager {
 
 impl SecretManager {
     pub fn new() -> Self {
-        Self { secrets: HashMap::new() }
+        Self {
+            secrets: HashMap::new(),
+        }
     }
 
     pub fn store(&mut self, key: &str, value: &str) {
@@ -192,10 +211,19 @@ pub struct AuditLog {
 
 impl AuditLog {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
-    pub fn record(&mut self, user: &str, action: &str, tool: Option<&str>, success: bool, details: &str) {
+    pub fn record(
+        &mut self,
+        user: &str,
+        action: &str,
+        tool: Option<&str>,
+        success: bool,
+        details: &str,
+    ) {
         self.entries.push(AuditEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             user: user.to_string(),

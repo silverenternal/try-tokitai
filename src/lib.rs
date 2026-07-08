@@ -15,17 +15,18 @@
 
 // 内部模块（不公开）
 pub mod app_paths;
+pub mod agent_skills;
 mod command_resolver;
 pub mod config;
-mod domain_prompt;
 pub mod desktop_host;
+mod domain_prompt;
 pub mod host;
 mod path_resolver;
 mod sandbox;
 pub mod security;
 pub mod text_encoding;
-mod tools;
 pub mod toolchain;
+mod tools;
 // Context is now a separate crate: tokitai-context
 pub use tokitai_context as context; // Re-export for backward compatibility
 pub use tokitai_filekv as filekv;
@@ -67,7 +68,8 @@ pub use tokitai_context::{
 // FileKV public types
 pub use tokitai_filekv::{
     FileKV, FileKVConfig, FileKVStats, FileKVStatsSnapshot, MemTable, MemTableConfig,
-    MemTableEntry, SegmentFile, SparseIndex, SparseIndexManager, ValuePointer, WalEntry, WalManager,
+    MemTableEntry, SegmentFile, SparseIndex, SparseIndexManager, ValuePointer, WalEntry,
+    WalManager,
 };
 
 // 重新导出 orchestrator 公共类型（用于集成测试）

@@ -159,9 +159,19 @@ impl PrivacyGuard {
     /// Generate a privacy report
     pub fn report(&self) -> String {
         let mut r = String::from("# Privacy Audit Report\n\n");
-        r.push_str(&format!("Privacy mode: {}\n", if self.enforced { "ENFORCED" } else { "OFF" }));
+        r.push_str(&format!(
+            "Privacy mode: {}\n",
+            if self.enforced { "ENFORCED" } else { "OFF" }
+        ));
         r.push_str(&format!("Current level: {}\n", self.level.label()));
-        r.push_str(&format!("Local model: {}\n", if self.local_model_available { "Available" } else { "Not configured" }));
+        r.push_str(&format!(
+            "Local model: {}\n",
+            if self.local_model_available {
+                "Available"
+            } else {
+                "Not configured"
+            }
+        ));
         r.push_str(&format!("External API calls: {}\n\n", self.audit_log.len()));
 
         if !self.audit_log.is_empty() {
@@ -170,8 +180,12 @@ impl PrivacyGuard {
             for entry in &self.audit_log {
                 r.push_str(&format!(
                     "| {} | {} | {} | {} | {} | {} |\n",
-                    entry.timestamp, entry.phase, entry.security_level,
-                    entry.provider, entry.model, entry.tokens,
+                    entry.timestamp,
+                    entry.phase,
+                    entry.security_level,
+                    entry.provider,
+                    entry.model,
+                    entry.tokens,
                 ));
             }
         }
@@ -188,7 +202,9 @@ impl PrivacyGuard {
 }
 
 impl Default for PrivacyGuard {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Result of a safety check

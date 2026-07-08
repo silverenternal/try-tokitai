@@ -33,7 +33,13 @@ impl ChatPanel {
 
         let mut all_lines = Vec::<Line>::new();
         for block_msg in messages {
-            Self::render_block(block_msg, &mut all_lines, area.width, frame_count, status_word);
+            Self::render_block(
+                block_msg,
+                &mut all_lines,
+                area.width,
+                frame_count,
+                status_word,
+            );
         }
 
         let total_lines = all_lines.len();
@@ -77,10 +83,7 @@ impl ChatPanel {
     ) {
         match block {
             MessageBlock::ToolCall {
-                name,
-                args,
-                status,
-                ..
+                name, args, status, ..
             } => {
                 let is_done = matches!(status, ToolCallStatus::Complete);
                 let icon = if is_done { "[ok]" } else { "[run]" };
@@ -99,7 +102,10 @@ impl ChatPanel {
                             .fg(color)
                             .add_modifier(ratatui::style::Modifier::BOLD),
                     ),
-                    Span::styled(format!("  {}", args_short), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("  {}", args_short),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
                 lines.push(Line::from(""));
             }
@@ -182,6 +188,19 @@ impl ChatPanel {
                 append_markdown_lines(lines, content, width, Color::White);
                 lines.push(Line::from(""));
             }
+            MessageBlock::AssistantChoices { title, options } => {
+                lines.push(Line::from(vec![
+                    Span::styled("[choices] ", Style::default().fg(Color::Green)),
+                    Span::styled(title.clone(), Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD)),
+                ]));
+                for item in options {
+                    lines.push(Line::from(Span::styled(
+                        format!("  - {}", item),
+                        Style::default().fg(Color::Gray),
+                    )));
+                }
+                lines.push(Line::from(""));
+            }
             MessageBlock::AssistantStreaming { content } => {
                 append_markdown_lines(lines, content, width, Color::White);
                 if !content.is_empty() {
@@ -198,8 +217,16 @@ impl ChatPanel {
                     Span::styled(
                         format!(
                             "{} [{}]",
-                            if record.name.is_empty() { "subagent" } else { &record.name },
-                            if record.status.is_empty() { "pending" } else { &record.status }
+                            if record.name.is_empty() {
+                                "subagent"
+                            } else {
+                                &record.name
+                            },
+                            if record.status.is_empty() {
+                                "pending"
+                            } else {
+                                &record.status
+                            }
                         ),
                         Style::default()
                             .fg(Color::Magenta)

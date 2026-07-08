@@ -47,8 +47,8 @@ use crate::tool_matrix::registry::ToolSource;
 use crate::tools::io::security::{SandboxConfig, SecurePathResolver};
 use crate::tools::HttpClientTools;
 use crate::tools::{
-    CodeTools, DownloadTools, FileOperations, GitOperations, JsonFormatTools, SearchTools,
-    SystemTools,
+    CodeTools, DownloadTools, FileOperations, FileSearchTools, GitOperations, JsonFormatTools,
+    SearchTools, SystemTools,
 };
 
 /// 自主助手 - 项目自更新服务
@@ -73,6 +73,7 @@ pub struct AutonomousAssistant {
     git_workflow: GitWorkflow,
     /// 工具实例（用于 call_tool 调用）
     file_ops: FileOperations,
+    file_search: FileSearchTools,
     system_tools: SystemTools,
     code_tools: CodeTools,
     web_search: SearchTools,
@@ -180,7 +181,8 @@ impl AutonomousAssistant {
             autonomy_dir,
             coordinator,
             git_workflow,
-            file_ops: FileOperations::with_resolver(path_resolver),
+            file_ops: FileOperations::with_resolver(path_resolver.clone()),
+            file_search: FileSearchTools::with_resolver(path_resolver),
             system_tools: SystemTools::default(),
             code_tools: CodeTools::default(),
             web_search: SearchTools::new(),
@@ -297,6 +299,7 @@ impl AutonomousAssistant {
         }
 
         try_tool!(self.file_ops);
+        try_tool!(self.file_search);
         try_tool!(self.system_tools);
         try_tool!(self.code_tools);
         try_tool!(self.web_search);
@@ -315,9 +318,67 @@ impl AutonomousAssistant {
 
         // 对文件操作类工具验证 path 参数
         let file_tools = [
-            "read_file", "write_file", "edit_file", "copy_file", "move_file",
-            "delete_file", "list_dir", "mkdir", "create_dir",
-            "read_pdf_text", "read_pdf",
+            "read_file",
+            "read_file_head",
+            "inspect_path",
+            "write_file",
+            "edit_file",
+            "search_and_replace_multi",
+            "apply_patch",
+            "copy_file",
+            "move_file",
+            "rename_path",
+            "delete_file",
+            "list_dir",
+            "mkdir",
+            "create_dir",
+            "grep",
+            "search_content",
+            "find_files",
+            "count_file_types",
+            "find_large_files",
+            "tree_dir",
+            "get_file_info",
+            "diagnostics",
+            "go_to_definition",
+            "symbol_search",
+            "references_search",
+            "find_implementations",
+            "document_symbols",
+            "workspace_symbols",
+            "hover",
+            "signature_help",
+            "rename_symbol",
+            "file_complexity",
+            "import_map",
+            "api_surface",
+            "project_dependency_graph",
+            "search_workspace_text",
+            "change_hierarchy",
+            "code_lens",
+            "diagnostic_summary",
+            "dependency_hotspots",
+            "test_impact_analysis",
+            "save_analysis_snapshot",
+            "compare_snapshots",
+            "workspace_risk_report",
+            "recent_change_report",
+            "git_add",
+            "git_commit",
+            "git_restore_file",
+            "git_reset_file",
+            "git_checkout",
+            "git_stash_push",
+            "git_stash_pop",
+            "git_push",
+            "git_pull",
+            "git_branch_create",
+            "git_branch_delete",
+            "git_log_file",
+            "format_file",
+            "test_target",
+            "read_pdf_text",
+            "read_pdf",
         ];
         if file_tools.contains(&name) {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
@@ -354,7 +415,8 @@ impl AutonomousAssistant {
                 }
                 // run_command 仍需 confirmed=true
                 if name == "run_command" {
-                    let confirmed = args.get("confirmed")
+                    let confirmed = args
+                        .get("confirmed")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     if !confirmed {
@@ -366,17 +428,29 @@ impl AutonomousAssistant {
                     let cmd_name = cmd.split_whitespace().next().unwrap_or("");
                     let cmd_base = cmd_name.rsplit('/').next().unwrap_or(cmd_name);
                     let dangerous: &[&str] = &[
-                        "rm", "dd", "mkfs", "chmod", "chown", "sudo", "su",
-                        "shutdown", "reboot", "halt", "poweroff",
-                        "kill", "pkill", "killall",
-                        "iptables", "ufw",
+                        "rm", "dd", "mkfs", "chmod", "chown", "sudo", "su", "shutdown", "reboot",
+                        "halt", "poweroff", "kill", "pkill", "killall", "iptables", "ufw",
                         "passwd", "useradd", "userdel",
                     ];
                     if dangerous.contains(&cmd_base) {
                         return Err(anyhow::anyhow!(
-                            "自主模式拒绝执行危险命令: '{}' 在黑名单中", cmd_base
+                            "自主模式拒绝执行危险命令: '{}' 在黑名单中",
+                            cmd_base
                         ));
                     }
+                }
+            }
+        }
+
+        let directory_tools = ["find_files", "count_file_types", "find_large_files", "tree_dir"];
+        if directory_tools.contains(&name) {
+            if let Some(directory) = args.get("directory").and_then(|v| v.as_str()) {
+                let validation = resolver.resolve(directory);
+                if !validation.is_valid {
+                    return Err(anyhow::anyhow!(
+                        "路径安全验证失败：{}",
+                        validation.error.unwrap_or_else(|| "未知错误".to_string())
+                    ));
                 }
             }
         }
@@ -475,8 +549,13 @@ impl AutonomousAssistant {
 
 你可以使用以下工具：
 - read_file: 读取文件
+- read_file_head: 读取文件前几行
+- inspect_path: 检查路径状态
 - write_file: 写入文件
 - edit_file: 编辑文件
+- list_dir: 列出目录
+- grep / search_content: 在文件中搜索
+- find_files / count_file_types / find_large_files / tree_dir: 目录搜索与概览
 - run_command: 执行命令（如 cargo fmt, cargo clippy, cargo test）
 
 请根据计划逐步执行任务，每次调用一个工具。"

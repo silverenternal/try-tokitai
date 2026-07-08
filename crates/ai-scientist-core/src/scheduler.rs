@@ -65,7 +65,10 @@ impl Scheduler for RoundRobinScheduler {
         // In practice, registration happens at startup before dispatch begins
         futures::executor::block_on(async {
             let mut agents = self.agents.write().await;
-            agents.entry(role.clone()).or_insert_with(Vec::new).push(agent);
+            agents
+                .entry(role.clone())
+                .or_insert_with(Vec::new)
+                .push(agent);
             let mut counters = self.counters.write().await;
             counters.entry(role).or_insert(0);
         });
@@ -223,9 +226,7 @@ impl Scheduler for PriorityScheduler {
                         if let Some(agent) = candidates.first() {
                             match agent.handle_message(msg, ctx).await {
                                 Ok(resp) => return vec![resp],
-                                Err(e) => {
-                                    return vec![AgentResponse::error(e.to_string())]
-                                }
+                                Err(e) => return vec![AgentResponse::error(e.to_string())],
                             }
                         }
                     }
@@ -282,7 +283,9 @@ mod tests {
             _msg: AgentMessage,
             _ctx: &AgentContext,
         ) -> Result<AgentResponse, crate::agent::AgentError> {
-            Ok(AgentResponse::ok(serde_json::json!({"handled_by": self.id.clone()})))
+            Ok(AgentResponse::ok(
+                serde_json::json!({"handled_by": self.id.clone()}),
+            ))
         }
     }
 

@@ -109,6 +109,19 @@ impl CommandRegistry {
                     description: "Approve current phase and continue (competition mode)",
                 },
                 Command {
+                    name: "reviewer-panel",
+                    description: "Toggle reviewer feedback panel",
+                },
+                Command {
+                    name: "reviewer-add",
+                    description:
+                        "Add reviewer feedback (/reviewer-add reviewer|score|comment|run_id?)",
+                },
+                Command {
+                    name: "reviewer-resolve",
+                    description: "Resolve reviewer feedback by index (/reviewer-resolve <n>)",
+                },
+                Command {
                     name: "privacy",
                     description: "Show privacy/security status and audit log",
                 },
@@ -201,7 +214,11 @@ Available commands:
   /research <t>   Start AI Scientist pipeline
   /next           Advance research phase
   /phase          Show research status
-  /stop           Stop research pipeline";
+  /stop           Stop research pipeline
+  /reviewer-panel Toggle reviewer feedback panel
+  /reviewer-add   Add reviewer feedback
+  /reviewer-resolve <n>
+                  Mark reviewer feedback item as resolved";
                 app.add_message(MessageBlock::System {
                     content: help_text.to_string(),
                 });
@@ -375,10 +392,11 @@ Available commands:
                 if app.research.active {
                     app.add_message(MessageBlock::System {
                         content: format!(
-                            "Topic: **{}**\nPhase: **{}** ({} of 7)",
+                            "Topic: **{}**\nPhase: **{}** ({} of 7)\n{}",
                             app.research.topic,
                             app.research.phase.label(),
                             app.research.context.len() + 1,
+                            app.research.reviewer_feedback_summary(),
                         ),
                     });
                 } else {
@@ -509,6 +527,105 @@ Available commands:
                     }
                 }
             }
+            "reviewer-panel" => {
+                let visible = app.research.toggle_reviewer_panel();
+                app.status_bar.reviewer_open_items = app.research.unresolved_feedback_count();
+                app.add_message(MessageBlock::System {
+                    content: if visible {
+                        format!(
+                            "Reviewer feedback panel opened.\n{}",
+                            app.research.reviewer_feedback_summary()
+                        )
+                    } else {
+                        "Reviewer feedback panel hidden.".to_string()
+                    },
+                });
+                CommandResult::Handled
+            }
+            "reviewer-add" => {
+                let raw = _args.trim();
+                if raw.is_empty() {
+                    app.add_message(MessageBlock::System {
+                        content: "Usage: /reviewer-add reviewer|score|comment|run_id(optional)"
+                            .to_string(),
+                    });
+                    return CommandResult::Handled;
+                }
+                let parts = raw.split('|').map(|part| part.trim()).collect::<Vec<_>>();
+                if parts.len() < 3 {
+                    app.add_message(MessageBlock::System {
+                        content: "Usage: /reviewer-add reviewer|score|comment|run_id(optional)"
+                            .to_string(),
+                    });
+                    return CommandResult::Handled;
+                }
+                let reviewer = parts[0];
+                let score = if parts[1].is_empty() {
+                    None
+                } else {
+                    match parts[1].parse::<u8>() {
+                        Ok(value) => Some(value),
+                        Err(_) => {
+                            app.add_message(MessageBlock::System {
+                                content: "reviewer-add score must be an integer from 0 to 255."
+                                    .to_string(),
+                            });
+                            return CommandResult::Handled;
+                        }
+                    }
+                };
+                let comment = parts[2];
+                let run_id = parts.get(3).map(|value| value.to_string());
+                if let Some(run_id) = run_id.clone() {
+                    if !run_id.trim().is_empty() {
+                        app.research.set_current_run_id(run_id);
+                    }
+                }
+                app.research
+                    .add_reviewer_feedback(reviewer, score, comment, run_id);
+                app.status_bar.reviewer_open_items = app.research.unresolved_feedback_count();
+                app.add_message(MessageBlock::System {
+                    content: format!(
+                        "Reviewer feedback recorded for {}.\n{}",
+                        reviewer,
+                        app.research.reviewer_feedback_summary()
+                    ),
+                });
+                CommandResult::Handled
+            }
+            "reviewer-resolve" => {
+                let raw = _args.trim();
+                if raw.is_empty() {
+                    app.add_message(MessageBlock::System {
+                        content: "Usage: /reviewer-resolve <n>".to_string(),
+                    });
+                    return CommandResult::Handled;
+                }
+                let parsed = match raw.parse::<usize>() {
+                    Ok(value) if value > 0 => value - 1,
+                    _ => {
+                        app.add_message(MessageBlock::System {
+                            content: "reviewer-resolve expects a 1-based item index.".to_string(),
+                        });
+                        return CommandResult::Handled;
+                    }
+                };
+                if app.research.resolve_reviewer_feedback(parsed) {
+                    app.status_bar.reviewer_open_items = app.research.unresolved_feedback_count();
+                    app.add_message(MessageBlock::System {
+                        content: format!(
+                            "Reviewer feedback #{} marked resolved.\n{}",
+                            parsed + 1,
+                            app.research.reviewer_feedback_summary()
+                        ),
+                    });
+                } else {
+                    app.add_message(MessageBlock::System {
+                        content: format!("Reviewer feedback #{} not found.", parsed + 1),
+                    });
+                }
+                CommandResult::Handled
+            }
             "kgraph" => {
                 let kg = &app.research.knowledge_graph;
                 let mermaid = kg.to_mermaid();
@@ -572,7 +689,9 @@ Available commands:
                         app.add_message(MessageBlock::System {
                             content: format!(
                                 "Forked at message #{} → branch `{}` (parent: {})",
-                                at + 1, fork_id, current_branch,
+                                at + 1,
+                                fork_id,
+                                current_branch,
                             ),
                         });
                     }
@@ -588,27 +707,34 @@ Available commands:
                 let args: Vec<&str> = _args.split_whitespace().collect();
                 if args.is_empty() {
                     let branches = app.session_manager.list_branches();
-                    let mut list = String::from("Usage: /merge <branch-id> [target-branch]\n\nAvailable branches:\n");
+                    let mut list = String::from(
+                        "Usage: /merge <branch-id> [target-branch]\n\nAvailable branches:\n",
+                    );
                     for b in &branches {
-                        let merged = b.merged_into.as_ref()
+                        let merged = b
+                            .merged_into
+                            .as_ref()
                             .map(|t| format!(" (merged into {})", t))
                             .unwrap_or_default();
-                        list.push_str(&format!("  {} — parent: {}{}\n", b.id, if b.parent_id.is_empty() { "main" } else { &b.parent_id }, merged));
+                        list.push_str(&format!(
+                            "  {} — parent: {}{}\n",
+                            b.id,
+                            if b.parent_id.is_empty() {
+                                "main"
+                            } else {
+                                &b.parent_id
+                            },
+                            merged
+                        ));
                     }
                     app.add_message(MessageBlock::System { content: list });
                 } else {
                     let branch_id = args[0];
                     let target = if args.len() > 1 { args[1] } else { "main" };
-                    match app
-                        .session_manager
-                        .mark_branch_merged(branch_id, target)
-                    {
+                    match app.session_manager.mark_branch_merged(branch_id, target) {
                         Ok(()) => {
                             app.add_message(MessageBlock::System {
-                                content: format!(
-                                    "Branch `{}` merged into `{}`",
-                                    branch_id, target
-                                ),
+                                content: format!("Branch `{}` merged into `{}`", branch_id, target),
                             });
                         }
                         Err(e) => {
@@ -824,5 +950,27 @@ Available commands:
 impl Default for CommandRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_registry_exposes_reviewer_feedback_commands() {
+        let registry = CommandRegistry::new();
+        assert_eq!(
+            registry.match_command("/reviewer-panel"),
+            Some("reviewer-panel")
+        );
+        assert_eq!(
+            registry.match_command("/reviewer-add panel-a|88|looks good"),
+            Some("reviewer-add")
+        );
+        assert_eq!(
+            registry.match_command("/reviewer-resolve 1"),
+            Some("reviewer-resolve")
+        );
     }
 }

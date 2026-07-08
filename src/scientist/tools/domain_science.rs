@@ -7,7 +7,9 @@
 use ai_scientist_science::biology::{AutoBiologyTool, BiologyToolInterface};
 use ai_scientist_science::chemistry::{AutoChemistryTool, ChemistryToolInterface};
 use ai_scientist_science::detect_domain_environment;
-use ai_scientist_science::simulation::{AutoSimulationTool, SimulationConfig, SimulationToolInterface};
+use ai_scientist_science::simulation::{
+    AutoSimulationTool, SimulationConfig, SimulationToolInterface,
+};
 use serde_json::{json, Value};
 use tokio::runtime::Builder;
 use tokitai::tool;
@@ -79,7 +81,11 @@ impl DomainScienceTools {
     }
 
     /// Generate molecular conformers, preferring RDKit when available.
-    pub fn chemistry_conformers(&self, smiles: String, num: Option<usize>) -> Result<Value, String> {
+    pub fn chemistry_conformers(
+        &self,
+        smiles: String,
+        num: Option<usize>,
+    ) -> Result<Value, String> {
         let tool = AutoChemistryTool;
         let conformers = block_on_domain(tool.generate_conformers(&smiles, num.unwrap_or(1)))?;
         Ok(json!({
@@ -91,7 +97,11 @@ impl DomainScienceTools {
     }
 
     /// Calculate local fingerprint similarity between two SMILES strings.
-    pub fn chemistry_similarity(&self, smiles_a: String, smiles_b: String) -> Result<Value, String> {
+    pub fn chemistry_similarity(
+        &self,
+        smiles_a: String,
+        smiles_b: String,
+    ) -> Result<Value, String> {
         let tool = AutoChemistryTool;
         let similarity = block_on_domain(tool.similarity(&smiles_a, &smiles_b))?;
         Ok(json!({
@@ -312,7 +322,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(blast["status"], "success");
-        assert!(blast["result"]["backend"].is_string() || blast["result"]["backend_mode"].is_string());
+        assert!(
+            blast["result"]["backend"].is_string() || blast["result"]["backend_mode"].is_string()
+        );
 
         let simulation = tool
             .call_tool(
@@ -338,7 +350,9 @@ mod tests {
             .unwrap();
         assert_eq!(preset["status"], "success");
 
-        let status = tool.call_tool("scientific_backend_status", &json!({})).unwrap();
+        let status = tool
+            .call_tool("scientific_backend_status", &json!({}))
+            .unwrap();
         assert_eq!(status["status"], "success");
         assert!(status["report"]["rdkit"]["name"].is_string());
     }

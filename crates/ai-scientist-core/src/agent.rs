@@ -109,7 +109,12 @@ pub struct AgentMessage {
 
 impl AgentMessage {
     /// Create a new message
-    pub fn new(from: AgentRole, to: Option<AgentRole>, msg_type: MessageType, payload: serde_json::Value) -> Self {
+    pub fn new(
+        from: AgentRole,
+        to: Option<AgentRole>,
+        msg_type: MessageType,
+        payload: serde_json::Value,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             from,

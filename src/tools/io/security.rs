@@ -20,11 +20,13 @@ impl PathValidationResult {
             Ok(self.canonical_path.unwrap_or_else(|| path.to_string()))
         } else {
             Err(IoToolError::PathValidation {
-                message: self.error.unwrap_or_else(|| "unknown path validation error".to_string()),
+                message: self
+                    .error
+                    .unwrap_or_else(|| "unknown path validation error".to_string()),
                 path: path.to_string(),
-                suggestion: self
-                    .suggestion
-                    .unwrap_or_else(|| "check whether the path is inside the active workspace".to_string()),
+                suggestion: self.suggestion.unwrap_or_else(|| {
+                    "check whether the path is inside the active workspace".to_string()
+                }),
             })
         }
     }
@@ -145,7 +147,10 @@ impl SecurePathResolver {
                     is_valid: false,
                     canonical_path: None,
                     error: Some(error),
-                    suggestion: Some("ensure the parent directory exists inside the active workspace".to_string()),
+                    suggestion: Some(
+                        "ensure the parent directory exists inside the active workspace"
+                            .to_string(),
+                    ),
                 };
             }
         };
@@ -261,7 +266,9 @@ impl SecurePathResolver {
             suffix.push(name.to_os_string());
             existing_ancestor = existing_ancestor
                 .parent()
-                .ok_or_else(|| format!("unable to resolve parent directory for {}", path.display()))?
+                .ok_or_else(|| {
+                    format!("unable to resolve parent directory for {}", path.display())
+                })?
                 .to_path_buf();
         }
 
@@ -315,7 +322,9 @@ impl SecurePathResolver {
 
     #[allow(dead_code)]
     pub fn remove_allowed_root(&mut self, path: &Path) {
-        self.config.allowed_roots.retain(|candidate| candidate != path);
+        self.config
+            .allowed_roots
+            .retain(|candidate| candidate != path);
     }
 }
 
@@ -459,7 +468,10 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(fs::read_to_string(&target).unwrap(), "workspace scoped write");
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "workspace scoped write"
+        );
     }
 
     #[test]
@@ -510,7 +522,9 @@ mod tests {
         for index in 0..10 {
             let path = tmpdir.path().join(format!("file_{}.txt", index));
             let resolver = Arc::clone(&resolver);
-            handles.push(thread::spawn(move || resolver.resolve(&path.to_string_lossy()).is_valid));
+            handles.push(thread::spawn(move || {
+                resolver.resolve(&path.to_string_lossy()).is_valid
+            }));
         }
 
         for handle in handles {

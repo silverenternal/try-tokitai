@@ -6,7 +6,7 @@
 //! The default implementation uses Tokio MPSC channels for in-process
 //! communication. Future implementations may use Redis, NATS, or Kafka.
 
-use super::agent::{AgentMessage};
+use super::agent::AgentMessage;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use tokio::sync::mpsc;

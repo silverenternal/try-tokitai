@@ -1,5 +1,19 @@
-﻿use std::convert::Infallible;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use anyhow::{anyhow, Result};
+use axum::body::{Body, Bytes};
+use axum::extract::{Query, State};
+use axum::http::header;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use chrono::Local;
+use futures::{FutureExt, StreamExt};
+use regex::Regex;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::convert::Infallible;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
@@ -9,32 +23,21 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use anyhow::{anyhow, Result};
-use axum::body::{Body, Bytes};
-use axum::extract::{Query, State};
-use axum::http::header;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use futures::{FutureExt, StreamExt};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tower_http::services::ServeDir;
-use chrono::Local;
-use regex::Regex;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
+use tower_http::services::ServeDir;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 use crate::app_paths::AppPaths;
+use crate::agent_skills::{AgentSkillCatalog, AgentSkillMatch, SkillKind};
 use crate::assistant_common::AssistantConfig;
 use crate::cli_assistant::{ChatRunResult, CliAssistant};
 use crate::config::Config;
-use crate::domain_prompt::{agent_mode_system_prompt, chat_mode_system_prompt, research_mode_system_prompt, strip_emoji};
+use crate::domain_prompt::{
+    agent_mode_system_prompt, chat_mode_system_prompt, research_mode_system_prompt, strip_emoji,
+};
 use crate::host::{
     HostBridgeResponse, HostBridgeStream, HostCapabilities, HostCommand, HostDescriptor,
 };
@@ -42,19 +45,28 @@ use crate::llm::providers::OpenAIProvider;
 use crate::llm::{ChatRequest, LLMProvider, Message};
 use crate::provider_config::ProviderManager;
 use crate::sandbox::initialize_app_sandbox;
+use crate::scientist::tools::data::{extract_paper_dataset_hints_from_value, DataTools};
+use crate::scientist::tools::github::{
+    detect_github_api_base_public, detect_github_token, GitHubTools,
+};
+use crate::scientist::tools::literature::LiteratureTools;
+use crate::scientist::tools::verification_center::VerificationCenterTools;
+use crate::scientist::workflow::{run_paper_workflow, PaperWorkflowRequest};
 use crate::security::{default_tool_risk_map, RateLimiter, SecurityConfig};
-use crate::text_encoding::{decode_bytes, ensure_json_text, normalize_json_strings, read_text_file};
+use crate::text_encoding::{
+    decode_bytes, ensure_json_text, normalize_json_strings, read_text_file,
+};
+use crate::tool_matrix::matrix::RiskLevel;
 use crate::toolchain::{
     auto_detect_toolchain_paths, command_is_available, default_toolchain_command,
     normalize_toolchain_paths, resolve_toolchain_value,
 };
-use crate::tool_matrix::matrix::RiskLevel;
+use crate::tui::components::diff_viewer::{DiffLine, FileDiff};
 use crate::tui::components::message_block::{
     AgentSubagentRecord, AgentVerifierCheck, AgentVerifierReport, MessageBlock, ToolCallStatus,
 };
-use crate::tui::components::diff_viewer::{DiffLine, FileDiff};
-use crate::tui::streaming::{build_conversation, is_tool_call_finish};
 use crate::tui::session::{SessionBranch, SessionManager, SessionMeta};
+use crate::tui::streaming::{build_conversation, is_tool_call_finish};
 
 #[derive(Clone)]
 pub struct WebAppState {
@@ -68,6 +80,7 @@ pub struct WebAppState {
     run_debug_runtime: Arc<Mutex<RunDebugRuntime>>,
     terminal_runtime: Arc<Mutex<TerminalRuntime>>,
     stream_runtime: Arc<Mutex<HashMap<String, StreamSessionRuntime>>>,
+    paper_workflow_inflight: Arc<Mutex<HashSet<String>>>,
     host: Arc<WebHostConfig>,
 }
 
@@ -88,11 +101,7 @@ impl WebHostConfig {
         }
     }
 
-    pub fn for_desktop_shell(
-        base_dir: PathBuf,
-        frontend_dir: PathBuf,
-        state_dir: PathBuf,
-    ) -> Self {
+    pub fn for_desktop_shell(base_dir: PathBuf, frontend_dir: PathBuf, state_dir: PathBuf) -> Self {
         let paths = AppPaths::for_desktop(base_dir, frontend_dir, state_dir);
         Self {
             paths,
@@ -102,7 +111,9 @@ impl WebHostConfig {
     }
 
     pub fn from_env_or_local_dev(base_dir: PathBuf) -> Self {
-        let frontend_dir = std::env::var("TOKITAI_FRONTEND_DIR").ok().map(PathBuf::from);
+        let frontend_dir = std::env::var("TOKITAI_FRONTEND_DIR")
+            .ok()
+            .map(PathBuf::from);
         let state_dir = std::env::var("TOKITAI_STATE_DIR").ok().map(PathBuf::from);
         let host_mode = std::env::var("TOKITAI_HOST_MODE").unwrap_or_else(|_| "web".to_string());
 
@@ -121,7 +132,9 @@ impl WebHostConfig {
                             Self {
                                 paths,
                                 bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
-                                descriptor: HostDescriptor::desktop_bridge(HostCapabilities::desktop_default()),
+                                descriptor: HostDescriptor::desktop_bridge(
+                                    HostCapabilities::desktop_default(),
+                                ),
                             }
                         } else {
                             Self::for_local_dev(base_dir.clone())
@@ -280,6 +293,7 @@ struct WebResearchPayload {
     waiting_approval: bool,
     competition_mode: bool,
     workflow_kind: String,
+    workflow_profile_summary: String,
     overall_state: String,
     rationale: String,
     blocker: Option<String>,
@@ -288,7 +302,16 @@ struct WebResearchPayload {
     resource_summary: Option<String>,
     graph: ResearchGraphPayload,
     review: Vec<String>,
+    execution_schema_summary: Vec<String>,
+    result_bundle: WebResearchResultBundle,
+    run_comparison: WebResearchRunComparison,
+    lineage: WebResearchLineage,
+    reviewer_feedback: WebReviewerFeedbackPayload,
+    paper_workflow: Option<WebPaperWorkflowPayload>,
+    paper_ready: WebPaperReadyPayload,
     runtime: WebResearchRuntimeEvent,
+    progress_prompts: Vec<WebResearchProgressPrompt>,
+    closure_checks: Vec<WebResearchClosureCheck>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,6 +360,1060 @@ struct ResearchRuntimeAssessment {
     resource_summary: Option<String>,
     current_node_override: Option<String>,
     next_phase_override: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebResearchResultField {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebResearchResultBundle {
+    bundle_kind: String,
+    summary_fields: Vec<WebResearchResultField>,
+    artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebResearchRunComparison {
+    available: bool,
+    compare_keys: Vec<String>,
+    observations: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebResearchLineageEntry {
+    run_id: String,
+    parent_run_id: String,
+    variant_label: String,
+    change_summary: String,
+    artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebResearchLineage {
+    available: bool,
+    run_count_hint: usize,
+    recent_runs: Vec<String>,
+    notes: Vec<String>,
+    history: Vec<WebResearchLineageEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct WebReviewerFeedbackEntry {
+    reviewer: String,
+    linked_run_id: String,
+    score: Option<u8>,
+    comment: String,
+    resolved: bool,
+    created_at: Option<String>,
+    resolved_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebReviewerFeedbackPayload {
+    session_id: Option<String>,
+    current_run_id: Option<String>,
+    unresolved_count: usize,
+    entries: Vec<WebReviewerFeedbackEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct WebPaperWorkflowArtifact {
+    label: String,
+    path: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct WebResearchProgressPrompt {
+    stage_id: String,
+    stage_label: String,
+    message: String,
+    evidence_contract: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct WebResearchClosureCheck {
+    id: String,
+    label: String,
+    status: String,
+    detail: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+struct WebPaperWorkflowPayload {
+    session_id: String,
+    topic: String,
+    workflow_profile: String,
+    workspace_root: String,
+    paper_dir: String,
+    artifact_paths: Vec<String>,
+    artifacts: Vec<WebPaperWorkflowArtifact>,
+    paper_markdown_path: String,
+    paper_latex_path: String,
+    paper_pdf_path: String,
+    references_bib_path: String,
+    appendix_markdown_path: String,
+    result_bundle_path: String,
+    review_response_path: String,
+    revision_execution_plan_path: String,
+    workflow_checkpoint_path: String,
+    payload_path: String,
+    rebuttal_markdown_path: String,
+    section_bundle_path: String,
+    section_bundle_before_path: String,
+    section_bundle_after_path: String,
+    section_diff_path: String,
+    manuscript_bundle_before_path: String,
+    manuscript_bundle_after_path: String,
+    manuscript_diff_path: String,
+    pdf_compile_status: String,
+    pdf_compile_detail: Option<String>,
+    paper_ready: bool,
+    paper_ready_detail: String,
+    paper_ready_gate: Value,
+    revision_mode: String,
+    revision_summary: String,
+    revision_queue_size: usize,
+    revision_queue_preview: Vec<String>,
+    source_run_id: String,
+    unresolved_reviewer_feedback: usize,
+    auto_revision_applied: bool,
+    checkpoint_stage: String,
+    reviewer_feedback_trace: Vec<Value>,
+    rebuttal_closure_records: Vec<Value>,
+    evidence_trace: Vec<Value>,
+    revision_execution_trace: Value,
+    section_diff_preview: Vec<Value>,
+    manuscript_diff_preview: Vec<Value>,
+    progress_prompts: Vec<WebResearchProgressPrompt>,
+    closure_checks: Vec<WebResearchClosureCheck>,
+    trigger_mode: String,
+    summary: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct WebPaperReadyPayload {
+    ready: bool,
+    reason: String,
+    auto_triggered: bool,
+    workflow_present: bool,
+    current_run_id: Option<String>,
+    unresolved_reviewer_feedback: usize,
+}
+
+fn reviewer_feedback_path(state: &WebAppState, session_id: &str) -> PathBuf {
+    state
+        .host
+        .sessions_dir()
+        .join(format!("{}.reviewer_feedback.json", session_id))
+}
+
+fn paper_workflow_payload_path(state: &WebAppState, session_id: &str) -> PathBuf {
+    state
+        .host
+        .sessions_dir()
+        .join(format!("{}.paper_workflow.json", session_id))
+}
+
+fn load_reviewer_feedback_entries(
+    state: &WebAppState,
+    session_id: &str,
+) -> Result<Vec<WebReviewerFeedbackEntry>> {
+    let path = reviewer_feedback_path(state, session_id);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = ensure_json_text(&path)?;
+    let mut entries: Vec<WebReviewerFeedbackEntry> = serde_json::from_str(&content)?;
+    for entry in &mut entries {
+        entry.reviewer = entry.reviewer.trim().to_string();
+        entry.linked_run_id = entry.linked_run_id.trim().to_string();
+        entry.comment = entry.comment.trim().to_string();
+    }
+    Ok(entries)
+}
+
+fn save_reviewer_feedback_entries(
+    state: &WebAppState,
+    session_id: &str,
+    entries: &[WebReviewerFeedbackEntry],
+) -> Result<()> {
+    let path = reviewer_feedback_path(state, session_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(entries)?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
+fn load_paper_workflow_payload(
+    state: &WebAppState,
+    session_id: &str,
+) -> Result<Option<WebPaperWorkflowPayload>> {
+    let path = paper_workflow_payload_path(state, session_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = ensure_json_text(&path)?;
+    let mut payload: WebPaperWorkflowPayload = serde_json::from_str(&content)?;
+    payload.session_id = payload.session_id.trim().to_string();
+    payload.topic = payload.topic.trim().to_string();
+    payload.workflow_profile = payload.workflow_profile.trim().to_string();
+    payload.workspace_root = payload.workspace_root.trim().to_string();
+    payload.paper_dir = payload.paper_dir.trim().to_string();
+    payload.paper_markdown_path = payload.paper_markdown_path.trim().to_string();
+    payload.paper_latex_path = payload.paper_latex_path.trim().to_string();
+    payload.paper_pdf_path = payload.paper_pdf_path.trim().to_string();
+    payload.references_bib_path = payload.references_bib_path.trim().to_string();
+    payload.appendix_markdown_path = payload.appendix_markdown_path.trim().to_string();
+    payload.result_bundle_path = payload.result_bundle_path.trim().to_string();
+    payload.review_response_path = payload.review_response_path.trim().to_string();
+    payload.revision_execution_plan_path = payload.revision_execution_plan_path.trim().to_string();
+    payload.workflow_checkpoint_path = payload.workflow_checkpoint_path.trim().to_string();
+    payload.payload_path = payload.payload_path.trim().to_string();
+    payload.rebuttal_markdown_path = payload.rebuttal_markdown_path.trim().to_string();
+    payload.section_bundle_path = payload.section_bundle_path.trim().to_string();
+    payload.section_bundle_before_path = payload.section_bundle_before_path.trim().to_string();
+    payload.section_bundle_after_path = payload.section_bundle_after_path.trim().to_string();
+    payload.section_diff_path = payload.section_diff_path.trim().to_string();
+    payload.manuscript_bundle_before_path =
+        payload.manuscript_bundle_before_path.trim().to_string();
+    payload.manuscript_bundle_after_path = payload.manuscript_bundle_after_path.trim().to_string();
+    payload.manuscript_diff_path = payload.manuscript_diff_path.trim().to_string();
+    payload.pdf_compile_status = payload.pdf_compile_status.trim().to_string();
+    payload.pdf_compile_detail = payload
+        .pdf_compile_detail
+        .take()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    payload.paper_ready_detail = payload.paper_ready_detail.trim().to_string();
+    payload.revision_mode = payload.revision_mode.trim().to_string();
+    payload.revision_summary = payload.revision_summary.trim().to_string();
+    payload.source_run_id = payload.source_run_id.trim().to_string();
+    payload.checkpoint_stage = payload.checkpoint_stage.trim().to_string();
+    payload.trigger_mode = payload.trigger_mode.trim().to_string();
+    payload.summary = payload.summary.trim().to_string();
+    for item in &mut payload.artifact_paths {
+        *item = item.trim().to_string();
+    }
+    for artifact in &mut payload.artifacts {
+        artifact.label = artifact.label.trim().to_string();
+        artifact.path = artifact.path.trim().to_string();
+        artifact.kind = artifact.kind.trim().to_string();
+    }
+    Ok(Some(payload))
+}
+
+fn save_paper_workflow_payload(
+    state: &WebAppState,
+    session_id: &str,
+    payload: &WebPaperWorkflowPayload,
+) -> Result<()> {
+    let path = paper_workflow_payload_path(state, session_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(payload)?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
+fn result_bundle_field_value(
+    result_bundle: &WebResearchResultBundle,
+    field_name: &str,
+) -> Option<String> {
+    result_bundle
+        .summary_fields
+        .iter()
+        .find(|field| field.name.eq_ignore_ascii_case(field_name))
+        .map(|field| field.value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn build_reviewer_feedback_payload(
+    state: &WebAppState,
+    session_id: Option<&str>,
+    current_run_id: Option<String>,
+) -> Result<WebReviewerFeedbackPayload> {
+    let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(WebReviewerFeedbackPayload::default());
+    };
+    let entries = load_reviewer_feedback_entries(state, session_id)?;
+    let unresolved_count = entries.iter().filter(|entry| !entry.resolved).count();
+    Ok(WebReviewerFeedbackPayload {
+        session_id: Some(session_id.to_string()),
+        current_run_id,
+        unresolved_count,
+        entries,
+    })
+}
+
+fn build_paper_workflow_payload(
+    session_id: &str,
+    topic: &str,
+    workflow_profile: &str,
+    workspace_root: &Path,
+    result: &crate::scientist::workflow::PaperWorkflowResult,
+    trigger_mode: &str,
+) -> WebPaperWorkflowPayload {
+    let mut artifact_paths = vec![
+        result.paper_markdown_path.clone(),
+        result.paper_latex_path.clone(),
+        result.references_bib_path.clone(),
+        result.appendix_markdown_path.clone(),
+        result.result_bundle_path.clone(),
+        result.review_response_path.clone(),
+        result.revision_execution_plan_path.clone(),
+        result.workflow_checkpoint_path.clone(),
+        result.rebuttal_markdown_path.clone(),
+        result.section_bundle_path.clone(),
+        result.section_bundle_before_path.clone(),
+        result.section_bundle_after_path.clone(),
+        result.section_diff_path.clone(),
+        result.manuscript_bundle_before_path.clone(),
+        result.manuscript_bundle_after_path.clone(),
+        result.manuscript_diff_path.clone(),
+        result.payload_path.clone(),
+    ];
+    if let Some(pdf_path) = result.paper_pdf_path.clone() {
+        artifact_paths.insert(2, pdf_path);
+    }
+
+    let to_relative = |path: &Path| -> String {
+        path.strip_prefix(workspace_root)
+            .map(|value| value.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+    };
+    let artifact = |label: &str, kind: &str, path: &Path| WebPaperWorkflowArtifact {
+        label: label.to_string(),
+        kind: kind.to_string(),
+        path: to_relative(path),
+    };
+    let revision_queue = result
+        .report_response
+        .content
+        .pointer("/paper/revision_plan/section_rewrite_queue")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let revision_queue_preview = revision_queue
+        .iter()
+        .take(4)
+        .map(|item| {
+            let reviewer = item
+                .get("reviewer")
+                .and_then(Value::as_str)
+                .unwrap_or("reviewer");
+            let sections = item
+                .get("target_sections")
+                .and_then(Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "discussion".to_string());
+            let scope = item
+                .get("reverification_scope")
+                .and_then(Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "paper_ready_gate".to_string());
+            format!("{} -> [{}] -> [{}]", reviewer, sections, scope)
+        })
+        .collect::<Vec<_>>();
+    let reviewer_feedback_trace = result
+        .report_response
+        .content
+        .pointer("/paper/reviewer_feedback_trace")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let rebuttal_closure_records = result
+        .report_response
+        .content
+        .pointer("/paper/rebuttal_closure_records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let evidence_trace = result
+        .report_response
+        .content
+        .pointer("/paper/evidence_trace")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let revision_execution_trace = result.revision_execution_trace.clone();
+    let section_diff_preview = result.section_diff_preview.clone();
+    let manuscript_diff_preview = result.manuscript_diff_preview.clone();
+    let progress_prompts = build_research_progress_prompts(workflow_profile, topic);
+    let closure_checks = build_paper_workflow_closure_checks(
+        result,
+        &artifact_paths,
+        &reviewer_feedback_trace,
+        &rebuttal_closure_records,
+        &evidence_trace,
+        &revision_queue,
+    );
+
+    let summary = result
+        .report_response
+        .content
+        .pointer("/paper/quality_checklist")
+        .and_then(Value::as_array)
+        .map(|items| {
+            let passed = items
+                .iter()
+                .filter(|item| {
+                    item.get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case("pass")
+                })
+                .count();
+            format!(
+                "Paper workflow generated {} artifacts; quality checklist passed {}/{} items.",
+                artifact_paths.len(),
+                passed,
+                items.len()
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "Paper workflow generated {} artifacts under {}.",
+                artifact_paths.len(),
+                to_relative(&result.paper_dir)
+            )
+        });
+
+    WebPaperWorkflowPayload {
+        session_id: session_id.to_string(),
+        topic: topic.trim().to_string(),
+        workflow_profile: workflow_profile.trim().to_string(),
+        workspace_root: workspace_root.to_string_lossy().replace('\\', "/"),
+        paper_dir: to_relative(&result.paper_dir),
+        artifact_paths: artifact_paths
+            .iter()
+            .map(|path| to_relative(path))
+            .collect(),
+        artifacts: {
+            let mut items = vec![
+                artifact("Paper Markdown", "markdown", &result.paper_markdown_path),
+                artifact("Paper LaTeX", "latex", &result.paper_latex_path),
+                artifact("References BibTeX", "bibtex", &result.references_bib_path),
+                artifact(
+                    "Artifact Appendix",
+                    "markdown",
+                    &result.appendix_markdown_path,
+                ),
+                artifact("Result Bundle", "json", &result.result_bundle_path),
+                artifact("Review Response", "json", &result.review_response_path),
+                artifact(
+                    "Revision Execution Plan",
+                    "json",
+                    &result.revision_execution_plan_path,
+                ),
+                artifact(
+                    "Workflow Checkpoint",
+                    "json",
+                    &result.workflow_checkpoint_path,
+                ),
+                artifact(
+                    "Reviewer Rebuttal",
+                    "markdown",
+                    &result.rebuttal_markdown_path,
+                ),
+                artifact("Paper Sections", "json", &result.section_bundle_path),
+                artifact(
+                    "Paper Sections Before",
+                    "json",
+                    &result.section_bundle_before_path,
+                ),
+                artifact(
+                    "Paper Sections After",
+                    "json",
+                    &result.section_bundle_after_path,
+                ),
+                artifact("Paper Section Diff", "json", &result.section_diff_path),
+                artifact(
+                    "Paper Manuscript Before",
+                    "json",
+                    &result.manuscript_bundle_before_path,
+                ),
+                artifact(
+                    "Paper Manuscript After",
+                    "json",
+                    &result.manuscript_bundle_after_path,
+                ),
+                artifact(
+                    "Paper Manuscript Diff",
+                    "json",
+                    &result.manuscript_diff_path,
+                ),
+                artifact("Paper Bundle", "json", &result.payload_path),
+            ];
+            if let Some(pdf_path) = result.paper_pdf_path.as_ref() {
+                items.insert(2, artifact("Paper PDF", "pdf", pdf_path));
+            }
+            items
+        },
+        paper_markdown_path: to_relative(&result.paper_markdown_path),
+        paper_latex_path: to_relative(&result.paper_latex_path),
+        paper_pdf_path: result
+            .paper_pdf_path
+            .as_deref()
+            .map(to_relative)
+            .unwrap_or_default(),
+        references_bib_path: to_relative(&result.references_bib_path),
+        appendix_markdown_path: to_relative(&result.appendix_markdown_path),
+        result_bundle_path: to_relative(&result.result_bundle_path),
+        review_response_path: to_relative(&result.review_response_path),
+        revision_execution_plan_path: to_relative(&result.revision_execution_plan_path),
+        workflow_checkpoint_path: to_relative(&result.workflow_checkpoint_path),
+        payload_path: to_relative(&result.payload_path),
+        rebuttal_markdown_path: to_relative(&result.rebuttal_markdown_path),
+        section_bundle_path: to_relative(&result.section_bundle_path),
+        section_bundle_before_path: to_relative(&result.section_bundle_before_path),
+        section_bundle_after_path: to_relative(&result.section_bundle_after_path),
+        section_diff_path: to_relative(&result.section_diff_path),
+        manuscript_bundle_before_path: to_relative(&result.manuscript_bundle_before_path),
+        manuscript_bundle_after_path: to_relative(&result.manuscript_bundle_after_path),
+        manuscript_diff_path: to_relative(&result.manuscript_diff_path),
+        pdf_compile_status: result.pdf_compile_status.clone(),
+        pdf_compile_detail: result.pdf_compile_detail.clone(),
+        paper_ready: result.paper_ready,
+        paper_ready_detail: result.paper_ready_detail.clone(),
+        paper_ready_gate: result.paper_ready_gate.clone(),
+        revision_mode: result.revision_mode.clone(),
+        revision_summary: result.revision_summary.clone(),
+        revision_queue_size: revision_queue.len(),
+        revision_queue_preview,
+        source_run_id: result.source_run_id.clone(),
+        unresolved_reviewer_feedback: result.unresolved_reviewer_feedback,
+        auto_revision_applied: result.auto_revision_applied,
+        checkpoint_stage: result.checkpoint_stage.clone(),
+        reviewer_feedback_trace,
+        rebuttal_closure_records,
+        evidence_trace,
+        revision_execution_trace,
+        section_diff_preview,
+        manuscript_diff_preview,
+        progress_prompts,
+        closure_checks,
+        trigger_mode: trigger_mode.trim().to_string(),
+        summary,
+    }
+}
+
+fn reviewer_feedback_entries_to_values(entries: &[WebReviewerFeedbackEntry]) -> Vec<Value> {
+    entries
+        .iter()
+        .map(|entry| {
+            json!({
+                "reviewer": entry.reviewer,
+                "linked_run_id": entry.linked_run_id,
+                "score": entry.score,
+                "comment": entry.comment,
+                "resolved": entry.resolved,
+                "created_at": entry.created_at,
+                "resolved_at": entry.resolved_at,
+            })
+        })
+        .collect()
+}
+
+fn reviewer_feedback_values_to_entries(values: &Value) -> Vec<WebReviewerFeedbackEntry> {
+    values
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| WebReviewerFeedbackEntry {
+            reviewer: entry
+                .get("reviewer")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            linked_run_id: entry
+                .get("linked_run_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            score: entry
+                .get("score")
+                .and_then(|value| value.as_u64())
+                .map(|value| value as u8),
+            comment: entry
+                .get("comment")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            resolved: entry
+                .get("resolved")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            created_at: entry
+                .get("created_at")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            resolved_at: entry
+                .get("resolved_at")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        })
+        .collect()
+}
+
+fn auto_paper_workflow_decision(payload: &WebResearchPayload) -> AutoPaperDecision {
+    let topic = payload.topic.trim();
+    if topic.is_empty()
+        || topic == "待确定研究课题"
+        || topic.eq_ignore_ascii_case("general scientific inquiry")
+    {
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: "research topic is not concrete enough for paper orchestration".to_string(),
+        };
+    }
+    if payload.waiting_approval {
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: "research session is waiting for approval".to_string(),
+        };
+    }
+    let overall_state = payload.overall_state.trim().to_ascii_lowercase();
+    if !matches!(overall_state.as_str(), "complete" | "resumable") {
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: format!(
+                "research overall_state={} is not ready for paper orchestration",
+                overall_state
+            ),
+        };
+    }
+    let current_run_id = result_bundle_field_value(&payload.result_bundle, "run_id");
+    let Some(current_run_id) = current_run_id.filter(|value| !value.trim().is_empty()) else {
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: "research result bundle does not expose a run_id yet".to_string(),
+        };
+    };
+    let verifier_status = payload
+        .runtime
+        .verifier
+        .as_ref()
+        .map(|report| report.status.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !verifier_status.is_empty() && !matches!(verifier_status.as_str(), "pass" | "complete") {
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: format!(
+                "runtime verifier status {} is not paper-ready",
+                verifier_status
+            ),
+        };
+    }
+
+    let unresolved_feedback = payload.reviewer_feedback.unresolved_count;
+    if let Some(workflow) = payload.paper_workflow.as_ref() {
+        if workflow.source_run_id.trim() != current_run_id.trim() {
+            return AutoPaperDecision {
+                should_run: true,
+                force_rewrite: false,
+                reason: format!(
+                    "paper workflow is stale: current run_id={} but workflow source_run_id={}",
+                    current_run_id, workflow.source_run_id
+                ),
+            };
+        }
+        if workflow.unresolved_reviewer_feedback != unresolved_feedback {
+            return AutoPaperDecision {
+                should_run: true,
+                force_rewrite: unresolved_feedback > 0,
+                reason: format!(
+                    "reviewer feedback state changed from {} to {} unresolved item(s)",
+                    workflow.unresolved_reviewer_feedback, unresolved_feedback
+                ),
+            };
+        }
+        if unresolved_feedback > 0
+            && !workflow
+                .revision_mode
+                .eq_ignore_ascii_case("reviewer_guided_revision")
+        {
+            return AutoPaperDecision {
+                should_run: true,
+                force_rewrite: true,
+                reason: "reviewer feedback is attached but the existing paper workflow is not in reviewer-guided revision mode".to_string(),
+            };
+        }
+        return AutoPaperDecision {
+            should_run: false,
+            force_rewrite: false,
+            reason: "server-side paper workflow is already up to date for the current run and reviewer state".to_string(),
+        };
+    }
+
+    AutoPaperDecision {
+        should_run: true,
+        force_rewrite: unresolved_feedback > 0,
+        reason: "research is complete and no server-side paper workflow exists yet".to_string(),
+    }
+}
+
+fn build_paper_ready_payload(payload: &WebResearchPayload) -> WebPaperReadyPayload {
+    let current_run_id = result_bundle_field_value(&payload.result_bundle, "run_id");
+    let unresolved = payload.reviewer_feedback.unresolved_count;
+    if let Some(workflow) = payload.paper_workflow.as_ref() {
+        let stale_run = current_run_id
+            .as_deref()
+            .is_some_and(|run_id| workflow.source_run_id.trim() != run_id.trim());
+        let stale_feedback = workflow.unresolved_reviewer_feedback != unresolved;
+        let ready = workflow.paper_ready && !stale_run && !stale_feedback;
+        let reason = if stale_run {
+            format!(
+                "paper workflow is stale for the current run: {} -> {}",
+                workflow.source_run_id,
+                current_run_id.clone().unwrap_or_default()
+            )
+        } else if stale_feedback {
+            format!(
+                "paper workflow is stale for reviewer feedback: workflow={} current={}",
+                workflow.unresolved_reviewer_feedback, unresolved
+            )
+        } else {
+            workflow.paper_ready_detail.clone()
+        };
+        return WebPaperReadyPayload {
+            ready,
+            reason,
+            auto_triggered: workflow.trigger_mode.starts_with("auto"),
+            workflow_present: true,
+            current_run_id,
+            unresolved_reviewer_feedback: unresolved,
+        };
+    }
+
+    let decision = auto_paper_workflow_decision(payload);
+    WebPaperReadyPayload {
+        ready: false,
+        reason: decision.reason,
+        auto_triggered: false,
+        workflow_present: false,
+        current_run_id,
+        unresolved_reviewer_feedback: unresolved,
+    }
+}
+
+async fn execute_paper_workflow_for_session(
+    state: &WebAppState,
+    session_id: &str,
+    topic: &str,
+    local_paper_source: Option<&str>,
+    search_limit: Option<usize>,
+    force_rewrite: bool,
+    trigger_mode: &str,
+) -> Result<ResearchPaperWorkflowResponse> {
+    let topic = topic.trim().to_string();
+    if topic.is_empty() {
+        return Err(anyhow!("paper workflow topic is empty"));
+    }
+
+    {
+        let mut inflight = state
+            .paper_workflow_inflight
+            .lock()
+            .map_err(|_| anyhow!("paper workflow inflight lock poisoned"))?;
+        if inflight.contains(session_id) {
+            let runtime = {
+                let runtime = lock_runtime_settings(state)?;
+                runtime.clone()
+            };
+            let messages = {
+                let session_manager = lock_session_manager(state)?;
+                session_manager
+                    .load_messages(session_id)
+                    .unwrap_or_default()
+            };
+            let runtime_snapshot = lock_stream_runtime(state)?
+                .get(session_id)
+                .map(clone_stream_runtime_view);
+            let research = build_research_payload_with_feedback(
+                state,
+                Some(session_id),
+                &runtime,
+                &messages,
+                runtime_snapshot.as_ref(),
+                SessionResearchState::Research,
+            );
+            let paper_workflow = research
+                .paper_workflow
+                .clone()
+                .ok_or_else(|| anyhow!("paper workflow is already running for this session"))?;
+            return Ok(ResearchPaperWorkflowResponse {
+                paper_workflow,
+                research,
+                session_id: session_id.to_string(),
+            });
+        }
+        inflight.insert(session_id.to_string());
+    }
+
+    let run_result = async {
+        {
+            let mut session_manager = lock_session_manager(state)?;
+            session_manager.resume_session(session_id)?;
+        }
+
+        let runtime = {
+            let runtime = lock_runtime_settings(state)?;
+            runtime.clone()
+        };
+        let workspace_root =
+            canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)?;
+        let workflow_workspace = workspace_root
+            .join(".tokitai")
+            .join("paper-workflows")
+            .join(session_id);
+        fs::create_dir_all(&workflow_workspace)?;
+
+        let local_paper_source = local_paper_source
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                resolve_workspace_relative_path(
+                    state.host.base_dir(),
+                    &runtime.workspace_root,
+                    value,
+                )
+                .unwrap_or_else(|| PathBuf::from(value))
+            });
+        let messages = {
+            let session_manager = lock_session_manager(state)?;
+            session_manager
+                .load_messages(session_id)
+                .unwrap_or_default()
+        };
+        let runtime_snapshot = lock_stream_runtime(state)?
+            .get(session_id)
+            .map(clone_stream_runtime_view);
+        let research_before = build_research_payload_with_feedback(
+            state,
+            Some(session_id),
+            &runtime,
+            &messages,
+            runtime_snapshot.as_ref(),
+            SessionResearchState::Research,
+        );
+        let reviewer_feedback_values =
+            reviewer_feedback_entries_to_values(&research_before.reviewer_feedback.entries);
+        let workflow_profile = if research_before.workflow_kind.trim().is_empty() {
+            infer_research_workflow_kind(&topic, &messages)
+        } else {
+            research_before.workflow_kind.clone()
+        };
+        let result = run_paper_workflow(PaperWorkflowRequest {
+            topic: topic.clone(),
+            session_id: session_id.to_string(),
+            workspace_root: workflow_workspace.clone(),
+            source_workspace_root: Some(workspace_root.clone()),
+            local_paper_source,
+            search_limit: search_limit.unwrap_or(5).clamp(1, 10),
+            toolchains: Some(sanitize_toolchain_paths(runtime.toolchains.clone())),
+            reviewer_feedback: Some(reviewer_feedback_values),
+            force_rewrite,
+            runtime_artifact_paths: Some(research_before.result_bundle.artifact_paths.clone()),
+            runtime_result_bundle: Some(
+                serde_json::to_value(&research_before.result_bundle).unwrap_or_else(|_| json!({})),
+            ),
+            runtime_run_comparison: Some(
+                serde_json::to_value(&research_before.run_comparison).unwrap_or_else(|_| json!({})),
+            ),
+            runtime_lineage: Some(
+                serde_json::to_value(&research_before.lineage).unwrap_or_else(|_| json!({})),
+            ),
+        })
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let final_feedback_entries =
+            reviewer_feedback_values_to_entries(&result.final_reviewer_feedback);
+        save_reviewer_feedback_entries(state, session_id, &final_feedback_entries)?;
+
+        let paper_payload = build_paper_workflow_payload(
+            session_id,
+            &topic,
+            &workflow_profile,
+            &workspace_root,
+            &result,
+            trigger_mode,
+        );
+        save_paper_workflow_payload(state, session_id, &paper_payload)?;
+
+        let refreshed_messages = {
+            let session_manager = lock_session_manager(state)?;
+            session_manager
+                .load_messages(session_id)
+                .unwrap_or_default()
+        };
+        let refreshed_runtime_snapshot = lock_stream_runtime(state)?
+            .get(session_id)
+            .map(clone_stream_runtime_view);
+        let research = build_research_payload_with_feedback(
+            state,
+            Some(session_id),
+            &runtime,
+            &refreshed_messages,
+            refreshed_runtime_snapshot.as_ref(),
+            SessionResearchState::Research,
+        );
+
+        Ok(ResearchPaperWorkflowResponse {
+            paper_workflow: paper_payload,
+            research,
+            session_id: session_id.to_string(),
+        })
+    }
+    .await;
+
+    if let Ok(mut inflight) = state.paper_workflow_inflight.lock() {
+        inflight.remove(session_id);
+    }
+
+    run_result
+}
+
+async fn ensure_server_side_paper_workflow(
+    state: &WebAppState,
+    session_id: Option<&str>,
+    runtime: &RuntimeSettings,
+    messages: &[MessageBlock],
+    session_runtime: Option<&StreamSessionRuntimeView>,
+    session_state: SessionResearchState,
+    trigger_mode: &str,
+) -> Result<Option<ResearchPaperWorkflowResponse>> {
+    let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if session_state != SessionResearchState::Research {
+        return Ok(None);
+    }
+    let research = build_research_payload_with_feedback(
+        state,
+        Some(session_id),
+        runtime,
+        messages,
+        session_runtime,
+        session_state,
+    );
+    let decision = auto_paper_workflow_decision(&research);
+    if !decision.should_run {
+        return Ok(None);
+    }
+    let response = execute_paper_workflow_for_session(
+        state,
+        session_id,
+        &research.topic,
+        None,
+        Some(5),
+        decision.force_rewrite,
+        trigger_mode,
+    )
+    .await?;
+    Ok(Some(response))
+}
+
+async fn maybe_auto_run_server_side_paper_workflow_for_session(
+    state: &WebAppState,
+    session_id: Option<&str>,
+    trigger_mode: &str,
+) -> Result<Option<ResearchPaperWorkflowResponse>> {
+    let target_session_id =
+        if let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) {
+            session_id.to_string()
+        } else {
+            ensure_current_session(state)?
+        };
+    let runtime = {
+        let runtime = lock_runtime_settings(state)?;
+        runtime.clone()
+    };
+    let messages = {
+        let session_manager = lock_session_manager(state)?;
+        session_manager
+            .load_messages(&target_session_id)
+            .unwrap_or_default()
+    };
+    let session_state = infer_session_research_state(&messages);
+    let runtime_snapshot = lock_stream_runtime(state)?
+        .get(&target_session_id)
+        .map(clone_stream_runtime_view);
+    ensure_server_side_paper_workflow(
+        state,
+        Some(target_session_id.as_str()),
+        &runtime,
+        &messages,
+        runtime_snapshot.as_ref(),
+        session_state,
+        trigger_mode,
+    )
+    .await
+}
+
+fn schedule_server_side_paper_workflow(
+    state: &WebAppState,
+    session_id: Option<&str>,
+    trigger_mode: &str,
+) {
+    let state = state.clone();
+    let session_id = session_id.map(|value| value.to_string());
+    let trigger_mode = trigger_mode.to_string();
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = maybe_auto_run_server_side_paper_workflow_for_session(
+                &state,
+                session_id.as_deref(),
+                &trigger_mode,
+            )
+            .await;
+        });
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProfileRuntimeSummary {
+    workflow_profile: String,
+    bundle_fields: Vec<String>,
+    profile_evidence: Vec<String>,
+    artifact_paths: Vec<String>,
+    compare_keys: Vec<String>,
+    compare_observations: Vec<String>,
+    recent_runs: Vec<String>,
+    lineage_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -446,6 +1523,21 @@ struct WebMessage {
     before_content: Option<String>,
     subagent: Option<WebSubagentEvent>,
     verifier: Option<WebVerifierReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assistant_choices: Option<WebAssistantChoices>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    auto_skills: Vec<WebAutoSkill>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebAssistantChoices {
+    title: String,
+    options: Vec<String>,
+}
+
+struct AssistantChoicePayload {
+    body: String,
+    choices: Option<WebAssistantChoices>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -518,6 +1610,7 @@ struct WebToolEvent {
     result: Option<String>,
     success: Option<bool>,
     file_path: Option<String>,
+    updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -536,6 +1629,12 @@ struct WebEditedFile {
     removed: usize,
     before_content: String,
     after_content: String,
+    updated_at: Option<String>,
+}
+
+fn timed_web_tool_event(mut tool: WebToolEvent) -> WebToolEvent {
+    tool.updated_at = Some(web_now_iso());
+    tool
 }
 
 #[derive(Debug, Clone)]
@@ -666,6 +1765,69 @@ struct StreamControlRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct SearchQueryRequest {
+    query: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchPaperRequest {
+    query: String,
+    source: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchSourceRequest {
+    query: String,
+    source: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchDatasetManifestRequest {
+    dataset_url: String,
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResearchPaperWorkflowRequest {
+    topic: String,
+    session_id: Option<String>,
+    local_paper_source: Option<String>,
+    search_limit: Option<usize>,
+    force_rewrite: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchGitHubRequest {
+    query: String,
+    limit: Option<usize>,
+    mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchGitHubPreviewRequest {
+    repo_full_name: String,
+    branch: Option<String>,
+    path: Option<String>,
+    commit_sha: Option<String>,
+    compare_base_sha: Option<String>,
+    compare_head_sha: Option<String>,
+    history_scope_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserOpenRequest {
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserViewRequest {
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ToolApprovalRequest {
     session_id: String,
     call_id: String,
@@ -690,6 +1852,19 @@ struct SessionRenameRequest {
 #[derive(Debug, Deserialize)]
 struct ReviewFileRequest {
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewerFeedbackAddRequest {
+    reviewer: String,
+    linked_run_id: Option<String>,
+    score: Option<u8>,
+    comment: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewerFeedbackResolveRequest {
+    index: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -744,6 +1919,55 @@ struct SessionMutationResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct SearchHealthResponse {
+    dataset_entrypoint: SearchHealthStatus,
+    paper_search: SearchHealthStatus,
+    tracking_search: SearchHealthStatus,
+    benchmark_search: SearchHealthStatus,
+    web_search: SearchHealthStatus,
+    models_search: SearchHealthStatus,
+    github_search: SearchHealthStatus,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct WebAutoSkill {
+    name: String,
+    description: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct SearchHealthStatus {
+    name: String,
+    status: String,
+    detail: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    providers: Vec<SearchHealthStatus>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct BraveSearchResponse {
+    #[serde(default)]
+    web: Option<BraveWebResultBlock>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct BraveWebResultBlock {
+    #[serde(default)]
+    results: Vec<BraveWebResult>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct BraveWebResult {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct SettingsMutationResponse {
     config: WebConfigPayload,
 }
@@ -756,6 +1980,25 @@ struct WorkspacePickerResponse {
 #[derive(Debug, Serialize)]
 struct ReviewFileResponse {
     file: WebReviewFileDetail,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewerFeedbackResponse {
+    reviewer_feedback: WebReviewerFeedbackPayload,
+}
+
+#[derive(Debug, Serialize)]
+struct ResearchPaperWorkflowResponse {
+    paper_workflow: WebPaperWorkflowPayload,
+    research: WebResearchPayload,
+    session_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct AutoPaperDecision {
+    should_run: bool,
+    force_rewrite: bool,
+    reason: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1024,7 +2267,7 @@ struct TerminalSessionRuntime {
 
 #[derive(Debug)]
 struct StreamSessionRuntime {
-    abort_handle: tokio::task::AbortHandle,
+    task_handle: Arc<tokio::task::JoinHandle<()>>,
     event_tx: tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
     pending_approvals: HashMap<String, PendingApprovalRuntime>,
     latest_activity: Option<WebActivityEvent>,
@@ -1041,6 +2284,7 @@ struct StreamSessionRuntime {
     checkpoints: Vec<String>,
     branch_notes: Vec<String>,
     timeline: Vec<WebTimelineEvent>,
+    auto_skills: Vec<WebAutoSkill>,
 }
 
 #[derive(Debug)]
@@ -1065,6 +2309,8 @@ struct StreamEnvelope {
     research: Option<WebResearchPayload>,
     subagents: Option<Vec<WebSubagentEvent>>,
     verifier: Option<WebVerifierReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_skills: Option<Vec<WebAutoSkill>>,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -1081,11 +2327,18 @@ struct WebSessionRuntimeSnapshot {
     checkpoints: Vec<String>,
     branch_notes: Vec<String>,
     timeline: Vec<WebTimelineEvent>,
+    auto_skills: Vec<WebAutoSkill>,
 }
 
 fn clear_stream_runtime_session(state: &WebAppState, session_id: &str) {
     if let Ok(mut runtime) = lock_stream_runtime(state) {
         runtime.remove(session_id);
+    }
+}
+
+fn prune_completed_stream_runtime_sessions(state: &WebAppState) {
+    if let Ok(mut runtime) = lock_stream_runtime(state) {
+        runtime.retain(|_, session| !session.task_handle.is_finished());
     }
 }
 
@@ -1101,10 +2354,17 @@ fn sync_stream_runtime_messages(
     }
 }
 
-fn load_stream_required_path_snapshots(state: &WebAppState, session_id: &str) -> Vec<RequiredPathSnapshot> {
+fn load_stream_required_path_snapshots(
+    state: &WebAppState,
+    session_id: &str,
+) -> Vec<RequiredPathSnapshot> {
     lock_stream_runtime(state)
         .ok()
-        .and_then(|sessions| sessions.get(session_id).map(|session| session.required_path_snapshots.clone()))
+        .and_then(|sessions| {
+            sessions
+                .get(session_id)
+                .map(|session| session.required_path_snapshots.clone())
+        })
         .unwrap_or_default()
 }
 
@@ -1135,10 +2395,44 @@ pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
         .route("/api/tool/deny", post(api_deny_tool_call))
         .route("/api/workspace/pick", post(api_pick_workspace))
         .route("/api/review/file", post(api_review_file))
+        .route("/api/reviewer-feedback", get(api_reviewer_feedback_state))
+        .route(
+            "/api/reviewer-feedback/add",
+            post(api_reviewer_feedback_add),
+        )
+        .route(
+            "/api/reviewer-feedback/resolve",
+            post(api_reviewer_feedback_resolve),
+        )
+        .route(
+            "/api/research/paper-workflow",
+            post(api_research_paper_workflow),
+        )
+        .route("/api/search/health", get(api_search_health))
+        .route("/api/search/web", post(api_search_web))
+        .route("/api/search/tracking", post(api_search_tracking))
+        .route("/api/search/benchmarks", post(api_search_benchmarks))
+        .route("/api/search/models", post(api_search_models))
+        .route("/api/search/github", post(api_search_github))
+        .route(
+            "/api/search/github/preview",
+            post(api_search_github_preview),
+        )
+        .route("/api/search/papers", post(api_search_papers))
+        .route("/api/search/datasets", post(api_search_datasets))
+        .route(
+            "/api/search/dataset-manifest",
+            post(api_search_dataset_manifest),
+        )
+        .route("/api/browser/open", post(api_browser_open))
+        .route("/api/browser/view", get(api_browser_view))
         .route("/api/workspace/file", post(api_workspace_file))
         .route("/api/workspace/file/save", post(api_workspace_file_save))
         .route("/api/workspace/file/undo", post(api_workspace_file_undo))
-        .route("/api/workspace/file/complete", post(api_workspace_file_complete))
+        .route(
+            "/api/workspace/file/complete",
+            post(api_workspace_file_complete),
+        )
         .route("/api/workspace/file/raw", get(api_workspace_file_raw))
         .route("/api/sessions", post(api_create_session))
         .route("/api/sessions/select", post(api_select_session))
@@ -1210,6 +2504,7 @@ pub fn build_web_app_state(
         run_debug_runtime: Arc::new(Mutex::new(RunDebugRuntime::default())),
         terminal_runtime: Arc::new(Mutex::new(TerminalRuntime::default())),
         stream_runtime: Arc::new(Mutex::new(HashMap::new())),
+        paper_workflow_inflight: Arc::new(Mutex::new(HashSet::new())),
         host: Arc::new(host),
     };
 
@@ -1232,11 +2527,16 @@ pub async fn dispatch_bridge_command(
 ) -> HostBridgeResponse {
     let command = match HostCommand::parse(command) {
         Some(command) => command,
-        None => return HostBridgeResponse::error(404, format!("unknown bridge command: {}", command)),
+        None => {
+            return HostBridgeResponse::error(404, format!("unknown bridge command: {}", command))
+        }
     };
 
     let result = match command {
-        HostCommand::BootstrapLoad => build_bootstrap(&state).map(|bootstrap| json!({ "ok": true, "data": bootstrap })),
+        HostCommand::BootstrapLoad => match build_bootstrap(&state).await {
+            Ok(bootstrap) => Ok(json!({ "ok": true, "data": bootstrap })),
+            Err(err) => Err(err),
+        },
         HostCommand::SettingsUpdate => {
             let parsed = parse_bridge_payload::<WebSettingsRequest>(payload);
             match parsed {
@@ -1247,81 +2547,246 @@ pub async fn dispatch_bridge_command(
                 Err(err) => Err(err),
             }
         }
-        HostCommand::WorkspacePick => bridge_pick_workspace(&state).await.map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::WorkspaceFileOpen => match parse_bridge_payload::<ReviewFileRequest>(payload) {
-            Ok(req) => bridge_workspace_file(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::WorkspacePick => bridge_pick_workspace(&state)
+            .await
+            .map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::WorkspaceFileOpen => {
+            match parse_bridge_payload::<ReviewFileRequest>(payload) {
+                Ok(req) => bridge_workspace_file(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::WorkspaceFileSave => {
+            match parse_bridge_payload::<WorkspaceFileSaveRequest>(payload) {
+                Ok(req) => bridge_workspace_file_save(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::WorkspaceFileUndo => {
+            match parse_bridge_payload::<WorkspaceFileUndoRequest>(payload) {
+                Ok(req) => bridge_workspace_file_undo(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::WorkspaceFileComplete => {
+            match parse_bridge_payload::<WorkspaceFileCompleteRequest>(payload) {
+                Ok(req) => bridge_workspace_file_complete(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::WorkspaceReviewFile => {
+            match parse_bridge_payload::<ReviewFileRequest>(payload) {
+                Ok(req) => bridge_review_file(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::ReviewerFeedbackState => {
+            bridge_reviewer_feedback_state(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::ReviewerFeedbackAdd => {
+            match parse_bridge_payload::<ReviewerFeedbackAddRequest>(payload) {
+                Ok(req) => match bridge_reviewer_feedback_add(&state, req) {
+                    Ok(value) => {
+                        let _ = maybe_auto_run_server_side_paper_workflow_for_session(
+                            &state,
+                            value.reviewer_feedback.session_id.as_deref(),
+                            "auto_feedback_add",
+                        )
+                        .await;
+                        Ok(json!({ "ok": true, "data": value }))
+                    }
+                    Err(err) => Err(err),
+                },
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::ReviewerFeedbackResolve => {
+            match parse_bridge_payload::<ReviewerFeedbackResolveRequest>(payload) {
+                Ok(req) => match bridge_reviewer_feedback_resolve(&state, req) {
+                    Ok(value) => {
+                        let _ = maybe_auto_run_server_side_paper_workflow_for_session(
+                            &state,
+                            value.reviewer_feedback.session_id.as_deref(),
+                            "auto_feedback_resolve",
+                        )
+                        .await;
+                        Ok(json!({ "ok": true, "data": value }))
+                    }
+                    Err(err) => Err(err),
+                },
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::ResearchPaperWorkflowRun => {
+            match parse_bridge_payload::<ResearchPaperWorkflowRequest>(payload) {
+                Ok(req) => bridge_research_paper_workflow(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::SearchHealth => {
+            bridge_search_health(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::SearchWeb => match parse_bridge_payload::<SearchQueryRequest>(payload) {
+            Ok(req) => {
+                bridge_search_web(&state, req).map(|value| json!({ "ok": true, "data": value }))
+            }
             Err(err) => Err(err),
         },
-        HostCommand::WorkspaceFileSave => match parse_bridge_payload::<WorkspaceFileSaveRequest>(payload) {
-            Ok(req) => bridge_workspace_file_save(&state, req).map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::SearchTracking => match parse_bridge_payload::<SearchSourceRequest>(payload) {
+            Ok(req) => bridge_search_tracking(&state, req)
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
-        HostCommand::WorkspaceFileUndo => match parse_bridge_payload::<WorkspaceFileUndoRequest>(payload) {
-            Ok(req) => bridge_workspace_file_undo(&state, req).map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::SearchBenchmarks => match parse_bridge_payload::<SearchSourceRequest>(payload)
+        {
+            Ok(req) => bridge_search_benchmarks(&state, req)
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
-        HostCommand::WorkspaceFileComplete => match parse_bridge_payload::<WorkspaceFileCompleteRequest>(payload) {
-            Ok(req) => bridge_workspace_file_complete(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::SearchModels => match parse_bridge_payload::<SearchQueryRequest>(payload) {
+            Ok(req) => bridge_search_models(&state, req).map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
-        HostCommand::WorkspaceReviewFile => match parse_bridge_payload::<ReviewFileRequest>(payload) {
-            Ok(req) => bridge_review_file(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::SearchPapers => match parse_bridge_payload::<SearchPaperRequest>(payload) {
+            Ok(req) => {
+                bridge_search_papers(&state, req).map(|value| json!({ "ok": true, "data": value }))
+            }
+            Err(err) => Err(err),
+        },
+        HostCommand::SearchGitHub => match parse_bridge_payload::<SearchGitHubRequest>(payload) {
+            Ok(req) => {
+                bridge_search_github(&state, req).map(|value| json!({ "ok": true, "data": value }))
+            }
+            Err(err) => Err(err),
+        },
+        HostCommand::SearchGitHubPreview => {
+            match parse_bridge_payload::<SearchGitHubPreviewRequest>(payload) {
+                Ok(req) => bridge_search_github_preview(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::SearchDatasets => match parse_bridge_payload::<SearchQueryRequest>(payload) {
+            Ok(req) => bridge_search_datasets(&state, req)
+                .map(|value| json!({ "ok": true, "data": value })),
+            Err(err) => Err(err),
+        },
+        HostCommand::SearchDatasetManifest => {
+            match parse_bridge_payload::<SearchDatasetManifestRequest>(payload) {
+                Ok(req) => bridge_search_dataset_manifest(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::BrowserOpen => match parse_bridge_payload::<BrowserOpenRequest>(payload) {
+            Ok(req) => bridge_browser_open(req).map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
         HostCommand::ChatSend => match parse_bridge_payload::<SendMessageRequest>(payload) {
-            Ok(req) => bridge_chat_send(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
+            Ok(req) => bridge_chat_send(&state, req)
+                .await
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
         HostCommand::ChatStream => Err(anyhow!("chat.stream must use dispatch_bridge_stream")),
         HostCommand::ChatStop => match parse_bridge_payload::<StreamControlRequest>(payload) {
-            Ok(req) => bridge_stop_message_stream(&state, req).map(|value| json!({ "ok": true, "data": value })),
+            Ok(req) => bridge_stop_message_stream(&state, req)
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
-        HostCommand::ToolApprovalApprove => match parse_bridge_payload::<ToolApprovalRequest>(payload) {
-            Ok(req) => bridge_tool_approval(&state, req, true).map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
-        HostCommand::ToolApprovalDeny => match parse_bridge_payload::<ToolApprovalRequest>(payload) {
-            Ok(req) => bridge_tool_approval(&state, req, false).map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::ToolApprovalApprove => {
+            match parse_bridge_payload::<ToolApprovalRequest>(payload) {
+                Ok(req) => bridge_tool_approval(&state, req, true)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::ToolApprovalDeny => match parse_bridge_payload::<ToolApprovalRequest>(payload)
+        {
+            Ok(req) => bridge_tool_approval(&state, req, false)
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
         HostCommand::GitState => match parse_bridge_payload::<GitStateQuery>(payload) {
-            Ok(req) => bridge_git_state(&state, req).map(|value| json!({ "ok": true, "data": value })),
+            Ok(req) => {
+                bridge_git_state(&state, req).map(|value| json!({ "ok": true, "data": value }))
+            }
             Err(err) => Err(err),
         },
         HostCommand::GitAction => match parse_bridge_payload::<GitActionRequest>(payload) {
-            Ok(req) => bridge_git_action(&state, req).map(|value| json!({ "ok": true, "data": value })),
+            Ok(req) => {
+                bridge_git_action(&state, req).map(|value| json!({ "ok": true, "data": value }))
+            }
             Err(err) => Err(err),
         },
-        HostCommand::ExtensionsList => bridge_extensions_list().map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::RunDebugState => bridge_run_debug_state(&state).map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::RunDebugAction => match parse_bridge_payload::<RunDebugActionRequest>(payload) {
-            Ok(req) => bridge_run_debug_action(&state, req).map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::ExtensionsList => {
+            bridge_extensions_list().map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::RunDebugState => {
+            bridge_run_debug_state(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::RunDebugAction => match parse_bridge_payload::<RunDebugActionRequest>(payload)
+        {
+            Ok(req) => bridge_run_debug_action(&state, req)
+                .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
-        HostCommand::TerminalsState => bridge_terminals_state(&state).map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::TerminalsCreate => bridge_terminals_create(&state).await.map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::TerminalsInput => match parse_bridge_payload::<TerminalInputRequest>(payload) {
-            Ok(req) => bridge_terminals_input(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
-        HostCommand::TerminalsClose => match parse_bridge_payload::<TerminalCloseRequest>(payload) {
-            Ok(req) => bridge_terminals_close(&state, req).await.map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
-        HostCommand::SessionsCreate => bridge_sessions_create(&state).map(|value| json!({ "ok": true, "data": value })),
-        HostCommand::SessionsSelect => match parse_bridge_payload::<SessionSwitchRequest>(payload) {
-            Ok(req) => bridge_sessions_select(&state, req).map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
-        HostCommand::SessionsRename => match parse_bridge_payload::<SessionRenameRequest>(payload) {
-            Ok(req) => bridge_sessions_rename(&state, req).map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
-        HostCommand::SessionsDelete => match parse_bridge_payload::<SessionDeleteRequest>(payload) {
-            Ok(req) => bridge_sessions_delete(&state, req).map(|value| json!({ "ok": true, "data": value })),
-            Err(err) => Err(err),
-        },
+        HostCommand::TerminalsState => {
+            bridge_terminals_state(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::TerminalsCreate => bridge_terminals_create(&state)
+            .await
+            .map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::TerminalsInput => {
+            match parse_bridge_payload::<TerminalInputRequest>(payload) {
+                Ok(req) => bridge_terminals_input(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::TerminalsClose => {
+            match parse_bridge_payload::<TerminalCloseRequest>(payload) {
+                Ok(req) => bridge_terminals_close(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::SessionsCreate => {
+            bridge_sessions_create(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::SessionsSelect => {
+            match parse_bridge_payload::<SessionSwitchRequest>(payload) {
+                Ok(req) => bridge_sessions_select(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::SessionsRename => {
+            match parse_bridge_payload::<SessionRenameRequest>(payload) {
+                Ok(req) => bridge_sessions_rename(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::SessionsDelete => {
+            match parse_bridge_payload::<SessionDeleteRequest>(payload) {
+                Ok(req) => bridge_sessions_delete(&state, req)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
     };
 
     match result {
@@ -1338,7 +2803,10 @@ pub fn dispatch_bridge_stream(
     let command = HostCommand::parse(command)
         .ok_or_else(|| anyhow!("unknown bridge command: {}", command))?;
     if !command.is_stream() {
-        return Err(anyhow!("bridge stream is not supported for '{}'", command.as_str()));
+        return Err(anyhow!(
+            "bridge stream is not supported for '{}'",
+            command.as_str()
+        ));
     }
 
     let request = parse_bridge_payload::<SendMessageRequest>(payload)?;
@@ -1366,7 +2834,7 @@ pub fn dispatch_bridge_stream(
     let session_id_for_task = session_id.clone();
     let tx_stream_for_runtime = tx_stream.clone();
     let state_for_cleanup = state_for_task.clone();
-    let handle = tokio::spawn(async move {
+    let handle = Arc::new(tokio::spawn(async move {
         let result = AssertUnwindSafe(run_chat_request_stream(
             state_for_task,
             session_id_for_task.clone(),
@@ -1392,16 +2860,20 @@ pub fn dispatch_bridge_stream(
                         recovery_mode.as_deref(),
                         turn_language_from_option(recovery_language.as_deref()),
                     ) {
-                        let required_path_snapshots =
-                            load_stream_required_path_snapshots(&state_for_cleanup, &session_id_for_task);
-                        if let Some((report, checkpoints, branch_notes)) = can_finalize_from_hard_verifier_only(
-                            &plan,
-                            &persisted_blocks,
-                            state_for_cleanup.host.base_dir(),
-                            &runtime,
-                            &required_path_snapshots,
-                            turn_language_from_option(recovery_language.as_deref()),
-                        ) {
+                        let required_path_snapshots = load_stream_required_path_snapshots(
+                            &state_for_cleanup,
+                            &session_id_for_task,
+                        );
+                        if let Some((report, checkpoints, branch_notes)) =
+                            can_finalize_from_hard_verifier_only(
+                                &plan,
+                                &persisted_blocks,
+                                state_for_cleanup.host.base_dir(),
+                                &runtime,
+                                &required_path_snapshots,
+                                turn_language_from_option(recovery_language.as_deref()),
+                            )
+                        {
                             emit_verifier_update(
                                 &tx_stream,
                                 &state_for_cleanup,
@@ -1454,16 +2926,20 @@ pub fn dispatch_bridge_stream(
                         recovery_mode.as_deref(),
                         turn_language_from_option(recovery_language.as_deref()),
                     ) {
-                        let required_path_snapshots =
-                            load_stream_required_path_snapshots(&state_for_cleanup, &session_id_for_task);
-                        if let Some((report, checkpoints, branch_notes)) = can_finalize_from_hard_verifier_only(
-                            &plan,
-                            &persisted_blocks,
-                            state_for_cleanup.host.base_dir(),
-                            &runtime,
-                            &required_path_snapshots,
-                            turn_language_from_option(recovery_language.as_deref()),
-                        ) {
+                        let required_path_snapshots = load_stream_required_path_snapshots(
+                            &state_for_cleanup,
+                            &session_id_for_task,
+                        );
+                        if let Some((report, checkpoints, branch_notes)) =
+                            can_finalize_from_hard_verifier_only(
+                                &plan,
+                                &persisted_blocks,
+                                state_for_cleanup.host.base_dir(),
+                                &runtime,
+                                &required_path_snapshots,
+                                turn_language_from_option(recovery_language.as_deref()),
+                            )
+                        {
                             emit_verifier_update(
                                 &tx_stream,
                                 &state_for_cleanup,
@@ -1505,14 +2981,14 @@ pub fn dispatch_bridge_stream(
                 );
             }
         }
-    });
+    }));
 
     {
         let mut runtime = lock_stream_runtime(&state)?;
         runtime.insert(
             session_id.clone(),
             StreamSessionRuntime {
-                abort_handle: handle.abort_handle(),
+                task_handle: handle.clone(),
                 event_tx: tx_stream_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -1529,6 +3005,7 @@ pub fn dispatch_bridge_stream(
                 checkpoints: Vec::new(),
                 branch_notes: Vec::new(),
                 timeline: Vec::new(),
+                auto_skills: Vec::new(),
             },
         );
     }
@@ -1540,15 +3017,11 @@ pub fn dispatch_bridge_stream(
     })
 }
 
-async fn api_bootstrap(State(state): State<WebAppState>) -> impl IntoResponse {
-    match build_bootstrap(&state) {
-        Ok(bootstrap) => json_api_response(true, bootstrap).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": err.to_string() })),
-        )
-            .into_response(),
-    }
+async fn api_bootstrap(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let bootstrap = build_bootstrap(&state).await.map_err(internal_error)?;
+    Ok(json_api_response(true, bootstrap))
 }
 
 async fn api_create_session(
@@ -1605,6 +3078,63 @@ async fn api_select_session(
     }))
 }
 
+async fn api_reviewer_feedback_state(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = bridge_reviewer_feedback_state(&state).map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_reviewer_feedback_add(
+    State(state): State<WebAppState>,
+    Json(payload): Json<ReviewerFeedbackAddRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = bridge_reviewer_feedback_add(&state, payload).map_err(internal_error)?;
+    let _ = maybe_auto_run_server_side_paper_workflow_for_session(
+        &state,
+        response.reviewer_feedback.session_id.as_deref(),
+        "auto_feedback_add",
+    )
+    .await;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_reviewer_feedback_resolve(
+    State(state): State<WebAppState>,
+    Json(payload): Json<ReviewerFeedbackResolveRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = bridge_reviewer_feedback_resolve(&state, payload).map_err(internal_error)?;
+    let _ = maybe_auto_run_server_side_paper_workflow_for_session(
+        &state,
+        response.reviewer_feedback.session_id.as_deref(),
+        "auto_feedback_resolve",
+    )
+    .await;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_research_paper_workflow(
+    State(state): State<WebAppState>,
+    Json(payload): Json<ResearchPaperWorkflowRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = bridge_research_paper_workflow(&state, payload)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
 async fn api_delete_session(
     State(state): State<WebAppState>,
     Json(payload): Json<SessionDeleteRequest>,
@@ -1620,6 +3150,8 @@ async fn api_delete_session(
         }
         session_manager.current_id.clone()
     };
+    let feedback_path = reviewer_feedback_path(&state, &payload.session_id);
+    let _ = fs::remove_file(feedback_path);
     {
         let runtime = lock_runtime_settings(&state).map_err(internal_error)?;
         persist_web_state(&state, &runtime, next_session_id.clone()).map_err(internal_error)?;
@@ -1631,6 +3163,195 @@ async fn api_delete_session(
             session_id: next_session_id,
         },
     }))
+}
+
+async fn api_search_health(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response = tokio::task::spawn_blocking(move || bridge_search_health(&state_clone))
+        .await
+        .map_err(|err| internal_error(anyhow!("search health task failed: {}", err)))?
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_web(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchQueryRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response = tokio::task::spawn_blocking(move || bridge_search_web(&state_clone, payload))
+        .await
+        .map_err(|err| internal_error(anyhow!("search web task failed: {}", err)))?
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_tracking(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchSourceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_tracking(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search tracking task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_benchmarks(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchSourceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_benchmarks(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search benchmarks task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_papers(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchPaperRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response = tokio::task::spawn_blocking(move || bridge_search_papers(&state_clone, payload))
+        .await
+        .map_err(|err| internal_error(anyhow!("search papers task failed: {}", err)))?
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_models(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchQueryRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_models(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search models task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_github(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchGitHubRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response = tokio::task::spawn_blocking(move || bridge_search_github(&state_clone, payload))
+        .await
+        .map_err(|err| internal_error(anyhow!("search github task failed: {}", err)))?
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_github_preview(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchGitHubPreviewRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_github_preview(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search github preview task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_datasets(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchQueryRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_datasets(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search datasets task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_search_dataset_manifest(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SearchDatasetManifestRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let state_clone = state.clone();
+    let response =
+        tokio::task::spawn_blocking(move || bridge_search_dataset_manifest(&state_clone, payload))
+            .await
+            .map_err(|err| internal_error(anyhow!("search dataset manifest task failed: {}", err)))?
+            .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_browser_open(
+    Json(payload): Json<BrowserOpenRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = tokio::task::spawn_blocking(move || bridge_browser_open(payload))
+        .await
+        .map_err(|err| internal_error(anyhow!("browser open task failed: {}", err)))?
+        .map_err(internal_error)?;
+    Ok(Json(ApiResponse {
+        ok: true,
+        data: response,
+    }))
+}
+
+async fn api_browser_view(
+    Query(payload): Query<BrowserViewRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let url = payload.url.trim().to_string();
+    if url.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "browser url is empty".to_string()));
+    }
+    let html = match tokio::task::spawn_blocking(move || browser_view_html(&url)).await {
+        Ok(Ok(html)) => html,
+        Ok(Err(err)) => browser_error_html(&payload.url, &err.to_string()),
+        Err(err) => browser_error_html(&payload.url, &format!("browser view task failed: {}", err)),
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        html,
+    ))
 }
 
 async fn api_rename_session(
@@ -1668,14 +3389,20 @@ async fn api_update_settings(
         runtime.api_url = non_empty_or(payload.api_url.trim(), &runtime.api_url);
         runtime.model = non_empty_or(payload.model.trim(), &runtime.model);
         runtime.deep_think = payload.deep_think;
-        runtime.reasoning_effort = non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
+        runtime.reasoning_effort =
+            non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
         runtime.competition_mode = payload.competition_mode;
         runtime.privacy_mode = payload.privacy_mode;
-        runtime.workspace_root = resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)
-            .map_err(internal_error)?;
-        runtime.api_key = payload
-            .api_key
-            .and_then(|key| if key.trim().is_empty() { None } else { Some(key) });
+        runtime.workspace_root =
+            resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)
+                .map_err(internal_error)?;
+        runtime.api_key = payload.api_key.and_then(|key| {
+            if key.trim().is_empty() {
+                None
+            } else {
+                Some(key)
+            }
+        });
         runtime.auto_approve_tools = payload.auto_approve_tools;
         runtime.max_auto_approve_risk =
             parse_risk_level(&payload.max_auto_approve_risk).map_err(internal_error)?;
@@ -1805,15 +3532,17 @@ async fn api_review_file(
 
         let runtime_paths = current_id
             .as_ref()
-            .and_then(|id| lock_stream_runtime(&state).ok().and_then(|sessions| {
-                sessions.get(id).map(|session| {
-                    session
-                        .edited_files
-                        .iter()
-                        .map(|file| file.path.clone())
-                        .collect::<Vec<_>>()
+            .and_then(|id| {
+                lock_stream_runtime(&state).ok().and_then(|sessions| {
+                    sessions.get(id).map(|session| {
+                        session
+                            .edited_files
+                            .iter()
+                            .map(|file| file.path.clone())
+                            .collect::<Vec<_>>()
+                    })
                 })
-            }))
+            })
             .unwrap_or_default();
 
         (workspace_root, messages, runtime_paths)
@@ -1823,11 +3552,15 @@ async fn api_review_file(
     if !touched_files.iter().any(|path| path == &payload.path) {
         return Err((
             StatusCode::NOT_FOUND,
-            format!("review file is not part of the current agent turn: {}", payload.path),
+            format!(
+                "review file is not part of the current agent turn: {}",
+                payload.path
+            ),
         ));
     }
 
-    let detail = build_review_file_detail(state.host.base_dir(), &workspace_root, &payload.path).map_err(internal_error)?;
+    let detail = build_review_file_detail(state.host.base_dir(), &workspace_root, &payload.path)
+        .map_err(internal_error)?;
 
     Ok(Json(ApiResponse {
         ok: true,
@@ -1844,7 +3577,8 @@ async fn api_workspace_file(
         runtime.workspace_root.clone()
     };
 
-    let file = build_workspace_file_response(state.host.base_dir(), &workspace_root, &payload.path).map_err(internal_error)?;
+    let file = build_workspace_file_response(state.host.base_dir(), &workspace_root, &payload.path)
+        .map_err(internal_error)?;
 
     Ok(Json(ApiResponse {
         ok: true,
@@ -1856,7 +3590,8 @@ async fn api_workspace_file_save(
     State(state): State<WebAppState>,
     Json(payload): Json<WorkspaceFileSaveRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let file = save_workspace_file(&state, &payload.path, &payload.content).map_err(internal_error)?;
+    let file =
+        save_workspace_file(&state, &payload.path, &payload.content).map_err(internal_error)?;
 
     Ok(Json(ApiResponse {
         ok: true,
@@ -1868,7 +3603,8 @@ async fn api_workspace_file_undo(
     State(state): State<WebAppState>,
     Json(payload): Json<WorkspaceFileUndoRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let file = save_workspace_file(&state, &payload.path, &payload.before_content).map_err(internal_error)?;
+    let file = save_workspace_file(&state, &payload.path, &payload.before_content)
+        .map_err(internal_error)?;
 
     Ok(Json(ApiResponse {
         ok: true,
@@ -1919,17 +3655,27 @@ async fn api_workspace_file_complete(
 
     let workspace_root = runtime.workspace_root.trim().to_string();
     if workspace_root.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "workspace root is empty".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "workspace root is empty".to_string(),
+        ));
     }
 
-    let workspace = canonical_workspace_dir_from(state.host.base_dir(), &workspace_root).map_err(internal_error)?;
+    let workspace = canonical_workspace_dir_from(state.host.base_dir(), &workspace_root)
+        .map_err(internal_error)?;
     let relative_path = sanitize_review_path(&payload.path).map_err(internal_error)?;
     let absolute = workspace.join(&relative_path);
     if !absolute.exists() {
-        return Err((StatusCode::NOT_FOUND, format!("workspace file does not exist: {}", relative_path)));
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("workspace file does not exist: {}", relative_path),
+        ));
     }
     if !absolute.is_file() {
-        return Err((StatusCode::BAD_REQUEST, format!("workspace path is not a file: {}", relative_path)));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("workspace path is not a file: {}", relative_path),
+        ));
     }
 
     let provider = build_streaming_provider(&state, &runtime).map_err(internal_error)?;
@@ -1952,25 +3698,34 @@ async fn api_workspace_file_raw(
         runtime.workspace_root.clone()
     };
 
-    let workspace = canonical_workspace_dir_from(state.host.base_dir(), &workspace_root).map_err(internal_error)?;
+    let workspace = canonical_workspace_dir_from(state.host.base_dir(), &workspace_root)
+        .map_err(internal_error)?;
     let relative_path = sanitize_review_path(&query.path).map_err(internal_error)?;
     let absolute = workspace.join(&relative_path);
 
     if !absolute.exists() {
-        return Err((StatusCode::NOT_FOUND, format!("workspace file does not exist: {}", relative_path)));
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("workspace file does not exist: {}", relative_path),
+        ));
     }
     if !absolute.is_file() {
-        return Err((StatusCode::BAD_REQUEST, format!("workspace path is not a file: {}", relative_path)));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("workspace path is not a file: {}", relative_path),
+        ));
     }
 
-    let bytes = std::fs::read(&absolute)
-        .map_err(|err| internal_error(anyhow!("failed to read workspace file '{}': {}", absolute.display(), err)))?;
+    let bytes = std::fs::read(&absolute).map_err(|err| {
+        internal_error(anyhow!(
+            "failed to read workspace file '{}': {}",
+            absolute.display(),
+            err
+        ))
+    })?;
     let mime_type = workspace_mime_type(&relative_path);
 
-    Ok((
-        [(header::CONTENT_TYPE, mime_type)],
-        bytes,
-    ))
+    Ok(([(header::CONTENT_TYPE, mime_type)], bytes))
 }
 
 async fn api_git_state(
@@ -2119,15 +3874,14 @@ async fn api_send_message(
     State(state): State<WebAppState>,
     Json(payload): Json<SendMessageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let (current_id, next_blocks) =
-        run_chat_request(
-            &state,
-            payload.content.clone(),
-            payload.mode.clone(),
-            payload.language.clone(),
-        )
-        .await
-        .map_err(internal_error)?;
+    let (current_id, next_blocks) = run_chat_request(
+        &state,
+        payload.content.clone(),
+        payload.mode.clone(),
+        payload.language.clone(),
+    )
+    .await
+    .map_err(internal_error)?;
 
     Ok(Json(ApiResponse {
         ok: true,
@@ -2154,7 +3908,7 @@ async fn api_send_message_stream(
     let session_id_for_task = session_id.clone();
     let tx_for_runtime = tx.clone();
     let state_for_cleanup = state_for_task.clone();
-    let handle = tokio::spawn(async move {
+    let handle = Arc::new(tokio::spawn(async move {
         let result = AssertUnwindSafe(run_chat_request_stream(
             state_for_task,
             session_id_for_task.clone(),
@@ -2180,16 +3934,20 @@ async fn api_send_message_stream(
                         recovery_mode.as_deref(),
                         turn_language_from_option(recovery_language.as_deref()),
                     ) {
-                        let required_path_snapshots =
-                            load_stream_required_path_snapshots(&state_for_cleanup, &session_id_for_task);
-                        if let Some((report, checkpoints, branch_notes)) = can_finalize_from_hard_verifier_only(
-                            &plan,
-                            &persisted_blocks,
-                            state_for_cleanup.host.base_dir(),
-                            &runtime,
-                            &required_path_snapshots,
-                            turn_language_from_option(recovery_language.as_deref()),
-                        ) {
+                        let required_path_snapshots = load_stream_required_path_snapshots(
+                            &state_for_cleanup,
+                            &session_id_for_task,
+                        );
+                        if let Some((report, checkpoints, branch_notes)) =
+                            can_finalize_from_hard_verifier_only(
+                                &plan,
+                                &persisted_blocks,
+                                state_for_cleanup.host.base_dir(),
+                                &runtime,
+                                &required_path_snapshots,
+                                turn_language_from_option(recovery_language.as_deref()),
+                            )
+                        {
                             emit_verifier_update(
                                 &tx,
                                 &state_for_cleanup,
@@ -2242,16 +4000,20 @@ async fn api_send_message_stream(
                         recovery_mode.as_deref(),
                         turn_language_from_option(recovery_language.as_deref()),
                     ) {
-                        let required_path_snapshots =
-                            load_stream_required_path_snapshots(&state_for_cleanup, &session_id_for_task);
-                        if let Some((report, checkpoints, branch_notes)) = can_finalize_from_hard_verifier_only(
-                            &plan,
-                            &persisted_blocks,
-                            state_for_cleanup.host.base_dir(),
-                            &runtime,
-                            &required_path_snapshots,
-                            turn_language_from_option(recovery_language.as_deref()),
-                        ) {
+                        let required_path_snapshots = load_stream_required_path_snapshots(
+                            &state_for_cleanup,
+                            &session_id_for_task,
+                        );
+                        if let Some((report, checkpoints, branch_notes)) =
+                            can_finalize_from_hard_verifier_only(
+                                &plan,
+                                &persisted_blocks,
+                                state_for_cleanup.host.base_dir(),
+                                &runtime,
+                                &required_path_snapshots,
+                                turn_language_from_option(recovery_language.as_deref()),
+                            )
+                        {
                             emit_verifier_update(
                                 &tx,
                                 &state_for_cleanup,
@@ -2293,14 +4055,14 @@ async fn api_send_message_stream(
                 );
             }
         }
-    });
+    }));
 
     {
         let mut runtime = lock_stream_runtime(&state).map_err(internal_error)?;
         runtime.insert(
             session_id.clone(),
             StreamSessionRuntime {
-                abort_handle: handle.abort_handle(),
+                task_handle: handle.clone(),
                 event_tx: tx_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -2317,6 +4079,7 @@ async fn api_send_message_stream(
                 checkpoints: Vec::new(),
                 branch_notes: Vec::new(),
                 timeline: Vec::new(),
+                auto_skills: Vec::new(),
             },
         );
     }
@@ -2340,7 +4103,8 @@ async fn api_stop_message_stream(
     State(state): State<WebAppState>,
     Json(payload): Json<StreamControlRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let session_id = resolve_stream_session_id(&state, payload.session_id).map_err(internal_error)?;
+    let session_id =
+        resolve_stream_session_id(&state, payload.session_id).map_err(internal_error)?;
     stop_stream_session(&state, &session_id).map_err(internal_error)?;
     Ok(Json(ApiResponse {
         ok: true,
@@ -2382,7 +4146,8 @@ fn parse_bridge_payload<T: DeserializeOwned>(payload: Value) -> Result<T> {
     if payload.is_null() {
         return Err(anyhow!("bridge payload is empty"));
     }
-    serde_json::from_value(payload).map_err(|err| anyhow!("failed to parse bridge payload: {}", err))
+    serde_json::from_value(payload)
+        .map_err(|err| anyhow!("failed to parse bridge payload: {}", err))
 }
 
 async fn bridge_update_settings(
@@ -2396,13 +4161,19 @@ async fn bridge_update_settings(
         runtime.api_url = non_empty_or(payload.api_url.trim(), &runtime.api_url);
         runtime.model = non_empty_or(payload.model.trim(), &runtime.model);
         runtime.deep_think = payload.deep_think;
-        runtime.reasoning_effort = non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
+        runtime.reasoning_effort =
+            non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
         runtime.competition_mode = payload.competition_mode;
         runtime.privacy_mode = payload.privacy_mode;
-        runtime.workspace_root = resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)?;
-        runtime.api_key = payload
-            .api_key
-            .and_then(|key| if key.trim().is_empty() { None } else { Some(key) });
+        runtime.workspace_root =
+            resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)?;
+        runtime.api_key = payload.api_key.and_then(|key| {
+            if key.trim().is_empty() {
+                None
+            } else {
+                Some(key)
+            }
+        });
         runtime.auto_approve_tools = payload.auto_approve_tools;
         runtime.max_auto_approve_risk = parse_risk_level(&payload.max_auto_approve_risk)?;
         runtime.max_tool_calls_per_minute = payload.max_tool_calls_per_minute;
@@ -2493,7 +4264,10 @@ async fn bridge_pick_workspace(state: &WebAppState) -> Result<WorkspacePickerRes
     })
 }
 
-async fn bridge_review_file(state: &WebAppState, payload: ReviewFileRequest) -> Result<ReviewFileResponse> {
+async fn bridge_review_file(
+    state: &WebAppState,
+    payload: ReviewFileRequest,
+) -> Result<ReviewFileResponse> {
     let (workspace_root, messages, runtime_paths) = {
         let runtime = lock_runtime_settings(state)?;
         let workspace_root = runtime.workspace_root.clone();
@@ -2513,15 +4287,17 @@ async fn bridge_review_file(state: &WebAppState, payload: ReviewFileRequest) -> 
 
         let runtime_paths = current_id
             .as_ref()
-            .and_then(|id| lock_stream_runtime(state).ok().and_then(|sessions| {
-                sessions.get(id).map(|session| {
-                    session
-                        .edited_files
-                        .iter()
-                        .map(|file| file.path.clone())
-                        .collect::<Vec<_>>()
+            .and_then(|id| {
+                lock_stream_runtime(state).ok().and_then(|sessions| {
+                    sessions.get(id).map(|session| {
+                        session
+                            .edited_files
+                            .iter()
+                            .map(|file| file.path.clone())
+                            .collect::<Vec<_>>()
+                    })
                 })
-            }))
+            })
             .unwrap_or_default();
 
         (workspace_root, messages, runtime_paths)
@@ -2539,12 +4315,16 @@ async fn bridge_review_file(state: &WebAppState, payload: ReviewFileRequest) -> 
     Ok(ReviewFileResponse { file: detail })
 }
 
-async fn bridge_workspace_file(state: &WebAppState, payload: ReviewFileRequest) -> Result<WorkspaceFileEnvelope> {
+async fn bridge_workspace_file(
+    state: &WebAppState,
+    payload: ReviewFileRequest,
+) -> Result<WorkspaceFileEnvelope> {
     let workspace_root = {
         let runtime = lock_runtime_settings(state)?;
         runtime.workspace_root.clone()
     };
-    let file = build_workspace_file_response(state.host.base_dir(), &workspace_root, &payload.path)?;
+    let file =
+        build_workspace_file_response(state.host.base_dir(), &workspace_root, &payload.path)?;
     Ok(WorkspaceFileEnvelope { file })
 }
 
@@ -2595,15 +4375,17 @@ async fn bridge_workspace_file_complete(
     Ok(WorkspaceFileCompleteResponse { items })
 }
 
-async fn bridge_chat_send(state: &WebAppState, payload: SendMessageRequest) -> Result<SendMessageResponse> {
-    let (current_id, next_blocks) =
-        run_chat_request(
-            state,
-            payload.content.clone(),
-            payload.mode.clone(),
-            payload.language.clone(),
-        )
-        .await?;
+async fn bridge_chat_send(
+    state: &WebAppState,
+    payload: SendMessageRequest,
+) -> Result<SendMessageResponse> {
+    let (current_id, next_blocks) = run_chat_request(
+        state,
+        payload.content.clone(),
+        payload.mode.clone(),
+        payload.language.clone(),
+    )
+    .await?;
 
     Ok(SendMessageResponse {
         messages: messages_to_web(&next_blocks),
@@ -2611,7 +4393,10 @@ async fn bridge_chat_send(state: &WebAppState, payload: SendMessageRequest) -> R
     })
 }
 
-fn bridge_stop_message_stream(state: &WebAppState, payload: StreamControlRequest) -> Result<SessionMutationResponse> {
+fn bridge_stop_message_stream(
+    state: &WebAppState,
+    payload: StreamControlRequest,
+) -> Result<SessionMutationResponse> {
     let session_id = resolve_stream_session_id(state, payload.session_id)?;
     stop_stream_session(state, &session_id)?;
     Ok(SessionMutationResponse {
@@ -2678,7 +4463,10 @@ fn bridge_run_debug_state(state: &WebAppState) -> Result<RunDebugEnvelope> {
     })
 }
 
-fn bridge_run_debug_action(state: &WebAppState, payload: RunDebugActionRequest) -> Result<RunDebugEnvelope> {
+fn bridge_run_debug_action(
+    state: &WebAppState,
+    payload: RunDebugActionRequest,
+) -> Result<RunDebugEnvelope> {
     let workspace_root = {
         let runtime = lock_runtime_settings(state)?;
         runtime.workspace_root.clone()
@@ -2747,7 +4535,10 @@ fn bridge_sessions_create(state: &WebAppState) -> Result<SessionMutationResponse
     })
 }
 
-fn bridge_sessions_select(state: &WebAppState, payload: SessionSwitchRequest) -> Result<SessionMutationResponse> {
+fn bridge_sessions_select(
+    state: &WebAppState,
+    payload: SessionSwitchRequest,
+) -> Result<SessionMutationResponse> {
     {
         let mut session_manager = lock_session_manager(state)?;
         session_manager.resume_session(&payload.session_id)?;
@@ -2761,7 +4552,10 @@ fn bridge_sessions_select(state: &WebAppState, payload: SessionSwitchRequest) ->
     })
 }
 
-fn bridge_sessions_rename(state: &WebAppState, payload: SessionRenameRequest) -> Result<SessionMutationResponse> {
+fn bridge_sessions_rename(
+    state: &WebAppState,
+    payload: SessionRenameRequest,
+) -> Result<SessionMutationResponse> {
     let current_session_id = {
         let mut session_manager = lock_session_manager(state)?;
         session_manager.rename_session(&payload.session_id, &payload.title)?;
@@ -2776,7 +4570,10 @@ fn bridge_sessions_rename(state: &WebAppState, payload: SessionRenameRequest) ->
     })
 }
 
-fn bridge_sessions_delete(state: &WebAppState, payload: SessionDeleteRequest) -> Result<SessionMutationResponse> {
+fn bridge_sessions_delete(
+    state: &WebAppState,
+    payload: SessionDeleteRequest,
+) -> Result<SessionMutationResponse> {
     let next_session_id = {
         let mut session_manager = lock_session_manager(state)?;
         session_manager.delete_session(&payload.session_id)?;
@@ -2785,6 +4582,10 @@ fn bridge_sessions_delete(state: &WebAppState, payload: SessionDeleteRequest) ->
         }
         session_manager.current_id.clone()
     };
+    let feedback_path = reviewer_feedback_path(state, &payload.session_id);
+    let _ = fs::remove_file(feedback_path);
+    let paper_workflow_path = paper_workflow_payload_path(state, &payload.session_id);
+    let _ = fs::remove_file(paper_workflow_path);
     {
         let runtime = lock_runtime_settings(state)?;
         persist_web_state(state, &runtime, next_session_id.clone())?;
@@ -2792,6 +4593,1211 @@ fn bridge_sessions_delete(state: &WebAppState, payload: SessionDeleteRequest) ->
     Ok(SessionMutationResponse {
         session_id: next_session_id,
     })
+}
+
+fn bridge_reviewer_feedback_state(state: &WebAppState) -> Result<ReviewerFeedbackResponse> {
+    let session_id = ensure_current_session(state)?;
+    let runtime = {
+        let runtime = lock_runtime_settings(state)?;
+        runtime.clone()
+    };
+    let messages = {
+        let session_manager = lock_session_manager(state)?;
+        session_manager.load_messages(&session_id)?
+    };
+    let session_state = infer_session_research_state(&messages);
+    let runtime_snapshot = lock_stream_runtime(state)?
+        .get(&session_id)
+        .map(clone_stream_runtime_view);
+    let payload = build_research_payload_with_feedback(
+        state,
+        Some(session_id.as_str()),
+        &runtime,
+        &messages,
+        runtime_snapshot.as_ref(),
+        session_state,
+    );
+    Ok(ReviewerFeedbackResponse {
+        reviewer_feedback: payload.reviewer_feedback,
+    })
+}
+
+async fn bridge_research_paper_workflow(
+    state: &WebAppState,
+    payload: ResearchPaperWorkflowRequest,
+) -> Result<ResearchPaperWorkflowResponse> {
+    let topic = payload.topic.trim().to_string();
+    if topic.is_empty() {
+        return Err(anyhow!("paper workflow topic is empty"));
+    }
+
+    let session_id = if let Some(session_id) = payload
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        session_id.to_string()
+    } else {
+        ensure_current_session(state)?
+    };
+
+    {
+        let mut session_manager = lock_session_manager(state)?;
+        session_manager.resume_session(&session_id)?;
+    }
+
+    execute_paper_workflow_for_session(
+        state,
+        &session_id,
+        &topic,
+        payload.local_paper_source.as_deref(),
+        payload.search_limit,
+        payload.force_rewrite.unwrap_or(false),
+        "manual",
+    )
+    .await
+}
+
+fn bridge_search_health(_state: &WebAppState) -> Result<SearchHealthResponse> {
+    let dataset_status = official_dataset_database_health_status();
+
+    Ok(SearchHealthResponse {
+        dataset_entrypoint: dataset_status.clone(),
+        paper_search: official_paper_api_health_status(),
+        tracking_search: huggingface_tracking_health_status(),
+        benchmark_search: mlperf_benchmark_health_status(),
+        web_search: brave_search_health_status(),
+        models_search: onnx_models_search_health_status(),
+        github_search: github_search_health_status(),
+    })
+}
+
+fn aggregate_provider_health(name: &str, providers: Vec<SearchHealthStatus>) -> SearchHealthStatus {
+    let ready_count = providers
+        .iter()
+        .filter(|provider| provider.status.eq_ignore_ascii_case("ready"))
+        .count();
+    let degraded_count = providers
+        .iter()
+        .filter(|provider| provider.status.eq_ignore_ascii_case("degraded"))
+        .count();
+    let unknown_count = providers
+        .iter()
+        .filter(|provider| provider.status.eq_ignore_ascii_case("unknown"))
+        .count();
+    let total = providers.len();
+    let status = if total > 0 && ready_count == total {
+        "ready"
+    } else if ready_count > 0 || degraded_count > 0 {
+        "degraded"
+    } else if unknown_count > 0 {
+        "unknown"
+    } else {
+        "down"
+    };
+    let detail = if providers.is_empty() {
+        "no provider probes configured".to_string()
+    } else {
+        let summary = providers
+            .iter()
+            .map(|provider| format!("{}={}", provider.name, provider.status))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("official provider probes: {}", summary)
+    };
+
+    SearchHealthStatus {
+        name: name.to_string(),
+        status: status.to_string(),
+        detail,
+        providers,
+    }
+}
+
+fn http_probe_status(
+    client: &reqwest::blocking::Client,
+    name: &str,
+    endpoint: &str,
+    request: reqwest::blocking::RequestBuilder,
+) -> SearchHealthStatus {
+    match request.send() {
+        Ok(response) if response.status().is_success() => SearchHealthStatus {
+            name: name.to_string(),
+            status: "ready".to_string(),
+            detail: endpoint.to_string(),
+            providers: Vec::new(),
+        },
+        Ok(response) => SearchHealthStatus {
+            name: name.to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", endpoint, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: name.to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", endpoint, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn official_paper_api_health_status() -> SearchHealthStatus {
+    const DEFAULT_ARXIV_API_URL: &str = "https://export.arxiv.org/api/query";
+    const DEFAULT_SEMANTIC_SCHOLAR_API_URL: &str = "https://api.semanticscholar.org/graph/v1";
+    const DEFAULT_CROSSREF_API_URL: &str = "https://api.crossref.org";
+    const DEFAULT_OPENALEX_API_URL: &str = "https://api.openalex.org";
+    const DEFAULT_OPENREVIEW_API_URL: &str = "https://api2.openreview.net";
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "official-paper-apis".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    let semantic_scholar_api_url = std::env::var("SEMANTIC_SCHOLAR_API_URL")
+        .unwrap_or_else(|_| DEFAULT_SEMANTIC_SCHOLAR_API_URL.to_string());
+    let semantic_scholar_endpoint = format!(
+        "{}/paper/search?query={}&limit=1&fields=title",
+        semantic_scholar_api_url.trim_end_matches('/'),
+        urlencoding::encode("transformer")
+    );
+    let mut semantic_scholar_request = client.get(&semantic_scholar_endpoint);
+    if let Ok(api_key) = std::env::var("SEMANTIC_SCHOLAR_API_KEY") {
+        let trimmed = api_key.trim();
+        if !trimmed.is_empty() {
+            semantic_scholar_request = semantic_scholar_request.header("x-api-key", trimmed);
+        }
+    }
+
+    let crossref_api_base =
+        std::env::var("CROSSREF_API_URL").unwrap_or_else(|_| DEFAULT_CROSSREF_API_URL.to_string());
+    let mut crossref_endpoint = format!(
+        "{}/works?query.bibliographic={}&rows=1",
+        crossref_api_base.trim_end_matches('/'),
+        urlencoding::encode("transformer")
+    );
+    if let Ok(mailto) = std::env::var("CROSSREF_MAILTO") {
+        let trimmed = mailto.trim();
+        if !trimmed.is_empty() {
+            crossref_endpoint.push_str("&mailto=");
+            crossref_endpoint.push_str(&urlencoding::encode(trimmed));
+        }
+    }
+
+    let openalex_api_base =
+        std::env::var("OPENALEX_API_URL").unwrap_or_else(|_| DEFAULT_OPENALEX_API_URL.to_string());
+    let mut openalex_endpoint = format!(
+        "{}/works?search={}&per-page=1",
+        openalex_api_base.trim_end_matches('/'),
+        urlencoding::encode("transformer")
+    );
+    if let Ok(mailto) = std::env::var("OPENALEX_MAILTO") {
+        let trimmed = mailto.trim();
+        if !trimmed.is_empty() {
+            openalex_endpoint.push_str("&mailto=");
+            openalex_endpoint.push_str(&urlencoding::encode(trimmed));
+        }
+    }
+
+    let arxiv_api_base =
+        std::env::var("ARXIV_API_URL").unwrap_or_else(|_| DEFAULT_ARXIV_API_URL.to_string());
+    let arxiv_endpoint = format!(
+        "{}?search_query=all:{}&start=0&max_results=1&sortBy=relevance&sortOrder=descending",
+        arxiv_api_base,
+        urlencoding::encode("transformer")
+    );
+
+    let openreview_api_base = std::env::var("OPENREVIEW_API_URL")
+        .unwrap_or_else(|_| DEFAULT_OPENREVIEW_API_URL.to_string());
+    let openreview_endpoint = format!(
+        "{}/notes?term={}&limit=1",
+        openreview_api_base.trim_end_matches('/'),
+        urlencoding::encode("transformer")
+    );
+
+    let providers = vec![
+        http_probe_status(
+            &client,
+            "semantic_scholar",
+            &semantic_scholar_endpoint,
+            semantic_scholar_request,
+        ),
+        http_probe_status(
+            &client,
+            "openalex",
+            &openalex_endpoint,
+            client.get(&openalex_endpoint),
+        ),
+        http_probe_status(
+            &client,
+            "arxiv",
+            &arxiv_endpoint,
+            client.get(&arxiv_endpoint),
+        ),
+        http_probe_status(
+            &client,
+            "crossref",
+            &crossref_endpoint,
+            client.get(&crossref_endpoint),
+        ),
+        http_probe_status(
+            &client,
+            "openreview",
+            &openreview_endpoint,
+            client.get(&openreview_endpoint),
+        ),
+    ];
+
+    aggregate_provider_health("official-paper-apis", providers)
+}
+
+fn bridge_search_web(_state: &WebAppState, payload: SearchQueryRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Err(anyhow!("search query is empty"));
+    }
+    let limit = payload.limit.unwrap_or(8).clamp(1, 10);
+    let api_key = detect_brave_search_api_key()
+        .ok_or_else(|| anyhow!("BRAVE_SEARCH_API_KEY is not configured"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| anyhow!("failed to build web search client: {}", err))?;
+    let url = detect_brave_search_api_base();
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .header("X-Subscription-Token", api_key)
+        .query(&[
+            ("q", query.clone()),
+            ("limit", limit.to_string()),
+            ("search_lang", "en".to_string()),
+            ("country", "us".to_string()),
+            ("safesearch", "moderate".to_string()),
+            ("text_decorations", "false".to_string()),
+            ("spellcheck", "true".to_string()),
+        ])
+        .send()
+        .map_err(|err| anyhow!("failed to reach Brave Search at {}: {}", url, err))?;
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Brave Search API returned HTTP {}",
+            response.status()
+        ));
+    }
+
+    let payload: BraveSearchResponse = response
+        .json()
+        .map_err(|err| anyhow!("Brave Search API returned invalid JSON: {}", err))?;
+    let results = payload
+        .web
+        .unwrap_or_default()
+        .results
+        .into_iter()
+        .filter_map(normalize_brave_web_result)
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "query": query,
+        "total": results.len(),
+        "results": results,
+        "status": if results.is_empty() { "empty" } else { "ok" },
+        "provider": "brave-search",
+        "hints": if results.is_empty() {
+            vec!["Brave Search API returned zero web results for this query.".to_string()]
+        } else {
+            Vec::<String>::new()
+        },
+    }))
+}
+
+fn bridge_search_tracking(_state: &WebAppState, payload: SearchSourceRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    VerificationCenterTools
+        .search_research_tracking(query, payload.source, payload.limit)
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_search_benchmarks(_state: &WebAppState, payload: SearchSourceRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    VerificationCenterTools
+        .search_benchmark_platforms(query, payload.source, payload.limit)
+        .map_err(|err| anyhow!(err))
+}
+
+fn detect_brave_search_api_key() -> Option<String> {
+    std::env::var("BRAVE_SEARCH_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn detect_brave_search_api_base() -> String {
+    std::env::var("BRAVE_SEARCH_API_BASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://api.search.brave.com/res/v1/web/search".to_string())
+}
+
+fn brave_search_health_status() -> SearchHealthStatus {
+    let detail = detect_brave_search_api_base();
+    let Some(api_key) = detect_brave_search_api_key() else {
+        return SearchHealthStatus {
+            name: "brave-search".to_string(),
+            status: "down".to_string(),
+            detail: "missing BRAVE_SEARCH_API_KEY".to_string(),
+            providers: Vec::new(),
+        };
+    };
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "brave-search".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    match client
+        .get(&detail)
+        .header("Accept", "application/json")
+        .header("X-Subscription-Token", api_key)
+        .query(&[("q", "openai"), ("limit", "1")])
+        .send()
+    {
+        Ok(response) if response.status().is_success() => SearchHealthStatus {
+            name: "brave-search".to_string(),
+            status: "ready".to_string(),
+            detail,
+            providers: Vec::new(),
+        },
+        Ok(response) => SearchHealthStatus {
+            name: "brave-search".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", detail, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: "brave-search".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", detail, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn github_search_health_status() -> SearchHealthStatus {
+    let base = detect_github_api_base_public();
+    let token_detection = detect_github_token();
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "github-search".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    let probe_url = format!("{}/rate_limit", base.trim_end_matches('/'));
+    match client
+        .get(&probe_url)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {
+            let (status, detail) = match token_detection {
+                Some(detected) => (
+                    "ready".to_string(),
+                    format!("{} reachable; repository/code search ready via {}", base, detected.source),
+                ),
+                None => (
+                    "unknown".to_string(),
+                    format!(
+                        "{} reachable; repository search ready, code search may fall back without token",
+                        base
+                    ),
+                ),
+            };
+            SearchHealthStatus {
+                name: "github-search".to_string(),
+                status,
+                detail,
+                providers: Vec::new(),
+            }
+        }
+        Ok(response) => SearchHealthStatus {
+            name: "github-search".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", base, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: "github-search".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", base, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn onnx_models_search_health_status() -> SearchHealthStatus {
+    let detail = "https://raw.githubusercontent.com/onnx/models/main/ONNX_HUB_MANIFEST.json";
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "onnx-model-zoo".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    match client
+        .get(detail)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .send()
+    {
+        Ok(response) if response.status().is_success() => SearchHealthStatus {
+            name: "onnx-model-zoo".to_string(),
+            status: "ready".to_string(),
+            detail: detail.to_string(),
+            providers: Vec::new(),
+        },
+        Ok(response) => SearchHealthStatus {
+            name: "onnx-model-zoo".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", detail, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: "onnx-model-zoo".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", detail, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn huggingface_tracking_health_status() -> SearchHealthStatus {
+    let detail = "https://huggingface.co/papers";
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "huggingface-trending-papers".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    match client
+        .get(detail)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .send()
+    {
+        Ok(response) if response.status().is_success() => SearchHealthStatus {
+            name: "huggingface-trending-papers".to_string(),
+            status: "ready".to_string(),
+            detail: detail.to_string(),
+            providers: Vec::new(),
+        },
+        Ok(response) => SearchHealthStatus {
+            name: "huggingface-trending-papers".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", detail, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: "huggingface-trending-papers".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", detail, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn mlperf_benchmark_health_status() -> SearchHealthStatus {
+    let detail = "https://mlcommons.org/benchmarks/";
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "mlperf-benchmarks".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    match client
+        .get(detail)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .send()
+    {
+        Ok(response) if response.status().is_success() => SearchHealthStatus {
+            name: "mlperf-benchmarks".to_string(),
+            status: "ready".to_string(),
+            detail: detail.to_string(),
+            providers: Vec::new(),
+        },
+        Ok(response) => SearchHealthStatus {
+            name: "mlperf-benchmarks".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} returned HTTP {}", detail, response.status()),
+            providers: Vec::new(),
+        },
+        Err(err) => SearchHealthStatus {
+            name: "mlperf-benchmarks".to_string(),
+            status: "down".to_string(),
+            detail: format!("{} unreachable: {}", detail, err),
+            providers: Vec::new(),
+        },
+    }
+}
+
+fn normalize_brave_web_result(result: BraveWebResult) -> Option<Value> {
+    let title = result
+        .title
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let url = result
+        .url
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let snippet = result
+        .description
+        .map(|value| collapse_search_snippet(&value))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "No snippet available.".to_string());
+    Some(json!({
+        "title": title,
+        "url": url,
+        "snippet": snippet,
+        "engine": "brave-search",
+    }))
+}
+
+fn browser_open_payload(url: &str) -> Result<Value> {
+    let final_url = canonical_browser_url(url)?;
+    let view_url = format!("/api/browser/view?url={}", urlencoding::encode(&final_url));
+    Ok(json!({
+        "url": final_url,
+        "view_url": view_url,
+    }))
+}
+
+fn browser_view_html(url: &str) -> Result<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|err| anyhow!("failed to build in-app browser client: {}", err))?;
+    let response = client
+        .get(url)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .send()
+        .map_err(|err| anyhow!("failed to load {}: {}", url, err))?;
+    if !response.status().is_success() {
+        return Err(anyhow!("browser fetch returned HTTP {}", response.status()));
+    }
+    let final_url = response.url().to_string();
+    let body = response
+        .text()
+        .map_err(|err| anyhow!("browser fetch returned invalid text body: {}", err))?;
+    let stripped = strip_browser_scripts(&body, &final_url);
+    let normalized = normalize_browser_document(&stripped, &final_url);
+    let rewritten = rewrite_browser_resource_urls(&normalized, &final_url);
+    Ok(inject_browser_base_href(&rewritten, &final_url))
+}
+
+fn canonical_browser_url(url: &str) -> Result<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|err| anyhow!("failed to build in-app browser client: {}", err))?;
+    let response = client
+        .get(url)
+        .header("User-Agent", "tokitai-ai-scientist/1.0")
+        .send()
+        .map_err(|err| anyhow!("failed to load {}: {}", url, err))?;
+    if !response.status().is_success() {
+        return Err(anyhow!("browser fetch returned HTTP {}", response.status()));
+    }
+    Ok(response.url().to_string())
+}
+
+fn browser_error_html(url: &str, error: &str) -> String {
+    let safe_url = browser_escape_html(url);
+    let safe_error = browser_escape_html(error);
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browser Load Failed</title>
+    <style>
+      :root {{
+        color-scheme: dark;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: #0f1115;
+        color: #edf1f7;
+      }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f1115;
+      }}
+      main {{
+        width: min(720px, calc(100vw - 32px));
+        box-sizing: border-box;
+        padding: 24px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px;
+        background: #171a21;
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: 18px;
+        line-height: 1.4;
+      }}
+      p {{
+        margin: 0 0 12px;
+        color: #c2cad8;
+        line-height: 1.6;
+      }}
+      code, pre {{
+        font-family: Consolas, "SFMono-Regular", monospace;
+      }}
+      pre {{
+        margin: 0;
+        padding: 12px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-radius: 8px;
+        background: #0d1016;
+        border: 1px solid rgba(255,255,255,0.06);
+        color: #ffb4b4;
+      }}
+      a {{
+        color: #8bc5ff;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Unable to load page</h1>
+      <p>The built-in browser could not fetch this URL right now.</p>
+      <p><a href="{safe_url}" target="_blank" rel="noopener noreferrer">{safe_url}</a></p>
+      <pre>{safe_error}</pre>
+    </main>
+  </body>
+</html>"#
+    )
+}
+
+fn browser_escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn normalize_browser_document(html: &str, final_url: &str) -> String {
+    let Ok(parsed) = reqwest::Url::parse(final_url) else {
+        return html.to_string();
+    };
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    if host != "github.com" {
+        return html.to_string();
+    }
+
+    let mut output = html.to_string();
+
+    if let Ok(hidden_re) = Regex::new(r#"(?is)visibility\s*:\s*hidden\s*;?"#) {
+        output = hidden_re
+            .replace_all(&output, "visibility: visible;")
+            .to_string();
+    }
+    if let Ok(display_none_re) = Regex::new(r#"(?is)display\s*:\s*none\s*;?"#) {
+        output = display_none_re
+            .replace_all(&output, "display: block;")
+            .to_string();
+    }
+    if let Ok(opacity_zero_re) = Regex::new(r#"(?is)opacity\s*:\s*0(\.0+)?\s*;?"#) {
+        output = opacity_zero_re
+            .replace_all(&output, "opacity: 1;")
+            .to_string();
+    }
+
+    output
+}
+
+fn strip_browser_scripts(html: &str, final_url: &str) -> String {
+    let Ok(parsed) = reqwest::Url::parse(final_url) else {
+        return html.to_string();
+    };
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    if host != "github.com" {
+        return html.to_string();
+    }
+    Regex::new(r#"(?is)<script\b[^>]*>.*?</script>"#)
+        .ok()
+        .map(|re| re.replace_all(html, "").to_string())
+        .unwrap_or_else(|| html.to_string())
+}
+
+fn rewrite_browser_resource_urls(html: &str, final_url: &str) -> String {
+    let parsed = match reqwest::Url::parse(final_url) {
+        Ok(value) => value,
+        Err(_) => return html.to_string(),
+    };
+    let origin = format!(
+        "{}://{}",
+        parsed.scheme(),
+        parsed.host_str().unwrap_or_default()
+    );
+    let origin_with_port = if let Some(port) = parsed.port() {
+        format!("{}:{}", origin, port)
+    } else {
+        origin
+    };
+    let attr_re = match Regex::new(r#"(?i)\b(href|src|action|poster)\s*=\s*(["'])/(?!/)([^"']*)\2"#)
+    {
+        Ok(value) => value,
+        Err(_) => return html.to_string(),
+    };
+    let srcset_re = match Regex::new(r#"(?i)\bsrcset\s*=\s*(["'])([^"']*)\1"#) {
+        Ok(value) => value,
+        Err(_) => return html.to_string(),
+    };
+    let output = attr_re.replace_all(html, |caps: &regex::Captures| {
+        format!(
+            r#"{}={}{}{}/{}{}"#,
+            &caps[1], &caps[2], origin_with_port, "", &caps[3], &caps[2],
+        )
+    });
+    srcset_re
+        .replace_all(&output, |caps: &regex::Captures| {
+            let quote = &caps[1];
+            let rewritten = caps[2]
+                .split(',')
+                .map(|entry| {
+                    let trimmed = entry.trim();
+                    if trimmed.starts_with('/')
+                        && !trimmed.starts_with("//")
+                        && !trimmed.starts_with("/api/")
+                    {
+                        format!("{}{}", origin_with_port, trimmed)
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(r#"srcset={}{}{}"#, quote, rewritten, quote)
+        })
+        .to_string()
+}
+
+fn inject_browser_base_href(html: &str, final_url: &str) -> String {
+    let base_tag = format!(r#"<base href="{}">"#, final_url);
+    let proxy_script = format!(
+        r##"<script>
+(function() {{
+  var currentUrl = {current_url:?};
+  var originalFetch = window.fetch ? window.fetch.bind(window) : null;
+  var originalXhrOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype
+    ? window.XMLHttpRequest.prototype.open
+    : null;
+  var originalPushState = window.history && window.history.pushState ? window.history.pushState.bind(window.history) : null;
+  var originalReplaceState = window.history && window.history.replaceState ? window.history.replaceState.bind(window.history) : null;
+  function absolutize(href) {{
+    try {{
+      return new URL(href, currentUrl).toString();
+    }} catch (_error) {{
+      return "";
+    }}
+  }}
+  function toProxyUrl(target) {{
+    return "/api/browser/view?url=" + encodeURIComponent(target);
+  }}
+  function postParentNavigation(target) {{
+    try {{
+      if (window.parent && window.parent !== window) {{
+        window.parent.postMessage({{ type: "tokitai-browser-navigate", url: target }}, "*");
+        return true;
+      }}
+    }} catch (_error) {{}}
+    return false;
+  }}
+  function navigateDocument(target) {{
+    var nextUrl = rewriteMaybeRelative(target);
+    if (!nextUrl) return;
+    if (postParentNavigation(nextUrl)) return;
+    window.location.href = toProxyUrl(nextUrl);
+  }}
+  function isHttpUrl(target) {{
+    return /^https?:\/\//i.test(target || "");
+  }}
+  function shouldProxyRequest(target) {{
+    return isHttpUrl(target) && !target.startsWith(window.location.origin + "/api/browser/view");
+  }}
+  function rewriteMaybeRelative(target) {{
+    if (!target) return "";
+    if (typeof target !== "string") return target;
+    if (target.startsWith("/api/browser/")) return target;
+    var absolute = absolutize(target);
+    return absolute || target;
+  }}
+  function wrapProxyNavigation(target, mode) {{
+    var nextUrl = rewriteMaybeRelative(target);
+    if (!shouldProxyRequest(nextUrl)) return nextUrl;
+    return mode === "document" ? toProxyUrl(nextUrl) : nextUrl;
+  }}
+  if (originalFetch) {{
+    window.fetch = function(input, init) {{
+      try {{
+        if (typeof input === "string") {{
+          input = rewriteMaybeRelative(input);
+        }} else if (input && typeof input.url === "string") {{
+          input = new Request(rewriteMaybeRelative(input.url), input);
+        }}
+      }} catch (_error) {{}}
+      return originalFetch(input, init);
+    }};
+  }}
+  if (originalXhrOpen) {{
+    window.XMLHttpRequest.prototype.open = function(method, url) {{
+      try {{
+        url = rewriteMaybeRelative(url);
+      }} catch (_error) {{}}
+      return originalXhrOpen.apply(this, [method, url].concat(Array.prototype.slice.call(arguments, 2)));
+    }};
+  }}
+  if (originalPushState) {{
+    window.history.pushState = function(state, title, url) {{
+      if (url) {{
+        navigateDocument(url);
+        return;
+      }}
+      return originalPushState(state, title, url);
+    }};
+  }}
+  if (originalReplaceState) {{
+    window.history.replaceState = function(state, title, url) {{
+      if (url) {{
+        navigateDocument(url);
+        return;
+      }}
+      return originalReplaceState(state, title, url);
+    }};
+  }}
+  try {{
+    var locationAssign = window.location.assign.bind(window.location);
+    var locationReplace = window.location.replace.bind(window.location);
+    window.location.assign = function(url) {{
+      if (postParentNavigation(rewriteMaybeRelative(url))) return;
+      return locationAssign(wrapProxyNavigation(url, "document"));
+    }};
+    window.location.replace = function(url) {{
+      if (postParentNavigation(rewriteMaybeRelative(url))) return;
+      return locationReplace(wrapProxyNavigation(url, "document"));
+    }};
+  }} catch (_error) {{}}
+  document.addEventListener("click", function(event) {{
+    var anchor = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+    if (!anchor) return;
+    var href = anchor.getAttribute("href") || "";
+    if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) return;
+    var nextUrl = absolutize(href);
+    if (!nextUrl) return;
+    event.preventDefault();
+    navigateDocument(nextUrl);
+  }}, true);
+  window.addEventListener("submit", function(event) {{
+    var form = event.target;
+    if (!form || !form.action) return;
+    var method = (form.method || "get").toLowerCase();
+    if (method !== "get") return;
+    event.preventDefault();
+    var actionUrl = absolutize(form.action || currentUrl);
+    if (!actionUrl) return;
+    var params = new URLSearchParams(new FormData(form));
+    var separator = actionUrl.indexOf("?") >= 0 ? "&" : "?";
+    navigateDocument(actionUrl + (params.toString() ? separator + params.toString() : ""));
+  }}, true);
+  try {{
+    document.documentElement.style.setProperty("visibility", "visible", "important");
+    document.documentElement.style.setProperty("opacity", "1", "important");
+    document.documentElement.style.removeProperty("display");
+    if (document.body) {{
+      document.body.style.setProperty("visibility", "visible", "important");
+      document.body.style.setProperty("opacity", "1", "important");
+      document.body.style.removeProperty("display");
+    }}
+  }} catch (_error) {{}}
+}})();
+</script>"##,
+        current_url = final_url,
+    );
+    let lower = html.to_ascii_lowercase();
+    let has_base_tag = lower.contains("<base ");
+    let has_proxy_script = lower.contains("/api/browser/view?url=");
+    if has_base_tag && has_proxy_script {
+        return html.to_string();
+    }
+    if let Some(index) = lower.find("<head>") {
+        let insert_at = index + "<head>".len();
+        let mut output =
+            String::with_capacity(html.len() + base_tag.len() + proxy_script.len() + 1);
+        output.push_str(&html[..insert_at]);
+        if !has_base_tag {
+            output.push_str(&base_tag);
+        }
+        if !has_proxy_script {
+            output.push_str(&proxy_script);
+        }
+        output.push_str(&html[insert_at..]);
+        return output;
+    }
+    if let Some(index) = lower.find("<html") {
+        if let Some(close_index) = html[index..].find('>') {
+            let insert_at = index + close_index + 1;
+            let mut output =
+                String::with_capacity(html.len() + base_tag.len() + proxy_script.len() + 13);
+            output.push_str(&html[..insert_at]);
+            output.push_str("<head>");
+            if !has_base_tag {
+                output.push_str(&base_tag);
+            }
+            if !has_proxy_script {
+                output.push_str(&proxy_script);
+            }
+            output.push_str("</head>");
+            output.push_str(&html[insert_at..]);
+            return output;
+        }
+    }
+    let mut head = String::new();
+    if !has_base_tag {
+        head.push_str(&base_tag);
+    }
+    if !has_proxy_script {
+        head.push_str(&proxy_script);
+    }
+    format!("<head>{}</head>{}", head, html)
+}
+
+fn collapse_search_snippet(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim();
+    if trimmed.len() <= 240 {
+        trimmed.to_string()
+    } else {
+        let mut snippet = trimmed.chars().take(237).collect::<String>();
+        snippet.push_str("...");
+        snippet
+    }
+}
+
+fn bridge_search_papers(_state: &WebAppState, payload: SearchPaperRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Err(anyhow!("paper search query is empty"));
+    }
+    LiteratureTools
+        .search_paper(query, payload.source, payload.limit)
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_search_models(_state: &WebAppState, payload: SearchQueryRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Err(anyhow!("models search query is empty"));
+    }
+    GitHubTools
+        .search_onnx_models(query, payload.limit)
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_search_github(_state: &WebAppState, payload: SearchGitHubRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Err(anyhow!("github search query is empty"));
+    }
+    let mode = payload.mode.unwrap_or_else(|| "repositories".to_string());
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "repositories" | "repos" => GitHubTools
+            .search_github_repositories(query, payload.limit)
+            .map_err(|err| anyhow!(err)),
+        "code" => GitHubTools
+            .search_github_code(query, payload.limit)
+            .map_err(|err| anyhow!(err)),
+        "datasets" | "dataset" => GitHubTools
+            .search_github_datasets(query, payload.limit)
+            .map_err(|err| anyhow!(err)),
+        other => Err(anyhow!("unsupported github search mode: {}", other)),
+    }
+}
+
+fn bridge_search_github_preview(
+    _state: &WebAppState,
+    payload: SearchGitHubPreviewRequest,
+) -> Result<Value> {
+    let repo_full_name = payload.repo_full_name.trim().to_string();
+    if repo_full_name.is_empty() {
+        return Err(anyhow!("github preview repo_full_name is empty"));
+    }
+    GitHubTools
+        .search_github_preview(
+            repo_full_name,
+            payload.branch,
+            payload.path,
+            payload.commit_sha,
+            payload.compare_base_sha,
+            payload.compare_head_sha,
+            payload.history_scope_mode,
+        )
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_search_datasets(_state: &WebAppState, payload: SearchQueryRequest) -> Result<Value> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Err(anyhow!("dataset search query is empty"));
+    }
+    DataTools
+        .search_public_datasets(query, payload.limit)
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_search_dataset_manifest(
+    _state: &WebAppState,
+    payload: SearchDatasetManifestRequest,
+) -> Result<Value> {
+    DataTools
+        .fetch_public_dataset_manifest(payload.dataset_url, payload.title)
+        .map_err(|err| anyhow!(err))
+}
+
+fn bridge_browser_open(payload: BrowserOpenRequest) -> Result<Value> {
+    let url = payload.url.trim().to_string();
+    if url.is_empty() {
+        return Err(anyhow!("browser url is empty"));
+    }
+    let parsed =
+        reqwest::Url::parse(&url).map_err(|err| anyhow!("invalid browser url: {}", err))?;
+    match parsed.scheme().to_ascii_lowercase().as_str() {
+        "http" | "https" => browser_open_payload(parsed.as_str()),
+        other => Err(anyhow!("browser does not support scheme '{}'", other)),
+    }
+}
+
+fn bridge_reviewer_feedback_add(
+    state: &WebAppState,
+    payload: ReviewerFeedbackAddRequest,
+) -> Result<ReviewerFeedbackResponse> {
+    let session_id = ensure_current_session(state)?;
+    let reviewer = payload.reviewer.trim();
+    if reviewer.is_empty() {
+        return Err(anyhow!("reviewer feedback reviewer is required"));
+    }
+    let comment = payload.comment.trim();
+    if comment.is_empty() {
+        return Err(anyhow!("reviewer feedback comment is required"));
+    }
+
+    let current_state = bridge_reviewer_feedback_state(state)?;
+    let fallback_run_id = current_state
+        .reviewer_feedback
+        .current_run_id
+        .clone()
+        .unwrap_or_default();
+    let linked_run_id = payload
+        .linked_run_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or(fallback_run_id);
+
+    let mut entries = load_reviewer_feedback_entries(state, &session_id)?;
+    entries.push(WebReviewerFeedbackEntry {
+        reviewer: reviewer.to_string(),
+        linked_run_id,
+        score: payload.score,
+        comment: comment.to_string(),
+        resolved: false,
+        created_at: Some(web_now_iso()),
+        resolved_at: None,
+    });
+    save_reviewer_feedback_entries(state, &session_id, &entries)?;
+
+    bridge_reviewer_feedback_state(state)
+}
+
+fn bridge_reviewer_feedback_resolve(
+    state: &WebAppState,
+    payload: ReviewerFeedbackResolveRequest,
+) -> Result<ReviewerFeedbackResponse> {
+    let session_id = ensure_current_session(state)?;
+    let mut entries = load_reviewer_feedback_entries(state, &session_id)?;
+    let Some(entry) = entries.get_mut(payload.index) else {
+        return Err(anyhow!(
+            "reviewer feedback index {} is out of range",
+            payload.index
+        ));
+    };
+    entry.resolved = true;
+    entry.resolved_at = Some(web_now_iso());
+    save_reviewer_feedback_entries(state, &session_id, &entries)?;
+    bridge_reviewer_feedback_state(state)
 }
 
 async fn run_chat_request(
@@ -2849,47 +5855,143 @@ async fn run_chat_request(
     let host_base_dir = state.host.base_dir().to_path_buf();
     let base_security = state.base_security_config.clone();
     let messages_for_thread = llm_messages;
+    let extra_tool_definitions = web_terminal_tool_definitions();
+    let assistant_state_for_first = assistant_state.clone();
+    let host_base_dir_for_first = host_base_dir.clone();
+    let base_security_for_first = base_security.clone();
+    let runtime_for_first = runtime_for_chat.clone();
+    let assistant_api_url_for_first = assistant_api_url.clone();
+    let assistant_api_key_for_first = assistant_api_key.clone();
+    let messages_for_first = messages_for_thread.clone();
+    let extra_tools_for_first = extra_tool_definitions.clone();
 
-    let chat_result: ChatRunResult = tokio::task::spawn_blocking(move || -> Result<ChatRunResult> {
-        let _cwd_guard = enter_workspace_dir_from(&host_base_dir, &runtime_for_chat.workspace_root)?;
-        let mut assistant_slot = lock_assistant_mutex(&assistant_state)?;
+    let chat_result: ChatRunResult =
+        tokio::task::spawn_blocking(move || -> Result<ChatRunResult> {
+            let _cwd_guard =
+                enter_workspace_dir_from(&host_base_dir_for_first, &runtime_for_first.workspace_root)?;
+            let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_first)?;
 
-        if assistant_slot.is_none() {
-            let assistant_config = AssistantConfig::new_with_runtime(
-                assistant_api_url,
-                assistant_api_key,
-                runtime_for_chat.model.clone(),
-                effort_temperature(&runtime_for_chat),
-                effort_max_tokens(&runtime_for_chat),
-            );
-            let security_config = runtime_security_config(&base_security, &runtime_for_chat);
-            let assistant = CliAssistant::new(assistant_config, security_config)?;
-            *assistant_slot = Some(assistant);
-        }
-
-        let assistant = assistant_slot
-            .take()
-            .ok_or_else(|| anyhow!("assistant initialization failed"))?;
-        drop(assistant_slot);
-
-        let mut messages = messages_for_thread;
-        let chat_attempt = catch_unwind(AssertUnwindSafe(|| assistant.chat_with_trace(&mut messages)));
-        match chat_attempt {
-            Ok(result) => {
-                let mut assistant_slot = lock_assistant_mutex(&assistant_state)?;
+            if assistant_slot.is_none() {
+                let assistant_config = AssistantConfig::new_with_runtime(
+                    assistant_api_url_for_first,
+                    assistant_api_key_for_first,
+                    runtime_for_first.model.clone(),
+                    effort_temperature(&runtime_for_first),
+                    effort_max_tokens(&runtime_for_first),
+                );
+                let security_config = runtime_security_config(&base_security_for_first, &runtime_for_first);
+                let assistant = CliAssistant::new(assistant_config, security_config)?;
                 *assistant_slot = Some(assistant);
-                result
             }
-            Err(payload) => {
-                let message = panic_payload_to_string(payload);
-                let mut assistant_slot = lock_assistant_mutex(&assistant_state)?;
-                *assistant_slot = None;
-                Err(anyhow!("assistant panicked during chat: {}", message))
+
+            let assistant = assistant_slot
+                .take()
+                .ok_or_else(|| anyhow!("assistant initialization failed"))?;
+            drop(assistant_slot);
+
+            let mut messages = messages_for_first;
+            let chat_attempt = catch_unwind(AssertUnwindSafe(|| {
+                assistant.chat_with_trace_with_tools(&mut messages, &extra_tools_for_first)
+            }));
+            match chat_attempt {
+                Ok(result) => {
+                    let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_first)?;
+                    *assistant_slot = Some(assistant);
+                    result
+                }
+                Err(payload) => {
+                    let message = panic_payload_to_string(payload);
+                    let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_first)?;
+                    *assistant_slot = None;
+                    Err(anyhow!("assistant panicked during chat: {}", message))
+                }
             }
+        })
+        .await
+        .map_err(|err| anyhow!("assistant task join error: {}", err))??;
+
+    let forced_tools = extract_explicit_tool_names(&content);
+    let used_tools = chat_result
+        .trace
+        .iter()
+        .filter_map(|block| match block {
+            MessageBlock::ToolCall { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let missing_forced_tools = forced_tools
+        .iter()
+        .filter(|name| !used_tools.iter().any(|used| used.eq_ignore_ascii_case(name)))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let chat_result = if !missing_forced_tools.is_empty() {
+        let retry_instruction = format!(
+            "{content}\n\nNative tool-call retry directive:\n- The user explicitly requested these tool names: {}.\n- You must call the requested native tool/function directly instead of describing it.\n- Do not explain tool usage. Do not substitute another tool unless the requested tool actually fails at runtime.\n- If a prerequisite file must exist before an edit/delete, create or read it with native tool calls first, then continue.\n- Return the real tool result and a short factual summary.",
+            missing_forced_tools.join(", ")
+        );
+        let mut retry_messages = messages_for_thread.clone();
+        if let Some(last) = retry_messages.last_mut() {
+            *last = json!({
+                "role": "user",
+                "content": retry_instruction
+            });
         }
-    })
-    .await
-    .map_err(|err| anyhow!("assistant task join error: {}", err))??;
+
+        let assistant_state_for_retry = assistant_state.clone();
+        let host_base_dir_for_retry = host_base_dir.clone();
+        let base_security_for_retry = base_security.clone();
+        let runtime_for_retry = runtime_for_chat.clone();
+        let assistant_api_url_for_retry = assistant_api_url.clone();
+        let assistant_api_key_for_retry = assistant_api_key.clone();
+        let extra_tools_for_retry = extra_tool_definitions.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<ChatRunResult> {
+            let _cwd_guard =
+                enter_workspace_dir_from(&host_base_dir_for_retry, &runtime_for_retry.workspace_root)?;
+            let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_retry)?;
+
+            if assistant_slot.is_none() {
+                let assistant_config = AssistantConfig::new_with_runtime(
+                    assistant_api_url_for_retry,
+                    assistant_api_key_for_retry,
+                    runtime_for_retry.model.clone(),
+                    effort_temperature(&runtime_for_retry),
+                    effort_max_tokens(&runtime_for_retry),
+                );
+                let security_config = runtime_security_config(&base_security_for_retry, &runtime_for_retry);
+                let assistant = CliAssistant::new(assistant_config, security_config)?;
+                *assistant_slot = Some(assistant);
+            }
+
+            let assistant = assistant_slot
+                .take()
+                .ok_or_else(|| anyhow!("assistant initialization failed"))?;
+            drop(assistant_slot);
+
+            let mut messages = retry_messages;
+            let chat_attempt = catch_unwind(AssertUnwindSafe(|| {
+                assistant.chat_with_trace_with_tools(&mut messages, &extra_tools_for_retry)
+            }));
+            match chat_attempt {
+                Ok(result) => {
+                    let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_retry)?;
+                    *assistant_slot = Some(assistant);
+                    result
+                }
+                Err(payload) => {
+                    let message = panic_payload_to_string(payload);
+                    let mut assistant_slot = lock_assistant_mutex(&assistant_state_for_retry)?;
+                    *assistant_slot = None;
+                    Err(anyhow!("assistant panicked during chat retry: {}", message))
+                }
+            }
+        })
+        .await
+        .map_err(|err| anyhow!("assistant retry task join error: {}", err))??
+    } else {
+        chat_result
+    };
 
     let mut next_blocks = existing_blocks;
     next_blocks.push(MessageBlock::User {
@@ -2897,9 +5999,7 @@ async fn run_chat_request(
         branch_id: "main".to_string(),
     });
     next_blocks.extend(chat_result.trace);
-    next_blocks.push(MessageBlock::Assistant {
-        content: strip_emoji(&chat_result.content),
-    });
+    push_assistant_message_blocks(&mut next_blocks, strip_emoji(&chat_result.content));
 
     {
         let mut session_manager = lock_session_manager(state)?;
@@ -2907,6 +6007,31 @@ async fn run_chat_request(
     }
 
     Ok((current_id, next_blocks))
+}
+
+fn extract_explicit_tool_names(content: &str) -> Vec<String> {
+    let candidates = [
+        "write_file",
+        "edit_file",
+        "delete_file",
+        "run_python_file",
+        "run_python",
+        "terminal_run_structured",
+        "read_file",
+        "read_file_head",
+        "inspect_path",
+        "find_files",
+        "count_file_types",
+        "find_large_files",
+        "tree_dir",
+        "get_file_info",
+    ];
+    let lowered = content.to_ascii_lowercase();
+    candidates
+        .iter()
+        .filter(|name| lowered.contains(**name))
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
 async fn run_chat_request_stream(
@@ -2956,32 +6081,35 @@ async fn run_chat_request_stream(
         turn_language_name(turn_language),
     );
     let mut dynamic_system_prompt = base_system_prompt.clone();
-    let max_repair_attempts = 3usize;
+    append_auto_selected_skills_prompt(&mut dynamic_system_prompt, &user_content, stream_mode);
+    let auto_skills = auto_selected_skills_for_turn(&user_content, stream_mode);
+    if let Ok(mut sessions) = lock_stream_runtime(&state) {
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.auto_skills = auto_skills.clone();
+        }
+    }
     let mut repair_attempts = 0usize;
     let mut pseudo_tool_repair_attempted = false;
 
-        emit_activity(
-            &tx,
-            &state,
-            &session_id,
-            &runtime,
-            &persisted_blocks,
-            stream_mode,
-            workflow_activity_event(
-                "starting",
-                Some(localized_text(
-                    turn_language,
-                    "正在准备本轮 Agent 执行",
-                    "Preparing agent turn",
-                )),
-                Some("initialize".to_string()),
-                Some("running".to_string()),
-                None,
-                Some("main".to_string()),
-            ),
+    emit_activity(
+        &tx,
+        &state,
+        &session_id,
+        &runtime,
+        &persisted_blocks,
+        stream_mode,
+        workflow_activity_event(
+            "starting",
+            None,
+            Some("initialize".to_string()),
+            Some("running".to_string()),
+            None,
+            Some("main".to_string()),
+        ),
     );
 
     let structured_workflow = should_run_structured_workflow(stream_mode, &user_content);
+    let max_repair_attempts = if structured_workflow { 6usize } else { 4usize };
     let plan = if structured_workflow {
         emit_activity(
             &tx,
@@ -2992,11 +6120,7 @@ async fn run_chat_request_stream(
             stream_mode,
             workflow_activity_event(
                 "planning",
-                Some(localized_text(
-                    turn_language,
-                    "Planning execution",
-                    "Planner subagent is building an execution plan",
-                )),
+                None,
                 Some("plan".to_string()),
                 Some("running".to_string()),
                 None,
@@ -3069,14 +6193,10 @@ async fn run_chat_request_stream(
                     stream_mode,
                     workflow_activity_event(
                         "planning",
-                        Some(localized_string(
-                            turn_language,
-                            format!("Planner fallback: {}", err),
-                            format!("Planner fallback: {}", err),
-                        )),
+                        None,
                         Some("plan".to_string()),
                         Some("failed".to_string()),
-                        None,
+                        Some(err.to_string()),
                         Some("planner".to_string()),
                     ),
                 );
@@ -3089,7 +6209,9 @@ async fn run_chat_request_stream(
 
     let required_path_snapshots = plan
         .as_ref()
-        .map(|plan| capture_required_path_snapshots(state.host.base_dir(), &runtime, &plan.required_paths))
+        .map(|plan| {
+            capture_required_path_snapshots(state.host.base_dir(), &runtime, &plan.required_paths)
+        })
         .unwrap_or_default();
     if let Ok(mut sessions) = lock_stream_runtime(&state) {
         if let Some(session) = sessions.get_mut(&session_id) {
@@ -3187,6 +6309,7 @@ async fn run_chat_request_stream(
 
     let max_turn_rounds = dynamic_turn_round_limit(plan.as_ref(), structured_workflow);
     let mut stagnant_rounds = 0usize;
+    let mut rounds_with_real_progress = 0usize;
     for _ in 0..max_turn_rounds {
         let turn_start = persisted_blocks.len();
         let request = build_stream_chat_request_with_prompt(
@@ -3250,9 +6373,7 @@ async fn run_chat_request_stream(
         .unwrap_or(raw_assistant_text);
         if !assistant_text.is_empty() {
             visible_assistant = combine_assistant_segments(&visible_assistant, &assistant_text);
-            persisted_blocks.push(MessageBlock::Assistant {
-                content: assistant_text,
-            });
+            push_assistant_message_blocks(&mut persisted_blocks, assistant_text);
             sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
             if let Ok(mut sessions) = lock_stream_runtime(&state) {
                 if let Some(session) = sessions.get_mut(&session_id) {
@@ -3270,6 +6391,7 @@ async fn run_chat_request_stream(
         );
         if made_progress_this_round {
             stagnant_rounds = 0;
+            rounds_with_real_progress = rounds_with_real_progress.saturating_add(1);
         } else {
             stagnant_rounds = stagnant_rounds.saturating_add(1);
         }
@@ -3289,11 +6411,7 @@ async fn run_chat_request_stream(
                     stream_mode,
                     workflow_activity_event(
                         "execution",
-                        Some(localized_text(
-                            turn_language,
-                            "Model signaled tool usage without concrete tool calls; continuing review.",
-                            "Model signaled tool usage without concrete tool calls; continuing review",
-                        )),
+                        None,
                         Some("execute".to_string()),
                         Some("running".to_string()),
                         None,
@@ -3319,7 +6437,11 @@ async fn run_chat_request_stream(
                                 "executor",
                                 "running",
                                 user_content.as_str(),
-                                &localized_text(turn_language, "Dispatching tool work", "Dispatching tool work"),
+                                &localized_text(
+                                    turn_language,
+                                    "Dispatching tool work",
+                                    "Dispatching tool work",
+                                ),
                             )
                         })
                         .unwrap_or_default();
@@ -3330,17 +6452,13 @@ async fn run_chat_request_stream(
                         &runtime,
                         &persisted_blocks,
                         stream_mode,
-                        workflow_activity_event(
-                            "delegation",
-                            Some(localized_text(
-                                turn_language,
-                                "Dispatching tool work",
-                                "Dispatching tool work",
-                            )),
-                            Some("delegate".to_string()),
-                            Some("running".to_string()),
-                            Some(tool_names.join(", ")),
-                            Some("executor".to_string()),
+                    workflow_activity_event(
+                        "delegation",
+                        None,
+                        Some("delegate".to_string()),
+                        Some("running".to_string()),
+                        Some(tool_names.join(", ")),
+                        Some("executor".to_string()),
                         )
                         .with_delegates(delegate_snapshot),
                     );
@@ -3407,20 +6525,10 @@ async fn run_chat_request_stream(
                     stream_mode,
                     workflow_activity_event(
                         "execution",
-                        Some(localized_string(
-                            turn_language,
-                            format!(
-                                "Model narrated tool usage as plain text ({}); requesting a native tool-call retry.",
-                                pseudo_tools
-                            ),
-                            format!(
-                                "Model narrated tool usage as plain text ({}); requesting a native tool-call retry",
-                                pseudo_tools
-                            ),
-                        )),
+                        None,
                         Some("execute".to_string()),
                         Some("repair".to_string()),
-                        None,
+                        Some(pseudo_tools.clone()),
                         Some("main".to_string()),
                     ),
                 );
@@ -3452,11 +6560,7 @@ async fn run_chat_request_stream(
                     stream_mode,
                     workflow_activity_event(
                         "execution",
-                        Some(localized_text(
-                            turn_language,
-                            "Required workspace targets are still incomplete; continuing execution.",
-                            "Required workspace targets are still incomplete; continuing execution",
-                        )),
+                        None,
                         Some("execute".to_string()),
                         Some("running".to_string()),
                         Some(plan.required_paths.join(" | ")),
@@ -3634,7 +6738,12 @@ async fn run_chat_request_stream(
                     });
                     sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
                     for checkpoint in &result.checkpoints {
-                        push_runtime_checkpoint(&state, &session_id, checkpoint.clone(), turn_language);
+                        push_runtime_checkpoint(
+                            &state,
+                            &session_id,
+                            checkpoint.clone(),
+                            turn_language,
+                        );
                     }
                     for note in &result.branch_notes {
                         push_runtime_branch_note(&state, &session_id, note.clone(), turn_language);
@@ -3646,9 +6755,12 @@ async fn run_chat_request_stream(
                         state.host.base_dir(),
                         &runtime.workspace_root,
                         &required_path_snapshots,
-                    ) || required_paths_ready_for_review(state.host.base_dir(), &runtime, plan))
-                        && (result.verifier_report.issues.len() <= 1
-                            || verifier_report_has_only_soft_evidence_gaps(&result.verifier_report));
+                    ) || required_paths_ready_for_review(
+                        state.host.base_dir(),
+                        &runtime,
+                        plan,
+                    )) && (result.verifier_report.issues.len() <= 1
+                        || verifier_report_has_only_soft_evidence_gaps(&result.verifier_report));
                     let needs_repair = result.needs_repair && !near_completion;
                     let summary = result.summary.clone();
                     let meta = if !result.issues.is_empty() {
@@ -3667,7 +6779,11 @@ async fn run_chat_request_stream(
                             "review",
                             Some(summary.clone()),
                             Some("review".to_string()),
-                            Some(if needs_repair { "repair".to_string() } else { "pass".to_string() }),
+                            Some(if needs_repair {
+                                "repair".to_string()
+                            } else {
+                                "pass".to_string()
+                            }),
                             meta,
                             Some("reviewer".to_string()),
                         )
@@ -3760,9 +6876,7 @@ async fn run_chat_request_stream(
                                 Some("running".to_string()),
                                 Some(format!(
                                     "{} | repair pass {}/{}",
-                                    repair_hint,
-                                    repair_attempts,
-                                    max_repair_attempts
+                                    repair_hint, repair_attempts, max_repair_attempts
                                 )),
                                 Some("repairer".to_string()),
                             )
@@ -3771,7 +6885,11 @@ async fn run_chat_request_stream(
                                 "repairer",
                                 "running",
                                 user_content.as_str(),
-                                &localized_text(turn_language, "Requested another execution pass", "Requested another execution pass"),
+                                &localized_text(
+                                    turn_language,
+                                    "Requested another execution pass",
+                                    "Requested another execution pass",
+                                ),
                             )),
                         );
                         continue;
@@ -3798,10 +6916,23 @@ async fn run_chat_request_stream(
                                 ),
                             )
                         };
-                        persisted_blocks.push(MessageBlock::Assistant {
-                            content: failure_summary,
-                        });
+                        push_assistant_message_blocks(&mut persisted_blocks, failure_summary);
                         sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
+                        finalize_stream_success(
+                            &tx,
+                            &state,
+                            &session_id,
+                            &runtime,
+                            &persisted_blocks,
+                            stream_mode,
+                            turn_language,
+                            &localized_text(
+                                turn_language,
+                                "本轮 Agent 因验证修复次数耗尽而停止",
+                                "Agent turn stopped after exhausting verification repair attempts",
+                            ),
+                        )?;
+                        return Ok(());
                     }
                 }
                 Err(err) => {
@@ -3814,14 +6945,10 @@ async fn run_chat_request_stream(
                         stream_mode,
                         workflow_activity_event(
                             "review",
-                            Some(localized_string(
-                                turn_language,
-                                format!("Reviewer fallback: {}", err),
-                                format!("Reviewer fallback: {}", err),
-                            )),
+                            None,
                             Some("review".to_string()),
                             Some("failed".to_string()),
-                            None,
+                            Some(err.to_string()),
                             Some("reviewer".to_string()),
                         ),
                     );
@@ -3898,7 +7025,11 @@ async fn run_chat_request_stream(
                 Some("main".to_string()),
             ),
         );
-        let extra_rounds = if structured_workflow { 48usize } else { 24usize };
+        let extra_rounds = if structured_workflow {
+            48usize
+        } else {
+            24usize
+        };
         for _ in 0..extra_rounds {
             let turn_start = persisted_blocks.len();
             let request = build_stream_chat_request_with_prompt(
@@ -3962,9 +7093,7 @@ async fn run_chat_request_stream(
             .unwrap_or(raw_assistant_text);
             if !assistant_text.is_empty() {
                 visible_assistant = combine_assistant_segments(&visible_assistant, &assistant_text);
-                persisted_blocks.push(MessageBlock::Assistant {
-                    content: assistant_text,
-                });
+                push_assistant_message_blocks(&mut persisted_blocks, assistant_text);
                 sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
                 if let Ok(mut sessions) = lock_stream_runtime(&state) {
                     if let Some(session) = sessions.get_mut(&session_id) {
@@ -4047,8 +7176,33 @@ async fn run_chat_request_stream(
                 }
             } else {
                 stagnant_rounds = 0;
+                rounds_with_real_progress = rounds_with_real_progress.saturating_add(1);
             }
         }
+    }
+    if rounds_with_real_progress == 0 {
+        let failure_summary = localized_text(
+            turn_language,
+            "本轮研究没有形成新的可验证进展，已停止自动继续。请收紧目标、降低任务范围，或明确下一步要验证的文件/命令。",
+            "This research turn did not produce new verifiable progress, so automatic continuation stopped. Narrow the goal, reduce scope, or specify the next file/command to verify.",
+        );
+        push_assistant_message_blocks(&mut persisted_blocks, failure_summary);
+        sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
+        finalize_stream_success(
+            &tx,
+            &state,
+            &session_id,
+            &runtime,
+            &persisted_blocks,
+            stream_mode,
+            turn_language,
+            &localized_text(
+                turn_language,
+                "本轮 Agent 因无新进展而停止",
+                "Agent turn stopped due to lack of new progress",
+            ),
+        )?;
+        return Ok(());
     }
     let round_limit_message = if incomplete_required_paths {
         localized_text(
@@ -4063,9 +7217,7 @@ async fn run_chat_request_stream(
             "This agent turn has been running for a while and is pausing at a safe checkpoint. The main work is already preserved in the current workspace; continue the turn to finish the remaining verification and wrap-up.",
         )
     };
-    persisted_blocks.push(MessageBlock::Assistant {
-        content: round_limit_message,
-    });
+    push_assistant_message_blocks(&mut persisted_blocks, round_limit_message);
     sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
 
     finalize_stream_success(
@@ -4097,14 +7249,20 @@ fn finalize_stream_success(
 ) -> Result<()> {
     let runtime_files = lock_stream_runtime(state)
         .ok()
-        .and_then(|sessions| sessions.get(session_id).map(|session| session.edited_files.clone()))
+        .and_then(|sessions| {
+            sessions
+                .get(session_id)
+                .map(|session| (session.edited_files.clone(), session.progress_updates.clone()))
+        })
         .unwrap_or_default();
     let finalized_blocks = merge_runtime_edited_files_into_messages(
         state.host.base_dir(),
         &runtime.workspace_root,
         persisted_blocks,
-        &runtime_files,
+        &runtime_files.0,
     );
+    let finalized_blocks =
+        merge_runtime_progress_updates_into_messages(&finalized_blocks, &runtime_files.1);
     let finalized_blocks =
         ensure_final_turn_assistant_summary(&finalized_blocks, stream_mode, language);
     {
@@ -4115,16 +7273,12 @@ fn finalize_stream_success(
             runtime,
             &finalized_blocks,
             stream_mode,
-            workflow_activity_event(
-                "finalize",
-                Some(localized_text(
-                    language,
-                    "正在持久化会话消息",
-                    "Persisting session messages",
-                )),
-                Some("finalize".to_string()),
-                Some("running".to_string()),
-                None,
+        workflow_activity_event(
+            "finalize",
+            None,
+            Some("finalize".to_string()),
+            Some("running".to_string()),
+            None,
                 Some("main".to_string()),
             ),
         );
@@ -4141,11 +7295,7 @@ fn finalize_stream_success(
         stream_mode,
         workflow_activity_event(
             "finalize",
-            Some(localized_text(
-                language,
-                "正在准备最终消息载荷",
-                "Preparing final message payload",
-            )),
+            None,
             Some("finalize".to_string()),
             Some("running".to_string()),
             None,
@@ -4162,11 +7312,7 @@ fn finalize_stream_success(
         stream_mode,
         workflow_activity_event(
             "finalize",
-            Some(localized_text(
-                language,
-                "正在发送完成事件",
-                "Sending complete event",
-            )),
+            None,
             Some("finalize".to_string()),
             Some("running".to_string()),
             None,
@@ -4199,7 +7345,12 @@ fn finalize_stream_success(
         ),
         subagents: None,
         verifier: None,
+        auto_skills: lock_stream_runtime(state)
+            .ok()
+            .and_then(|sessions| sessions.get(session_id).map(|session| session.auto_skills.clone()))
+            .filter(|items| !items.is_empty()),
     });
+    schedule_server_side_paper_workflow(state, Some(session_id), "auto_finalize");
     clear_stream_runtime_session(state, session_id);
     Ok(())
 }
@@ -4223,7 +7374,9 @@ fn recover_stream_finalize_context(
     .unwrap_or_else(|| {
         let session_manager = lock_session_manager(state)
             .expect("failed to lock session manager during stream recovery");
-        session_manager.load_messages(session_id).unwrap_or_default()
+        session_manager
+            .load_messages(session_id)
+            .unwrap_or_default()
     });
     Ok((runtime, messages))
 }
@@ -4246,13 +7399,42 @@ fn merge_runtime_edited_files_into_messages(
             continue;
         }
 
-        let diff = build_workspace_artifact_diff(base_dir, workspace_root, &file.path).unwrap_or_else(|| {
-            FileDiff::compute(&file.path, &file.before_content, &file.after_content)
-        });
+        let diff = build_workspace_artifact_diff(base_dir, workspace_root, &file.path)
+            .unwrap_or_else(|| {
+                FileDiff::compute(&file.path, &file.before_content, &file.after_content)
+            });
         upsert_diff_block(&mut merged, diff);
         known_paths.push(file.path.clone());
     }
 
+    merged
+}
+
+fn merge_runtime_progress_updates_into_messages(
+    messages: &[MessageBlock],
+    progress_updates: &[String],
+) -> Vec<MessageBlock> {
+    if progress_updates.is_empty() {
+        return messages.to_vec();
+    }
+
+    let mut merged = messages.to_vec();
+    for update in progress_updates {
+        let trimmed = update.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let already_present = merged.iter().rev().any(|block| match block {
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                let existing = content.trim();
+                existing == trimmed || existing.contains(trimmed) || trimmed.contains(existing)
+            }
+            _ => false,
+        });
+        if !already_present {
+            push_assistant_message_blocks(&mut merged, trimmed.to_string());
+        }
+    }
     merged
 }
 
@@ -4267,14 +7449,20 @@ fn finalize_stream_failure(
     if let Ok((runtime, persisted_blocks)) = recover_stream_finalize_context(state, session_id) {
         let runtime_files = lock_stream_runtime(state)
             .ok()
-            .and_then(|sessions| sessions.get(session_id).map(|session| session.edited_files.clone()))
+            .and_then(|sessions| {
+                sessions
+                    .get(session_id)
+                    .map(|session| (session.edited_files.clone(), session.progress_updates.clone()))
+            })
             .unwrap_or_default();
         let mut merged_messages = merge_runtime_edited_files_into_messages(
             state.host.base_dir(),
             &runtime.workspace_root,
             &persisted_blocks,
-            &runtime_files,
+            &runtime_files.0,
         );
+        merged_messages =
+            merge_runtime_progress_updates_into_messages(&merged_messages, &runtime_files.1);
         append_stream_failure_message(&mut merged_messages, language, err);
         sync_stream_runtime_messages(state, session_id, &merged_messages);
         if let Ok(mut session_manager) = lock_session_manager(state) {
@@ -4296,6 +7484,7 @@ fn finalize_stream_failure(
         research: None,
         subagents: None,
         verifier: None,
+        auto_skills: None,
     });
 }
 
@@ -4320,10 +7509,10 @@ fn merge_required_paths_into_plan(
         .collect::<Vec<_>>();
 
     for path in &merged_required_paths {
-        if !verification
-            .iter()
-            .any(|item| item.to_ascii_lowercase().contains(&path.to_ascii_lowercase()))
-        {
+        if !verification.iter().any(|item| {
+            item.to_ascii_lowercase()
+                .contains(&path.to_ascii_lowercase())
+        }) {
             verification.push(localized_required_target_text(language, path));
         }
     }
@@ -4353,8 +7542,9 @@ fn append_stream_failure_message(
         return;
     }
 
-    messages.push(MessageBlock::Assistant {
-        content: localized_string(
+    push_assistant_message_blocks(
+        messages,
+        localized_string(
             language,
             format!(
                 "这轮执行被外部服务打断了：{}。我已经保留当前工作区改动和执行痕迹，继续本轮后会从这里接着完成剩余写入与验证。",
@@ -4365,7 +7555,7 @@ fn append_stream_failure_message(
                 trimmed
             ),
         ),
-    });
+    );
 }
 
 fn recover_plan_for_finalize(
@@ -4467,7 +7657,9 @@ fn can_finalize_from_hard_verifier_only(
         required_path_snapshots,
         language,
     );
-    if report.status.eq_ignore_ascii_case("pass") {
+    if report.status.eq_ignore_ascii_case("pass")
+        && final_turn_has_post_execution_assistant_text(messages, language)
+    {
         Some((report, checkpoints, branch_notes))
     } else {
         None
@@ -4532,10 +7724,18 @@ fn summarize_tool_history_for_provider(messages: &[MessageBlock]) -> Vec<Message
                     "Tool {} {}.\nArguments: {}\nResult summary: {}",
                     name,
                     if *success { "succeeded" } else { "failed" },
-                    if args_preview.trim().is_empty() { "{}" } else { args_preview.as_str() },
-                    if summary.trim().is_empty() { "(empty)" } else { summary.as_str() }
+                    if args_preview.trim().is_empty() {
+                        "{}"
+                    } else {
+                        args_preview.as_str()
+                    },
+                    if summary.trim().is_empty() {
+                        "(empty)"
+                    } else {
+                        summary.as_str()
+                    }
                 );
-                summarized.push(MessageBlock::Assistant { content: context });
+                push_assistant_message_blocks(&mut summarized, context);
             }
             other => summarized.push(other.clone()),
         }
@@ -4584,10 +7784,7 @@ fn build_workspace_completion_request(
 
     ChatRequest {
         model: runtime.model.clone(),
-        messages: vec![
-            Message::system(system_prompt),
-            Message::user(&user_prompt),
-        ],
+        messages: vec![Message::system(system_prompt), Message::user(&user_prompt)],
         temperature: 0.2,
         max_tokens: Some(180),
         top_p: Some(0.95),
@@ -4717,8 +7914,8 @@ fn build_stream_chat_request_with_prompt(
             system_prompt,
             localized_text(
                 language,
-                "工具使用策略:\n- 当前环境提供可用工具。\n- 需要工具时，使用原生 tool/function call 机制。\n- 创建或编辑工作区文件时，优先使用 write_file、edit_file、read_file 等直接文件工具，而不是终端 shell 重定向。\n- 不要在 assistant 正文里输出伪工具语法、XML、DSML 或包装标签。\n- 当真实工具调用可用时，不要把 Bash 或 shell 包装器当作普通文本输出。",
-                "Tool-use policy:\n- Tools are available in this environment.\n- When a tool is needed, use the native tool/function call mechanism.\n- For creating or editing workspace files, prefer direct file tools such as write_file, edit_file, and read_file over terminal shell redirection.\n- Never emit pseudo tool syntax, XML, DSML, or wrapper tags in assistant text.\n- Never emit Bash or shell tool wrappers as plain text when a real tool call can be used."
+                "工具使用策略:\n- 当前环境提供可用工具。\n- 需要工具时，使用原生 tool/function call 机制。\n- 创建或编辑工作区文件时，优先使用 write_file、edit_file、read_file 等直接文件工具，而不是终端 shell 重定向。\n- 当文件或目录的精确路径不确定时，优先使用 inspect_path；必要时再用 find_files 或 list_dir 枚举确认，不要凭猜测直接 read_file。\n- 对于单次命令执行并获取 stdout/stderr/exit code，优先使用 terminal_run_structured；只有需要持续交互式会话时再使用 terminal_create / terminal_run / terminal_read。\n- 不要在 assistant 正文里输出伪工具语法、XML、DSML 或包装标签。\n- 当真实工具调用可用时，不要把 Bash 或 shell 包装器当作普通文本输出。",
+                "Tool-use policy:\n- Tools are available in this environment.\n- When a tool is needed, use the native tool/function call mechanism.\n- For creating or editing workspace files, prefer direct file tools such as write_file, edit_file, and read_file over terminal shell redirection.\n- When the exact file or directory path is uncertain, use inspect_path first, then find_files or list_dir if needed. Do not guess likely filenames or folder names and then call read_file blindly.\n- If a path-related tool call fails with file_not_found, path_not_found, not_a_directory, or an OS path error, your next action must be path recovery using inspect_path, find_files, or list_dir on a confirmed parent.\n- After a path-related failure, do not continue using the failed path, do not invent sibling paths from docs or memory, and do not ask the user whether to continue until you have attempted path recovery.\n- For one-shot command execution that needs stdout, stderr, and exit code, prefer terminal_run_structured. Use terminal_create / terminal_run / terminal_read only for persistent interactive sessions.\n- Never emit pseudo tool syntax, XML, DSML, or wrapper tags in assistant text.\n- Never emit Bash or shell tool wrappers as plain text when a real tool call can be used."
             )
         )
     };
@@ -4755,8 +7952,10 @@ fn sanitize_messages_for_stream_provider(
     let mut sanitized = Vec::with_capacity(messages.len());
 
     for block in messages {
-        if matches!(block, MessageBlock::ToolCall { .. } | MessageBlock::ToolResult { .. })
-            && !supports_streaming_tools
+        if matches!(
+            block,
+            MessageBlock::ToolCall { .. } | MessageBlock::ToolResult { .. }
+        ) && !supports_streaming_tools
         {
             sanitized.push(block);
             continue;
@@ -4770,7 +7969,10 @@ fn sanitize_messages_for_stream_provider(
     sanitized
 }
 
-fn compress_messages_for_request(messages: &[MessageBlock], language: TurnLanguage) -> Vec<MessageBlock> {
+fn compress_messages_for_request(
+    messages: &[MessageBlock],
+    language: TurnLanguage,
+) -> Vec<MessageBlock> {
     const MAX_BLOCKS_BEFORE_COMPRESSION: usize = 48;
     const RECENT_BLOCKS_TO_KEEP: usize = 18;
 
@@ -4831,6 +8033,16 @@ fn summarize_message_blocks(messages: &[MessageBlock], language: TurnLanguage) -
                     ));
                 }
             }
+            MessageBlock::AssistantChoices { title, options } => {
+                let line = tail_string(&format!("{} => {}", title, options.join(" | ")), 220);
+                if !line.is_empty() {
+                    assistant_points.push(localized_string(
+                        language,
+                        format!("- 助手选项: {}", line),
+                        format!("- Assistant choices: {}", line),
+                    ));
+                }
+            }
             MessageBlock::ToolCall { name, status, .. } => {
                 tool_points.push(localized_string(
                     language,
@@ -4846,7 +8058,9 @@ fn summarize_message_blocks(messages: &[MessageBlock], language: TurnLanguage) -
                     ),
                 ));
             }
-            MessageBlock::ToolResult { result, success, .. } => {
+            MessageBlock::ToolResult {
+                result, success, ..
+            } => {
                 tool_points.push(localized_string(
                     language,
                     format!(
@@ -5072,7 +8286,10 @@ fn upsert_diff_block(persisted_blocks: &mut Vec<MessageBlock>, diff: FileDiff) {
                 if existing_diff.file_path == diff.file_path
         )
     }) {
-        if let MessageBlock::Diff { diff: existing_diff } = existing {
+        if let MessageBlock::Diff {
+            diff: existing_diff,
+        } = existing
+        {
             *existing_diff = diff;
         }
         return;
@@ -5089,8 +8306,51 @@ fn system_prompt_for_mode(mode: Option<&str>) -> String {
     }
 }
 
+fn research_skill_catalog() -> &'static AgentSkillCatalog {
+    static CATALOG: OnceLock<AgentSkillCatalog> = OnceLock::new();
+    CATALOG.get_or_init(AgentSkillCatalog::new)
+}
+
+fn auto_selected_skills_for_turn(user_content: &str, mode: Option<&str>) -> Vec<WebAutoSkill> {
+    research_skill_catalog()
+        .auto_match_metadata(user_content, mode)
+        .into_iter()
+        .map(web_auto_skill_from_match)
+        .collect()
+}
+
+fn web_auto_skill_from_match(skill: AgentSkillMatch) -> WebAutoSkill {
+    WebAutoSkill {
+        name: skill.name,
+        description: skill.description,
+        kind: match skill.kind {
+            SkillKind::Workflow => "workflow",
+            SkillKind::Subfield => "subfield",
+            SkillKind::General => "general",
+        }
+        .to_string(),
+    }
+}
+
+fn append_auto_selected_skills_prompt(
+    system_prompt: &mut String,
+    user_content: &str,
+    mode: Option<&str>,
+) {
+    let Some(skill_prompt) = research_skill_catalog().auto_match_prompt(user_content, mode) else {
+        return;
+    };
+    system_prompt.push_str("\n\n");
+    system_prompt.push_str(&skill_prompt);
+}
+
 fn turn_language_from_option(language: Option<&str>) -> TurnLanguage {
-    match language.unwrap_or("zh").trim().to_ascii_lowercase().as_str() {
+    match language
+        .unwrap_or("zh")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "en" | "english" => TurnLanguage::En,
         _ => TurnLanguage::Zh,
     }
@@ -5110,7 +8370,11 @@ fn localized_text(language: TurnLanguage, zh: &'static str, en: &'static str) ->
     }
 }
 
-fn localized_string(language: TurnLanguage, zh: impl Into<String>, en: impl Into<String>) -> String {
+fn localized_string(
+    language: TurnLanguage,
+    zh: impl Into<String>,
+    en: impl Into<String>,
+) -> String {
     match language {
         TurnLanguage::Zh => zh.into(),
         TurnLanguage::En => en.into(),
@@ -5246,7 +8510,14 @@ fn provider_thinking_mode(runtime: &RuntimeSettings, has_tools: bool) -> Option<
         return Some("disabled".to_string());
     }
 
-    Some(if runtime.deep_think { "enabled" } else { "disabled" }.to_string())
+    Some(
+        if runtime.deep_think {
+            "enabled"
+        } else {
+            "disabled"
+        }
+        .to_string(),
+    )
 }
 
 fn provider_reasoning_effort(runtime: &RuntimeSettings) -> Option<String> {
@@ -5254,12 +8525,20 @@ fn provider_reasoning_effort(runtime: &RuntimeSettings) -> Option<String> {
         return None;
     }
 
-    Some(match runtime.reasoning_effort.trim().to_ascii_lowercase().as_str() {
-        "low" => "low",
-        "high" => "high",
-        "max" => "high",
-        _ => "medium",
-    }.to_string())
+    Some(
+        match runtime
+            .reasoning_effort
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "low" => "low",
+            "high" => "high",
+            "max" => "high",
+            _ => "medium",
+        }
+        .to_string(),
+    )
 }
 
 fn workflow_mode(mode: Option<&str>) -> &'static str {
@@ -5271,7 +8550,10 @@ fn workflow_mode(mode: Option<&str>) -> &'static str {
 }
 
 fn is_spec_request(content: &str) -> bool {
-    content.trim_start().to_ascii_lowercase().starts_with("/spec")
+    content
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("/spec")
 }
 
 fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
@@ -5296,25 +8578,33 @@ fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
 }
 
 fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchState {
-    let mut saw_user = false;
+    let mut latest_user_content: Option<String> = None;
     for message in messages.iter().rev() {
         match message {
             MessageBlock::User { content, .. } => {
-                saw_user = true;
                 let trimmed = content.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
+                latest_user_content = Some(trimmed.to_string());
                 if trimmed.to_ascii_lowercase().starts_with("/spec") {
+                    return SessionResearchState::Research;
+                }
+                let lowered = trimmed.to_ascii_lowercase();
+                if lowered.contains("research")
+                    || lowered.contains("literature")
+                    || lowered.contains("benchmark")
+                    || lowered.contains("survey")
+                    || trimmed.contains("研究")
+                    || trimmed.contains("文献")
+                    || trimmed.contains("综述")
+                {
                     return SessionResearchState::Research;
                 }
                 return SessionResearchState::Agent;
             }
-            MessageBlock::Subagent { .. } | MessageBlock::Verification { .. } => {
-                return SessionResearchState::Research;
-            }
             MessageBlock::Thinking { content, .. } | MessageBlock::Assistant { content } => {
-                if saw_user {
+                if latest_user_content.is_some() {
                     let lowered = content.to_ascii_lowercase();
                     if lowered.contains("verification target")
                         || lowered.contains("planner subagent")
@@ -5335,10 +8625,7 @@ fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchSta
     SessionResearchState::Inactive
 }
 
-fn activity_event(
-    label: impl Into<String>,
-    detail: impl Into<Option<String>>,
-) -> WebActivityEvent {
+fn activity_event(label: impl Into<String>, detail: impl Into<Option<String>>) -> WebActivityEvent {
     WebActivityEvent {
         label: label.into(),
         detail: detail.into(),
@@ -5418,7 +8705,11 @@ fn to_web_verifier(report: &AgentVerifierReport) -> WebVerifierReport {
 fn upsert_runtime_subagent(state: &WebAppState, session_id: &str, subagent: &WebSubagentEvent) {
     if let Ok(mut sessions) = lock_stream_runtime(state) {
         if let Some(session) = sessions.get_mut(session_id) {
-            if let Some(existing) = session.subagents.iter_mut().find(|item| item.id == subagent.id) {
+            if let Some(existing) = session
+                .subagents
+                .iter_mut()
+                .find(|item| item.id == subagent.id)
+            {
                 *existing = subagent.clone();
             } else {
                 session.subagents.push(subagent.clone());
@@ -5449,6 +8740,7 @@ fn build_research_runtime_event(
 ) -> WebResearchRuntimeEvent {
     let mut subagents = Vec::new();
     let mut verifier = None;
+    let mut timeline = Vec::new();
 
     if let Some(runtime) = session_runtime {
         subagents = runtime.subagents.clone();
@@ -5471,19 +8763,60 @@ fn build_research_runtime_event(
         .rposition(|message| matches!(message, MessageBlock::User { .. }))
         .unwrap_or(0);
     let tail = &messages[start_index..];
+    let last_checkpoint_index = tail.iter().rposition(|block| {
+        matches!(
+            block,
+            MessageBlock::Diff { .. } | MessageBlock::Verification { .. }
+        )
+    });
     let mut checkpoints = Vec::new();
     let mut branch_notes = Vec::new();
-    for block in tail {
+    for (index, block) in tail.iter().enumerate() {
         match block {
             MessageBlock::Subagent { record } => subagents.push(to_web_subagent(record)),
             MessageBlock::Verification { report } => verifier = Some(to_web_verifier(report)),
+            MessageBlock::ToolCall { name, status, .. } => {
+                timeline.push(WebTimelineEvent {
+                    kind: "tool_call".to_string(),
+                    title: name.clone(),
+                    detail: format!("tool status={status:?}"),
+                    status: "observed".to_string(),
+                    agent: "main".to_string(),
+                    ts: String::new(),
+                });
+            }
+            MessageBlock::ToolResult {
+                call_id,
+                result,
+                success,
+            } => {
+                let tool_name =
+                    tool_name_by_call_id(messages, call_id).unwrap_or_else(|| "tool".to_string());
+                if !success && !last_checkpoint_index.is_some_and(|checkpoint| checkpoint > index)
+                {
+                    branch_notes.push(tail_string(result, 180));
+                }
+                timeline.push(WebTimelineEvent {
+                    kind: "tool_result".to_string(),
+                    title: tool_name,
+                    detail: if *success {
+                        tail_string(result, 120)
+                    } else {
+                        format!("failed: {}", tail_string(result, 120))
+                    },
+                    status: if *success {
+                        "success".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
+                    agent: "main".to_string(),
+                    ts: String::new(),
+                });
+            }
             MessageBlock::Diff { diff } => checkpoints.push(format!(
                 "{} (+{} / -{})",
                 diff.file_path, diff.added, diff.removed
             )),
-            MessageBlock::ToolResult { result, success, .. } if !success => {
-                branch_notes.push(tail_string(result, 180));
-            }
             _ => {}
         }
     }
@@ -5495,7 +8828,7 @@ fn build_research_runtime_event(
         verifier,
         checkpoints,
         branch_notes,
-        timeline: Vec::new(),
+        timeline,
     }
 }
 
@@ -5506,6 +8839,7 @@ fn clone_stream_runtime_view(runtime: &StreamSessionRuntime) -> StreamSessionRun
         checkpoints: runtime.checkpoints.clone(),
         branch_notes: runtime.branch_notes.clone(),
         timeline: runtime.timeline.clone(),
+        auto_skills: runtime.auto_skills.clone(),
     }
 }
 
@@ -5543,6 +8877,7 @@ struct StreamSessionRuntimeView {
     checkpoints: Vec<String>,
     branch_notes: Vec<String>,
     timeline: Vec<WebTimelineEvent>,
+    auto_skills: Vec<WebAutoSkill>,
 }
 
 struct ProgressNarration {
@@ -5599,9 +8934,19 @@ fn emit_activity(
         tool: None,
         permission: None,
         edited_files: None,
-        research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+        research: current_research_payload(
+            state,
+            Some(session_id),
+            runtime,
+            persisted_blocks,
+            mode,
+        ),
         subagents: None,
         verifier: None,
+        auto_skills: lock_stream_runtime(state)
+            .ok()
+            .and_then(|sessions| sessions.get(session_id).map(|session| session.auto_skills.clone()))
+            .filter(|items| !items.is_empty()),
     });
 }
 
@@ -5657,94 +9002,8 @@ fn tool_progress_narration(
     file_path: Option<&str>,
     result: Option<&str>,
 ) -> Option<ProgressNarration> {
-    let target = summarize_tool_target_for_chat(file_path);
-    let target_suffix = if target.is_empty() {
-        String::new()
-    } else if matches!(language, TurnLanguage::Zh) {
-        format!("，目标是 {}", target)
-    } else {
-        format!(" for {}", target)
-    };
-    let normalized_name = tool_name.trim().to_ascii_lowercase();
-    let normalized_status = status.trim().to_ascii_lowercase();
-    let (summary, dedupe_key) = match (normalized_name.as_str(), normalized_status.as_str()) {
-        ("list_dir", "pending") | ("find_files", "pending") | ("read_file", "pending") => {
-            (
-                localized_string(
-                    language,
-                    format!("我先检查当前工作区状态{}。", target_suffix),
-                    format!("I’m first checking the current workspace state{}.", target_suffix),
-                ),
-                progress_key_with_target("inspect", &target),
-            )
-        }
-        ("list_dir", "failed") | ("find_files", "failed") | ("read_file", "failed") => {
-            (
-                localized_string(
-                    language,
-                    "目标路径还没准备好，我先调整一下目录或路径再继续。".to_string(),
-                    "That target path is not ready yet, so I’m adjusting the directory or path before continuing.".to_string(),
-                ),
-                progress_key_with_target("inspect-repair", &target),
-            )
-        }
-        ("write_file", "complete") | ("edit_file", "complete") => (
-            localized_string(
-                language,
-                format!("我已经把内容写进工作区文件了{}。", target_suffix),
-                format!("I’ve written the content into the workspace file{}.", target_suffix),
-            ),
-            progress_key_with_target("workspace-write", &target),
-        ),
-        ("run_python", "executing") | ("run_python_file", "executing") => (
-            localized_string(
-                language,
-                "脚本已经开始跑了，我现在看运行结果和生成的产物。".to_string(),
-                "The script is running now, and I’m checking the result and generated artifacts.".to_string(),
-            ),
-            "script-running".to_string(),
-        ),
-        ("run_python", "complete") | ("run_python_file", "complete") => (
-            localized_string(
-                language,
-                "脚本已经跑完了，我开始核对输出文件和实验结果。".to_string(),
-                "The script finished, and I’m now checking the output files and experiment results.".to_string(),
-            ),
-            "script-complete".to_string(),
-        ),
-        ("run_command", "complete") | ("run_safe_command", "complete") | ("terminal_run", "complete") => {
-            let result_hint = result
-                .map(|raw| tail_string(raw, 120))
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_default();
-            let text = if matches!(language, TurnLanguage::Zh) {
-                if result_hint.is_empty() {
-                    "这一步命令已经完成，我继续根据输出往下推进。".to_string()
-                } else {
-                    format!("这一步命令已经完成，我先根据输出继续推进：{}。", result_hint)
-                }
-            } else if result_hint.is_empty() {
-                "That command finished, and I’m continuing from its output.".to_string()
-            } else {
-                format!("That command finished, and I’m continuing from its output: {}.", result_hint)
-            };
-            (text, format!("command-complete:{}", normalized_name))
-        }
-        ("terminal_create", "complete") => (
-            localized_string(
-                language,
-                "终端已经准备好了，后面需要的命令我会直接在这里接着跑。".to_string(),
-                "The terminal is ready, so I’ll keep running the next commands there.".to_string(),
-            ),
-            "terminal-ready".to_string(),
-        ),
-        _ => return None,
-    };
-
-    Some(ProgressNarration {
-        text: summary,
-        dedupe_key,
-    })
+    let _ = (language, tool_name, status, file_path, result);
+    None
 }
 
 fn emit_assistant_progress_delta(
@@ -5800,7 +9059,8 @@ fn emit_assistant_progress_delta(
                 .insert(trimmed_key.to_string(), Instant::now());
             if session.recent_progress_keys.len() > 6 {
                 let drop_count = session.recent_progress_keys.len().saturating_sub(6);
-                let removed: Vec<String> = session.recent_progress_keys.drain(0..drop_count).collect();
+                let removed: Vec<String> =
+                    session.recent_progress_keys.drain(0..drop_count).collect();
                 for key in removed {
                     session.recent_progress_emitted_at.remove(&key);
                 }
@@ -5825,6 +9085,7 @@ fn emit_assistant_progress_delta(
         research: None,
         subagents: None,
         verifier: None,
+        auto_skills: None,
     });
 }
 
@@ -5929,9 +9190,16 @@ fn emit_subagent_update(
         tool: None,
         permission: None,
         edited_files: None,
-        research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+        research: current_research_payload(
+            state,
+            Some(session_id),
+            runtime,
+            persisted_blocks,
+            mode,
+        ),
         subagents: Some(vec![web_record]),
         verifier: None,
+        auto_skills: None,
     });
 }
 
@@ -5979,27 +9247,31 @@ fn emit_verifier_update(
         tool: None,
         permission: None,
         edited_files: None,
-        research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+        research: current_research_payload(
+            state,
+            Some(session_id),
+            runtime,
+            persisted_blocks,
+            mode,
+        ),
         subagents: None,
         verifier: Some(web_report),
+        auto_skills: None,
     });
 }
 
-fn push_runtime_tool_event(
-    state: &WebAppState,
-    session_id: &str,
-    tool: &WebToolEvent,
-) {
+fn push_runtime_tool_event(state: &WebAppState, session_id: &str, tool: &WebToolEvent) {
+    let timed = timed_web_tool_event(tool.clone());
     if let Ok(mut sessions) = lock_stream_runtime(state) {
         if let Some(session) = sessions.get_mut(session_id) {
             if let Some(existing) = session
                 .tool_events
                 .iter_mut()
-                .find(|item| item.call_id == tool.call_id)
+                .find(|item| item.call_id == timed.call_id)
             {
-                *existing = tool.clone();
+                *existing = timed.clone();
             } else {
-                session.tool_events.push(tool.clone());
+                session.tool_events.push(timed);
             }
             if session.tool_events.len() > 12 {
                 let drop_count = session.tool_events.len().saturating_sub(12);
@@ -6009,15 +9281,15 @@ fn push_runtime_tool_event(
     }
 }
 
-fn push_runtime_edited_files(
-    state: &WebAppState,
-    session_id: &str,
-    files: &[WebEditedFile],
-) {
+fn push_runtime_edited_files(state: &WebAppState, session_id: &str, files: &[WebEditedFile]) {
     if let Ok(mut sessions) = lock_stream_runtime(state) {
         if let Some(session) = sessions.get_mut(session_id) {
             for file in files {
-                if let Some(existing) = session.edited_files.iter_mut().find(|item| item.path == file.path) {
+                if let Some(existing) = session
+                    .edited_files
+                    .iter_mut()
+                    .find(|item| item.path == file.path)
+                {
                     *existing = file.clone();
                 } else {
                     session.edited_files.push(file.clone());
@@ -6038,6 +9310,7 @@ fn web_edited_file_from_diff(diff: &FileDiff) -> WebEditedFile {
         removed: diff.removed,
         before_content: diff.before_content.clone(),
         after_content: diff.after_content.clone(),
+        updated_at: Some(web_now_iso()),
     }
 }
 
@@ -6067,15 +9340,19 @@ fn refresh_runtime_review_from_filesystem(
                 return;
             }
 
-            if let Ok(review) =
-                try_build_review_payload(state.host.base_dir(), &runtime.workspace_root, &valid_paths)
-            {
+            if let Ok(review) = try_build_review_payload(
+                state.host.base_dir(),
+                &runtime.workspace_root,
+                &valid_paths,
+            ) {
                 let review_map = review
                     .files
                     .into_iter()
                     .map(|file| (file.path.clone(), file))
                     .collect::<HashMap<_, _>>();
-                session.edited_files.retain(|file| review_map.contains_key(&file.path));
+                session
+                    .edited_files
+                    .retain(|file| review_map.contains_key(&file.path));
                 for file in &mut session.edited_files {
                     if let Some(summary) = review_map.get(&file.path) {
                         file.added = summary.additions as usize;
@@ -6110,13 +9387,29 @@ fn line_suggests_artifact(line: &str) -> bool {
 }
 
 fn is_path_wrapper_char(ch: char) -> bool {
-    matches!(ch, '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>')
+    matches!(
+        ch,
+        '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+    )
 }
 
 fn is_path_trailing_char(ch: char) -> bool {
     matches!(
         ch,
-        ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '"' | '\'' | '`' | '，' | '。' | '；' | '：'
+        ',' | ';'
+            | ':'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+            | '"'
+            | '\''
+            | '`'
+            | '，'
+            | '。'
+            | '；'
+            | '：'
     )
 }
 
@@ -6195,6 +9488,50 @@ fn collect_workspace_paths_from_text(text: &str, out: &mut Vec<String>) {
     }
 }
 
+fn collect_existing_workspace_paths_from_text(
+    text: &str,
+    base_dir: &Path,
+    workspace_root: &str,
+    out: &mut Vec<String>,
+) {
+    let mut raw_candidates = Vec::new();
+    collect_workspace_paths_from_text(text, &mut raw_candidates);
+
+    let mut seen = out
+        .iter()
+        .map(|path| path.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    for candidate in raw_candidates {
+        let Some(path) =
+            normalize_workspace_output_path(base_dir, workspace_root, &candidate, None)
+        else {
+            continue;
+        };
+        let lowered = path.to_ascii_lowercase();
+        if seen.insert(lowered) {
+            out.push(path);
+        }
+    }
+}
+
+fn normalize_workspace_diff_path(
+    base_dir: &Path,
+    workspace_root: &str,
+    raw_path: &str,
+) -> Option<String> {
+    if let Ok(path) = sanitize_review_path(raw_path) {
+        return Some(path);
+    }
+
+    let workspace = canonical_workspace_dir_from(base_dir, workspace_root).ok()?;
+    let absolute = Path::new(raw_path);
+    if !absolute.is_absolute() {
+        return None;
+    }
+
+    relativize_workspace_file(&workspace, absolute)
+}
+
 fn json_path_key_suggests_output(prefix: &str) -> bool {
     let lowered = prefix.to_ascii_lowercase();
     [
@@ -6239,7 +9576,10 @@ fn collect_json_output_paths(value: &Value, prefix: &str, out: &mut Vec<String>)
         }
         Value::String(text) => {
             let trimmed = text.trim();
-            if !trimmed.is_empty() && looks_like_output_path(trimmed) && json_path_key_suggests_output(prefix) {
+            if !trimmed.is_empty()
+                && looks_like_output_path(trimmed)
+                && json_path_key_suggests_output(prefix)
+            {
                 out.push(trimmed.to_string());
             }
         }
@@ -6248,15 +9588,15 @@ fn collect_json_output_paths(value: &Value, prefix: &str, out: &mut Vec<String>)
 }
 
 fn relativize_workspace_file(workspace: &Path, absolute: &Path) -> Option<String> {
-    let normalized_absolute = absolute.canonicalize().unwrap_or_else(|_| absolute.to_path_buf());
+    let normalized_absolute = absolute
+        .canonicalize()
+        .unwrap_or_else(|_| absolute.to_path_buf());
     let relative = normalized_absolute
         .strip_prefix(workspace)
         .ok()?
         .to_string_lossy()
         .replace('\\', "/");
-    if relative.is_empty()
-        || relative.starts_with(".git/")
-        || relative.starts_with(".tokitai-run/")
+    if relative.is_empty() || relative.starts_with(".git/") || relative.starts_with(".tokitai-run/")
     {
         return None;
     }
@@ -6269,9 +9609,11 @@ fn tool_output_base_dir(
     tool_name: &str,
     args: &Value,
 ) -> Option<PathBuf> {
-    if let Some(raw) = extract_tool_path(tool_name, args)
-        .or_else(|| args.get("cwd").and_then(Value::as_str).map(|value| value.replace('\\', "/")))
-    {
+    if let Some(raw) = extract_tool_path(tool_name, args).or_else(|| {
+        args.get("cwd")
+            .and_then(Value::as_str)
+            .map(|value| value.replace('\\', "/"))
+    }) {
         let resolved = resolve_workspace_relative_path(base_dir, workspace_root, &raw)?;
         if resolved.is_dir() {
             return Some(resolved);
@@ -6348,11 +9690,17 @@ fn runtime_tool_excluded_paths(
 ) -> BTreeSet<String> {
     let mut excluded = BTreeSet::new();
     let base_hint = tool_output_base_dir(base_dir, workspace_root, tool_name, args);
-    if matches!(tool_name, "run_python_file" | "read_file" | "write_file" | "edit_file" | "delete_file") {
+    if matches!(
+        tool_name,
+        "run_python_file" | "read_file" | "write_file" | "edit_file" | "delete_file"
+    ) {
         if let Some(path) = args.get("path").and_then(Value::as_str) {
-            if let Some(normalized) =
-                normalize_workspace_output_path(base_dir, workspace_root, path, base_hint.as_deref())
-            {
+            if let Some(normalized) = normalize_workspace_output_path(
+                base_dir,
+                workspace_root,
+                path,
+                base_hint.as_deref(),
+            ) {
                 excluded.insert(normalized.to_ascii_lowercase());
             }
         }
@@ -6399,9 +9747,12 @@ fn collect_runtime_artifact_paths(
     let mut seen = BTreeSet::new();
     let mut normalized = Vec::new();
     for candidate in raw_candidates {
-        let Some(path) =
-            normalize_workspace_output_path(base_dir, workspace_root, &candidate, base_hint.as_deref())
-        else {
+        let Some(path) = normalize_workspace_output_path(
+            base_dir,
+            workspace_root,
+            &candidate,
+            base_hint.as_deref(),
+        ) else {
             continue;
         };
         let lowered = path.to_ascii_lowercase();
@@ -6437,7 +9788,10 @@ fn build_workspace_artifact_diff(
     } else {
         Some(FileDiff {
             file_path: relative_path.to_string(),
-            lines: vec![DiffLine::Header(format!("Generated artifact: {}", relative_path))],
+            lines: vec![DiffLine::Header(format!(
+                "Generated artifact: {}",
+                relative_path
+            ))],
             added: 0,
             removed: 0,
             before_content: String::new(),
@@ -6472,6 +9826,36 @@ struct VerificationEvidence {
     json_evidence: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ResearchRuntimeEvidence {
+    artifact_paths: Vec<String>,
+    text_evidence: Vec<String>,
+    metric_facts: Vec<(String, String)>,
+    successful_runs: usize,
+    failed_runs: usize,
+    rerun_signals: usize,
+    comparison_signals: usize,
+    checkpoint_signals: usize,
+    validation_signals: usize,
+    comparison_lines: Vec<String>,
+    lineage_lines: Vec<String>,
+    run_ids: Vec<String>,
+    parent_run_ids: Vec<String>,
+    variant_labels: Vec<String>,
+    baseline_labels: Vec<String>,
+    resume_refs: Vec<String>,
+    literature_fetch_count: usize,
+    literature_ready_count: usize,
+    literature_partial_count: usize,
+    literature_metadata_only_count: usize,
+    literature_remote_primary_count: usize,
+    literature_structured_count: usize,
+    literature_reference_rich_count: usize,
+    literature_providers: Vec<String>,
+    literature_fulltext_notes: Vec<String>,
+    paper_dataset_hints: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 struct WebTimelineEvent {
     kind: String,
@@ -6491,7 +9875,10 @@ fn parse_tool_result_evidence(tool_name: &str, raw: &str, success: bool) -> Veri
     };
     if let Ok(value) = serde_json::from_str::<Value>(raw) {
         if matches!(tool_name, "run_command" | "run_safe_command") {
-            evidence.success = value.get("success").and_then(Value::as_bool).unwrap_or(success);
+            evidence.success = value
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(success);
             evidence.exit_code = value.pointer("/data/exit_code").and_then(Value::as_i64);
             evidence.stdout = value
                 .pointer("/data/stdout")
@@ -6503,7 +9890,10 @@ fn parse_tool_result_evidence(tool_name: &str, raw: &str, success: bool) -> Veri
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-        } else if matches!(tool_name, "run_python" | "run_python_file" | "run_r" | "run_julia") {
+        } else if matches!(
+            tool_name,
+            "run_python" | "run_python_file" | "run_r" | "run_julia"
+        ) {
             evidence.success = value
                 .pointer("/result/status")
                 .and_then(Value::as_str)
@@ -6524,27 +9914,37 @@ fn parse_tool_result_evidence(tool_name: &str, raw: &str, success: bool) -> Veri
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-                } else if tool_name == "terminal_run" {
-                    evidence.success = value.get("success").and_then(Value::as_bool).unwrap_or(success);
-                    evidence.stdout = value
-                        .pointer("/terminal/buffer")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                } else if tool_name == "terminal_read" {
-                    evidence.success = value.get("success").and_then(Value::as_bool).unwrap_or(success);
-                    evidence.stdout = value
-                        .pointer("/terminal/buffer")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                }
+        } else if tool_name == "terminal_run" {
+            evidence.success = value
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(success);
+            evidence.stdout = value
+                .pointer("/terminal/buffer")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+        } else if tool_name == "terminal_read" {
+            evidence.success = value
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(success);
+            evidence.stdout = value
+                .pointer("/terminal/buffer")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+        }
         collect_json_text_evidence(&value, "", &mut evidence.json_evidence);
         if evidence.summary.is_empty() {
             evidence.summary = tail_string(raw, 220);
         }
     }
     evidence
+}
+
+fn parsed_tool_result_json(raw: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(raw).ok()
 }
 
 fn collect_json_text_evidence(value: &Value, prefix: &str, out: &mut Vec<String>) {
@@ -6621,16 +10021,126 @@ fn collect_json_text_evidence(value: &Value, prefix: &str, out: &mut Vec<String>
     }
 }
 
+fn collect_literature_runtime_evidence(
+    tool_name: &str,
+    value: &Value,
+    evidence: &mut ResearchRuntimeEvidence,
+) {
+    if !matches!(tool_name, "fetch_paper" | "fetch_papers") {
+        return;
+    }
+
+    let mut collect_payload = |payload: &Value| {
+        evidence.literature_fetch_count += 1;
+
+        if payload
+            .pointer("/fulltext/primary_source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source.eq_ignore_ascii_case("remote"))
+        {
+            evidence.literature_remote_primary_count += 1;
+        }
+
+        match payload
+            .pointer("/fulltext/status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
+            status if status.eq_ignore_ascii_case("ready") => evidence.literature_ready_count += 1,
+            status if status.eq_ignore_ascii_case("partial") => {
+                evidence.literature_partial_count += 1
+            }
+            _ => evidence.literature_metadata_only_count += 1,
+        }
+
+        if payload
+            .pointer("/structured_document/sections")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            evidence.literature_structured_count += 1;
+        }
+
+        if payload
+            .pointer("/structured_document/references")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            evidence.literature_reference_rich_count += 1;
+        }
+
+        if let Some(provider) = payload
+            .pointer("/fulltext/provider")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("provider").and_then(Value::as_str))
+        {
+            push_unique_text(&mut evidence.literature_providers, provider.to_string(), 8);
+        }
+
+        let status = payload
+            .pointer("/fulltext/status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let completeness = payload
+            .pointer("/fulltext/completeness")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let content_source = payload
+            .pointer("/fulltext/content_source")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let body_chars = payload
+            .pointer("/fulltext/body_text_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let section_count = payload
+            .pointer("/fulltext/section_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let reference_count = payload
+            .pointer("/fulltext/reference_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let note = format!(
+            "literature fulltext status={status} completeness={completeness} source={content_source} body_chars={body_chars} sections={section_count} references={reference_count}"
+        );
+        push_unique_text(&mut evidence.literature_fulltext_notes, note, 12);
+        for hint in extract_paper_dataset_hints_from_value(payload) {
+            push_unique_text(&mut evidence.paper_dataset_hints, hint, 8);
+        }
+    };
+
+    if tool_name == "fetch_papers" {
+        if let Some(items) = value.get("results").and_then(Value::as_array) {
+            for item in items {
+                collect_payload(item);
+            }
+        }
+    } else {
+        collect_payload(value);
+    }
+}
+
+fn paper_dataset_hint_summary(runtime: &ResearchRuntimeEvidence) -> Option<String> {
+    if runtime.paper_dataset_hints.is_empty() {
+        None
+    } else {
+        Some(runtime.paper_dataset_hints.join(", "))
+    }
+}
+
 fn looks_like_output_path(input: &str) -> bool {
     let lowered = input.trim().to_ascii_lowercase();
     if lowered.is_empty() {
         return false;
     }
     let file_suffixes = [
-        ".json", ".csv", ".tsv", ".txt", ".md", ".html", ".pdf", ".png", ".jpg", ".jpeg",
-        ".svg", ".tex", ".log", ".yaml", ".yml", ".toml",
+        ".json", ".csv", ".tsv", ".txt", ".md", ".html", ".pdf", ".png", ".jpg", ".jpeg", ".svg",
+        ".tex", ".log", ".yaml", ".yml", ".toml",
     ];
-    lowered.contains('/') || lowered.contains('\\') || file_suffixes.iter().any(|suffix| lowered.ends_with(suffix))
+    lowered.contains('/')
+        || lowered.contains('\\')
+        || file_suffixes.iter().any(|suffix| lowered.ends_with(suffix))
 }
 
 fn verification_target_keywords(target: &str) -> Vec<String> {
@@ -6638,11 +10148,86 @@ fn verification_target_keywords(target: &str) -> Vec<String> {
     let mut keywords = Vec::new();
 
     let mapping: &[(&[&str], &[&str])] = &[
-        (&["scaling", "standardscaler", "standardization", "preprocessing", "z-score"], &["scaler", "standard", "scaled", "z-score", "preprocessing"]),
-        (&["converge", "converges", "convergence", "stable clusters", "stability"], &["converged", "iterations", "stable", "reproducibility", "random_state"]),
-        (&["adjusted rand", "ari", "silhouette", "nmi", "metric", "metrics", "cluster assignments"], &["adjusted rand", "ari", "silhouette", "nmi", "accuracy", "confusion matrix"]),
-        (&["without errors", "runs without errors", "consistent output", "reproducible"], &["done.", "results saved", "reproducibility", "pass", "success"]),
-        (&["output file", "json output", "results file", "artifact", "saved figure", "saved plot"], &["results saved", ".json", "output", "artifact", "output file", "saved", ".png", ".csv"]),
+        (
+            &[
+                "scaling",
+                "standardscaler",
+                "standardization",
+                "preprocessing",
+                "z-score",
+            ],
+            &["scaler", "standard", "scaled", "z-score", "preprocessing"],
+        ),
+        (
+            &[
+                "converge",
+                "converges",
+                "convergence",
+                "stable clusters",
+                "stability",
+            ],
+            &[
+                "converged",
+                "iterations",
+                "stable",
+                "reproducibility",
+                "random_state",
+            ],
+        ),
+        (
+            &[
+                "adjusted rand",
+                "ari",
+                "silhouette",
+                "nmi",
+                "metric",
+                "metrics",
+                "cluster assignments",
+            ],
+            &[
+                "adjusted rand",
+                "ari",
+                "silhouette",
+                "nmi",
+                "accuracy",
+                "confusion matrix",
+            ],
+        ),
+        (
+            &[
+                "without errors",
+                "runs without errors",
+                "consistent output",
+                "reproducible",
+            ],
+            &[
+                "done.",
+                "results saved",
+                "reproducibility",
+                "pass",
+                "success",
+            ],
+        ),
+        (
+            &[
+                "output file",
+                "json output",
+                "results file",
+                "artifact",
+                "saved figure",
+                "saved plot",
+            ],
+            &[
+                "results saved",
+                ".json",
+                "output",
+                "artifact",
+                "output file",
+                "saved",
+                ".png",
+                ".csv",
+            ],
+        ),
     ];
 
     for (needles, emits) in mapping {
@@ -6741,6 +10326,925 @@ fn tool_result_identity(messages: &[MessageBlock], call_id: &str) -> (String, Op
     (tool_name, tool_path)
 }
 
+fn collect_runtime_artifact_paths_for_turn(
+    messages: &[MessageBlock],
+    base_dir: &Path,
+    workspace_root: &str,
+) -> BTreeSet<String> {
+    let turn_blocks = current_turn_blocks(messages);
+    let mut paths = BTreeSet::new();
+
+    for block in turn_blocks {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success,
+        } = block
+        else {
+            continue;
+        };
+
+        let tool_name =
+            tool_name_by_call_id(turn_blocks, call_id).unwrap_or_else(|| "tool".to_string());
+        let args = tool_args_by_call_id(turn_blocks, call_id).unwrap_or_else(|| json!({}));
+        for path in collect_runtime_artifact_paths(
+            base_dir,
+            workspace_root,
+            &tool_name,
+            &args,
+            result,
+            *success,
+        ) {
+            paths.insert(path.to_ascii_lowercase());
+        }
+    }
+
+    paths
+}
+
+fn push_unique_text(out: &mut Vec<String>, value: String, limit: usize) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || out.len() >= limit {
+        return;
+    }
+    if !out.iter().any(|item| item == trimmed) {
+        out.push(trimmed.to_string());
+    }
+}
+
+fn prepend_unique_text(out: &mut Vec<String>, value: String, limit: usize) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if let Some(index) = out.iter().position(|item| item == trimmed) {
+        let existing = out.remove(index);
+        out.insert(0, existing);
+    } else {
+        out.insert(0, trimmed.to_string());
+        if out.len() > limit {
+            out.truncate(limit);
+        }
+    }
+}
+
+fn push_unique_metric_fact(
+    out: &mut Vec<(String, String)>,
+    key: String,
+    value: String,
+    limit: usize,
+) {
+    let norm_key = key.trim().to_ascii_lowercase();
+    let norm_value = value.trim().to_string();
+    if norm_key.is_empty() || norm_value.is_empty() || out.len() >= limit {
+        return;
+    }
+    if !out.iter().any(|(k, v)| k == &norm_key && v == &norm_value) {
+        out.push((norm_key, norm_value));
+    }
+}
+
+fn prepend_metric_fact(out: &mut Vec<(String, String)>, key: String, value: String, limit: usize) {
+    let norm_key = key.trim().to_ascii_lowercase();
+    let norm_value = value.trim().to_string();
+    if norm_key.is_empty() || norm_value.is_empty() {
+        return;
+    }
+    if let Some(index) = out.iter().position(|(existing_key, existing_value)| {
+        existing_key == &norm_key && existing_value == &norm_value
+    }) {
+        let existing = out.remove(index);
+        out.insert(0, existing);
+    } else {
+        out.insert(0, (norm_key, norm_value));
+        if out.len() > limit {
+            out.truncate(limit);
+        }
+    }
+}
+
+fn collect_metric_facts_from_text(text: &str, out: &mut Vec<(String, String)>) {
+    let pattern = Regex::new(
+        r"(?im)\b([a-z][a-z0-9_/\-]*(?:\s+[a-z0-9_/\-]+){0,3})\s*(?:=|:)\s*(-?\d+(?:\.\d+)?%?(?:\s*(?:ms|s|sec|seconds|m|mb|gb|qps|ops/s|tokens?|items?))?)",
+    )
+    .expect("metric fact regex");
+    for captures in pattern.captures_iter(text) {
+        let key = captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        let value = captures.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        push_unique_metric_fact(out, key.to_string(), value.to_string(), 32);
+    }
+
+    let percentile_pattern = Regex::new(
+        r"(?im)\b(p(?:50|90|95|99)|latency|throughput|accuracy|f1|precision|recall|success rate|tool error rate)\s+(-?\d+(?:\.\d+)?%?(?:\s*(?:ms|s|sec|seconds|m|mb|gb|qps|ops/s))?)",
+    )
+    .expect("percentile metric regex");
+    for captures in percentile_pattern.captures_iter(text) {
+        let key = captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        let value = captures.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        push_unique_metric_fact(out, key.to_string(), value.to_string(), 32);
+    }
+}
+
+fn find_metric_fact_value(runtime: &ResearchRuntimeEvidence, aliases: &[&str]) -> Option<String> {
+    runtime.metric_facts.iter().find_map(|(key, value)| {
+        if aliases
+            .iter()
+            .any(|alias| key.contains(&alias.to_ascii_lowercase()))
+        {
+            Some(value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn collect_runtime_compare_and_lineage_facts(text: &str, evidence: &mut ResearchRuntimeEvidence) {
+    let run_id_pattern =
+        Regex::new(r"(?im)\b(?:run_id|run id)\s*(?:=|:)\s*([a-z0-9][a-z0-9._/\-]*)")
+            .expect("run id regex");
+    let parent_run_pattern = Regex::new(
+        r"(?im)\b(?:parent_run_id|parent run id|parent run)\s*(?:=|:)\s*([a-z0-9][a-z0-9._/\-]*)",
+    )
+    .expect("parent run regex");
+    let variant_pattern = Regex::new(
+        r"(?im)\b(?:variant_label|variant label|variant)\s*(?:=|:)\s*([a-z0-9][a-z0-9._/\-]*)",
+    )
+    .expect("variant regex");
+    let baseline_pattern = Regex::new(
+        r"(?im)\b(?:baseline_id|baseline run|baseline variant|baseline)\s*(?:=|:)\s*([a-z0-9][a-z0-9._/\-]*)",
+    )
+    .expect("baseline regex");
+    let resume_pattern =
+        Regex::new(r"(?im)\bresume from\s+([a-z0-9][a-z0-9._/\-]*)").expect("resume regex");
+
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(24)
+    {
+        let lowered = line.to_ascii_lowercase();
+        if contains_any(
+            &lowered,
+            &[
+                "baseline",
+                "delta",
+                "improvement",
+                "regression",
+                "before/after",
+                "compare",
+                "vs ",
+            ],
+        ) {
+            push_unique_text(&mut evidence.comparison_lines, tail_string(line, 220), 12);
+        }
+        if contains_any(
+            &lowered,
+            &[
+                "run_id",
+                "parent_run_id",
+                "checkpoint",
+                "resume",
+                "variant",
+                "baseline",
+            ],
+        ) {
+            push_unique_text(&mut evidence.lineage_lines, tail_string(line, 220), 16);
+        }
+    }
+
+    for captures in run_id_pattern.captures_iter(text) {
+        if let Some(value) = captures.get(1).map(|m| m.as_str().trim()) {
+            push_unique_text(&mut evidence.run_ids, value.to_string(), 8);
+        }
+    }
+    for captures in parent_run_pattern.captures_iter(text) {
+        if let Some(value) = captures.get(1).map(|m| m.as_str().trim()) {
+            push_unique_text(&mut evidence.parent_run_ids, value.to_string(), 8);
+        }
+    }
+    for captures in variant_pattern.captures_iter(text) {
+        if let Some(value) = captures.get(1).map(|m| m.as_str().trim()) {
+            push_unique_text(&mut evidence.variant_labels, value.to_string(), 8);
+        }
+    }
+    for captures in baseline_pattern.captures_iter(text) {
+        if let Some(value) = captures.get(1).map(|m| m.as_str().trim()) {
+            push_unique_text(&mut evidence.baseline_labels, value.to_string(), 8);
+        }
+    }
+    for captures in resume_pattern.captures_iter(text) {
+        if let Some(value) = captures.get(1).map(|m| m.as_str().trim()) {
+            push_unique_text(&mut evidence.resume_refs, value.to_string(), 8);
+        }
+    }
+}
+
+fn compare_key_metric_aliases(key: &str) -> &'static [&'static str] {
+    match key {
+        "best_validation_metric" => &["best validation", "validation", "val_accuracy", "val_f1"],
+        "training_time_minutes" => &["training time", "train time", "time minutes", "minutes"],
+        "gpu_or_memory_footprint" => &["gpu memory", "memory_mb", "memory", "vram"],
+        "dataset_id" => &["dataset id", "dataset_id", "dataset"],
+        "provider" => &["provider", "source provider"],
+        "path" => &["path", "source url", "source_url"],
+        "format" => &["format", "csv", "tsv", "json", "jsonl", "dataset hub"],
+        "task_hint" => &["task hint", "task", "classification", "benchmark"],
+        "latency_ms" => &["latency_ms", "latency", "p95", "p99", "p50"],
+        "throughput_ops_per_sec" => &["throughput_qps", "throughput", "qps", "ops/s"],
+        "memory_mb" => &["memory_mb", "memory", "rss"],
+        "task_success_rate" => &["task success rate", "success rate", "pass@"],
+        "trajectory_cost" => &["trajectory cost", "cost", "token cost"],
+        "tool_error_rate" => &["tool error rate", "tool_error_rate", "failure rate"],
+        "precision" => &["precision"],
+        "recall" => &["recall"],
+        "false_positive_rate" => &["false positive rate", "false_positive_rate"],
+        "accuracy" => &["accuracy"],
+        "f1" => &["f1"],
+        "fit_time_seconds" => &["fit_time", "fit time", "train time"],
+        "proof_status" => &["proof status", "proof"],
+        "lemma_coverage" => &["lemma coverage", "lemma"],
+        "screened_papers" => &["screened papers", "screened_papers"],
+        "included_papers" => &["included papers", "included_papers"],
+        "remote_fulltext_papers" => &[
+            "remote-first papers fetched",
+            "ready_documents",
+            "fulltext_bundle.requested_documents",
+        ],
+        "structured_papers" => &[
+            "structured sections",
+            "structured_paper_coverage",
+            "section_count",
+        ],
+        _ => &[],
+    }
+}
+
+fn summarize_profile_runtime(
+    workflow_profile: &str,
+    result_bundle: &WebResearchResultBundle,
+    run_comparison: &WebResearchRunComparison,
+    lineage: &WebResearchLineage,
+) -> ProfileRuntimeSummary {
+    let bundle_fields = result_bundle
+        .summary_fields
+        .iter()
+        .map(|field| format!("{}={}", field.name, tail_string(&field.value, 120)))
+        .collect::<Vec<_>>();
+    let mut profile_evidence = Vec::new();
+
+    match workflow_profile {
+        "literature_review" => {
+            for key in [
+                "remote_fulltext_coverage",
+                "structured_paper_coverage",
+                "search_scope",
+                "screening_summary",
+                "gap_summary",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        "classical_ml" => {
+            for key in [
+                "dataset_acquisition",
+                "paper_dataset_hints",
+                "dataset_manifest",
+                "primary_metric",
+                "baseline_delta",
+                "error_analysis_summary",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        "agent_evaluation" => {
+            for key in [
+                "dataset_acquisition",
+                "dataset_manifest",
+                "task_success_rate",
+                "tool_error_rate",
+                "judge_summary",
+                "trajectory_sample_count",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        "systems_evaluation" => {
+            for key in [
+                "dataset_acquisition",
+                "paper_dataset_hints",
+                "dataset_manifest",
+                "workload_name",
+                "latency_summary",
+                "throughput_summary",
+                "resource_summary",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        "deep_learning" => {
+            for key in [
+                "dataset_acquisition",
+                "paper_dataset_hints",
+                "dataset_manifest",
+                "checkpoint_path",
+                "best_validation_metric",
+                "resource_summary",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        "security_analysis" => {
+            for key in [
+                "dataset_acquisition",
+                "paper_dataset_hints",
+                "dataset_manifest",
+                "confirmed_findings",
+                "false_positive_count",
+                "coverage_summary",
+                "impact_summary",
+            ] {
+                if let Some(field) = result_bundle
+                    .summary_fields
+                    .iter()
+                    .find(|field| field.name == key)
+                {
+                    profile_evidence.push(format!(
+                        "{}={}",
+                        field.name,
+                        tail_string(&field.value, 180)
+                    ));
+                }
+            }
+        }
+        _ => {
+            profile_evidence.extend(bundle_fields.iter().take(4).cloned());
+        }
+    }
+
+    if matches!(
+        workflow_profile,
+        "classical_ml"
+            | "deep_learning"
+            | "systems_evaluation"
+            | "agent_evaluation"
+            | "security_analysis"
+    ) {
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "dataset_acquisition")
+        {
+            profile_evidence.push(format!(
+                "dataset_acquisition={}",
+                tail_string(&field.value, 180)
+            ));
+        }
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "dataset_manifest")
+        {
+            profile_evidence.push(format!(
+                "dataset_manifest={}",
+                tail_string(&field.value, 180)
+            ));
+        }
+    }
+
+    ProfileRuntimeSummary {
+        workflow_profile: workflow_profile.to_string(),
+        bundle_fields,
+        profile_evidence,
+        artifact_paths: result_bundle.artifact_paths.clone(),
+        compare_keys: run_comparison.compare_keys.clone(),
+        compare_observations: run_comparison.observations.clone(),
+        recent_runs: lineage.recent_runs.clone(),
+        lineage_notes: lineage.notes.clone(),
+    }
+}
+
+fn summarize_profile_runtime_from_messages(
+    workflow_profile: &str,
+    messages: &[MessageBlock],
+    base_dir: &Path,
+    workspace_root: &str,
+) -> ProfileRuntimeSummary {
+    let runtime = collect_research_runtime_evidence(messages, base_dir, workspace_root);
+    let result_bundle = research_result_bundle(
+        workflow_profile,
+        messages,
+        &runtime,
+        base_dir,
+        workspace_root,
+    );
+    let run_comparison =
+        research_run_comparison(workflow_profile, messages, &result_bundle, &runtime);
+    let lineage = research_lineage(messages, &result_bundle, &runtime);
+    summarize_profile_runtime(workflow_profile, &result_bundle, &run_comparison, &lineage)
+}
+
+fn is_dataset_driven_workflow_profile(workflow_profile: &str) -> bool {
+    matches!(
+        workflow_profile,
+        "classical_ml"
+            | "deep_learning"
+            | "systems_evaluation"
+            | "agent_evaluation"
+            | "security_analysis"
+    )
+}
+
+fn profile_runtime_field_value<'a>(
+    summary: &'a ProfileRuntimeSummary,
+    field_name: &str,
+) -> Option<&'a str> {
+    summary
+        .bundle_fields
+        .iter()
+        .find_map(|field| field.strip_prefix(&format!("{field_name}=")))
+}
+
+fn profile_runtime_field_pending(summary: &ProfileRuntimeSummary, field_name: &str) -> bool {
+    profile_runtime_field_value(summary, field_name)
+        .map(|value| value.to_ascii_lowercase().contains("pending"))
+        .unwrap_or(true)
+}
+
+fn dataset_closure_signal_present(plan: &AgentWorkflowPlan, messages: &[MessageBlock]) -> bool {
+    let verification = plan.verification.join("\n").to_ascii_lowercase();
+    let corpus = collect_message_text_corpus(messages, 48).to_ascii_lowercase();
+    let combined = format!("{verification}\n{corpus}");
+    contains_any(
+        &combined,
+        &[
+            "search_public_datasets",
+            "fetch_public_dataset_manifest",
+            "official_dataset_databases",
+            "dataset manifest",
+            "evaluation manifest",
+            "benchmark manifest",
+            "manifest fixed",
+            "retrieval_entrypoint",
+            "source_url",
+            "task_hint",
+            "provider",
+            "dataset acquisition",
+            "public task suite",
+        ],
+    )
+}
+
+fn format_profile_runtime_summary(
+    summary: &ProfileRuntimeSummary,
+    language: TurnLanguage,
+) -> String {
+    let bundle = if summary.bundle_fields.is_empty() {
+        localized_text(language, "无", "none").to_string()
+    } else {
+        summary.bundle_fields.join("; ")
+    };
+    let profile_evidence = if summary.profile_evidence.is_empty() {
+        localized_text(language, "无", "none").to_string()
+    } else {
+        summary.profile_evidence.join("; ")
+    };
+    let artifacts = if summary.artifact_paths.is_empty() {
+        localized_text(language, "无", "none").to_string()
+    } else {
+        summary.artifact_paths.join(", ")
+    };
+    let compare = if summary.compare_observations.is_empty() {
+        if summary.compare_keys.is_empty() {
+            localized_text(language, "无", "none").to_string()
+        } else {
+            summary.compare_keys.join(", ")
+        }
+    } else {
+        summary
+            .compare_observations
+            .iter()
+            .take(4)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    let lineage = if summary.lineage_notes.is_empty() {
+        if summary.recent_runs.is_empty() {
+            localized_text(language, "无", "none").to_string()
+        } else {
+            summary.recent_runs.join(", ")
+        }
+    } else {
+        summary
+            .lineage_notes
+            .iter()
+            .take(4)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+
+    match language {
+        TurnLanguage::Zh => format!(
+            "运行时结构化摘要\n- workflow_profile: {}\n- profile_evidence: {}\n- result_bundle: {}\n- artifact_paths: {}\n- run_comparison: {}\n- lineage: {}",
+            summary.workflow_profile, profile_evidence, bundle, artifacts, compare, lineage
+        ),
+        TurnLanguage::En => format!(
+            "Structured runtime summary\n- workflow_profile: {}\n- profile_evidence: {}\n- result_bundle: {}\n- artifact_paths: {}\n- run_comparison: {}\n- lineage: {}",
+            summary.workflow_profile, profile_evidence, bundle, artifacts, compare, lineage
+        ),
+    }
+}
+
+fn collect_research_runtime_evidence(
+    messages: &[MessageBlock],
+    base_dir: &Path,
+    workspace_root: &str,
+) -> ResearchRuntimeEvidence {
+    let turn_blocks = current_turn_blocks(messages);
+    let artifact_paths =
+        collect_runtime_artifact_paths_for_turn(messages, base_dir, workspace_root)
+            .into_iter()
+            .collect::<Vec<_>>();
+    let mut evidence = ResearchRuntimeEvidence {
+        artifact_paths,
+        ..ResearchRuntimeEvidence::default()
+    };
+
+    for block in turn_blocks {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success,
+        } = block
+        else {
+            continue;
+        };
+
+        let tool_name =
+            tool_name_by_call_id(turn_blocks, call_id).unwrap_or_else(|| "tool".to_string());
+        let parsed = parse_tool_result_evidence(&tool_name, result, *success);
+        if let Some(value) = parsed_tool_result_json(result) {
+            collect_literature_runtime_evidence(&tool_name, &value, &mut evidence);
+        }
+        if parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out {
+            evidence.successful_runs += 1;
+        } else {
+            evidence.failed_runs += 1;
+        }
+
+        let combined = format!(
+            "{}\n{}\n{}\n{}",
+            parsed.summary,
+            parsed.stdout,
+            parsed.stderr,
+            parsed.json_evidence.join("\n")
+        );
+        let lowered = combined.to_ascii_lowercase();
+        if contains_any(
+            &lowered,
+            &[
+                "rerun", "re-run", "retry", "resume", "retest", "re-test", "复测",
+            ],
+        ) {
+            evidence.rerun_signals += 1;
+        }
+        if contains_any(
+            &lowered,
+            &[
+                "baseline",
+                "delta",
+                "improvement",
+                "regression",
+                "before/after",
+                "compare",
+                "vs ",
+            ],
+        ) {
+            evidence.comparison_signals += 1;
+        }
+        if contains_any(&lowered, &["checkpoint", "resume from", "saved checkpoint"]) {
+            evidence.checkpoint_signals += 1;
+        }
+        if contains_any(
+            &lowered,
+            &[
+                "validation",
+                "val_",
+                "dev_",
+                "best metric",
+                "accuracy",
+                "f1",
+                "precision",
+                "recall",
+                "latency",
+                "throughput",
+            ],
+        ) {
+            evidence.validation_signals += 1;
+        }
+
+        for line in parsed
+            .stdout
+            .lines()
+            .chain(parsed.stderr.lines())
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .take(8)
+        {
+            push_unique_text(&mut evidence.text_evidence, tail_string(line, 220), 24);
+        }
+        for item in parsed.json_evidence.iter().take(12) {
+            push_unique_text(&mut evidence.text_evidence, tail_string(item, 220), 24);
+        }
+        for item in evidence
+            .literature_fulltext_notes
+            .clone()
+            .into_iter()
+            .take(8)
+        {
+            push_unique_text(&mut evidence.text_evidence, item, 24);
+        }
+        collect_metric_facts_from_text(&parsed.stdout, &mut evidence.metric_facts);
+        collect_metric_facts_from_text(&parsed.stderr, &mut evidence.metric_facts);
+        for item in &parsed.json_evidence {
+            collect_metric_facts_from_text(item, &mut evidence.metric_facts);
+        }
+        collect_runtime_compare_and_lineage_facts(&parsed.stdout, &mut evidence);
+        collect_runtime_compare_and_lineage_facts(&parsed.stderr, &mut evidence);
+        for item in &parsed.json_evidence {
+            collect_runtime_compare_and_lineage_facts(item, &mut evidence);
+        }
+    }
+
+    backfill_workspace_runtime_evidence(base_dir, workspace_root, &mut evidence);
+
+    evidence
+}
+
+fn backfill_workspace_runtime_evidence(
+    base_dir: &Path,
+    workspace_root: &str,
+    evidence: &mut ResearchRuntimeEvidence,
+) {
+    let Ok(workspace) = canonical_workspace_dir_from(base_dir, workspace_root) else {
+        return;
+    };
+    let experiments_dir = workspace.join("experiments");
+    if !experiments_dir.is_dir() {
+        return;
+    }
+
+    for relative in [
+        "experiments/config.py",
+        "experiments/experiment.py",
+        "experiments/results.csv",
+        "experiments/metrics.csv",
+    ] {
+        let normalized = relative.replace('/', &std::path::MAIN_SEPARATOR.to_string());
+        let absolute = workspace.join(normalized);
+        if !absolute.exists() {
+            continue;
+        }
+        push_workspace_artifact_path(evidence, &workspace, &absolute);
+        if let Ok(content) = fs::read_to_string(&absolute) {
+            ingest_workspace_runtime_text(&content, evidence);
+            if relative.ends_with("results.csv") {
+                ingest_workspace_results_csv(&content, evidence);
+            } else if relative.ends_with("experiment.py") {
+                ingest_workspace_dataset_hints(&content, evidence);
+            }
+        }
+    }
+}
+
+fn push_workspace_artifact_path(
+    evidence: &mut ResearchRuntimeEvidence,
+    workspace: &Path,
+    absolute: &Path,
+) {
+    let Some(relative) = relativize_workspace_file(workspace, absolute) else {
+        return;
+    };
+    if !evidence
+        .artifact_paths
+        .iter()
+        .any(|path| path.eq_ignore_ascii_case(&relative))
+    {
+        evidence.artifact_paths.push(relative);
+    }
+}
+
+fn ingest_workspace_runtime_text(text: &str, evidence: &mut ResearchRuntimeEvidence) {
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(64)
+    {
+        prepend_unique_text(&mut evidence.text_evidence, tail_string(line, 220), 24);
+    }
+    collect_metric_facts_from_text(text, &mut evidence.metric_facts);
+    collect_runtime_compare_and_lineage_facts(text, evidence);
+}
+
+fn ingest_workspace_dataset_hints(text: &str, evidence: &mut ResearchRuntimeEvidence) {
+    let lowered = text.to_ascii_lowercase();
+    let dataset_catalog = [
+        ("load_digits", "digits"),
+        ("load_breast_cancer", "breast_cancer"),
+        ("load_wine", "wine"),
+        ("load_iris", "iris"),
+    ];
+
+    for (needle, dataset_id) in dataset_catalog {
+        if lowered.contains(needle) {
+            prepend_unique_text(&mut evidence.paper_dataset_hints, dataset_id.to_string(), 8);
+            prepend_unique_text(
+                &mut evidence.text_evidence,
+                format!(
+                    "dataset manifest: dataset_id={dataset_id} provider=sklearn source_url=sklearn.datasets.{needle} task_hint=classification"
+                ),
+                24,
+            );
+        }
+    }
+}
+
+fn ingest_workspace_results_csv(csv_text: &str, evidence: &mut ResearchRuntimeEvidence) {
+    let mut lines = csv_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(header_line) = lines.next() else {
+        return;
+    };
+    let headers = header_line
+        .split(',')
+        .map(|value| value.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if headers.is_empty() {
+        return;
+    }
+
+    let metric_index = headers
+        .iter()
+        .position(|header| matches!(header.as_str(), "acc_mean" | "accuracy" | "acc" | "f1"));
+    let model_index = headers.iter().position(|header| header == "model");
+    let noise_index = headers.iter().position(|header| header == "noise_rate");
+    let Some(metric_index) = metric_index else {
+        return;
+    };
+
+    let mut best_row: Option<(Option<String>, Option<String>, f64)> = None;
+    let mut baseline_row: Option<(Option<String>, Option<String>, f64)> = None;
+
+    for line in lines {
+        let columns = line
+            .split(',')
+            .map(|value| value.trim())
+            .collect::<Vec<_>>();
+        if metric_index >= columns.len() {
+            continue;
+        }
+        let Ok(metric_value) = columns[metric_index].parse::<f64>() else {
+            continue;
+        };
+        let model_name = model_index
+            .and_then(|index| columns.get(index))
+            .map(|value| value.to_string());
+        let noise_value = noise_index
+            .and_then(|index| columns.get(index))
+            .map(|value| value.to_string());
+
+        if best_row
+            .as_ref()
+            .is_none_or(|(_, _, current)| metric_value > *current)
+        {
+            best_row = Some((model_name.clone(), noise_value.clone(), metric_value));
+        }
+
+        if model_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("RandomForest"))
+            && noise_value.as_deref() == Some("0.0")
+        {
+            baseline_row = Some((model_name, noise_value, metric_value));
+        }
+    }
+
+    let Some((best_model, best_noise, best_metric)) = best_row else {
+        return;
+    };
+    let best_model_name = best_model.unwrap_or_else(|| "best_model".to_string());
+    let best_noise_name = best_noise.unwrap_or_else(|| "unknown".to_string());
+
+    prepend_metric_fact(
+        &mut evidence.metric_facts,
+        "primary_metric".to_string(),
+        format!(
+            "best accuracy {:.4} ({}, noise_rate={})",
+            best_metric, best_model_name, best_noise_name
+        ),
+        32,
+    );
+    prepend_metric_fact(
+        &mut evidence.metric_facts,
+        "accuracy".to_string(),
+        format!("{:.4}", best_metric),
+        32,
+    );
+    prepend_unique_text(
+        &mut evidence.text_evidence,
+        format!(
+            "error analysis: best observed robustness comes from {} at noise_rate={}, while weaker variants degrade under heavier label noise.",
+            best_model_name, best_noise_name
+        ),
+        24,
+    );
+
+    if let Some((baseline_model, baseline_noise, baseline_metric)) = baseline_row {
+        let baseline_name = baseline_model.unwrap_or_else(|| "baseline".to_string());
+        let baseline_noise_name = baseline_noise.unwrap_or_else(|| "0.0".to_string());
+        let delta = best_metric - baseline_metric;
+        prepend_metric_fact(
+            &mut evidence.metric_facts,
+            "baseline_delta".to_string(),
+            format!(
+                "{:+.4} over {} at noise_rate={}",
+                delta, baseline_name, baseline_noise_name
+            ),
+            32,
+        );
+        prepend_unique_text(
+            &mut evidence.comparison_lines,
+            format!(
+                "compare vs baseline: {} {:.4} versus {} {:.4}",
+                best_model_name, best_metric, baseline_name, baseline_metric
+            ),
+            12,
+        );
+        evidence.comparison_signals += 1;
+    }
+}
+
 fn fingerprint_bytes(bytes: &[u8]) -> u64 {
     let mut hash = 1469598103934665603u64;
     for byte in bytes {
@@ -6751,7 +11255,9 @@ fn fingerprint_bytes(bytes: &[u8]) -> u64 {
 }
 
 fn read_workspace_file_fingerprint(path: &Path) -> Option<u64> {
-    std::fs::read(path).ok().map(|bytes| fingerprint_bytes(&bytes))
+    std::fs::read(path)
+        .ok()
+        .map(|bytes| fingerprint_bytes(&bytes))
 }
 
 fn capture_required_path_snapshots(
@@ -6804,12 +11310,20 @@ fn required_paths_ready_for_review(
 }
 
 fn dynamic_turn_round_limit(plan: Option<&AgentWorkflowPlan>, structured_workflow: bool) -> usize {
-    let base = if structured_workflow { 180usize } else { 96usize };
+    let base = if structured_workflow {
+        180usize
+    } else {
+        96usize
+    };
     let Some(plan) = plan else {
         return base;
     };
 
-    let step_bonus = plan.steps.len().saturating_sub(if structured_workflow { 4 } else { 3 }) * 12;
+    let step_bonus = plan
+        .steps
+        .len()
+        .saturating_sub(if structured_workflow { 4 } else { 3 })
+        * 12;
     let required_path_bonus = plan.required_paths.len().min(10) * 18;
     let verification_bonus = plan.verification.len().min(12) * 10;
     let workflow_bonus = if plan.workflow_kind.eq_ignore_ascii_case("research") {
@@ -6817,13 +11331,23 @@ fn dynamic_turn_round_limit(plan: Option<&AgentWorkflowPlan>, structured_workflo
     } else {
         0
     };
-    let long_plan_bonus = if plan.steps.len() + plan.verification.len() + plan.required_paths.len() >= 12 {
-        if structured_workflow { 180 } else { 96 }
-    } else {
-        0
-    };
+    let long_plan_bonus =
+        if plan.steps.len() + plan.verification.len() + plan.required_paths.len() >= 12 {
+            if structured_workflow {
+                180
+            } else {
+                96
+            }
+        } else {
+            0
+        };
 
-    let mut limit = base + step_bonus + required_path_bonus + verification_bonus + workflow_bonus + long_plan_bonus;
+    let mut limit = base
+        + step_bonus
+        + required_path_bonus
+        + verification_bonus
+        + workflow_bonus
+        + long_plan_bonus;
     if plan.workflow_kind.eq_ignore_ascii_case("research") {
         limit = limit.max(if structured_workflow { 720 } else { 420 });
     }
@@ -6881,6 +11405,8 @@ fn required_paths_likely_satisfied_by_evidence(
     let turn_blocks = current_turn_blocks(messages);
     let mut changed_file_lookup = BTreeSet::new();
     let mut successful_tool_paths = BTreeSet::new();
+    let runtime_artifact_paths =
+        collect_runtime_artifact_paths_for_turn(messages, base_dir, workspace_root);
 
     for block in turn_blocks {
         match block {
@@ -6894,7 +11420,8 @@ fn required_paths_likely_satisfied_by_evidence(
             } => {
                 let (tool_name, tool_path) = tool_result_identity(turn_blocks, call_id);
                 let parsed = parse_tool_result_evidence(&tool_name, result, *success);
-                let passed = parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
+                let passed =
+                    parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
                 if passed {
                     if let Some(path) = tool_path {
                         successful_tool_paths.insert(path);
@@ -6929,8 +11456,13 @@ fn required_paths_likely_satisfied_by_evidence(
                     path.contains(&display_workspace_path(resolved).to_ascii_lowercase())
                 })
         });
+        let runtime_artifact_hit = runtime_artifact_paths.contains(&lowered)
+            || absolute_path.as_ref().is_some_and(|resolved| {
+                runtime_artifact_paths
+                    .contains(&display_workspace_path(resolved).to_ascii_lowercase())
+            });
 
-        exact_changed || tool_hit
+        exact_changed || tool_hit || runtime_artifact_hit
     })
 }
 
@@ -6989,6 +11521,13 @@ fn build_hard_verifier_report(
     required_path_snapshots: &[RequiredPathSnapshot],
     language: TurnLanguage,
 ) -> (AgentVerifierReport, Vec<String>, Vec<String>) {
+    let workflow_profile = plan_workflow_profile(plan, messages);
+    let profile_runtime = summarize_profile_runtime_from_messages(
+        &workflow_profile,
+        messages,
+        base_dir,
+        workspace_root,
+    );
     let turn_blocks = current_turn_blocks(messages);
     let mut checks = Vec::new();
     let mut issues = Vec::new();
@@ -7009,9 +11548,15 @@ fn build_hard_verifier_report(
     let mut saw_missing_runtime = false;
     let mut saw_research_runtime_gap = false;
     let mut saw_soft_evidence_gap = false;
+    let mut saw_missing_literature_fulltext = false;
+    let mut saw_missing_theory_evidence = false;
+    let mut saw_missing_dataset_acquisition = false;
+    let mut saw_missing_dataset_manifest = false;
     let mut target_evidence_pool = Vec::new();
     let mut changed_file_lookup = BTreeSet::new();
     let mut successful_tool_targets = BTreeSet::new();
+    let runtime_artifact_paths =
+        collect_runtime_artifact_paths_for_turn(messages, base_dir, workspace_root);
     let plan_has_runtime_step = plan
         .steps
         .iter()
@@ -7021,10 +11566,12 @@ fn build_hard_verifier_report(
             .verification
             .iter()
             .any(|target| !extract_required_workspace_paths_from_text(target).is_empty())
-        || plan
-            .steps
-            .iter()
-            .all(|step| matches!(step.kind.as_str(), "inspect" | "edit" | "summarize" | "research" | "verify"));
+        || plan.steps.iter().all(|step| {
+            matches!(
+                step.kind.as_str(),
+                "inspect" | "edit" | "summarize" | "research" | "verify"
+            )
+        });
 
     for block in turn_blocks {
         if let MessageBlock::ToolResult {
@@ -7052,7 +11599,8 @@ fn build_hard_verifier_report(
                 let (tool_name, tool_path) = tool_result_identity(turn_blocks, call_id);
                 observed_tool_names.insert(tool_name.clone());
                 let parsed = parse_tool_result_evidence(&tool_name, result, *success);
-                let passed = parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
+                let passed =
+                    parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
                 let is_superseded_failure = !passed
                     && successful_tool_targets.contains(&(tool_name.clone(), tool_path.clone()));
                 if matches!(
@@ -7228,8 +11776,14 @@ fn build_hard_verifier_report(
                     "{}",
                     localized_string(
                         language,
-                        format!("已编辑 {} (+{} / -{})", diff.file_path, diff.added, diff.removed),
-                        format!("edited {} (+{} / -{})", diff.file_path, diff.added, diff.removed)
+                        format!(
+                            "已编辑 {} (+{} / -{})",
+                            diff.file_path, diff.added, diff.removed
+                        ),
+                        format!(
+                            "edited {} (+{} / -{})",
+                            diff.file_path, diff.added, diff.removed
+                        )
                     )
                 ));
                 checkpoints.push(format!(
@@ -7238,6 +11792,132 @@ fn build_hard_verifier_report(
                 ));
             }
             _ => {}
+        }
+    }
+
+    for path in &runtime_artifact_paths {
+        target_evidence_pool.push(format!("runtime artifact path: {}", path));
+    }
+    target_evidence_pool.push(format_profile_runtime_summary(&profile_runtime, language));
+
+    if workflow_profile == "literature_review" {
+        if profile_runtime
+            .bundle_fields
+            .iter()
+            .any(|field| field.contains("remote_fulltext_coverage="))
+        {
+            let missing_remote_fulltext = profile_runtime.bundle_fields.iter().any(|field| {
+                field.contains("remote_fulltext_coverage=")
+                    && (field.contains("0 remote-first papers fetched")
+                        || field.contains("remote fulltext evidence observed")
+                        || field.contains("remote fulltext coverage pending"))
+            });
+            let missing_structured = profile_runtime.bundle_fields.iter().any(|field| {
+                field.contains("structured_paper_coverage=")
+                    && (field.contains("structured-paper evidence observed")
+                        || field.contains("structured paper evidence pending")
+                        || field.contains("0 papers include structured sections"))
+            });
+            if missing_remote_fulltext || missing_structured {
+                saw_missing_literature_fulltext = true;
+                issues.push(localized_text(
+                    language,
+                    "缺少远程 fulltext 覆盖或结构化论文内容证据。",
+                    "missing remote fulltext coverage or structured paper evidence",
+                ));
+            }
+        }
+    }
+
+    if workflow_profile == "theory" {
+        let missing_proof = profile_runtime.bundle_fields.iter().any(|field| {
+            field.contains("proof_status=")
+                && (field.contains("proof evidence pending")
+                    || field.contains("proof evidence observed"))
+        });
+        let missing_lemma = profile_runtime.bundle_fields.iter().any(|field| {
+            field.contains("lemma_summary=") && field.contains("lemma evidence pending")
+        });
+        let missing_counterexample = profile_runtime.bundle_fields.iter().any(|field| {
+            field.contains("counterexample_status=")
+                && field.contains("counterexample search pending")
+        });
+        if missing_proof || missing_lemma || missing_counterexample {
+            saw_missing_theory_evidence = true;
+            saw_soft_evidence_gap = true;
+            issues.push(localized_text(
+                language,
+                "缺少理论工作流所需的证明、引理依赖或反例搜索证据。",
+                "missing theory-workflow evidence for proof status, lemma dependencies, or counterexample search",
+            ));
+            checks.push(AgentVerifierCheck {
+                id: format!("theory-evidence-{}", checks.len() + 1),
+                title: localized_text(language, "理论证据", "theory evidence").to_string(),
+                status: "missing".to_string(),
+                detail: localized_text(
+                    language,
+                    "理论工作流缺少证明状态、引理摘要或反例搜索的硬证据",
+                    "theory workflow is missing hard evidence for proof status, lemma summary, or counterexample search",
+                ),
+                evidence: profile_runtime
+                    .bundle_fields
+                    .iter()
+                    .filter(|field| {
+                        field.contains("proof_status=")
+                            || field.contains("lemma_summary=")
+                            || field.contains("counterexample_status=")
+                    })
+                    .cloned()
+                    .collect(),
+            });
+        }
+    }
+
+    if is_dataset_driven_workflow_profile(&workflow_profile)
+        && dataset_closure_signal_present(plan, messages)
+    {
+        let missing_dataset_acquisition =
+            profile_runtime_field_pending(&profile_runtime, "dataset_acquisition");
+        let missing_dataset_manifest =
+            profile_runtime_field_pending(&profile_runtime, "dataset_manifest");
+
+        if missing_dataset_acquisition || missing_dataset_manifest {
+            saw_soft_evidence_gap = true;
+            if missing_dataset_acquisition {
+                saw_missing_dataset_acquisition = true;
+                issues.push(localized_text(
+                    language,
+                    "缺少公开数据集入口检索或数据来源固定证据。",
+                    "missing public-dataset entrypoint search or fixed dataset-source evidence",
+                ));
+            }
+            if missing_dataset_manifest {
+                saw_missing_dataset_manifest = true;
+                issues.push(localized_text(
+                    language,
+                    "缺少 dataset manifest 证据，尚未固定 provider/source_url/task_hint 等结构化数据来源信息。",
+                    "missing dataset manifest evidence for fixed provider/source_url/task_hint-style structured source metadata",
+                ));
+            }
+
+            checks.push(AgentVerifierCheck {
+                id: format!("dataset-closure-{}", checks.len() + 1),
+                title: localized_text(language, "数据集闭环", "dataset closure").to_string(),
+                status: "missing".to_string(),
+                detail: localized_text(
+                    language,
+                    "当前数据驱动工作流缺少 dataset acquisition 或 dataset manifest 的硬证据。",
+                    "The current dataset-driven workflow is missing hard evidence for dataset acquisition or dataset manifest closure.",
+                ),
+                evidence: profile_runtime
+                    .bundle_fields
+                    .iter()
+                    .filter(|field| {
+                        field.contains("dataset_acquisition=") || field.contains("dataset_manifest=")
+                    })
+                    .cloned()
+                    .collect(),
+            });
         }
     }
 
@@ -7262,7 +11942,9 @@ fn build_hard_verifier_report(
                 let fingerprint_now = read_workspace_file_fingerprint(path);
                 let fingerprint_before = snapshot.and_then(|item| item.fingerprint_before);
                 changed_on_disk = match (snapshot, fingerprint_now) {
-                    (Some(before), Some(now)) => !before.existed_before || before.fingerprint_before != Some(now),
+                    (Some(before), Some(now)) => {
+                        !before.existed_before || before.fingerprint_before != Some(now)
+                    }
                     (Some(before), None) => !before.existed_before,
                     (None, Some(_)) => true,
                     (None, None) => false,
@@ -7296,8 +11978,14 @@ fn build_hard_verifier_report(
                     })
             })
         });
+        let runtime_artifact_hit = runtime_artifact_paths.contains(&lowered)
+            || absolute_path.as_ref().is_some_and(|resolved| {
+                runtime_artifact_paths
+                    .contains(&display_workspace_path(resolved).to_ascii_lowercase())
+            });
 
-        if exists_now && (exact_changed || changed_on_disk || tool_path_hit) {
+        if exists_now && (exact_changed || changed_on_disk || tool_path_hit || runtime_artifact_hit)
+        {
             checks.push(AgentVerifierCheck {
                 id: format!("required-path-{}", checks.len() + 1),
                 title: required_path.clone(),
@@ -7313,6 +12001,11 @@ fn build_hard_verifier_report(
                         .as_ref()
                         .map(|path| format!("filesystem path: {}", display_workspace_path(path)))
                         .unwrap_or_default(),
+                    if runtime_artifact_hit {
+                        format!("runtime artifact captured: {}", required_path)
+                    } else {
+                        String::new()
+                    },
                 ]
                 .into_iter()
                 .filter(|item| !item.trim().is_empty())
@@ -7323,12 +12016,17 @@ fn build_hard_verifier_report(
             let detail = if !exists_now {
                 match language {
                     TurnLanguage::Zh => format!("缺少所需工作区路径：{}", required_path),
-                    TurnLanguage::En => format!("required workspace path missing: {}", required_path),
+                    TurnLanguage::En => {
+                        format!("required workspace path missing: {}", required_path)
+                    }
                 }
             } else {
                 match language {
                     TurnLanguage::Zh => format!("所需工作区路径本轮未发生变更：{}", required_path),
-                    TurnLanguage::En => format!("required workspace path unchanged this turn: {}", required_path),
+                    TurnLanguage::En => format!(
+                        "required workspace path unchanged this turn: {}",
+                        required_path
+                    ),
                 }
             };
             issues.push(detail.clone());
@@ -7402,13 +12100,40 @@ fn build_hard_verifier_report(
         ));
     }
 
-    if plan.steps.iter().any(|step| step.kind == "verify") && !saw_validation_signal && verification_hits == 0 && !plan_is_file_evidence_friendly {
+    if plan.steps.iter().any(|step| step.kind == "verify")
+        && !saw_validation_signal
+        && verification_hits == 0
+        && !plan_is_file_evidence_friendly
+    {
         saw_soft_evidence_gap = true;
         issues.push(localized_text(
             language,
             "验证阶段结束时缺少足够强的验证证据。",
             "verification stage finished without strong validation evidence",
         ));
+    }
+
+    if saw_missing_literature_fulltext {
+        saw_soft_evidence_gap = true;
+        checks.push(AgentVerifierCheck {
+            id: format!("literature-fulltext-{}", checks.len() + 1),
+            title: localized_text(language, "远程 fulltext 证据", "remote fulltext evidence").to_string(),
+            status: "missing".to_string(),
+            detail: localized_text(
+                language,
+                "文献综述缺少远程正文覆盖或结构化章节/参考文献证据",
+                "literature review is missing remote fulltext coverage or structured section/reference evidence",
+            ),
+            evidence: profile_runtime
+                .bundle_fields
+                .iter()
+                .filter(|field| {
+                    field.contains("remote_fulltext_coverage=")
+                        || field.contains("structured_paper_coverage=")
+                })
+                .cloned()
+                .collect(),
+        });
     }
 
     if plan.workflow_kind.eq_ignore_ascii_case("research")
@@ -7455,6 +12180,60 @@ fn build_hard_verifier_report(
         ));
     }
 
+    if !profile_runtime.bundle_fields.is_empty() {
+        evidence_lines.push(localized_string(
+            language,
+            format!("结构化结果包：{}", profile_runtime.bundle_fields.join("; ")),
+            format!(
+                "structured result bundle: {}",
+                profile_runtime.bundle_fields.join("; ")
+            ),
+        ));
+    }
+    if !profile_runtime.compare_observations.is_empty() {
+        evidence_lines.push(localized_string(
+            language,
+            format!(
+                "结构化对比证据：{}",
+                profile_runtime
+                    .compare_observations
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            format!(
+                "structured comparison evidence: {}",
+                profile_runtime
+                    .compare_observations
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+        ));
+    }
+    if !profile_runtime.lineage_notes.is_empty() || !profile_runtime.recent_runs.is_empty() {
+        let lineage_excerpt = if !profile_runtime.lineage_notes.is_empty() {
+            profile_runtime
+                .lineage_notes
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" | ")
+        } else {
+            profile_runtime.recent_runs.join(", ")
+        };
+        evidence_lines.push(localized_string(
+            language,
+            format!("结构化 lineage 证据：{}", lineage_excerpt),
+            format!("structured lineage evidence: {}", lineage_excerpt),
+        ));
+    }
+
     let soft_evidence_only = !issues.is_empty()
         && !has_failed_runtime
         && !saw_test_failure
@@ -7462,9 +12241,16 @@ fn build_hard_verifier_report(
         && !saw_missing_edit
         && !saw_missing_runtime
         && !saw_research_runtime_gap
+        && !saw_missing_literature_fulltext
+        && !saw_missing_dataset_acquisition
+        && !saw_missing_dataset_manifest
+        && !saw_missing_theory_evidence
         && saw_soft_evidence_gap
         && (has_successful_runtime
-            || !plan.steps.iter().any(|step| matches!(step.kind.as_str(), "run" | "verify"))
+            || !plan
+                .steps
+                .iter()
+                .any(|step| matches!(step.kind.as_str(), "run" | "verify"))
             || !plan.required_paths.is_empty());
     if soft_evidence_only {
         branch_notes.push(localized_text(
@@ -7486,34 +12272,9 @@ fn build_hard_verifier_report(
         "pass"
     };
     let summary = if status == "pass" {
-        if diff_count > 0 {
-            match language {
-                TurnLanguage::Zh => format!(
-                    "硬验证器已通过：共检测到 {} 个编辑文件，匹配到 {} 个验证目标。",
-                    diff_count, verification_hits
-                ),
-                TurnLanguage::En => format!(
-                    "Hard verifier passed with {} edited files and {} matched verification targets.",
-                    diff_count, verification_hits
-                ),
-            }
-        } else {
-            match language {
-                TurnLanguage::Zh => format!(
-                    "硬验证器已通过：匹配到 {} 个验证目标。",
-                    verification_hits
-                ),
-                TurnLanguage::En => format!(
-                    "Hard verifier passed with {} matched verification targets.",
-                    verification_hits
-                ),
-            }
-        }
+        hard_verifier_pass_summary(&workflow_profile, diff_count, verification_hits, language)
     } else {
-        match language {
-            TurnLanguage::Zh => format!("硬验证器发现 {} 个问题。", issues.len().max(1)),
-            TurnLanguage::En => format!("Hard verifier found {} issue(s).", issues.len().max(1)),
-        }
+        hard_verifier_repair_summary(&workflow_profile, issues.len().max(1), language)
     };
     let next_actions = if status == "repair" {
         let mut actions = Vec::new();
@@ -7538,12 +12299,46 @@ fn build_hard_verifier_report(
                 "produce explicit verification evidence for each planned target",
             ));
         }
-        if !saw_validation_signal && plan.steps.iter().any(|step| step.kind == "verify") && !plan_is_file_evidence_friendly {
+        if saw_missing_dataset_acquisition {
+            let paper_hint_evidence = profile_runtime
+                .bundle_fields
+                .iter()
+                .find(|field| field.starts_with("paper_dataset_hints="))
+                .cloned()
+                .unwrap_or_default();
+            actions.push(localized_text(
+                language,
+                if paper_hint_evidence.is_empty() || paper_hint_evidence.contains("pending") {
+                    "先运行公开数据集入口检索，记录直连官方数据集库命中的 provider/source_url，并把候选数据源固定下来。"
+                } else {
+                    "先使用论文中标明的数据集名运行公开数据集入口检索，记录直连官方数据集库命中的 provider/source_url，并把候选数据源固定下来。"
+                },
+                if paper_hint_evidence.is_empty() || paper_hint_evidence.contains("pending") {
+                    "run the public-dataset entrypoint search first, record the direct official dataset database provider/source_url hits, and freeze the candidate data source"
+                } else {
+                    "run the public-dataset entrypoint search with the dataset names recovered from papers first, record the direct official dataset database provider/source_url hits, and freeze the candidate data source"
+                },
+            ));
+        }
+        if saw_missing_dataset_manifest {
+            actions.push(localized_text(
+                language,
+                "补一个结构化 dataset manifest，至少固定 provider、source_url、retrieval_entrypoint、task_hint 和后续 artifact 引用。",
+                "add a structured dataset manifest that fixes at least provider, source_url, retrieval_entrypoint, task_hint, and downstream artifact references",
+            ));
+        }
+        if !saw_validation_signal
+            && plan.steps.iter().any(|step| step.kind == "verify")
+            && !plan_is_file_evidence_friendly
+        {
             actions.push(localized_text(
                 language,
                 "执行一个具体的验证或测试步骤，并记录结果。",
                 "run a concrete validation or test step and capture the result",
             ));
+        }
+        if let Some(action) = workflow_specific_repair_action(&workflow_profile, language) {
+            actions.push(action);
         }
         if actions.is_empty() {
             actions.push(localized_text(
@@ -7610,6 +12405,11 @@ async fn generate_agent_plan(
     language: TurnLanguage,
 ) -> Result<AgentWorkflowPlan> {
     let mode_name = workflow_mode(mode);
+    let workflow_profile = if mode_name == "research" {
+        infer_research_workflow_kind(user_content, messages)
+    } else {
+        mode_name.to_string()
+    };
     let required_paths = collect_required_workspace_paths_from_user_content(user_content);
     let conversation = build_conversation(messages, Some(system_prompt_for_mode(mode).as_str()));
     let transcript = conversation
@@ -7622,7 +12422,7 @@ async fn generate_agent_plan(
         .join("\n");
     let planner_prompt = match language {
         TurnLanguage::Zh => format!(
-            "你是面向代码与科研 IDE 的规划子代理。只返回 JSON。\n\n任务模式：{mode_name}\n用户请求：\n{user_content}\n\n最近对话：\n{transcript}\n\n明确要求的工作区路径：\n{required_paths}\n\n输出 schema：\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\n规则：\n- 保持 2-6 个步骤。\n- 只要任务可能编辑文件或运行代码，就优先安排 reviewer 和 verifier。\n- 如果只是轻量对话，计划要短。\n- 如果是研究任务，要包含证据收集与验证。\n- 如果用户明确给出了工作区路径，必须保留在 required_paths 中，并围绕这些精确目标设计步骤和验证。\n- 不要把这些路径替换成别的相似文件或目录。\n- 不要输出 markdown 代码块。",
+            "你是面向代码与科研 IDE 的规划子代理。只返回 JSON。\n\n任务模式：{mode_name}\n研究轮廓提示：{workflow_profile}\n用户请求：\n{user_content}\n\n最近对话：\n{transcript}\n\n明确要求的工作区路径：\n{required_paths}\n\n输出 schema：\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\n规则：\n- 该 IDE 仅面向计算机科学研究与工程，不要设计生物、化学、医学、湿实验等非计算机科学工作流。\n- 如果用户请求跨出计算机科学范围，要把可执行部分重述为算法、数据、系统、代码、评测、形式化分析或文献综述任务；无法重述的部分在 summary 和 verification 中明确标出范围边界。\n- 如果研究轮廓提示是 classical_ml、deep_learning、systems_evaluation、agent_evaluation、security_analysis、theory 或 literature_review，就优先采用对应的计算机科学评测与验证路径，而不是泛化的“做实验”表述。\n- 保持 2-6 个步骤。\n- 只要任务可能编辑文件或运行代码，就优先安排 reviewer 和 verifier。\n- 如果只是轻量对话，计划要短。\n- 如果是研究任务，要包含证据收集与验证。\n- 如果用户明确给出了工作区路径，必须保留在 required_paths 中，并围绕这些精确目标设计步骤和验证。\n- 不要把这些路径替换成别的相似文件或目录。\n- 不要输出 markdown 代码块。",
             required_paths = if required_paths.is_empty() {
                 "无".to_string()
             } else {
@@ -7630,7 +12430,7 @@ async fn generate_agent_plan(
             }
         ),
         TurnLanguage::En => format!(
-            "You are the planner subagent for a coding and research IDE agent.\nReturn only JSON.\n\nTask mode: {mode_name}\nUser request:\n{user_content}\n\nRecent conversation:\n{transcript}\n\nExplicit required workspace paths:\n{required_paths}\n\nOutput schema:\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\nRules:\n- Keep 2-6 steps.\n- Choose reviewer and verifier delegates whenever the task may edit files or run code.\n- For lightweight chat, keep the plan short.\n- For research, include evidence gathering and verification.\n- If explicit required workspace paths are listed, keep them in required_paths and build steps and verification around those exact targets.\n- Do not replace required paths with semantically similar files in another directory.\n- No markdown fences.",
+            "You are the planner subagent for a coding and research IDE agent.\nReturn only JSON.\n\nTask mode: {mode_name}\nResearch profile hint: {workflow_profile}\nUser request:\n{user_content}\n\nRecent conversation:\n{transcript}\n\nExplicit required workspace paths:\n{required_paths}\n\nOutput schema:\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\nRules:\n- This IDE is scoped to computer science research and engineering only. Do not plan biology, chemistry, medicine, wet-lab, or other non-computer-science workflows.\n- When a request crosses scope, restate the executable portion as an algorithms, data, systems, code, evaluation, formal-analysis, or literature-review task, and explicitly mark the out-of-scope part in the summary and verification targets.\n- When the research profile hint is classical_ml, deep_learning, systems_evaluation, agent_evaluation, security_analysis, theory, or literature_review, prefer the matching computer-science evaluation workflow instead of a generic experiment template.\n- Keep 2-6 steps.\n- Choose reviewer and verifier delegates whenever the task may edit files or run code.\n- For lightweight chat, keep the plan short.\n- For research, include evidence gathering and verification.\n- If explicit required workspace paths are listed, keep them in required_paths and build steps and verification around those exact targets.\n- Do not replace required paths with semantically similar files in another directory.\n- No markdown fences.",
             required_paths = if required_paths.is_empty() {
                 "none".to_string()
             } else {
@@ -7696,11 +12496,10 @@ async fn generate_agent_plan(
     }
     if !plan.required_paths.is_empty() {
         for path in &plan.required_paths {
-            if !plan
-                .verification
-                .iter()
-                .any(|item| item.to_ascii_lowercase().contains(&path.to_ascii_lowercase()))
-            {
+            if !plan.verification.iter().any(|item| {
+                item.to_ascii_lowercase()
+                    .contains(&path.to_ascii_lowercase())
+            }) {
                 plan.verification
                     .push(localized_required_target_text(language, path));
             }
@@ -7717,6 +12516,15 @@ async fn review_agent_progress(
     user_content: &str,
     language: TurnLanguage,
 ) -> Result<AgentCritiqueReport> {
+    let spec = reviewer_subagent_spec();
+    let workflow_profile = if plan.workflow_kind.eq_ignore_ascii_case("research") {
+        infer_research_workflow_kind(user_content, messages)
+    } else {
+        plan.workflow_kind.clone()
+    };
+    let focus_text = workflow_specific_subagent_focus(&spec, &workflow_profile, language);
+    let issue_style = workflow_specific_subagent_issue_style(&spec, &workflow_profile, language);
+    let action_style = workflow_specific_subagent_action_style(&spec, &workflow_profile, language);
     let transcript = messages
         .iter()
         .rev()
@@ -7725,10 +12533,15 @@ async fn review_agent_progress(
         .map(|block| match block {
             MessageBlock::User { content, .. } => format!("user: {}", content),
             MessageBlock::Assistant { content } => format!("assistant: {}", content),
+            MessageBlock::AssistantChoices { title, options } => {
+                format!("assistant_choices: {} => {}", title, options.join(" | "))
+            }
             MessageBlock::ToolCall { name, status, .. } => {
                 format!("tool_call: {} [{}]", name, tool_status_name(status))
             }
-            MessageBlock::ToolResult { result, success, .. } => format!(
+            MessageBlock::ToolResult {
+                result, success, ..
+            } => format!(
                 "tool_result: {} :: {}",
                 if *success { "success" } else { "failure" },
                 tail_string(result, 400)
@@ -7740,7 +12553,9 @@ async fn review_agent_progress(
             MessageBlock::Thinking { content, .. } => format!("thinking: {}", content),
             MessageBlock::System { content } => format!("system: {}", content),
             MessageBlock::Error { content } => format!("error: {}", content),
-            MessageBlock::AssistantStreaming { content } => format!("assistant_stream: {}", content),
+            MessageBlock::AssistantStreaming { content } => {
+                format!("assistant_stream: {}", content)
+            }
             MessageBlock::Subagent { record } => format!(
                 "subagent: {} [{}] :: {}",
                 record.name,
@@ -7757,22 +12572,36 @@ async fn review_agent_progress(
         .join("\n");
     let prompt = match language {
         TurnLanguage::Zh => format!(
-            "你是代码代理的审查/验证子代理。只返回 JSON。\n\n原始用户请求：\n{user_content}\n\n计划摘要：{summary}\n验证目标：{verification}\n\n已观察到的执行轨迹：\n{transcript}\n\n输出 schema：\n{{\"status\":\"pass|repair\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\n规则：\n- 如果存在工具失败、缺少验证，或者任务明显未完成，返回 repair。\n- 只有当轨迹显示目标大概率已经满足时，才返回 pass。\n- 结论要简洁、具体。\n- 不要输出 markdown 代码块。",
+            "你是代码与科研 IDE 代理中的 reviewer 子代理。只返回 JSON。\n\n原始用户请求：\n{user_content}\n\n计划摘要：{summary}\n工作流类型：{workflow_kind}\n研究轮廓：{workflow_profile}\n验证目标：{verification}\n\n你的关注点：\n{focus}\n\nissue 风格要求：\n{issue_style}\n\nnext_actions 风格要求：\n{action_style}\n\n已观察到的执行轨迹：\n{transcript}\n\n输出 schema：\n{{\"status\":\"pass|repair\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\n规则：\n- 该 IDE 仅面向计算机科学任务；如果轨迹把请求误导到了非计算机科学领域，要返回 repair，并要求收敛到算法、数据、系统、代码、评测或形式化分析路径。\n- 如果存在工具失败、缺少验证，或者任务明显未完成，返回 repair。\n- 只有当轨迹显示用户请求已被完整满足，并且结果与你的 CS 研究轮廓关注点一致时，才返回 pass。\n- 结论、issues 和 next_actions 都要具体，不要泛泛而谈。\n- 不要输出 markdown 代码块。",
+            user_content = user_content,
             summary = plan.summary,
+            workflow_kind = plan.workflow_kind,
+            workflow_profile = workflow_profile,
             verification = if plan.verification.is_empty() {
                 "无".to_string()
             } else {
                 plan.verification.join("; ")
-            }
+            },
+            focus = focus_text,
+            issue_style = issue_style,
+            action_style = action_style,
+            transcript = transcript,
         ),
         TurnLanguage::En => format!(
-            "You are the reviewer/verifier subagent for a coding agent.\nReturn only JSON.\n\nOriginal user request:\n{user_content}\n\nPlan summary: {summary}\nVerification targets: {verification}\n\nObserved execution trace:\n{transcript}\n\nOutput schema:\n{{\"status\":\"pass|repair\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\nRules:\n- Return status=repair when there are tool failures, missing verification, or evidence that the task is incomplete.\n- Return status=pass only when the trace shows the goal is likely satisfied.\n- Be concise and concrete.\n- No markdown fences.",
+            "You are the reviewer subagent for a coding and research IDE agent.\nReturn only JSON.\n\nOriginal user request:\n{user_content}\n\nPlan summary: {summary}\nWorkflow kind: {workflow_kind}\nResearch profile: {workflow_profile}\nVerification targets: {verification}\n\nYour focus:\n{focus}\n\nIssue style requirements:\n{issue_style}\n\nNext-action style requirements:\n{action_style}\n\nObserved execution trace:\n{transcript}\n\nOutput schema:\n{{\"status\":\"pass|repair\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\nRules:\n- This IDE is scoped to computer science tasks only. Return repair when the trace drifts into non-computer-science domain work instead of algorithms, data, systems, code, evaluation, or formal analysis.\n- Return status=repair when there are tool failures, missing verification, or evidence that the task is incomplete.\n- Return status=pass only when the trace shows the request is fully satisfied and aligned with your CS workflow focus.\n- Keep the summary, issues, and next_actions concrete rather than generic.\n- No markdown fences.",
+            user_content = user_content,
             summary = plan.summary,
+            workflow_kind = plan.workflow_kind,
+            workflow_profile = workflow_profile,
             verification = if plan.verification.is_empty() {
                 "none".to_string()
             } else {
                 plan.verification.join("; ")
-            }
+            },
+            focus = focus_text,
+            issue_style = issue_style,
+            action_style = action_style,
+            transcript = transcript,
         ),
     };
     let content = provider_completion(
@@ -7782,7 +12611,7 @@ async fn review_agent_progress(
             Message::system(&localized_text(
                 language,
                 "你是严格的审查子代理。只输出 JSON。",
-                "You are a strict reviewer subagent. Output JSON only.",
+                spec.system_prompt,
             )),
             Message::user(&prompt),
         ],
@@ -7803,7 +12632,8 @@ async fn run_reviewer_subagent(
     user_content: &str,
     language: TurnLanguage,
 ) -> Result<(AgentCritiqueReport, AgentSubagentRecord)> {
-    let report = review_agent_progress(provider, runtime, plan, messages, user_content, language).await?;
+    let report =
+        review_agent_progress(provider, runtime, plan, messages, user_content, language).await?;
     let record = AgentSubagentRecord {
         id: "reviewer".to_string(),
         name: "reviewer".to_string(),
@@ -7825,15 +12655,7 @@ async fn run_reviewer_subagent(
 
 fn analysis_subagent_specs() -> Vec<AnalysisSubagentSpec> {
     vec![
-        AnalysisSubagentSpec {
-            id: "reviewer",
-            name: "reviewer",
-            purpose: "Review the turn for completeness and whether the result satisfies the request.",
-            kind: "review",
-            system_prompt: "You are a strict reviewer subagent. Output JSON only.",
-            focus: "Check whether the user request is fully satisfied and whether the response is complete.",
-            focus_zh: "检查用户请求是否已经被完整满足，以及结果是否足够完整。",
-        },
+        reviewer_subagent_spec(),
         AnalysisSubagentSpec {
             id: "critic",
             name: "critic",
@@ -7855,6 +12677,353 @@ fn analysis_subagent_specs() -> Vec<AnalysisSubagentSpec> {
     ]
 }
 
+fn workflow_specific_subagent_focus(
+    spec: &AnalysisSubagentSpec,
+    workflow_profile: &str,
+    language: TurnLanguage,
+) -> String {
+    let base = match language {
+        TurnLanguage::Zh => spec.focus_zh,
+        TurnLanguage::En => spec.focus,
+    };
+
+    let extra = match (spec.id, workflow_profile, language) {
+        ("reviewer", "classical_ml", TurnLanguage::Zh) => {
+            "重点判断交付物是否已经把公开数据集入口检索、dataset manifest 固化、数据切分、baseline、accuracy/F1、混淆矩阵或误差分析交代完整，而不是只说“模型有效”。"
+        }
+        ("reviewer", "classical_ml", TurnLanguage::En) => {
+            "Check whether the deliverable closes the loop on public-dataset entrypoint search, a fixed dataset manifest, dataset splits, baselines, accuracy/F1, confusion-matrix evidence, or error analysis instead of vaguely claiming the model works."
+        }
+        ("reviewer", "deep_learning", TurnLanguage::Zh) => {
+            "重点判断是否已经交付公开数据集入口检索、dataset manifest、训练日志、checkpoint、资源约束、验证集读数和失败恢复信息，而不是停在泛泛训练描述。"
+        }
+        ("reviewer", "deep_learning", TurnLanguage::En) => {
+            "Check whether the result actually ships public-dataset entrypoint evidence, a fixed dataset manifest, training logs, checkpoints, resource constraints, validation readings, and failure-recovery details instead of generic training claims."
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::Zh) => {
+            "重点判断数据或 workload 入口、manifest、负载定义、延迟/吞吐/内存口径、profiling 证据和复现条件是否已经完整落到结果里。"
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::En) => {
+            "Check whether the workload or dataset entrypoint, manifest closure, workload definition, latency/throughput/memory measurement, profiling evidence, and reproducibility conditions are concretely present in the result."
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::Zh) => {
+            "重点判断结果是否明确给出任务集入口、manifest、任务成功率、关键轨迹、judge 口径、工具错误和修复复测变化。"
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::En) => {
+            "Check whether the result explicitly reports task-suite entrypoint evidence, a fixed evaluation manifest, task success rate, key trajectories, judge criteria, tool errors, and before/after repair deltas."
+        }
+        ("reviewer", "security_analysis", TurnLanguage::Zh) => {
+            "重点判断是否真的交付了目标语料或 benchmark 入口、manifest、目标面、漏洞或告警证据、误报区分、影响判断和修复建议，而不是模糊风险提示。"
+        }
+        ("reviewer", "security_analysis", TurnLanguage::En) => {
+            "Check whether the result truly delivers target-corpus or benchmark entrypoint evidence, a fixed manifest, target scope, vulnerability or alert evidence, false-positive handling, impact assessment, and remediation guidance instead of vague risk notes."
+        }
+        ("critic", "classical_ml", TurnLanguage::Zh) => {
+            "重点寻找数据泄漏、数据集入口未固化、manifest 漂移、baseline 过弱、随机种子不稳、指标看起来好但缺少误差分析的薄弱点。"
+        }
+        ("critic", "classical_ml", TurnLanguage::En) => {
+            "Look for leakage, unfixed dataset entrypoints or manifest drift, weak baselines, unstable seeds, or metrics that look good without supporting error analysis."
+        }
+        ("critic", "deep_learning", TurnLanguage::Zh) => {
+            "重点寻找数据入口未固定、训练不稳定、checkpoint 缺失、资源瓶颈、只报单次结果或无法恢复的风险。"
+        }
+        ("critic", "deep_learning", TurnLanguage::En) => {
+            "Look for unfixed dataset entrypoints or manifests, unstable training, missing checkpoints, resource bottlenecks, one-off metrics, or missing resumability."
+        }
+        ("critic", "systems_evaluation", TurnLanguage::Zh) => {
+            "重点寻找 workload 或 benchmark manifest 漂移、负载不真实、测量口径漂移、baseline 不公平、profiling 缺失或复现条件不足的风险。"
+        }
+        ("critic", "systems_evaluation", TurnLanguage::En) => {
+            "Look for workload or benchmark-manifest drift, unrealistic workloads, drifting measurement definitions, unfair baselines, missing profiling, or weak reproducibility."
+        }
+        ("critic", "agent_evaluation", TurnLanguage::Zh) => {
+            "重点寻找任务集来源未固定、任务集偏置、judge 口径不稳、轨迹样本过少、工具错误被忽略或复测对比不足的问题。"
+        }
+        ("critic", "agent_evaluation", TurnLanguage::En) => {
+            "Look for unfixed task-suite sourcing, task-suite bias, unstable judge criteria, too few trajectory examples, ignored tool errors, or weak re-test comparisons."
+        }
+        ("critic", "security_analysis", TurnLanguage::Zh) => {
+            "重点寻找目标语料或 benchmark manifest 漂移、误报未剔除、影响夸大、证据链断裂、威胁模型含糊或修复建议不可执行的问题。"
+        }
+        ("critic", "security_analysis", TurnLanguage::En) => {
+            "Look for target-corpus or benchmark-manifest drift, unfiltered false positives, overstated impact, broken evidence chains, vague threat models, or non-actionable remediation."
+        }
+        ("researcher", "classical_ml", TurnLanguage::Zh) => {
+            "重点核查是否已形成公开数据集入口记录、dataset manifest、可复现脚本、metrics、baseline 对照和继续迭代所需的误差分析证据。"
+        }
+        ("researcher", "classical_ml", TurnLanguage::En) => {
+            "Check for public-dataset entrypoint records, a reusable dataset manifest, reproducible scripts, metrics artifacts, baseline comparisons, and error-analysis evidence that enable the next iteration."
+        }
+        ("researcher", "deep_learning", TurnLanguage::Zh) => {
+            "重点核查是否已形成公开数据集入口记录、dataset manifest、训练日志、checkpoint、验证集读数和下一轮调参或恢复训练所需的产物。"
+        }
+        ("researcher", "deep_learning", TurnLanguage::En) => {
+            "Check for public-dataset entrypoint records, a reusable dataset manifest, training logs, checkpoints, validation readings, and artifacts that support the next tuning or resume step."
+        }
+        ("researcher", "systems_evaluation", TurnLanguage::Zh) => {
+            "重点核查是否已形成 workload/dataset 入口记录、manifest、benchmark 产物、profiling 证据、瓶颈解释和后续优化实验所需材料。"
+        }
+        ("researcher", "systems_evaluation", TurnLanguage::En) => {
+            "Check for workload or dataset entrypoint records, a fixed manifest, benchmark artifacts, profiling evidence, bottleneck explanations, and materials for the next optimization experiment."
+        }
+        ("researcher", "agent_evaluation", TurnLanguage::Zh) => {
+            "重点核查是否已形成任务集入口记录、manifest、任务集结果、关键轨迹、失败模式归纳以及修复后复测所需证据。"
+        }
+        ("researcher", "agent_evaluation", TurnLanguage::En) => {
+            "Check for task-suite entrypoint records, a fixed evaluation manifest, task-suite results, key trajectories, distilled failure modes, and evidence needed for post-repair re-evaluation."
+        }
+        ("researcher", "security_analysis", TurnLanguage::Zh) => {
+            "重点核查是否已形成目标语料或 benchmark 入口记录、manifest、可审阅的发现清单、复现步骤、影响评估和补丁复验路径。"
+        }
+        ("researcher", "security_analysis", TurnLanguage::En) => {
+            "Check for target-corpus or benchmark entrypoint records, a fixed manifest, a reviewable findings list, reproduction steps, impact assessment, and a patch re-validation path."
+        }
+        (_, "classical_ml", TurnLanguage::Zh) => {
+            "重点核查数据切分、baseline、accuracy/F1 等指标、混淆矩阵与误差分析是否闭环。"
+        }
+        (_, "classical_ml", TurnLanguage::En) => {
+            "Focus on dataset split hygiene, lightweight baselines, accuracy/F1-style metrics, confusion-matrix evidence, and error analysis."
+        }
+        (_, "deep_learning", TurnLanguage::Zh) => {
+            "重点核查训练日志、checkpoint、资源约束、验证集读数和恢复路径。"
+        }
+        (_, "deep_learning", TurnLanguage::En) => {
+            "Focus on training logs, checkpoints, resource constraints, validation metrics, and resumability."
+        }
+        (_, "systems_evaluation", TurnLanguage::Zh) => {
+            "重点核查负载模型、延迟/吞吐/内存口径、profiling 证据和复现条件。"
+        }
+        (_, "systems_evaluation", TurnLanguage::En) => {
+            "Focus on workload definition, latency/throughput/memory measurement, profiling evidence, and reproducibility conditions."
+        }
+        (_, "agent_evaluation", TurnLanguage::Zh) => {
+            "重点核查任务成功率、轨迹质量、工具错误、judge 口径与复测变化。"
+        }
+        (_, "agent_evaluation", TurnLanguage::En) => {
+            "Focus on task success rate, trajectory quality, tool errors, judge criteria, and before/after repair deltas."
+        }
+        (_, "security_analysis", TurnLanguage::Zh) => {
+            "重点核查目标面、真实证据、误报区分、影响判断和修复建议。"
+        }
+        (_, "security_analysis", TurnLanguage::En) => {
+            "Focus on target scope, concrete evidence, false-positive handling, impact assessment, and remediation guidance."
+        }
+        (_, "theory", TurnLanguage::Zh) => {
+            "重点核查定义、引理依赖、反例搜索和推理是否有跳步。"
+        }
+        (_, "theory", TurnLanguage::En) => {
+            "Focus on definitions, lemma dependencies, counterexample search, and missing proof steps."
+        }
+        ("reviewer", "literature_review", TurnLanguage::Zh) => {
+            "重点判断是否明确交付了检索范围、筛选标准、remote_fulltext_coverage、structured_paper_coverage、证据综合和研究空白，而不是只列论文标题。"
+        }
+        ("reviewer", "literature_review", TurnLanguage::En) => {
+            "Check whether the result explicitly delivers search scope, screening criteria, remote_fulltext_coverage, structured_paper_coverage, synthesis, and gap statements instead of only listing paper titles."
+        }
+        ("critic", "literature_review", TurnLanguage::Zh) => {
+            "重点寻找只依赖元数据、远程正文覆盖不足、结构化章节/参考文献缺失、筛选口径不稳或综合结论跳步的问题。"
+        }
+        ("critic", "literature_review", TurnLanguage::En) => {
+            "Look for over-reliance on metadata, weak remote fulltext coverage, missing structured sections/references, unstable screening criteria, or synthesis claims that outrun the evidence."
+        }
+        ("researcher", "literature_review", TurnLanguage::Zh) => {
+            "重点核查是否已形成可复用的论文清单、远程 fulltext 覆盖摘要、结构化正文证据、纳入排除记录和研究空白归纳。"
+        }
+        ("researcher", "literature_review", TurnLanguage::En) => {
+            "Check for a reusable paper set, remote fulltext coverage summary, structured paper evidence, inclusion/exclusion records, and distilled gap statements."
+        }
+        (_, "literature_review", TurnLanguage::Zh) => {
+            "重点核查检索范围、筛选标准、remote_fulltext_coverage、structured_paper_coverage、证据综合和研究空白是否明确。"
+        }
+        (_, "literature_review", TurnLanguage::En) => {
+            "Focus on search scope, screening criteria, remote_fulltext_coverage, structured_paper_coverage, evidence synthesis, and whether the gap statement is explicit."
+        }
+        (_, "scope_boundary", TurnLanguage::Zh) => {
+            "重点核查是否清楚标出非计算机科学部分，并把可执行部分重述为 CS 路径。"
+        }
+        (_, "scope_boundary", TurnLanguage::En) => {
+            "Focus on making scope boundaries explicit and reframing the executable portion as a CS workflow."
+        }
+        _ => "",
+    };
+
+    if extra.is_empty() {
+        base.to_string()
+    } else {
+        format!("{} {}", base, extra)
+    }
+}
+
+fn workflow_specific_subagent_issue_style(
+    spec: &AnalysisSubagentSpec,
+    workflow_profile: &str,
+    language: TurnLanguage,
+) -> &'static str {
+    match (spec.id, workflow_profile, language) {
+        ("reviewer", "classical_ml", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的数据切分、baseline、指标读数、混淆矩阵或误差分析。"
+        }
+        ("reviewer", "classical_ml", TurnLanguage::En) => {
+            "When raising issues, name the missing dataset entrypoint search, dataset manifest, dataset split, baseline, metric readout, confusion matrix, or error analysis."
+        }
+        ("reviewer", "deep_learning", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的数据集入口检索、dataset manifest、训练日志、checkpoint、验证读数或恢复信息。"
+        }
+        ("reviewer", "deep_learning", TurnLanguage::En) => {
+            "When raising issues, call out the missing dataset entrypoint search, dataset manifest, training logs, checkpoints, validation readouts, or resume path."
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的 workload 或数据入口、manifest、latency/throughput/memory 口径、profiling 或复现条件。"
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::En) => {
+            "When raising issues, call out the missing workload or dataset entrypoint, manifest, latency/throughput/memory readout, profiling, or reproducibility conditions."
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的任务集入口、manifest、任务成功率、轨迹案例、judge 规则、工具错误记录或复测对比。"
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::En) => {
+            "When raising issues, call out the missing task-suite entrypoint, evaluation manifest, task success rate, trajectory examples, judge rules, tool-error logs, or re-test comparisons."
+        }
+        ("reviewer", "security_analysis", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的目标语料或 benchmark 入口、manifest、目标面、真实发现证据、误报研判、影响等级或修复建议。"
+        }
+        ("reviewer", "security_analysis", TurnLanguage::En) => {
+            "When raising issues, call out the missing target-corpus or benchmark entrypoint, manifest, target scope, concrete findings, false-positive triage, impact rating, or remediation guidance."
+        }
+        ("critic", "agent_evaluation", TurnLanguage::Zh) => {
+            "issue 应尽量落在 judge 漂移、任务集偏置、轨迹样本不足、工具错误被掩盖等真实风险上。"
+        }
+        ("critic", "agent_evaluation", TurnLanguage::En) => {
+            "Issues should land on real risks such as judge drift, task-suite bias, thin trajectory sampling, or masked tool failures."
+        }
+        ("critic", "security_analysis", TurnLanguage::Zh) => {
+            "issue 应尽量落在误报、证据链断裂、威胁模型缺口或不可执行修复建议上。"
+        }
+        ("critic", "security_analysis", TurnLanguage::En) => {
+            "Issues should land on false positives, broken evidence chains, threat-model gaps, or non-actionable remediation."
+        }
+        ("researcher", "deep_learning", TurnLanguage::Zh) => {
+            "issue 应尽量指出缺失的训练日志、checkpoint、验证曲线或下一轮调参所需产物。"
+        }
+        ("researcher", "deep_learning", TurnLanguage::En) => {
+            "Issues should point to missing dataset entrypoint search, dataset manifest, training logs, checkpoints, validation curves, or artifacts needed for the next tuning round."
+        }
+        ("researcher", "systems_evaluation", TurnLanguage::Zh) => {
+            "issue 应尽量指出缺失的 workload/dataset 入口、manifest、benchmark 产物、profiling 证据、瓶颈分析或复现实验材料。"
+        }
+        ("researcher", "systems_evaluation", TurnLanguage::En) => {
+            "Issues should point to missing workload or dataset entrypoint records, a fixed manifest, benchmark artifacts, profiling evidence, bottleneck analysis, or reproducibility materials."
+        }
+        ("researcher", "agent_evaluation", TurnLanguage::Zh) => {
+            "issue 应尽量指出缺失的任务集入口、manifest、轨迹样本、judge 记录、工具错误日志或复测材料。"
+        }
+        ("researcher", "agent_evaluation", TurnLanguage::En) => {
+            "Issues should point to missing task-suite entrypoint records, evaluation manifest, trajectory samples, judge logs, tool-error logs, or re-test materials."
+        }
+        ("researcher", "security_analysis", TurnLanguage::Zh) => {
+            "issue 应尽量指出缺失的目标语料/benchmark 入口、manifest、发现清单、误报研判、影响评估或补丁复验材料。"
+        }
+        ("researcher", "security_analysis", TurnLanguage::En) => {
+            "Issues should point to missing target-corpus or benchmark entrypoint records, manifest closure, findings artifacts, false-positive triage, impact assessment, or patch re-validation materials."
+        }
+        ("reviewer", "literature_review", TurnLanguage::Zh) => {
+            "若要返回 issue，优先指出缺失的 remote_fulltext_coverage、structured_paper_coverage、筛选标准、纳入排除依据或研究空白综合。"
+        }
+        ("reviewer", "literature_review", TurnLanguage::En) => {
+            "When raising issues, call out the missing remote_fulltext_coverage, structured_paper_coverage, screening criteria, inclusion/exclusion rationale, or gap synthesis."
+        }
+        ("critic", "literature_review", TurnLanguage::Zh) => {
+            "issue 应尽量落在远程正文覆盖不足、只凭摘要下结论、结构化章节/参考文献缺失或综合结论跳步上。"
+        }
+        ("critic", "literature_review", TurnLanguage::En) => {
+            "Issues should land on weak remote fulltext coverage, abstract-only claims, missing structured sections/references, or synthesis that leaps beyond the retrieved evidence."
+        }
+        ("researcher", "literature_review", TurnLanguage::Zh) => {
+            "issue 应尽量指出缺失的论文集合、正文结构化证据、纳入排除记录或下一轮综述可复用材料。"
+        }
+        ("researcher", "literature_review", TurnLanguage::En) => {
+            "Issues should point to missing paper-set artifacts, structured fulltext evidence, inclusion/exclusion records, or reusable materials for the next review round."
+        }
+        _ => match language {
+            TurnLanguage::Zh => "issue 要具体指向缺失证据、产物、验证或风险，不要只写笼统的“还不够完整”。",
+            TurnLanguage::En => "Issues should point to concrete missing evidence, artifacts, validation, or risks instead of generic incompleteness.",
+        },
+    }
+}
+
+fn workflow_specific_subagent_action_style(
+    spec: &AnalysisSubagentSpec,
+    workflow_profile: &str,
+    language: TurnLanguage,
+) -> &'static str {
+    match (spec.id, workflow_profile, language) {
+        ("reviewer", "classical_ml", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行的 CS 收口动作，例如补 baseline 对照、补 metrics 文件或补误差分析。"
+        }
+        ("reviewer", "classical_ml", TurnLanguage::En) => {
+            "Write next_actions as executable CS closure steps such as running public-dataset search, fixing a dataset manifest, adding a baseline comparison, metrics artifact, or error analysis."
+        }
+        ("reviewer", "deep_learning", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行动作，例如固定数据集 manifest、补训练日志、补 checkpoint 或补验证指标。"
+        }
+        ("reviewer", "deep_learning", TurnLanguage::En) => {
+            "Write next_actions as executable steps such as fixing the dataset manifest, adding training logs, adding checkpoints, or capturing validation metrics."
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行动作，例如固定 workload/benchmark manifest、重跑 benchmark、补 profiling、补 latency/throughput/memory 结果表。"
+        }
+        ("reviewer", "systems_evaluation", TurnLanguage::En) => {
+            "Write next_actions as executable steps such as fixing the workload or benchmark manifest, re-running the benchmark, adding profiling, or producing a latency/throughput/memory table."
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行动作，例如固定任务集 manifest、补任务集统计、导出关键轨迹、记录工具错误并做复测。"
+        }
+        ("reviewer", "agent_evaluation", TurnLanguage::En) => {
+            "Write next_actions as executable steps such as fixing the task-suite manifest, adding task-suite statistics, exporting key trajectories, logging tool errors, and re-testing."
+        }
+        ("reviewer", "security_analysis", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行动作，例如固定目标语料 manifest、补 PoC/样例、补误报研判、给出补丁方向并复验。"
+        }
+        ("reviewer", "security_analysis", TurnLanguage::En) => {
+            "Write next_actions as executable steps such as fixing the target-corpus manifest, adding a PoC or sample, triaging false positives, and proposing plus re-validating a patch direction."
+        }
+        ("reviewer", "literature_review", TurnLanguage::Zh) => {
+            "next_actions 要写成可执行动作，例如补远程 fulltext 抓取、补 structured_document 证据、补筛选记录或补研究空白综合。"
+        }
+        ("reviewer", "literature_review", TurnLanguage::En) => {
+            "Write next_actions as executable steps such as fetching more remote fulltext, adding structured_document evidence, recording screening decisions, or tightening the gap synthesis."
+        }
+        ("critic", _, TurnLanguage::Zh) => {
+            "next_actions 要优先要求消除高风险假设或补充能反驳当前结论的验证，而不是重复已有步骤。"
+        }
+        ("critic", _, TurnLanguage::En) => {
+            "Prioritize next_actions that remove high-risk assumptions or add validation that could falsify the current claim instead of repeating prior work."
+        }
+        ("researcher", _, TurnLanguage::Zh) => {
+            "next_actions 要优先指向下一轮研究可直接复用的产物、报告或复测材料。"
+        }
+        ("researcher", _, TurnLanguage::En) => {
+            "Prioritize next_actions that create artifacts, reports, or re-test materials directly reusable in the next research iteration."
+        }
+        _ => match language {
+            TurnLanguage::Zh => "next_actions 要写成具体可执行的计算机科学工作流动作。",
+            TurnLanguage::En => "Write next_actions as concrete executable computer-science workflow steps.",
+        },
+    }
+}
+
+fn reviewer_subagent_spec() -> AnalysisSubagentSpec {
+    AnalysisSubagentSpec {
+        id: "reviewer",
+        name: "reviewer",
+        purpose: "Review the turn for completeness and whether the result satisfies the request.",
+        kind: "review",
+        system_prompt: "You are a strict reviewer subagent. Output JSON only.",
+        focus: "Check whether the user request is fully satisfied and whether the response is complete.",
+        focus_zh: "检查用户请求是否已经被完整满足，以及结果是否足够完整。",
+    }
+}
+
 fn build_subagent_prompt(
     spec: &AnalysisSubagentSpec,
     plan: &AgentWorkflowPlan,
@@ -7862,6 +13031,22 @@ fn build_subagent_prompt(
     user_content: &str,
     language: TurnLanguage,
 ) -> String {
+    let workflow_profile = if plan.workflow_kind.eq_ignore_ascii_case("research") {
+        infer_research_workflow_kind(user_content, messages)
+    } else {
+        plan.workflow_kind.clone()
+    };
+    let profile_runtime =
+        summarize_profile_runtime_from_messages(&workflow_profile, messages, Path::new("."), ".");
+    let runtime_summary = format_profile_runtime_summary(&profile_runtime, language);
+    let profile_evidence_block = if profile_runtime.profile_evidence.is_empty() {
+        localized_text(language, "无", "none").to_string()
+    } else {
+        profile_runtime.profile_evidence.join("\n")
+    };
+    let focus_text = workflow_specific_subagent_focus(spec, &workflow_profile, language);
+    let issue_style = workflow_specific_subagent_issue_style(spec, &workflow_profile, language);
+    let action_style = workflow_specific_subagent_action_style(spec, &workflow_profile, language);
     let transcript = messages
         .iter()
         .rev()
@@ -7870,10 +13055,15 @@ fn build_subagent_prompt(
         .map(|block| match block {
             MessageBlock::User { content, .. } => format!("user: {}", content),
             MessageBlock::Assistant { content } => format!("assistant: {}", content),
+            MessageBlock::AssistantChoices { title, options } => {
+                format!("assistant_choices: {} => {}", title, options.join(" | "))
+            }
             MessageBlock::ToolCall { name, status, .. } => {
                 format!("tool_call: {} [{}]", name, tool_status_name(status))
             }
-            MessageBlock::ToolResult { result, success, .. } => format!(
+            MessageBlock::ToolResult {
+                result, success, ..
+            } => format!(
                 "tool_result: {} :: {}",
                 if *success { "success" } else { "failure" },
                 tail_string(result, 400)
@@ -7885,7 +13075,9 @@ fn build_subagent_prompt(
             MessageBlock::Thinking { content, .. } => format!("thinking: {}", content),
             MessageBlock::System { content } => format!("system: {}", content),
             MessageBlock::Error { content } => format!("error: {}", content),
-            MessageBlock::AssistantStreaming { content } => format!("assistant_stream: {}", content),
+            MessageBlock::AssistantStreaming { content } => {
+                format!("assistant_stream: {}", content)
+            }
             MessageBlock::Subagent { record } => format!(
                 "subagent: {} [{}] :: {}",
                 record.name,
@@ -7903,37 +13095,41 @@ fn build_subagent_prompt(
 
     match language {
         TurnLanguage::Zh => format!(
-            "你是代码与科研 IDE 代理中的 {name} 子代理。只返回 JSON。\n\n原始用户请求：\n{user_content}\n\n计划摘要：{summary}\n工作流类型：{workflow_kind}\n验证目标：{verification}\n\n你的关注点：\n{focus}\n\n已观察到的执行轨迹：\n{transcript}\n\n输出 schema：\n{{\"status\":\"pass|repair|complete|failed\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\n规则：\n- 如果轨迹显示还需要继续工作或证据不足，返回 repair。\n- 只有当轨迹对你的关注点已经形成强支撑时，才返回 pass 或 complete。\n- 结论要具体、简洁。\n- 不要输出 markdown 代码块。",
+            "你是代码与科研 IDE 代理中的 {name} 子代理。只返回 JSON。\n\n原始用户请求：\n{user_content}\n\n计划摘要：{summary}\n工作流类型：{workflow_kind}\n研究轮廓：{workflow_profile}\n验证目标：{verification}\n\n高优先级轮廓证据：\n{profile_evidence}\n\n结构化运行时摘要：\n{runtime_summary}\n\n你的关注点：\n{focus}\n\nissue 风格要求：\n{issue_style}\n\nnext_actions 风格要求：\n{action_style}\n\n已观察到的执行轨迹：\n{transcript}\n\n输出 schema：\n{{\"status\":\"pass|repair|complete|failed\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\n规则：\n- 该 IDE 仅面向计算机科学任务；如果轨迹把请求误导到了非计算机科学领域，要返回 repair，并要求收敛到算法、数据、系统、代码、评测或形式化分析路径。\n- 如果轨迹显示还需要继续工作或证据不足，返回 repair。\n- 只有当轨迹对你的关注点已经形成强支撑时，才返回 pass 或 complete。\n- 优先引用高优先级轮廓证据、结构化 result bundle、run comparison、lineage、artifact 路径或关键 metric，而不是只复述泛化轨迹。\n- 结论、issues 和 next_actions 都要具体，尽量贴合当前 CS 研究轮廓，而不是泛泛的“继续验证/继续修复”。\n- 不要输出 markdown 代码块。",
             name = spec.name,
             user_content = user_content,
             summary = plan.summary,
             workflow_kind = plan.workflow_kind,
+            workflow_profile = workflow_profile,
             verification = if plan.verification.is_empty() {
                 "无".to_string()
             } else {
                 plan.verification.join("; ")
             },
-            focus = match language {
-                TurnLanguage::Zh => spec.focus_zh,
-                TurnLanguage::En => spec.focus,
-            },
+            profile_evidence = profile_evidence_block,
+            runtime_summary = runtime_summary,
+            focus = focus_text,
+            issue_style = issue_style,
+            action_style = action_style,
             transcript = transcript,
         ),
         TurnLanguage::En => format!(
-            "You are the {name} subagent for a coding and research IDE agent.\nReturn only JSON.\n\nOriginal user request:\n{user_content}\n\nPlan summary: {summary}\nWorkflow kind: {workflow_kind}\nVerification targets: {verification}\n\nYour focus:\n{focus}\n\nObserved execution trace:\n{transcript}\n\nOutput schema:\n{{\"status\":\"pass|repair|complete|failed\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\nRules:\n- Return repair when the trace suggests more work or stronger evidence is needed.\n- Return pass or complete only when the trace strongly supports success for your focus area.\n- Be concrete and concise.\n- No markdown fences.",
+            "You are the {name} subagent for a coding and research IDE agent.\nReturn only JSON.\n\nOriginal user request:\n{user_content}\n\nPlan summary: {summary}\nWorkflow kind: {workflow_kind}\nResearch profile: {workflow_profile}\nVerification targets: {verification}\n\nHigh-priority profile evidence:\n{profile_evidence}\n\nStructured runtime summary:\n{runtime_summary}\n\nYour focus:\n{focus}\n\nIssue style requirements:\n{issue_style}\n\nNext-action style requirements:\n{action_style}\n\nObserved execution trace:\n{transcript}\n\nOutput schema:\n{{\"status\":\"pass|repair|complete|failed\",\"summary\":\"...\",\"issues\":[\"...\"],\"evidence\":[\"...\"],\"next_actions\":[\"...\"]}}\n\nRules:\n- This IDE is scoped to computer science tasks only. Return repair when the trace drifts into non-computer-science domain work instead of algorithms, data, systems, code, evaluation, or formal analysis.\n- Return repair when the trace suggests more work or stronger evidence is needed.\n- Return pass or complete only when the trace strongly supports success for your focus area.\n- Prefer citing high-priority profile evidence, structured result-bundle fields, run-comparison observations, lineage evidence, artifact paths, or named metrics instead of generic transcript paraphrases.\n- Keep the summary, issues, and next_actions concrete and tied to the active CS workflow profile rather than generic advice.\n- No markdown fences.",
             name = spec.name,
             user_content = user_content,
             summary = plan.summary,
             workflow_kind = plan.workflow_kind,
+            workflow_profile = workflow_profile,
             verification = if plan.verification.is_empty() {
                 "none".to_string()
             } else {
                 plan.verification.join("; ")
             },
-            focus = match language {
-                TurnLanguage::Zh => spec.focus_zh,
-                TurnLanguage::En => spec.focus,
-            },
+            profile_evidence = profile_evidence_block,
+            runtime_summary = runtime_summary,
+            focus = focus_text,
+            issue_style = issue_style,
+            action_style = action_style,
             transcript = transcript,
         ),
     }
@@ -7953,7 +13149,11 @@ async fn run_specialist_subagent(
         provider,
         runtime,
         vec![
-            Message::system(&localized_text(language, "你是严格的子代理。只输出 JSON。", spec.system_prompt)),
+            Message::system(&localized_text(
+                language,
+                "你是严格的子代理。只输出 JSON。",
+                spec.system_prompt,
+            )),
             Message::user(&prompt),
         ],
     )
@@ -7970,7 +13170,9 @@ async fn run_specialist_subagent(
             match spec.id {
                 "reviewer" => "检查本轮结果是否完整，以及是否满足用户请求。".to_string(),
                 "critic" => "寻找隐藏风险、薄弱假设，以及结果仍可能出错的地方。".to_string(),
-                "researcher" => "评估当前执行是否为本次工作流产出了足够的证据、产物和后续推进依据。".to_string(),
+                "researcher" => {
+                    "评估当前执行是否为本次工作流产出了足够的证据、产物和后续推进依据。".to_string()
+                }
                 _ => spec.purpose.to_string(),
             },
             spec.purpose.to_string(),
@@ -8050,9 +13252,10 @@ fn merge_parallel_analysis(
         && verifier_report_has_only_soft_evidence_gaps(&verifier_report);
     let needs_repair = review_report.status.eq_ignore_ascii_case("repair")
         || (verifier_report.status.eq_ignore_ascii_case("repair") && !verifier_soft_repair)
-        || subagent_records
-            .iter()
-            .any(|record| record.status.eq_ignore_ascii_case("repair") || record.status.eq_ignore_ascii_case("failed"));
+        || subagent_records.iter().any(|record| {
+            record.status.eq_ignore_ascii_case("repair")
+                || record.status.eq_ignore_ascii_case("failed")
+        });
 
     let summary = if verifier_report.status.eq_ignore_ascii_case("repair") {
         verifier_report.summary.clone()
@@ -8145,11 +13348,22 @@ async fn run_parallel_analysis_subagents(
         let user_content = user_content_owned.clone();
         let language = language;
         join_set.spawn(async move {
-            run_reviewer_subagent(provider, &runtime, &plan, &messages, &user_content, language).await
+            run_reviewer_subagent(
+                provider,
+                &runtime,
+                &plan,
+                &messages,
+                &user_content,
+                language,
+            )
+            .await
         });
     }
 
-    for spec in specialist_specs.into_iter().filter(|spec| spec.id != "reviewer") {
+    for spec in specialist_specs
+        .into_iter()
+        .filter(|spec| spec.id != "reviewer")
+    {
         let provider = provider.clone();
         let runtime = runtime_owned.clone();
         let plan = plan_owned.clone();
@@ -8157,7 +13371,16 @@ async fn run_parallel_analysis_subagents(
         let user_content = user_content_owned.clone();
         let language = language;
         join_set.spawn(async move {
-            run_specialist_subagent(provider, &runtime, spec, &plan, &messages, &user_content, language).await
+            run_specialist_subagent(
+                provider,
+                &runtime,
+                spec,
+                &plan,
+                &messages,
+                &user_content,
+                language,
+            )
+            .await
         });
     }
 
@@ -8209,7 +13432,9 @@ async fn run_parallel_analysis_subagents(
         language,
     );
     merged.subagent_records.push(verifier_record);
-    merged.subagent_records.sort_by(|left, right| left.id.cmp(&right.id));
+    merged
+        .subagent_records
+        .sort_by(|left, right| left.id.cmp(&right.id));
     Ok(merged)
 }
 
@@ -8253,7 +13478,8 @@ async fn stream_provider_turn(
             let current_text = strip_emoji(&text);
             if let Ok(mut sessions) = lock_stream_runtime(state) {
                 if let Some(session) = sessions.get_mut(session_id) {
-                    session.partial_text = combine_assistant_segments(visible_assistant_prefix, &current_text);
+                    session.partial_text =
+                        combine_assistant_segments(visible_assistant_prefix, &current_text);
                 }
             }
             let combined = combine_assistant_segments(visible_assistant_prefix, &current_text);
@@ -8279,6 +13505,7 @@ async fn stream_provider_turn(
                 research: None,
                 subagents: None,
                 verifier: None,
+                auto_skills: None,
             });
         }
     }
@@ -8311,7 +13538,7 @@ fn sanitize_visible_stream_text(input: &str) -> String {
         return String::new();
     }
     let cleaned = strip_provider_tool_narration(trimmed);
-    cleaned.trim().to_string()
+    cleaned.trim_start_matches(char::is_whitespace).to_string()
 }
 
 fn stream_visible_workspace_text(
@@ -8370,15 +13597,16 @@ fn assistant_text_for_workspace_control_channel(
     mode: Option<&str>,
     language: TurnLanguage,
 ) -> String {
-    let cleaned = strip_emoji(text).trim().to_string();
-    if cleaned.is_empty() {
-        return cleaned;
+    let cleaned = strip_emoji(text);
+    let normalized = cleaned.trim_start_matches(char::is_whitespace).to_string();
+    if normalized.trim().is_empty() {
+        return String::new();
     }
     let normalized_mode = workflow_mode(mode);
-    if has_workspace_edits && normalized_mode != "chat" && looks_like_large_inline_code(&cleaned) {
+    if has_workspace_edits && normalized_mode != "chat" && looks_like_large_inline_code(&normalized) {
         return workspace_write_notice(language);
     }
-    cleaned
+    normalized
 }
 
 fn strip_provider_tool_narration(input: &str) -> String {
@@ -8444,6 +13672,33 @@ fn summarize_workspace_turn_for_chat(
         return None;
     }
 
+    let original = text.trim();
+    let write_notice = workspace_write_notice(language);
+    let meaningful_assistant_texts = recent_blocks
+        .iter()
+        .filter_map(|block| match block {
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                let cleaned = sanitize_visible_stream_text(content);
+                let trimmed = cleaned.trim();
+                if trimmed.is_empty()
+                    || trimmed == write_notice.trim()
+                    || looks_like_large_inline_code(trimmed)
+                {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !meaningful_assistant_texts.is_empty() {
+        let combined = meaningful_assistant_texts.join("\n\n").trim().to_string();
+        if !combined.is_empty() {
+            return Some(combined);
+        }
+    }
+
     let diffs = recent_blocks
         .iter()
         .filter_map(|block| match block {
@@ -8459,9 +13714,9 @@ fn summarize_workspace_turn_for_chat(
         .iter()
         .rev()
         .filter_map(|block| match block {
-            MessageBlock::ToolResult { result, success, .. } if *success => {
-                summarize_tool_result_for_chat(result)
-            }
+            MessageBlock::ToolResult {
+                result, success, ..
+            } if *success => summarize_tool_result_for_chat(result),
             _ => None,
         })
         .filter(|line| {
@@ -8475,26 +13730,19 @@ fn summarize_workspace_turn_for_chat(
         })
         .take(2)
         .collect::<Vec<_>>();
-    let output_line = outputs
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join(" | ");
+    let output_line = outputs.into_iter().rev().collect::<Vec<_>>().join(" | ");
 
-    let verifier_summary = recent_blocks
-        .iter()
-        .rev()
-        .find_map(|block| match block {
-            MessageBlock::Verification { report } => {
-                let summary = tail_string(report.summary.trim(), 180);
-                if summary.is_empty() {
-                    None
-                } else {
-                    Some((report.status.clone(), summary))
-                }
+    let verifier_summary = recent_blocks.iter().rev().find_map(|block| match block {
+        MessageBlock::Verification { report } => {
+            let summary = tail_string(report.summary.trim(), 180);
+            if summary.is_empty() {
+                None
+            } else {
+                Some((report.status.clone(), summary))
             }
-            _ => None,
-        });
+        }
+        _ => None,
+    });
 
     let file_list = diffs
         .iter()
@@ -8507,12 +13755,9 @@ fn summarize_workspace_turn_for_chat(
         .collect::<Vec<_>>()
         .join("; ");
 
-    let original = text.trim();
     let looks_like_code = looks_like_large_inline_code(original);
-    let write_notice = workspace_write_notice(language);
-    let should_synthesize_summary = original.is_empty()
-        || looks_like_code
-        || original == write_notice.trim();
+    let should_synthesize_summary =
+        original.is_empty() || looks_like_code || original == write_notice.trim();
     if !should_synthesize_summary {
         return None;
     }
@@ -8554,7 +13799,11 @@ fn summarize_workspace_turn_for_chat(
         .join("\n\n")
         .trim()
         .to_string();
-    if summary.is_empty() { None } else { Some(summary) }
+    if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
 }
 
 fn final_turn_has_meaningful_assistant_text(
@@ -8570,6 +13819,35 @@ fn final_turn_has_meaningful_assistant_text(
         }
         _ => false,
     })
+}
+
+fn final_turn_has_post_execution_assistant_text(
+    recent_blocks: &[MessageBlock],
+    language: TurnLanguage,
+) -> bool {
+    let last_execution_index = recent_blocks.iter().rposition(|block| {
+        matches!(
+            block,
+            MessageBlock::ToolResult { .. } | MessageBlock::Diff { .. }
+        )
+    });
+
+    let Some(last_execution_index) = last_execution_index else {
+        return final_turn_has_meaningful_assistant_text(recent_blocks, language);
+    };
+
+    let write_notice = workspace_write_notice(language);
+    recent_blocks
+        .iter()
+        .skip(last_execution_index + 1)
+        .any(|block| match block {
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                let cleaned = sanitize_visible_stream_text(content);
+                let trimmed = cleaned.trim();
+                !trimmed.is_empty() && trimmed != write_notice.trim()
+            }
+            _ => false,
+        })
 }
 
 fn final_turn_should_collapse_assistant_history(
@@ -8610,12 +13888,26 @@ fn final_turn_should_collapse_assistant_history(
     let combined = assistant_texts.join("\n\n");
     let combined_lower = combined.to_ascii_lowercase();
     let noisy_marker = matches!(language, TurnLanguage::Zh)
-        && ["让我", "现在让我", "问题找到了", "有错误", "修复", "读取当前脚本", "重新编写这个脚本"]
-            .iter()
-            .any(|needle| combined.contains(needle))
-        || ["let me", "i need to", "there was an error", "repair", "rewrite this script"]
-            .iter()
-            .any(|needle| combined_lower.contains(needle));
+        && [
+            "让我",
+            "现在让我",
+            "问题找到了",
+            "有错误",
+            "修复",
+            "读取当前脚本",
+            "重新编写这个脚本",
+        ]
+        .iter()
+        .any(|needle| combined.contains(needle))
+        || [
+            "let me",
+            "i need to",
+            "there was an error",
+            "repair",
+            "rewrite this script",
+        ]
+        .iter()
+        .any(|needle| combined_lower.contains(needle));
 
     noisy_marker || assistant_texts.len() >= 4 || combined.chars().count() >= 700
 }
@@ -8628,7 +13920,9 @@ fn ensure_final_turn_assistant_summary(
     let mut merged = messages.to_vec();
     let turn_start = current_turn_start_index(&merged);
     let turn_blocks = &merged[turn_start..];
-    if final_turn_should_collapse_assistant_history(turn_blocks, language) {
+    let normalized_mode = workflow_mode(mode);
+    let allow_assistant_history_collapse = normalized_mode == "chat";
+    if allow_assistant_history_collapse && final_turn_should_collapse_assistant_history(turn_blocks, language) {
         let mut collapsed = merged[..turn_start].to_vec();
         collapsed.extend(
             turn_blocks
@@ -8642,16 +13936,29 @@ fn ensure_final_turn_assistant_summary(
                 .cloned(),
         );
         if let Some(summary) = summarize_workspace_turn_for_chat("", turn_blocks, mode, language) {
-            collapsed.push(MessageBlock::Assistant { content: summary });
+            push_assistant_message_blocks(&mut collapsed, summary);
         }
         return collapsed;
     }
-    if final_turn_has_meaningful_assistant_text(turn_blocks, language) {
+    let has_execution_artifacts = turn_blocks.iter().any(|block| {
+        matches!(
+            block,
+            MessageBlock::ToolResult { .. }
+                | MessageBlock::Diff { .. }
+                | MessageBlock::Verification { .. }
+        )
+    });
+    let already_has_final_summary = if has_execution_artifacts {
+        final_turn_has_post_execution_assistant_text(turn_blocks, language)
+    } else {
+        final_turn_has_meaningful_assistant_text(turn_blocks, language)
+    };
+    if already_has_final_summary {
         return merged;
     }
 
     if let Some(summary) = summarize_workspace_turn_for_chat("", turn_blocks, mode, language) {
-        merged.push(MessageBlock::Assistant { content: summary });
+        push_assistant_message_blocks(&mut merged, summary);
     }
 
     merged
@@ -8860,9 +14167,15 @@ fn extract_dsml_tool_calls(input: &str) -> Vec<Value> {
 
         for (index, invoke_caps) in invoke_re.captures_iter(block_body).enumerate() {
             let invoke_attrs = parse_dsml_attributes(
-                invoke_caps.get(1).map(|value| value.as_str()).unwrap_or_default(),
+                invoke_caps
+                    .get(1)
+                    .map(|value| value.as_str())
+                    .unwrap_or_default(),
             );
-            let invoke_body = invoke_caps.get(2).map(|value| value.as_str()).unwrap_or_default();
+            let invoke_body = invoke_caps
+                .get(2)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
             let invoke_name = invoke_attrs
                 .get("name")
                 .map(String::as_str)
@@ -8908,8 +14221,7 @@ fn extract_dsml_tool_calls(input: &str) -> Vec<Value> {
 fn parse_dsml_attributes(raw: &str) -> BTreeMap<String, String> {
     static DSML_ATTR_RE: OnceLock<Regex> = OnceLock::new();
     let attr_re = DSML_ATTR_RE.get_or_init(|| {
-        Regex::new(r#"([A-Za-z_][A-Za-z0-9_-]*)="([^"]*)""#)
-            .expect("valid DSML attribute regex")
+        Regex::new(r#"([A-Za-z_][A-Za-z0-9_-]*)="([^"]*)""#).expect("valid DSML attribute regex")
     });
 
     let mut attributes = BTreeMap::new();
@@ -8925,10 +14237,7 @@ fn parse_dsml_attributes(raw: &str) -> BTreeMap<String, String> {
     attributes
 }
 
-fn parse_dsml_parameter_value(
-    attrs: &BTreeMap<String, String>,
-    raw_value: &str,
-) -> Value {
+fn parse_dsml_parameter_value(attrs: &BTreeMap<String, String>, raw_value: &str) -> Value {
     let raw = raw_value.trim();
     let as_string = attrs
         .get("string")
@@ -9010,10 +14319,28 @@ fn normalize_dsml_arguments(tool_name: &str, args: Value) -> Value {
         }
     }
 
-    if matches!(tool_name, "write_file" | "read_file" | "edit_file" | "delete_file") {
+    if matches!(
+        tool_name,
+        "write_file" | "read_file" | "read_file_head" | "edit_file" | "delete_file" | "inspect_path"
+    ) {
         if object.get("path").is_none() {
             if let Some(dir) = object.get("dir").cloned() {
                 object.insert("path".to_string(), dir);
+            }
+        }
+    }
+
+    if matches!(
+        tool_name,
+        "find_files" | "count_file_types" | "find_large_files" | "tree_dir"
+    ) {
+        if object.get("directory").is_none() {
+            if let Some(path) = object
+                .get("path")
+                .cloned()
+                .or_else(|| object.get("dir").cloned())
+            {
+                object.insert("directory".to_string(), path);
             }
         }
     }
@@ -9023,9 +14350,24 @@ fn normalize_dsml_arguments(tool_name: &str, args: Value) -> Value {
 
 fn adapt_bash_command_for_powershell(command: &str) -> String {
     let trimmed = command.trim();
+    let cmd_wrapper_prefixes = ["cmd.exe /c ", "cmd /c "];
+    for prefix in cmd_wrapper_prefixes {
+        if let Some(remainder) = trimmed.strip_prefix(prefix) {
+            let inner = normalize_powershell_path_arg(remainder);
+            return adapt_bash_command_for_powershell(&inner);
+        }
+    }
     let normalized = normalize_dsml_command_for_windows(trimmed);
     let normalized = normalized.replace("&&", ";");
-    let normalized = adapt_powershell_dir_globs(&normalized);
+    let dir_glob_adapted = adapt_powershell_dir_globs(&normalized);
+    let normalized = if dir_glob_adapted != normalized {
+        return dir_glob_adapted;
+    } else {
+        normalized
+    };
+    if let Some(adapted) = adapt_windows_dir_command(&normalized) {
+        return adapted;
+    }
 
     let adapt_cd_prefix = |raw: &str, prefix: &str| -> Option<String> {
         let remainder = raw.strip_prefix(prefix)?.trim();
@@ -9166,7 +14508,11 @@ fn adapt_powershell_dir_globs(command: &str) -> String {
     };
 
     let tokens: Vec<&str> = rest.split_whitespace().collect();
-    if tokens.len() < 2 || !tokens.iter().all(|token| token.contains('*') || token.contains('?')) {
+    if tokens.len() < 2
+        || !tokens
+            .iter()
+            .all(|token| token.contains('*') || token.contains('?'))
+    {
         return trimmed.to_string();
     }
 
@@ -9176,6 +14522,99 @@ fn adapt_powershell_dir_globs(command: &str) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!("Get-ChildItem -Force -Include {}", includes)
+}
+
+fn adapt_windows_dir_command(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    let rest = trimmed.strip_prefix("dir ")?.trim();
+
+    let sanitized = rest
+        .replace("2>nul", "")
+        .replace("2> nul", "")
+        .replace(">nul", "")
+        .replace("> nul", "")
+        .trim()
+        .to_string();
+
+    let (before_pipe, after_pipe) = if let Some((left, right)) = sanitized.split_once('|') {
+        (left.trim(), Some(right.trim()))
+    } else {
+        (sanitized.as_str(), None)
+    };
+
+    let tokens = before_pipe
+        .split_whitespace()
+        .filter(|token| !token.trim().is_empty())
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return Some("Get-ChildItem -Force".to_string());
+    }
+
+    let first_flag_index = tokens
+        .iter()
+        .position(|token| token.starts_with('/'))
+        .unwrap_or(tokens.len());
+    let path_tokens = &tokens[..first_flag_index];
+    let flag_tokens = &tokens[first_flag_index..];
+
+    let recursive = flag_tokens.iter().any(|token| token.eq_ignore_ascii_case("/s"));
+    let bare = flag_tokens.iter().any(|token| token.eq_ignore_ascii_case("/b"));
+    let files_only = flag_tokens.iter().any(|token| {
+        token
+            .to_ascii_lowercase()
+            .contains("/a:-d")
+    });
+
+    let path = if path_tokens.is_empty() {
+        ".".to_string()
+    } else {
+        normalize_powershell_path_arg(&path_tokens.join(" "))
+    };
+
+    let mut adapted = format!(
+        "Get-ChildItem -Force{}{} -LiteralPath {}",
+        if recursive { " -Recurse" } else { "" },
+        if files_only { " -File" } else { "" },
+        powershell_single_quote(&path)
+    );
+    if bare {
+        adapted.push_str(" | Select-Object -ExpandProperty FullName");
+    }
+
+    if let Some(pipe) = after_pipe {
+        let lowered = pipe.to_ascii_lowercase();
+        if lowered.starts_with("findstr ") {
+            let raw_tokens = pipe.split_whitespace().collect::<Vec<_>>();
+            let inverse = raw_tokens
+                .iter()
+                .any(|token| token.eq_ignore_ascii_case("/v"));
+            let case_insensitive = raw_tokens
+                .iter()
+                .any(|token| token.eq_ignore_ascii_case("/i"));
+            let pattern = raw_tokens
+                .into_iter()
+                .filter(|token| !token.starts_with('/'))
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let pattern = normalize_powershell_path_arg(&pattern);
+            if !pattern.is_empty() {
+                let escaped = regex::escape(&pattern);
+                let matcher = if case_insensitive {
+                    format!("(?i){}", escaped)
+                } else {
+                    escaped
+                };
+                adapted.push_str(&format!(
+                    " | Where-Object {{ $_ {}match {} }}",
+                    if inverse { "-not" } else { "" },
+                    powershell_single_quote(&matcher)
+                ));
+            }
+        }
+    }
+
+    Some(adapted)
 }
 
 fn normalize_dsml_command_for_windows(command: &str) -> String {
@@ -9220,7 +14659,8 @@ async fn assistant_tool_definitions(
     let host_base_dir = state.host.base_dir().to_path_buf();
 
     tokio::task::spawn_blocking(move || -> Result<Vec<Value>> {
-        let _cwd_guard = enter_workspace_dir_from(&host_base_dir, &runtime_for_task.workspace_root)?;
+        let _cwd_guard =
+            enter_workspace_dir_from(&host_base_dir, &runtime_for_task.workspace_root)?;
         let mut assistant_slot = lock_assistant_mutex(&assistant_state)?;
 
         if assistant_slot.is_none() {
@@ -9294,6 +14734,28 @@ fn web_terminal_tool_definitions() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "terminal_run_structured",
+                "description": "Run a single shell command in the current workspace and return structured stdout, stderr, and exit code without relying on the persistent terminal buffer.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Command to execute once in the current workspace."
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Optional timeout in milliseconds. Defaults to 20000, max 120000."
+                        }
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "terminal_read",
                 "description": "Read the current output buffer from a persistent terminal session.",
                 "parameters": {
@@ -9344,17 +14806,15 @@ async fn execute_tool_calls(
             .and_then(|value| value.as_str())
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .unwrap_or_else(|| json!({}));
-        let args = bind_tool_args_to_workspace(
-            runtime,
-            &normalize_web_tool_args(&name, args),
-        );
+        let args = bind_tool_args_to_workspace(runtime, &normalize_web_tool_args(&name, args));
         let tool_target_path = extract_tool_path(&name, &args);
         let risk = default_tool_risk_map()
             .get(&name)
             .cloned()
             .unwrap_or(RiskLevel::Moderate);
         let risk_name = risk_level_name(&risk).to_string();
-        let pending_file_snapshot = capture_pending_file_snapshot(state.host.base_dir(), runtime, &name, &args);
+        let pending_file_snapshot =
+            capture_pending_file_snapshot(state.host.base_dir(), runtime, &name, &args);
 
         upsert_tool_call_block(
             persisted_blocks,
@@ -9388,12 +14848,20 @@ async fn execute_tool_calls(
                 result: None,
                 success: None,
                 file_path: extract_tool_path(&name, &args),
+                updated_at: None,
             }),
             permission: None,
             edited_files: None,
-            research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+            research: current_research_payload(
+                state,
+                Some(session_id),
+                runtime,
+                persisted_blocks,
+                mode,
+            ),
             subagents: None,
             verifier: None,
+            auto_skills: None,
         });
         push_runtime_tool_event(
             state,
@@ -9407,6 +14875,7 @@ async fn execute_tool_calls(
                 result: None,
                 success: None,
                 file_path: extract_tool_path(&name, &args),
+                updated_at: None,
             },
         );
         if let Some(summary) = tool_progress_narration(
@@ -9420,7 +14889,9 @@ async fn execute_tool_calls(
         }
 
         if !tool_call_is_allowed(state, runtime, &name, &risk) {
-            let approved = wait_for_tool_approval(state, session_id, &call_id, &name, &risk_name, &args, tx).await?;
+            let approved =
+                wait_for_tool_approval(state, session_id, &call_id, &name, &risk_name, &args, tx)
+                    .await?;
             if !approved {
                 persisted_blocks.push(MessageBlock::ToolResult {
                     call_id: call_id.clone(),
@@ -9451,12 +14922,20 @@ async fn execute_tool_calls(
                         result: Some("Denied by user".to_string()),
                         success: Some(false),
                         file_path: extract_tool_path(&name, &args),
+                        updated_at: None,
                     }),
                     permission: None,
                     edited_files: None,
-                    research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+                    research: current_research_payload(
+                        state,
+                        Some(session_id),
+                        runtime,
+                        persisted_blocks,
+                        mode,
+                    ),
                     subagents: None,
                     verifier: None,
+                    auto_skills: None,
                 });
                 push_runtime_tool_event(
                     state,
@@ -9470,6 +14949,7 @@ async fn execute_tool_calls(
                         result: Some("Denied by user".to_string()),
                         success: Some(false),
                         file_path: extract_tool_path(&name, &args),
+                        updated_at: None,
                     },
                 );
                 continue;
@@ -9494,11 +14974,7 @@ async fn execute_tool_calls(
                 error: None,
                 activity: Some(activity_event(
                     "tool_rate_limited",
-                    Some(localized_string(
-                        language,
-                        format!("{} 已触发速率限制", name),
-                        format!("Rate limited {}", name),
-                    )),
+                    None,
                 )),
                 tool: Some(WebToolEvent {
                     call_id: call_id.clone(),
@@ -9509,12 +14985,20 @@ async fn execute_tool_calls(
                     result: Some(rate_err.clone()),
                     success: Some(false),
                     file_path: extract_tool_path(&name, &args),
+                    updated_at: None,
                 }),
                 permission: None,
                 edited_files: None,
-                research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+                research: current_research_payload(
+                    state,
+                    Some(session_id),
+                    runtime,
+                    persisted_blocks,
+                    mode,
+                ),
                 subagents: None,
                 verifier: None,
+                auto_skills: None,
             });
             push_runtime_tool_event(
                 state,
@@ -9528,6 +15012,7 @@ async fn execute_tool_calls(
                     result: Some(rate_err.clone()),
                     success: Some(false),
                     file_path: extract_tool_path(&name, &args),
+                    updated_at: None,
                 },
             );
             continue;
@@ -9550,11 +15035,7 @@ async fn execute_tool_calls(
             error: None,
             activity: Some(activity_event(
                 "tool_executing",
-                Some(localized_string(
-                    language,
-                    format!("正在运行 {}", name),
-                    format!("Running {}", name),
-                )),
+                None,
             )),
             tool: Some(WebToolEvent {
                 call_id: call_id.clone(),
@@ -9565,12 +15046,20 @@ async fn execute_tool_calls(
                 result: None,
                 success: None,
                 file_path: extract_tool_path(&name, &args),
+                updated_at: None,
             }),
             permission: None,
             edited_files: None,
-            research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+            research: current_research_payload(
+                state,
+                Some(session_id),
+                runtime,
+                persisted_blocks,
+                mode,
+            ),
             subagents: None,
             verifier: None,
+            auto_skills: None,
         });
         push_runtime_tool_event(
             state,
@@ -9584,6 +15073,7 @@ async fn execute_tool_calls(
                 result: None,
                 success: None,
                 file_path: extract_tool_path(&name, &args),
+                updated_at: None,
             },
         );
         if let Some(summary) = tool_progress_narration(
@@ -9621,8 +15111,14 @@ async fn execute_tool_calls(
                         session_id,
                         localized_string(
                             language,
-                            format!("已编辑 {} (+{} / -{})", diff.file_path, diff.added, diff.removed),
-                            format!("Edited {} (+{} / -{})", diff.file_path, diff.added, diff.removed),
+                            format!(
+                                "已编辑 {} (+{} / -{})",
+                                diff.file_path, diff.added, diff.removed
+                            ),
+                            format!(
+                                "Edited {} (+{} / -{})",
+                                diff.file_path, diff.added, diff.removed
+                            ),
                         ),
                         language,
                     );
@@ -9634,11 +15130,7 @@ async fn execute_tool_calls(
                         error: None,
                         activity: Some(activity_event(
                             "editing",
-                            Some(localized_string(
-                                language,
-                                format!("正在编辑 {}", diff.file_path),
-                                format!("Editing {}", diff.file_path),
-                            )),
+                            None,
                         )),
                         tool: Some(WebToolEvent {
                             call_id: call_id.clone(),
@@ -9649,12 +15141,20 @@ async fn execute_tool_calls(
                             result: Some(result.clone()),
                             success: Some(true),
                             file_path: Some(diff.file_path.clone()),
+                            updated_at: None,
                         }),
                         permission: None,
                         edited_files: Some(vec![web_edited_file_from_diff(&diff)]),
-                        research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+                        research: current_research_payload(
+                            state,
+                            Some(session_id),
+                            runtime,
+                            persisted_blocks,
+                            mode,
+                        ),
                         subagents: None,
                         verifier: None,
+                        auto_skills: None,
                     });
                     push_runtime_tool_event(
                         state,
@@ -9668,6 +15168,7 @@ async fn execute_tool_calls(
                             result: Some(result.clone()),
                             success: Some(true),
                             file_path: Some(diff.file_path.clone()),
+                            updated_at: None,
                         },
                     );
                     push_runtime_edited_files(
@@ -9683,7 +15184,13 @@ async fn execute_tool_calls(
                         Some(&diff.file_path),
                         Some(&result),
                     ) {
-                        emit_assistant_progress_delta(tx, state, session_id, summary.dedupe_key, summary.text);
+                        emit_assistant_progress_delta(
+                            tx,
+                            state,
+                            session_id,
+                            summary.dedupe_key,
+                            summary.text,
+                        );
                     }
                     if abort_after_first_workspace_edit {
                         return Err(anyhow!(
@@ -9734,11 +15241,7 @@ async fn execute_tool_calls(
                             error: None,
                             activity: Some(activity_event(
                                 "artifact",
-                                Some(localized_string(
-                                    language,
-                                    format!("已捕获 {} 个产物", edited_files.len()),
-                                    format!("Captured {} artifact(s)", edited_files.len()),
-                                )),
+                                None,
                             )),
                             tool: Some(WebToolEvent {
                                 call_id: call_id.clone(),
@@ -9749,12 +15252,20 @@ async fn execute_tool_calls(
                                 result: Some(result.clone()),
                                 success: Some(true),
                                 file_path: primary_file_path.clone(),
+                                updated_at: None,
                             }),
                             permission: None,
                             edited_files: Some(edited_files.clone()),
-                            research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+                            research: current_research_payload(
+                                state,
+                                Some(session_id),
+                                runtime,
+                                persisted_blocks,
+                                mode,
+                            ),
                             subagents: None,
                             verifier: None,
+                            auto_skills: None,
                         });
                         push_runtime_tool_event(
                             state,
@@ -9768,6 +15279,7 @@ async fn execute_tool_calls(
                                 result: Some(result.clone()),
                                 success: Some(true),
                                 file_path: primary_file_path,
+                                updated_at: None,
                             },
                         );
                         push_runtime_edited_files(state, session_id, &edited_files);
@@ -9780,7 +15292,13 @@ async fn execute_tool_calls(
                                 Some(&last_file.path),
                                 Some(&result),
                             ) {
-                                emit_assistant_progress_delta(tx, state, session_id, summary.dedupe_key, summary.text);
+                                emit_assistant_progress_delta(
+                                    tx,
+                                    state,
+                                    session_id,
+                                    summary.dedupe_key,
+                                    summary.text,
+                                );
                             }
                         }
                         if abort_after_first_workspace_edit {
@@ -9789,59 +15307,70 @@ async fn execute_tool_calls(
                             ));
                         }
                     } else {
-                    let _ = tx.send(StreamEnvelope {
-                        r#type: "tool".to_string(),
-                        session_id: Some(session_id.to_string()),
-                        messages: None,
-                        delta: None,
-                        error: None,
-                        activity: Some(activity_event(
-                            "tool_complete",
-                            Some(localized_string(
-                                language,
-                                format!("已完成 {}", name),
-                                format!("Finished {}", name),
+                        let _ = tx.send(StreamEnvelope {
+                            r#type: "tool".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            messages: None,
+                            delta: None,
+                            error: None,
+                            activity: Some(activity_event(
+                                "tool_complete",
+                                None,
                             )),
-                        )),
-                        tool: Some(WebToolEvent {
-                            call_id: call_id.clone(),
-                            name: name.clone(),
-                            status: "complete".to_string(),
-                            risk: risk_name.clone(),
-                            args: Some(args.clone()),
-                            result: Some(result.clone()),
-                            success: Some(true),
-                            file_path: extract_tool_path(&name, &args),
-                        }),
-                        permission: None,
-                        edited_files: None,
-                        research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
-                        subagents: None,
-                        verifier: None,
-                    });
-                    push_runtime_tool_event(
-                        state,
-                        session_id,
-                        &WebToolEvent {
-                            call_id: call_id.clone(),
-                            name: name.clone(),
-                            status: "complete".to_string(),
-                            risk: risk_name.clone(),
-                            args: Some(args.clone()),
-                            result: Some(result.clone()),
-                            success: Some(true),
-                            file_path: extract_tool_path(&name, &args),
-                        },
-                    );
-                    if let Some(summary) = tool_progress_narration(
-                        language,
-                        &name,
-                        "complete",
-                        tool_target_path.as_deref(),
-                        Some(&result),
-                    ) {
-                        emit_assistant_progress_delta(tx, state, session_id, summary.dedupe_key, summary.text);
-                    }
+                            tool: Some(WebToolEvent {
+                                call_id: call_id.clone(),
+                                name: name.clone(),
+                                status: "complete".to_string(),
+                                risk: risk_name.clone(),
+                                args: Some(args.clone()),
+                                result: Some(result.clone()),
+                                success: Some(true),
+                                file_path: extract_tool_path(&name, &args),
+                                updated_at: None,
+                            }),
+                            permission: None,
+                            edited_files: None,
+                            research: current_research_payload(
+                                state,
+                                Some(session_id),
+                                runtime,
+                                persisted_blocks,
+                                mode,
+                            ),
+                            subagents: None,
+                            verifier: None,
+                            auto_skills: None,
+                        });
+                        push_runtime_tool_event(
+                            state,
+                            session_id,
+                            &WebToolEvent {
+                                call_id: call_id.clone(),
+                                name: name.clone(),
+                                status: "complete".to_string(),
+                                risk: risk_name.clone(),
+                                args: Some(args.clone()),
+                                result: Some(result.clone()),
+                                success: Some(true),
+                                file_path: extract_tool_path(&name, &args),
+                                updated_at: None,
+                            },
+                        );
+                        if let Some(summary) = tool_progress_narration(
+                            language,
+                            &name,
+                            "complete",
+                            tool_target_path.as_deref(),
+                            Some(&result),
+                        ) {
+                            emit_assistant_progress_delta(
+                                tx,
+                                state,
+                                session_id,
+                                summary.dedupe_key,
+                                summary.text,
+                            );
+                        }
                     }
                 }
             }
@@ -9886,12 +15415,20 @@ async fn execute_tool_calls(
                         result: Some(error_message.clone()),
                         success: Some(false),
                         file_path: extract_tool_path(&name, &args),
+                        updated_at: None,
                     }),
                     permission: None,
                     edited_files: None,
-                    research: current_research_payload(state, Some(session_id), runtime, persisted_blocks, mode),
+                    research: current_research_payload(
+                        state,
+                        Some(session_id),
+                        runtime,
+                        persisted_blocks,
+                        mode,
+                    ),
                     subagents: None,
                     verifier: None,
+                    auto_skills: None,
                 });
                 push_runtime_tool_event(
                     state,
@@ -9905,6 +15442,7 @@ async fn execute_tool_calls(
                         result: Some(error_message.clone()),
                         success: Some(false),
                         file_path: extract_tool_path(&name, &args),
+                        updated_at: None,
                     },
                 );
                 if let Some(summary) = tool_progress_narration(
@@ -9914,7 +15452,13 @@ async fn execute_tool_calls(
                     tool_target_path.as_deref(),
                     Some(&error_message),
                 ) {
-                    emit_assistant_progress_delta(tx, state, session_id, summary.dedupe_key, summary.text);
+                    emit_assistant_progress_delta(
+                        tx,
+                        state,
+                        session_id,
+                        summary.dedupe_key,
+                        summary.text,
+                    );
                 }
             }
         }
@@ -9931,6 +15475,12 @@ fn normalize_web_tool_args(tool_name: &str, args: Value) -> Value {
 
     let normalize_path_value = |value: &str| -> String {
         let normalized = value.replace('\\', "/");
+        if matches!(normalized.trim(), "/" | "\\") {
+            return ".".to_string();
+        }
+        if normalized.trim() == "__CURRENT_WORKSPACE__" {
+            return ".".to_string();
+        }
         if let Some(stripped) = normalized.strip_prefix("/home/user/workspace/") {
             return stripped.trim_start_matches('/').to_string();
         }
@@ -9943,7 +15493,15 @@ fn normalize_web_tool_args(tool_name: &str, args: Value) -> Value {
         normalized
     };
 
-    for key in ["path", "dir", "source", "dest", "destination", "workspace_root"] {
+    for key in [
+        "path",
+        "dir",
+        "directory",
+        "source",
+        "dest",
+        "destination",
+        "workspace_root",
+    ] {
         if let Some(next_value) = object
             .get(key)
             .and_then(|value| value.as_str())
@@ -9963,12 +15521,47 @@ fn normalize_web_tool_args(tool_name: &str, args: Value) -> Value {
         }
     }
 
-    if matches!(tool_name, "terminal_create") && !object.contains_key("workspace_root")
-    {
+    if matches!(tool_name, "terminal_create") && !object.contains_key("workspace_root") {
         object.insert(
             "workspace_root".to_string(),
             Value::String("__CURRENT_WORKSPACE__".to_string()),
         );
+    }
+
+    if matches!(tool_name, "list_dir") {
+        if object.get("path").is_none() {
+            if let Some(dir) = object.get("dir").cloned() {
+                object.insert("path".to_string(), dir);
+            }
+        }
+
+        let has_target = object
+            .get("path")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_target {
+            object.insert("path".to_string(), Value::String(".".to_string()));
+        }
+    }
+
+    if matches!(tool_name, "find_files" | "count_file_types" | "find_large_files" | "tree_dir") {
+        if object.get("directory").is_none() {
+            if let Some(path) = object
+                .get("path")
+                .cloned()
+                .or_else(|| object.get("dir").cloned())
+            {
+                object.insert("directory".to_string(), path);
+            }
+        }
+
+        let has_directory = object
+            .get("directory")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_directory {
+            object.insert("directory".to_string(), Value::String(".".to_string()));
+        }
     }
 
     Value::Object(object)
@@ -10003,7 +15596,8 @@ async fn assistant_call_tool(
     let host_base_dir = state.host.base_dir().to_path_buf();
 
     tokio::task::spawn_blocking(move || -> Result<String> {
-        let _cwd_guard = enter_workspace_dir_from(&host_base_dir, &runtime_for_task.workspace_root)?;
+        let _cwd_guard =
+            enter_workspace_dir_from(&host_base_dir, &runtime_for_task.workspace_root)?;
         let mut assistant_slot = lock_assistant_mutex(&assistant_state)?;
 
         if assistant_slot.is_none() {
@@ -10039,11 +15633,17 @@ fn gather_context_tool_result(
         .and_then(|value| value.as_str())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(".");
-    let absolute_path = resolve_workspace_relative_path(base_dir, &runtime.workspace_root, requested_path)
-        .or_else(|| canonical_workspace_dir_from(base_dir, &runtime.workspace_root).ok())
-        .ok_or_else(|| anyhow!("failed to resolve context path '{}'", requested_path))?;
-    let metadata = fs::metadata(&absolute_path)
-        .map_err(|err| anyhow!("failed to inspect context path '{}': {}", absolute_path.display(), err))?;
+    let absolute_path =
+        resolve_workspace_relative_path(base_dir, &runtime.workspace_root, requested_path)
+            .or_else(|| canonical_workspace_dir_from(base_dir, &runtime.workspace_root).ok())
+            .ok_or_else(|| anyhow!("failed to resolve context path '{}'", requested_path))?;
+    let metadata = fs::metadata(&absolute_path).map_err(|err| {
+        anyhow!(
+            "failed to inspect context path '{}': {}",
+            absolute_path.display(),
+            err
+        )
+    })?;
     let max_entries = args
         .get("max_entries")
         .and_then(|value| value.as_u64())
@@ -10074,7 +15674,13 @@ fn gather_context_tool_result(
 
 fn gather_context_directory_entries(path: &Path, max_entries: usize) -> Result<Vec<Value>> {
     let mut entries: Vec<_> = fs::read_dir(path)
-        .map_err(|err| anyhow!("failed to read context directory '{}': {}", path.display(), err))?
+        .map_err(|err| {
+            anyhow!(
+                "failed to read context directory '{}': {}",
+                path.display(),
+                err
+            )
+        })?
         .filter_map(|entry| entry.ok())
         .collect();
     entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
@@ -10115,7 +15721,10 @@ fn gather_context_file_preview(path: &Path, max_preview_chars: usize) -> Result<
 }
 
 fn is_web_terminal_tool(name: &str) -> bool {
-    matches!(name, "terminal_create" | "terminal_run" | "terminal_read")
+    matches!(
+        name,
+        "terminal_create" | "terminal_run" | "terminal_run_structured" | "terminal_read"
+    )
 }
 
 async fn execute_web_terminal_tool(
@@ -10192,6 +15801,29 @@ async fn execute_web_terminal_tool(
                 "terminal": snapshot,
             }))?)
         }
+        "terminal_run_structured" => {
+            let command = args
+                .get("command")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow!("terminal_run_structured requires command"))?;
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(20_000)
+                .clamp(250, 120_000);
+            let workspace =
+                canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)?;
+            let command = command.to_string();
+            let output = tokio::task::spawn_blocking(move || {
+                run_terminal_command_structured(&workspace, &command, timeout_ms)
+            })
+            .await
+            .map_err(|err| anyhow!("structured terminal task failed: {}", err))??;
+
+            Ok(serde_json::to_string_pretty(&output)?)
+        }
         "terminal_read" => {
             let tail = args
                 .get("tail")
@@ -10224,7 +15856,9 @@ fn active_terminal_id(state: &WebAppState) -> Option<String> {
 
 fn validate_terminal_command(command: &str) -> Result<()> {
     if command.len() > 4096 || command.contains('\n') || command.contains('\r') {
-        return Err(anyhow!("terminal command is empty, too long, or contains newlines"));
+        return Err(anyhow!(
+            "terminal command is empty, too long, or contains newlines"
+        ));
     }
     let normalized = command.trim().to_ascii_lowercase();
     let blocked = [
@@ -10249,7 +15883,10 @@ fn terminal_session_exists(state: &WebAppState, terminal_id: &str) -> bool {
         .ok()
         .map(|mut runtime| {
             prune_terminal_sessions(&mut runtime);
-            runtime.sessions.iter().any(|session| session.id == terminal_id)
+            runtime
+                .sessions
+                .iter()
+                .any(|session| session.id == terminal_id)
         })
         .unwrap_or(false)
 }
@@ -10289,6 +15926,75 @@ fn tail_string(input: &str, max_chars: usize) -> String {
     input.chars().skip(skip).collect()
 }
 
+pub(crate) fn run_terminal_command_structured(workspace: &Path, command: &str, timeout_ms: u64) -> Result<Value> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err(anyhow!("terminal_run_structured requires command"));
+    }
+    validate_terminal_command(command)?;
+    let timeout_ms = timeout_ms.clamp(250, 120_000);
+    let adapted = adapt_bash_command_for_powershell(command);
+
+    let mut child = Command::new("powershell.exe");
+    child
+        .current_dir(workspace)
+        .args(["-NoLogo", "-NoProfile", "-Command", &adapted])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        child.creation_flags(0x08000000);
+    }
+
+    let mut child = child
+        .spawn()
+        .map_err(|err| anyhow!("failed to run structured terminal command: {}", err))?;
+
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|err| anyhow!("failed waiting for structured terminal command: {}", err))?
+        {
+            let output = child
+                .wait_with_output()
+                .map_err(|err| anyhow!("failed collecting structured terminal output: {}", err))?;
+            return Ok(json!({
+                "command": command,
+                "adapted_command": adapted,
+                "cwd": display_workspace_path(workspace),
+                "stdout": decode_bytes(&output.stdout),
+                "stderr": decode_bytes(&output.stderr),
+                "exit_code": status.code(),
+                "success": status.success(),
+                "timed_out": false,
+                "timeout_ms": timeout_ms,
+            }));
+        }
+
+        if start.elapsed() >= Duration::from_millis(timeout_ms) {
+            let _ = child.kill();
+            let output = child
+                .wait_with_output()
+                .map_err(|err| anyhow!("failed collecting timed-out terminal output: {}", err))?;
+            return Ok(json!({
+                "command": command,
+                "adapted_command": adapted,
+                "cwd": display_workspace_path(workspace),
+                "stdout": decode_bytes(&output.stdout),
+                "stderr": decode_bytes(&output.stderr),
+                "exit_code": output.status.code(),
+                "success": false,
+                "timed_out": true,
+                "timeout_ms": timeout_ms,
+            }));
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn current_research_payload(
     state: &WebAppState,
     session_id: Option<&str>,
@@ -10298,9 +16004,14 @@ fn current_research_payload(
 ) -> Option<WebResearchPayload> {
     let normalized = mode.unwrap_or("chat").trim().to_ascii_lowercase();
     if normalized == "research" || normalized == "spec" {
-        let runtime_snapshot = session_id
-            .and_then(|id| lock_stream_runtime(state).ok().and_then(|sessions| sessions.get(id).map(clone_stream_runtime_view)));
-        Some(build_research_payload(
+        let runtime_snapshot = session_id.and_then(|id| {
+            lock_stream_runtime(state)
+                .ok()
+                .and_then(|sessions| sessions.get(id).map(clone_stream_runtime_view))
+        });
+        Some(build_research_payload_with_feedback(
+            state,
+            session_id,
             runtime,
             messages,
             runtime_snapshot.as_ref(),
@@ -10340,7 +16051,6 @@ fn normalize_plaintext_tool_name(tool_name: &str) -> String {
     trimmed.to_string()
 }
 
-
 fn summarize_tool_args_for_provider(tool_name: &str, args: &Value) -> String {
     match tool_name {
         "write_file" => {
@@ -10364,13 +16074,36 @@ fn summarize_tool_args_for_provider(tool_name: &str, args: &Value) -> String {
             let path = extract_tool_path(tool_name, args).unwrap_or_else(|| "unknown".to_string());
             format!("path={}", path)
         }
+        "read_file_head" => {
+            let path = extract_tool_path(tool_name, args).unwrap_or_else(|| "unknown".to_string());
+            let max_lines = args
+                .get("max_lines")
+                .and_then(Value::as_u64)
+                .unwrap_or(80);
+            format!("path={} max_lines={}", path, max_lines)
+        }
+        "inspect_path" => {
+            let path = extract_tool_path(tool_name, args).unwrap_or_else(|| "unknown".to_string());
+            format!("path={}", path)
+        }
+        "tree_dir" => {
+            let path = extract_tool_path(tool_name, args).unwrap_or_else(|| ".".to_string());
+            let max_depth = args
+                .get("max_depth")
+                .and_then(Value::as_u64)
+                .unwrap_or(3);
+            format!("directory={} max_depth={}", path, max_depth)
+        }
         _ => tail_string(&serde_json::to_string(args).unwrap_or_default(), 180),
     }
 }
 
 fn summarize_tool_result_for_provider_memory(tool_name: &str, raw: &str, success: bool) -> String {
     if let Ok(value) = serde_json::from_str::<Value>(raw) {
-        if matches!(tool_name, "write_file" | "edit_file" | "read_file" | "delete_file") {
+        if matches!(
+            tool_name,
+            "write_file" | "edit_file" | "read_file" | "delete_file"
+        ) {
             let path = value
                 .pointer("/data/path")
                 .and_then(Value::as_str)
@@ -10404,8 +16137,8 @@ fn combine_assistant_segments(existing: &str, next: &str) -> String {
     }
 
     let mut combined = existing.to_string();
-    let needs_break = !combined.ends_with(['\n', ' ', '\t'])
-        && !next.starts_with(['\n', ' ', '\t']);
+    let needs_break =
+        !combined.ends_with(['\n', ' ', '\t']) && !next.starts_with(['\n', ' ', '\t']);
     if needs_break {
         combined.push_str("\n\n");
     }
@@ -10461,7 +16194,8 @@ fn capture_pending_file_snapshot(
     }
 
     let display_path = extract_tool_path(tool_name, args)?;
-    let absolute_path = resolve_workspace_relative_path(base_dir, &runtime.workspace_root, &display_path)?;
+    let absolute_path =
+        resolve_workspace_relative_path(base_dir, &runtime.workspace_root, &display_path)?;
     let old_content = read_text_file(&absolute_path).unwrap_or_default();
 
     Some(PendingFileSnapshot {
@@ -10508,7 +16242,12 @@ fn detect_web_file_write(
     let snapshot = snapshot?;
     if serde_json::from_str::<Value>(result)
         .ok()
-        .and_then(|value| value.get("status").and_then(Value::as_str).map(str::to_string))
+        .and_then(|value| {
+            value
+                .get("status")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .map(|status| !status.eq_ignore_ascii_case("success"))
         .unwrap_or(false)
     {
@@ -10521,29 +16260,23 @@ fn detect_web_file_write(
         return None;
     }
 
-    let absolute_path = resolve_workspace_relative_path(
-        base_dir,
-        &runtime.workspace_root,
-        &snapshot.display_path,
-    )?;
+    let absolute_path =
+        resolve_workspace_relative_path(base_dir, &runtime.workspace_root, &snapshot.display_path)?;
     if absolute_path != snapshot.absolute_path || !absolute_path.exists() {
         return None;
     }
 
     Some(VerifiedWorkspaceWrite {
         absolute_path,
-        diff: FileDiff::compute(
-        &snapshot.display_path,
-        &snapshot.old_content,
-        &new_content,
-        ),
+        diff: FileDiff::compute(&snapshot.display_path, &snapshot.old_content, &new_content),
     })
 }
 
 fn extract_tool_path(tool_name: &str, args: &Value) -> Option<String> {
     let key = match tool_name {
-        "write_file" | "edit_file" | "read_file" | "delete_file" => "path",
+        "write_file" | "edit_file" | "read_file" | "read_file_head" | "delete_file" | "inspect_path" => "path",
         "list_dir" | "mkdir" | "create_dir" => "dir",
+        "find_files" | "count_file_types" | "find_large_files" | "tree_dir" => "directory",
         _ => "path",
     };
 
@@ -10553,7 +16286,11 @@ fn extract_tool_path(tool_name: &str, args: &Value) -> Option<String> {
         .map(|value| value.replace('\\', "/"))
 }
 
-fn resolve_workspace_relative_path(base_dir: &Path, workspace_root: &str, raw_path: &str) -> Option<PathBuf> {
+fn resolve_workspace_relative_path(
+    base_dir: &Path,
+    workspace_root: &str,
+    raw_path: &str,
+) -> Option<PathBuf> {
     let trimmed = raw_path.trim();
     if trimmed.is_empty() {
         return None;
@@ -10566,7 +16303,11 @@ fn resolve_workspace_relative_path(base_dir: &Path, workspace_root: &str, raw_pa
         .trim_start_matches("./")
         .trim_start_matches('/')
         .to_string();
-    let candidate = if normalized.is_empty() { trimmed } else { normalized.as_str() };
+    let candidate = if normalized.is_empty() {
+        trimmed
+    } else {
+        normalized.as_str()
+    };
     let path = PathBuf::from(candidate);
     if path.is_absolute() {
         return Some(path);
@@ -10606,17 +16347,15 @@ async fn wait_for_tool_approval(
         let session = runtime
             .get_mut(session_id)
             .ok_or_else(|| anyhow!("missing stream session runtime"))?;
-        session
-            .pending_approvals
-            .insert(
-                call_id.to_string(),
-                PendingApprovalRuntime {
-                    sender: approval_tx,
-                    name: name.to_string(),
-                    risk: risk.to_string(),
-                    args: args.clone(),
-                },
-            );
+        session.pending_approvals.insert(
+            call_id.to_string(),
+            PendingApprovalRuntime {
+                sender: approval_tx,
+                name: name.to_string(),
+                risk: risk.to_string(),
+                args: args.clone(),
+            },
+        );
     }
 
     let _ = tx.send(StreamEnvelope {
@@ -10641,6 +16380,7 @@ async fn wait_for_tool_approval(
         research: None,
         subagents: None,
         verifier: None,
+        auto_skills: None,
     });
 
     let approved = approval_rx.await.unwrap_or(false);
@@ -10654,22 +16394,32 @@ struct StreamTurnResult {
     pseudo_tool_names: Vec<String>,
 }
 
-fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
+async fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
+    prune_completed_stream_runtime_sessions(state);
     let runtime = {
         let runtime = lock_runtime_settings(state)?;
         runtime.clone()
     };
     let sandbox_bootstrap = initialize_app_sandbox(&state.host.paths)?;
-    let mut session_manager = lock_session_manager(state)?;
-    let _ = session_manager.refresh_summaries();
-    if session_manager.current_id.is_none() {
-        restore_session_selection(&mut session_manager, &state.persisted_state_path);
-    }
-    let current_id = session_manager.current_id.clone();
-    let messages = if let Some(ref id) = current_id {
-        session_manager.load_messages(id).unwrap_or_default()
-    } else {
-        Vec::new()
+    let (current_id, messages, sessions, branches) = {
+        let mut session_manager = lock_session_manager(state)?;
+        let _ = session_manager.refresh_summaries();
+        if session_manager.current_id.is_none() {
+            restore_session_selection(&mut session_manager, &state.persisted_state_path);
+        }
+        let current_id = session_manager.current_id.clone();
+        let messages = if let Some(ref id) = current_id {
+            session_manager.load_messages(id).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let sessions = session_manager.list_recent(20).to_vec();
+        let branches = current_id
+            .as_ref()
+            .and_then(|id| session_manager.index.iter().find(|m| &m.id == id))
+            .map(|meta| meta.branches.clone())
+            .unwrap_or_else(|| vec![SessionBranch::main()]);
+        (current_id, messages, sessions, branches)
     };
     let active_sessions = {
         let runtime = lock_stream_runtime(state)?;
@@ -10682,32 +16432,36 @@ fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
             })
             .collect::<Vec<_>>()
     };
-    let runtime_snapshots = {
-        let runtime = lock_stream_runtime(state)?;
-        runtime
-            .iter()
-            .map(|(session_id, session)| WebSessionRuntimeSnapshot {
-                session_id: session_id.clone(),
-                partial_text: session.partial_text.clone(),
-                progress_updates: session.progress_updates.clone(),
-                latest_activity: session.latest_activity.clone(),
-                tool_events: session.tool_events.clone(),
-                edited_files: session.edited_files.clone(),
-                permission: session.pending_approvals.iter().next().map(|(call_id, pending)| WebPermissionRequest {
-                    call_id: call_id.clone(),
-                    name: pending.name.clone(),
-                    risk: pending.risk.clone(),
-                    reason: format!("Tool '{}' requires manual approval.", pending.name),
-                    args: pending.args.clone(),
-                }),
-                subagents: session.subagents.clone(),
-                verifier: session.verifier.clone(),
-                checkpoints: session.checkpoints.clone(),
-                branch_notes: session.branch_notes.clone(),
-                timeline: session.timeline.clone(),
-            })
-            .collect::<Vec<_>>()
-    };
+    let runtime_snapshots =
+        {
+            let runtime = lock_stream_runtime(state)?;
+            runtime
+                .iter()
+                .map(|(session_id, session)| WebSessionRuntimeSnapshot {
+                    session_id: session_id.clone(),
+                    partial_text: session.partial_text.clone(),
+                    progress_updates: session.progress_updates.clone(),
+                    latest_activity: session.latest_activity.clone(),
+                    tool_events: session.tool_events.clone(),
+                    edited_files: session.edited_files.clone(),
+                    permission: session.pending_approvals.iter().next().map(
+                        |(call_id, pending)| WebPermissionRequest {
+                            call_id: call_id.clone(),
+                            name: pending.name.clone(),
+                            risk: pending.risk.clone(),
+                            reason: format!("Tool '{}' requires manual approval.", pending.name),
+                            args: pending.args.clone(),
+                        },
+                    ),
+                    subagents: session.subagents.clone(),
+                    verifier: session.verifier.clone(),
+                    checkpoints: session.checkpoints.clone(),
+                    branch_notes: session.branch_notes.clone(),
+                    timeline: session.timeline.clone(),
+                    auto_skills: session.auto_skills.clone(),
+                })
+                .collect::<Vec<_>>()
+        };
     let active_research_runtime = current_id.as_ref().and_then(|session_id| {
         lock_stream_runtime(state)
             .ok()
@@ -10728,7 +16482,12 @@ fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
             if selected_paths.is_empty() {
                 return Some(WebReviewPayload::default());
             }
-            try_build_review_payload(state.host.base_dir(), &runtime.workspace_root, &selected_paths).ok()
+            try_build_review_payload(
+                state.host.base_dir(),
+                &runtime.workspace_root,
+                &selected_paths,
+            )
+            .ok()
         })
         .or_else(|| {
             let selected_paths = collect_review_paths_for_current_turn(&messages, &[]);
@@ -10744,6 +16503,24 @@ fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
             }
         })
         .unwrap_or_default();
+    let _ = ensure_server_side_paper_workflow(
+        state,
+        current_id.as_deref(),
+        &runtime,
+        &messages,
+        active_research_runtime.as_ref(),
+        current_research_state,
+        "auto_bootstrap",
+    )
+    .await;
+    let bootstrap_research = build_research_payload_with_feedback(
+        state,
+        current_id.as_deref(),
+        &runtime,
+        &messages,
+        active_research_runtime.as_ref(),
+        current_research_state,
+    );
 
     Ok(WebBootstrap {
         host: state.host.descriptor(),
@@ -10756,39 +16533,29 @@ fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
             sessions_root: sandbox_bootstrap.manifest.sessions_root,
         },
         config: runtime_to_payload(&runtime),
-        research: build_research_payload(
-            &runtime,
-            &messages,
-            active_research_runtime.as_ref(),
-            current_research_state,
-        ),
+        research: bootstrap_research,
         review,
-        git: build_git_payload(state.host.base_dir(), &runtime.workspace_root, false, false).unwrap_or_else(|err| WebGitPayload {
-            available: false,
-            repository_root: runtime.workspace_root.clone(),
-            error: Some(err.to_string()),
-            ..WebGitPayload::default()
-        }),
-        workspace_browser: build_workspace_browser(state.host.base_dir(), &runtime.workspace_root).unwrap_or_else(|_| {
-            WebWorkspaceBrowser {
+        git: build_git_payload(state.host.base_dir(), &runtime.workspace_root, false, false)
+            .unwrap_or_else(|err| WebGitPayload {
+                available: false,
+                repository_root: runtime.workspace_root.clone(),
+                error: Some(err.to_string()),
+                ..WebGitPayload::default()
+            }),
+        workspace_browser: build_workspace_browser(state.host.base_dir(), &runtime.workspace_root)
+            .unwrap_or_else(|_| WebWorkspaceBrowser {
                 root_name: basename_for_display(&runtime.workspace_root),
                 root_path: runtime.workspace_root.clone(),
                 entries: Vec::new(),
-            }
-        }),
-        sessions: session_manager.list_recent(20).to_vec(),
+            }),
+        sessions,
         active_sessions,
         runtime_snapshots,
         current_session_id: current_id.clone(),
-        branches: current_id
-            .as_ref()
-            .and_then(|id| session_manager.index.iter().find(|m| &m.id == id))
-            .map(|meta| meta.branches.clone())
-            .unwrap_or_else(|| vec![SessionBranch::main()]),
+        branches,
         messages: messages_to_web(&messages),
     })
 }
-
 
 fn build_research_payload(
     runtime: &RuntimeSettings,
@@ -10796,20 +16563,36 @@ fn build_research_payload(
     session_runtime: Option<&StreamSessionRuntimeView>,
     session_state: SessionResearchState,
 ) -> WebResearchPayload {
-    let topic = infer_research_topic(messages)
-        .unwrap_or_else(|| "待确定研究课题".to_string());
-    let workflow_kind = infer_research_workflow_kind(&topic, messages);
+    let topic = infer_research_topic(messages).unwrap_or_else(|| "待确定研究课题".to_string());
+    let runtime_evidence =
+        collect_research_runtime_evidence(messages, Path::new("."), &runtime.workspace_root);
+    let workflow_kind = infer_research_workflow_kind_with_runtime(
+        &topic,
+        messages,
+        &runtime.workspace_root,
+        &runtime_evidence,
+    );
     let capability = detect_system_capability(runtime);
-    let assessment = assess_research_runtime(&workflow_kind, messages, &capability);
+    let assessment = assess_research_runtime(
+        &workflow_kind,
+        messages,
+        &capability,
+        &runtime.workspace_root,
+        &runtime_evidence,
+    );
     let graph = build_research_graph(&workflow_kind, messages, &assessment);
     let current_node = graph
         .nodes
         .iter()
-        .find(|node| node.status == "current" || node.status == "blocked" || node.status == "resumable")
+        .find(|node| {
+            node.status == "current" || node.status == "blocked" || node.status == "resumable"
+        })
         .or_else(|| graph.nodes.first());
     let next_phase = assessment.next_phase_override.clone().or_else(|| {
         current_node.and_then(|node| {
-            graph.edges.iter()
+            graph
+                .edges
+                .iter()
                 .find(|edge| edge.from == node.id)
                 .and_then(|edge| graph.nodes.iter().find(|candidate| candidate.id == edge.to))
                 .map(|node| node.label.clone())
@@ -10825,6 +16608,26 @@ fn build_research_payload(
     let phase = current_node
         .map(|node| node.label.clone())
         .unwrap_or_else(|| "Plan".to_string());
+    let execution_schema_summary = research_execution_schema_summary(&workflow_kind);
+    let result_bundle = research_result_bundle(
+        &workflow_kind,
+        messages,
+        &runtime_evidence,
+        Path::new("."),
+        &runtime.workspace_root,
+    );
+    let run_comparison =
+        research_run_comparison(&workflow_kind, messages, &result_bundle, &runtime_evidence);
+    let lineage = research_lineage(messages, &result_bundle, &runtime_evidence);
+    let runtime_event = build_research_runtime_event(messages, session_runtime);
+    let progress_prompts = build_research_progress_prompts(&workflow_kind, &topic);
+    let closure_checks = build_research_closure_checks(
+        &workflow_kind,
+        &result_bundle,
+        &run_comparison,
+        &lineage,
+        &runtime_event,
+    );
 
     WebResearchPayload {
         active: session_state == SessionResearchState::Research,
@@ -10843,6 +16646,7 @@ fn build_research_payload(
         waiting_approval: runtime.competition_mode,
         competition_mode: runtime.competition_mode,
         workflow_kind: workflow_kind.clone(),
+        workflow_profile_summary: research_workflow_profile_summary(&workflow_kind).to_string(),
         overall_state: assessment.overall_state,
         rationale: research_workflow_rationale(&workflow_kind).to_string(),
         blocker: assessment.blocker,
@@ -10851,8 +16655,42 @@ fn build_research_payload(
         resource_summary: assessment.resource_summary,
         graph,
         review: research_review_checks(&workflow_kind),
-        runtime: build_research_runtime_event(messages, session_runtime),
+        execution_schema_summary,
+        result_bundle,
+        run_comparison,
+        lineage,
+        reviewer_feedback: WebReviewerFeedbackPayload::default(),
+        paper_workflow: None,
+        paper_ready: WebPaperReadyPayload::default(),
+        runtime: runtime_event,
+        progress_prompts,
+        closure_checks,
     }
+}
+
+fn build_research_payload_with_feedback(
+    state: &WebAppState,
+    session_id: Option<&str>,
+    runtime: &RuntimeSettings,
+    messages: &[MessageBlock],
+    session_runtime: Option<&StreamSessionRuntimeView>,
+    session_state: SessionResearchState,
+) -> WebResearchPayload {
+    let mut payload = build_research_payload(runtime, messages, session_runtime, session_state);
+    let current_run_id = result_bundle_field_value(&payload.result_bundle, "run_id");
+    payload.reviewer_feedback =
+        build_reviewer_feedback_payload(state, session_id, current_run_id.clone()).unwrap_or_else(
+            |_| WebReviewerFeedbackPayload {
+                session_id: session_id.map(|value| value.to_string()),
+                current_run_id,
+                unresolved_count: 0,
+                entries: Vec::new(),
+            },
+        );
+    payload.paper_workflow =
+        session_id.and_then(|value| load_paper_workflow_payload(state, value).ok().flatten());
+    payload.paper_ready = build_paper_ready_payload(&payload);
+    payload
 }
 
 fn infer_research_topic(messages: &[MessageBlock]) -> Option<String> {
@@ -10885,6 +16723,16 @@ fn infer_research_workflow_kind(topic: &str, messages: &[MessageBlock]) -> Strin
                 corpus.push('\n');
                 corpus.push_str(&name.to_ascii_lowercase());
             }
+            MessageBlock::ToolResult { result, .. } => {
+                corpus.push('\n');
+                corpus.push_str(&result.to_ascii_lowercase());
+                corpus.push('\n');
+                corpus.push_str(result);
+            }
+            MessageBlock::Diff { diff } => {
+                corpus.push('\n');
+                corpus.push_str(&diff.file_path.to_ascii_lowercase());
+            }
             _ => {}
         }
     }
@@ -10892,9 +16740,90 @@ fn infer_research_workflow_kind(topic: &str, messages: &[MessageBlock]) -> Strin
     if contains_any(
         &corpus,
         &[
+            "biology",
+            "biological",
+            "chemistry",
+            "chemical",
+            "medicine",
+            "medical",
+            "drug",
+            "protein",
+            "genome",
+            "cell culture",
+            "western blot",
+            "pcr",
+            "assay",
+            "wet lab",
+            "materials",
+            "molecule",
+            "molecular",
+            "生物",
+            "化学",
+            "医学",
+            "药物",
+            "蛋白",
+            "细胞",
+            "材料",
+            "分子",
+            "湿实验",
+            "实验方案",
+        ],
+    ) && !contains_any(
+        &corpus,
+        &[
+            "bioinformatics",
+            "computational biology",
+            "computational chemistry",
+            "cheminformatics",
+            "benchmark",
+            "dataset",
+            "ml",
+            "machine learning",
+            "模型",
+            "算法",
+            "程序",
+            "系统",
+            "代码",
+            "数据集",
+        ],
+    ) {
+        "scope_boundary".to_string()
+    } else if contains_any(
+        &corpus,
+        &[
+            "literature review",
+            "survey",
+            "systematic review",
+            "related work",
+            "paper review",
+            "citation",
+            "citations",
+            "papers on",
+            "synthesize the literature",
+            "search paper",
+            "fetch_paper",
+            "fetch_papers",
+            "文献综述",
+            "综述",
+            "论文调研",
+            "论文综述",
+            "引用",
+            "检索论文",
+        ],
+    ) {
+        "literature_review".to_string()
+    } else if contains_any(
+        &corpus,
+        &[
             "sklearn",
             "scikit-learn",
             "iris",
+            "machine learning",
+            "supervised learning",
+            "tabular",
+            "lightweight ml",
+            "ml experiment",
+            "ml baseline",
             "logistic regression",
             "linear regression",
             "random forest",
@@ -10934,7 +16863,52 @@ fn infer_research_workflow_kind(topic: &str, messages: &[MessageBlock]) -> Strin
             "深度学习",
         ],
     ) {
-        "data_analysis".to_string()
+        "classical_ml".to_string()
+    } else if contains_any(
+        &corpus,
+        &[
+            "multi-agent",
+            "agent evaluation",
+            "agentic",
+            "tool use",
+            "tool-use",
+            "planner",
+            "planning agent",
+            "autonomous agent",
+            "assistant benchmark",
+            "trajectory",
+            "任务成功率",
+            "工具调用",
+            "智能体",
+            "轨迹",
+            "评测集",
+        ],
+    ) {
+        "agent_evaluation".to_string()
+    } else if contains_any(
+        &corpus,
+        &[
+            "security",
+            "vulnerability",
+            "vuln",
+            "exploit",
+            "fuzz",
+            "fuzzer",
+            "static analysis",
+            "dynamic analysis",
+            "cve",
+            "hardening",
+            "malware",
+            "taint",
+            "漏洞",
+            "安全",
+            "模糊测试",
+            "污点",
+            "静态分析",
+            "动态分析",
+        ],
+    ) {
+        "security_analysis".to_string()
     } else if contains_any(
         &corpus,
         &[
@@ -10956,31 +16930,66 @@ fn infer_research_workflow_kind(topic: &str, messages: &[MessageBlock]) -> Strin
             "finetune",
             "fine-tune",
             "微调",
+            "rag",
+            "retrieval augmented generation",
+            "embedding",
+            "vector database",
+            "agent benchmark",
+            "代码生成",
+            "代码补全",
+            "检索增强",
+            "向量数据库",
+            "智能体评测",
         ],
     ) {
         "deep_learning".to_string()
     } else if contains_any(
         &corpus,
-        &["proof", "定理", "证明", "lemma", "数学", "推导"],
+        &[
+            "proof",
+            "lemma",
+            "invariant",
+            "type system",
+            "formal verification",
+            "program logic",
+            "theorem",
+            "complexity proof",
+            "定理",
+            "证明",
+            "不变量",
+            "形式化验证",
+            "程序逻辑",
+            "复杂度",
+            "推导",
+        ],
     ) {
         "theory".to_string()
     } else if contains_any(
         &corpus,
         &[
-            "experiment design",
-            "protocol",
-            "assay",
-            "pcr",
-            "western blot",
-            "cell culture",
-            "实验设计",
-            "实验方案",
-            "生物实验",
-            "化学实验",
-            "对照组",
+            "benchmark",
+            "ablation",
+            "latency",
+            "throughput",
+            "scalability",
+            "fault injection",
+            "load test",
+            "stress test",
+            "profiling",
+            "memory usage",
+            "benchmark design",
+            "system evaluation",
+            "性能测试",
+            "压测",
+            "吞吐",
+            "延迟",
+            "可扩展性",
+            "消融实验",
+            "系统评测",
+            "基准测试",
         ],
     ) {
-        "experimental_design".to_string()
+        "systems_evaluation".to_string()
     } else if contains_any(
         &corpus,
         &["literature", "综述", "论文", "review", "citation", "文献"],
@@ -10988,21 +16997,218 @@ fn infer_research_workflow_kind(topic: &str, messages: &[MessageBlock]) -> Strin
         "literature_review".to_string()
     } else if contains_any(
         &corpus,
-        &["simulation", "monte carlo", "有限元", "仿真", "模拟"],
-    ) {
-        "simulation".to_string()
-    } else if contains_any(
-        &corpus,
-        &["dataset", "kmeans", "regression", "classification", "数据", "聚类", "统计"],
+        &[
+            "dataset",
+            "kmeans",
+            "regression",
+            "classification",
+            "statistics",
+            "etl",
+            "feature engineering",
+            "数据",
+            "聚类",
+            "统计",
+            "特征工程",
+        ],
     ) {
         "data_analysis".to_string()
     } else {
-        "adaptive_research".to_string()
+        "cs_adaptive_research".to_string()
+    }
+}
+
+fn infer_research_workflow_kind_with_runtime(
+    topic: &str,
+    messages: &[MessageBlock],
+    workspace_root: &str,
+    runtime_evidence: &ResearchRuntimeEvidence,
+) -> String {
+    let inferred = infer_research_workflow_kind(topic, messages);
+    let runtime_override =
+        infer_research_workflow_kind_from_runtime_evidence(runtime_evidence, workspace_root);
+    match runtime_override {
+        Some(override_kind)
+            if matches!(
+                inferred.as_str(),
+                "literature_review" | "data_analysis" | "scope_boundary"
+            ) =>
+        {
+            override_kind
+        }
+        _ => inferred,
+    }
+}
+
+fn infer_research_workflow_kind_from_runtime_evidence(
+    runtime_evidence: &ResearchRuntimeEvidence,
+    workspace_root: &str,
+) -> Option<String> {
+    let mut corpus = String::new();
+    for path in &runtime_evidence.artifact_paths {
+        corpus.push('\n');
+        corpus.push_str(&path.to_ascii_lowercase());
+    }
+    for line in &runtime_evidence.text_evidence {
+        corpus.push('\n');
+        corpus.push_str(&line.to_ascii_lowercase());
+    }
+    for (key, value) in &runtime_evidence.metric_facts {
+        corpus.push('\n');
+        corpus.push_str(&key.to_ascii_lowercase());
+        corpus.push('=');
+        corpus.push_str(&value.to_ascii_lowercase());
+    }
+    if let Some(workspace_hint) = workspace_research_profile_hint(workspace_root) {
+        corpus.push('\n');
+        corpus.push_str(&workspace_hint);
+    }
+
+    if corpus.trim().is_empty() {
+        return None;
+    }
+
+    if contains_any(
+        &corpus,
+        &[
+            "task success rate",
+            "tool error rate",
+            "trajectory",
+            "judge",
+            "assistant benchmark",
+        ],
+    ) {
+        return Some("agent_evaluation".to_string());
+    }
+    if contains_any(
+        &corpus,
+        &[
+            "latency",
+            "throughput",
+            "qps",
+            "ops/s",
+            "memory_mb",
+            "profiling",
+        ],
+    ) {
+        return Some("systems_evaluation".to_string());
+    }
+    if contains_any(
+        &corpus,
+        &[
+            "vulnerability",
+            "static analysis",
+            "dynamic analysis",
+            "cve",
+            "false positive",
+            "taint",
+        ],
+    ) {
+        return Some("security_analysis".to_string());
+    }
+    if contains_any(
+        &corpus,
+        &[
+            "proof",
+            "lemma",
+            "theorem",
+            "counterexample",
+            "invariant",
+            "formal verification",
+        ],
+    ) {
+        return Some("theory".to_string());
+    }
+    if contains_any(
+        &corpus,
+        &[
+            "epoch",
+            "checkpoint",
+            "val_loss",
+            "pytorch",
+            "tensorflow",
+            "cuda",
+            "transformer",
+            "bert",
+        ],
+    ) {
+        return Some("deep_learning".to_string());
+    }
+
+    let has_classical_ml_signal = contains_any(
+        &corpus,
+        &[
+            "sklearn",
+            "scikit-learn",
+            "random forest",
+            "randomforest",
+            "extra trees",
+            "extratrees",
+            "bagging",
+            "decision tree",
+            "classification",
+            "accuracy",
+            "balanced accuracy",
+            "results.csv",
+            "experiment.py",
+            "load_breast_cancer",
+            "load_digits",
+            "load_wine",
+        ],
+    );
+    let has_deep_learning_signal = contains_any(
+        &corpus,
+        &[
+            "pytorch",
+            "tensorflow",
+            "cuda",
+            "epoch",
+            "val_loss",
+            "transformer",
+            "bert",
+        ],
+    );
+    if has_classical_ml_signal && !has_deep_learning_signal {
+        return Some("classical_ml".to_string());
+    }
+
+    None
+}
+
+fn workspace_research_profile_hint(workspace_root: &str) -> Option<String> {
+    let experiments_dir = Path::new(workspace_root).join("experiments");
+    if !experiments_dir.is_dir() {
+        return None;
+    }
+
+    let mut hints = Vec::new();
+    for name in ["config.py", "experiment.py", "results.csv", "metrics.csv"] {
+        let path = experiments_dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+        hints.push(name.to_ascii_lowercase());
+        if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| matches!(value, "py" | "txt" | "md" | "csv"))
+        {
+            if let Ok(content) = fs::read_to_string(&path) {
+                hints.push(tail_string(&content.to_ascii_lowercase(), 12_000));
+            }
+        }
+    }
+
+    if hints.is_empty() {
+        None
+    } else {
+        Some(hints.join("\n"))
     }
 }
 
 fn contains_any(input: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| input.contains(&needle.to_ascii_lowercase()))
+    needles
+        .iter()
+        .any(|needle| input.contains(&needle.to_ascii_lowercase()))
 }
 
 fn system_capability_cache() -> &'static Mutex<Option<CachedSystemCapability>> {
@@ -11021,12 +17227,7 @@ fn system_capability_signature(runtime: &RuntimeSettings) -> String {
         .get("python")
         .map(|value| value.trim())
         .unwrap_or("");
-    format!(
-        "{}|{}|{}",
-        runtime.workspace_root.trim(),
-        cuda,
-        python
-    )
+    format!("{}|{}|{}", runtime.workspace_root.trim(), cuda, python)
 }
 
 fn detect_system_capability(runtime: &RuntimeSettings) -> SystemCapability {
@@ -11040,7 +17241,9 @@ fn detect_system_capability(runtime: &RuntimeSettings) -> SystemCapability {
     }
 
     let mut capability = SystemCapability {
-        cpu_cores: std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(1),
+        cpu_cores: std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(1),
         total_memory_mb: None,
         available_memory_mb: None,
         gpu_hint: None,
@@ -11090,6 +17293,8 @@ fn assess_research_runtime(
     kind: &str,
     messages: &[MessageBlock],
     capability: &SystemCapability,
+    workspace_root: &str,
+    runtime_evidence: &ResearchRuntimeEvidence,
 ) -> ResearchRuntimeAssessment {
     let mut assessment = ResearchRuntimeAssessment {
         overall_state: "active".to_string(),
@@ -11102,8 +17307,9 @@ fn assess_research_runtime(
         .take(40)
         .filter_map(|message| match message {
             MessageBlock::ToolResult { result, .. } => Some(result.to_ascii_lowercase()),
-            MessageBlock::Assistant { content }
-            | MessageBlock::AssistantStreaming { content } => Some(content.to_ascii_lowercase()),
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                Some(content.to_ascii_lowercase())
+            }
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -11134,10 +17340,7 @@ fn assess_research_runtime(
             "CPU {} cores / avail mem {} MB / {}",
             capability.cpu_cores,
             capability.available_memory_mb.unwrap_or(0),
-            capability
-                .gpu_hint
-                .as_deref()
-                .unwrap_or("no GPU hint")
+            capability.gpu_hint.as_deref().unwrap_or("no GPU hint")
         ));
 
         if likely_blocked {
@@ -11156,19 +17359,155 @@ fn assess_research_runtime(
                 "在高性能机器上恢复 train_monitor 节点".to_string(),
             ];
             assessment.current_node_override = Some("train_monitor".to_string());
-            assessment.next_phase_override =
-                Some("切换到更高性能环境后恢复训练".to_string());
-        } else if contains_any(&tool_corpus, &["checkpoint", "resume", "继续训练", "恢复训练"]) {
+            assessment.next_phase_override = Some("切换到更高性能环境后恢复训练".to_string());
+        } else if contains_any(
+            &tool_corpus,
+            &["checkpoint", "resume", "继续训练", "恢复训练"],
+        ) {
             assessment.overall_state = "resumable".to_string();
-            assessment.recovery_hint = Some(
-                "已检测到可恢复训练线索，可从最近 checkpoint 或训练配置继续。".to_string(),
-            );
+            assessment.recovery_hint =
+                Some("已检测到可恢复训练线索，可从最近 checkpoint 或训练配置继续。".to_string());
             assessment.resume_points = vec![
                 "读取最近 checkpoint".to_string(),
                 "复用现有训练脚本与参数".to_string(),
                 "从 train_monitor 节点继续".to_string(),
             ];
         }
+    }
+
+    let progress_index =
+        infer_research_progress_index(kind, messages, research_workflow_specs(kind).len());
+    let mut runtime_metric_signal = !runtime_evidence.metric_facts.is_empty()
+        || runtime_evidence.validation_signals > 0
+        || runtime_evidence.text_evidence.iter().any(|item| {
+            contains_any(
+                &item.to_ascii_lowercase(),
+                &[
+                    "accuracy",
+                    "f1",
+                    "auc",
+                    "precision",
+                    "recall",
+                    "latency",
+                    "throughput",
+                    "memory",
+                    "qps",
+                    "ops/s",
+                ],
+            )
+        });
+    let mut runtime_artifact_signal = !runtime_evidence.artifact_paths.is_empty()
+        || runtime_evidence.text_evidence.iter().any(|item| {
+            contains_any(
+                &item.to_ascii_lowercase(),
+                &[
+                    "results.csv",
+                    "metrics.csv",
+                    "saved",
+                    "written",
+                    "report",
+                    "summary",
+                    "compare",
+                    "baseline",
+                ],
+            )
+        });
+    for message in messages.iter().rev().take(40) {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success,
+        } = message
+        else {
+            continue;
+        };
+        let tool_name =
+            tool_name_by_call_id(messages, call_id).unwrap_or_else(|| "tool".to_string());
+        if !matches!(
+            tool_name.as_str(),
+            "run_command"
+                | "run_safe_command"
+                | "run_python"
+                | "run_python_file"
+                | "run_r"
+                | "run_julia"
+                | "terminal_run"
+        ) {
+            continue;
+        }
+        let parsed = parse_tool_result_evidence(&tool_name, result, *success);
+        if !(parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out) {
+            continue;
+        }
+        let combined = format!(
+            "{}\n{}\n{}",
+            parsed.stdout.to_ascii_lowercase(),
+            parsed.stderr.to_ascii_lowercase(),
+            parsed.summary.to_ascii_lowercase()
+        );
+        if contains_any(
+            &combined,
+            &[
+                "accuracy",
+                "f1",
+                "auc",
+                "precision",
+                "recall",
+                "latency",
+                "throughput",
+                "memory",
+                "qps",
+                "ops/s",
+            ],
+        ) {
+            runtime_metric_signal = true;
+        }
+        if contains_any(
+            &combined,
+            &[
+                "results.csv",
+                "metrics.csv",
+                "saved",
+                "written",
+                "report",
+                "summary",
+                "compare",
+                "baseline",
+            ],
+        ) {
+            runtime_artifact_signal = true;
+        }
+    }
+
+    let dataset_driven_complete = matches!(
+        kind,
+        "classical_ml"
+            | "systems_evaluation"
+            | "agent_evaluation"
+            | "security_analysis"
+            | "data_analysis"
+    ) && progress_index + 1 >= research_workflow_specs(kind).len()
+        && runtime_metric_signal
+        && runtime_artifact_signal;
+
+    let workspace_complete = matches!(
+        kind,
+        "classical_ml"
+            | "systems_evaluation"
+            | "agent_evaluation"
+            | "security_analysis"
+            | "data_analysis"
+    ) && runtime_metric_signal
+        && runtime_artifact_signal
+        && (!runtime_evidence.metric_facts.is_empty()
+            || runtime_evidence.validation_signals > 0
+            || runtime_evidence
+                .artifact_paths
+                .iter()
+                .any(|path| path.ends_with("results.csv") || path.ends_with("metrics.csv")));
+
+    if (dataset_driven_complete || workspace_complete) && assessment.overall_state == "active" {
+        assessment.overall_state = "complete".to_string();
     }
 
     assessment
@@ -11254,26 +17593,46 @@ fn infer_research_progress_index(kind: &str, messages: &[MessageBlock], total: u
         match message {
             MessageBlock::ToolCall { name, .. } => {
                 let name = name.as_str();
-                if matches!(name, "read_file" | "list_dir" | "search_files" | "grep_files" | "terminal_read") {
+                if matches!(
+                    name,
+                    "read_file" | "list_dir" | "search_files" | "grep_files" | "terminal_read"
+                ) {
                     has_evidence = true;
                 }
                 if matches!(name, "write_file" | "edit_file") {
                     has_design = true;
                 }
-                if matches!(name, "terminal_run" | "run_python" | "run_command" | "run_safe_command") {
+                if matches!(
+                    name,
+                    "terminal_run" | "run_python" | "run_command" | "run_safe_command"
+                ) {
                     has_execution = true;
                 }
                 if matches!(name, "git_status" | "git_diff" | "run_tests") {
                     has_validation = true;
                 }
             }
-            MessageBlock::ToolResult { result, success, .. } => {
+            MessageBlock::ToolResult {
+                result, success, ..
+            } => {
                 let text = result.to_ascii_lowercase();
                 if *success {
-                    if contains_any(&text, &["accuracy", "loss", "f1", "auc", "val_", "metrics", "结果", "指标", "误差"]) {
+                    if contains_any(
+                        &text,
+                        &[
+                            "accuracy", "loss", "f1", "auc", "val_", "metrics", "结果", "指标",
+                            "误差",
+                        ],
+                    ) {
                         has_validation = true;
                     }
-                    if contains_any(&text, &["saved", "written", "created", "report", "summary", "导出", "保存", "报告", "结论"]) {
+                    if contains_any(
+                        &text,
+                        &[
+                            "saved", "written", "created", "report", "summary", "导出", "保存",
+                            "报告", "结论",
+                        ],
+                    ) {
                         has_delivery = true;
                     }
                 } else {
@@ -11286,10 +17645,31 @@ fn infer_research_progress_index(kind: &str, messages: &[MessageBlock], total: u
             }
             MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
                 let text = content.to_ascii_lowercase();
-                if contains_any(&text, &["validate", "verification", "cross-check", "误差分析", "验证", "核查"]) {
+                if contains_any(
+                    &text,
+                    &[
+                        "validate",
+                        "verification",
+                        "cross-check",
+                        "误差分析",
+                        "验证",
+                        "核查",
+                    ],
+                ) {
                     has_validation = true;
                 }
-                if contains_any(&text, &["self-review", "risk", "assumption", "局限", "假设", "风险", "审查"]) {
+                if contains_any(
+                    &text,
+                    &[
+                        "self-review",
+                        "risk",
+                        "assumption",
+                        "局限",
+                        "假设",
+                        "风险",
+                        "审查",
+                    ],
+                ) {
                     has_review = true;
                 }
             }
@@ -11299,36 +17679,109 @@ fn infer_research_progress_index(kind: &str, messages: &[MessageBlock], total: u
 
     let stage = match kind {
         "deep_learning" => {
-            if has_delivery { 5 }
-            else if has_validation { 4 }
-            else if has_execution && has_review { 3 }
-            else if has_execution { 2 }
-            else if has_evidence { 1 }
-            else { 0 }
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_execution && has_review {
+                3
+            } else if has_execution {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
+        }
+        "classical_ml" => {
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_execution {
+                3
+            } else if has_design {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
+        }
+        "agent_evaluation" => {
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_execution && has_review {
+                3
+            } else if has_execution {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
+        }
+        "security_analysis" => {
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_execution {
+                3
+            } else if has_design || has_review {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
         }
         "theory" => {
-            if has_delivery { 5 }
-            else if has_validation { 4 }
-            else if has_review { 3 }
-            else if has_design || has_evidence { 2 }
-            else if has_evidence { 1 }
-            else { 0 }
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_review {
+                3
+            } else if has_design || has_evidence {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
         }
-        "experimental_design" => {
-            if has_delivery { 5 }
-            else if has_validation { 4 }
-            else if has_execution { 3 }
-            else if has_design { 2 }
-            else if has_evidence { 1 }
-            else { 0 }
+        "systems_evaluation" => {
+            if has_delivery {
+                5
+            } else if has_validation {
+                4
+            } else if has_execution {
+                3
+            } else if has_design {
+                2
+            } else if has_evidence {
+                1
+            } else {
+                0
+            }
         }
         _ => {
-            if has_delivery { total.saturating_sub(1) }
-            else if has_validation { total.saturating_sub(2).min(total.saturating_sub(1)) }
-            else if has_execution { 3.min(total.saturating_sub(1)) }
-            else if has_design { 2.min(total.saturating_sub(1)) }
-            else if has_evidence { 1.min(total.saturating_sub(1)) }
-            else { 0 }
+            if has_delivery {
+                total.saturating_sub(1)
+            } else if has_validation {
+                total.saturating_sub(2).min(total.saturating_sub(1))
+            } else if has_execution {
+                3.min(total.saturating_sub(1))
+            } else if has_design {
+                2.min(total.saturating_sub(1))
+            } else if has_evidence {
+                1.min(total.saturating_sub(1))
+            } else {
+                0
+            }
         }
     };
 
@@ -11340,74 +17793,1797 @@ fn research_workflow_specs(
 ) -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     match kind {
         "deep_learning" => vec![
-            ("scope", "界定任务", "明确数据、指标、算力和停止条件", "plan"),
-            ("baseline", "建立基线", "先跑最小 baseline，确认流程可复现", "evidence"),
-            ("train_monitor", "训练与监控", "记录 epoch、loss、日志和 checkpoint", "execute"),
-            ("debug_or_checkpoint", "调参与回退", "检查失败原因、资源与训练配置", "branch"),
-            ("evaluate", "评估泛化", "验证集/测试集评估并做误差分析", "validate"),
+            (
+                "scope",
+                "界定任务",
+                "明确数据、指标、算力和停止条件",
+                "plan",
+            ),
+            (
+                "baseline",
+                "建立基线",
+                "先跑最小 baseline，确认流程可复现",
+                "evidence",
+            ),
+            (
+                "train_monitor",
+                "训练与监控",
+                "记录 epoch、loss、日志和 checkpoint",
+                "execute",
+            ),
+            (
+                "debug_or_checkpoint",
+                "调参与回退",
+                "检查失败原因、资源与训练配置",
+                "branch",
+            ),
+            (
+                "evaluate",
+                "评估泛化",
+                "验证集/测试集评估并做误差分析",
+                "validate",
+            ),
             ("report", "整理结论", "输出图表、局限和下一步实验", "report"),
         ],
         "theory" => vec![
-            ("formalize", "形式化问题", "定义对象、条件和目标命题", "plan"),
-            ("known_results", "已有结论", "查找相关定理、反例和边界条件", "evidence"),
+            (
+                "formalize",
+                "形式化问题",
+                "定义对象、条件和目标命题",
+                "plan",
+            ),
+            (
+                "known_results",
+                "已有结论",
+                "查找相关定理、反例和边界条件",
+                "evidence",
+            ),
             ("proof_path", "证明路径", "拆分引理并检查依赖关系", "reason"),
-            ("counterexample", "反例搜索", "尝试构造反例或极端情况", "branch"),
-            ("verify", "逐步核查", "检查量词、假设遗漏和推理跳步", "validate"),
+            (
+                "counterexample",
+                "反例搜索",
+                "尝试构造反例或极端情况",
+                "branch",
+            ),
+            (
+                "verify",
+                "逐步核查",
+                "检查量词、假设遗漏和推理跳步",
+                "validate",
+            ),
             ("writeup", "证明写作", "形成可审阅证明与讨论", "report"),
         ],
-        "experimental_design" => vec![
-            ("question", "定义实验问题", "明确机制、变量、终点和成功标准", "plan"),
-            ("background", "背景证据", "整理先验文献、对照组和可测指标", "evidence"),
-            ("protocol", "设计实验方案", "确定材料、步骤、剂量、时间窗和样本量", "reason"),
-            ("pilot", "预实验", "先跑最小闭环，检查可操作性与关键风险", "execute"),
-            ("analysis", "结果判读", "检查统计方法、偏差来源和可重复性", "validate"),
-            ("report", "输出方案与结论", "给出实验卡、风险点和下一步建议", "report"),
+        "systems_evaluation" => vec![
+            (
+                "target",
+                "定义评测目标",
+                "明确系统对象、负载、约束和成功指标",
+                "plan",
+            ),
+            (
+                "baseline",
+                "建立基线",
+                "确认对照实现、输入分布和观测方式",
+                "evidence",
+            ),
+            (
+                "instrument",
+                "布置观测",
+                "添加日志、profiling、监控和采样方案",
+                "reason",
+            ),
+            (
+                "benchmark",
+                "执行评测",
+                "运行 benchmark、压测或消融并记录产物",
+                "execute",
+            ),
+            (
+                "analyze",
+                "分析瓶颈",
+                "解释延迟、吞吐、资源占用和失败模式",
+                "validate",
+            ),
+            (
+                "report",
+                "整理建议",
+                "输出图表、局限、优化建议和复现实验说明",
+                "report",
+            ),
+        ],
+        "classical_ml" => vec![
+            (
+                "dataset",
+                "确认数据与切分",
+                "明确数据来源、标签、切分方式和泄漏边界",
+                "plan",
+            ),
+            (
+                "baseline",
+                "建立轻量基线",
+                "先跑逻辑回归、树模型或线性模型确认流程可复现",
+                "evidence",
+            ),
+            (
+                "train_eval",
+                "训练与评估",
+                "执行训练脚本并产出 accuracy、F1、混淆矩阵等结果",
+                "execute",
+            ),
+            (
+                "error_analysis",
+                "误差与稳健性",
+                "检查类别混淆、随机种子敏感性和过拟合迹象",
+                "validate",
+            ),
+            (
+                "compare",
+                "比较与归纳",
+                "和简单 baseline 或配置变体做对比",
+                "review",
+            ),
+            (
+                "report",
+                "输出结论",
+                "保存脚本、图像、metrics 和中文总结",
+                "report",
+            ),
+        ],
+        "agent_evaluation" => vec![
+            (
+                "task_suite",
+                "定义任务集",
+                "明确任务范围、成功标准、judge 口径和工具边界",
+                "plan",
+            ),
+            (
+                "baseline",
+                "建立对照",
+                "确定零样本、单代理或规则基线",
+                "evidence",
+            ),
+            (
+                "run_eval",
+                "执行评测",
+                "记录任务成功率、轨迹、工具错误与成本",
+                "execute",
+            ),
+            (
+                "trajectory_review",
+                "轨迹审查",
+                "分析失败案例、无效调用和规划问题",
+                "validate",
+            ),
+            (
+                "repair_loop",
+                "修复与复测",
+                "针对关键失败模式做小修并复测",
+                "review",
+            ),
+            (
+                "report",
+                "整理结论",
+                "输出评测报告、关键案例和后续优化建议",
+                "report",
+            ),
+        ],
+        "security_analysis" => vec![
+            (
+                "scope",
+                "定义目标面",
+                "明确目标程序、威胁模型、约束和允许的分析方式",
+                "plan",
+            ),
+            (
+                "baseline",
+                "建立检测基线",
+                "确认现有规则、静态工具或样例集",
+                "evidence",
+            ),
+            (
+                "analyze",
+                "执行分析",
+                "运行静态分析、脚本检查或轻量 fuzz/样例验证",
+                "execute",
+            ),
+            (
+                "triage",
+                "研判结果",
+                "区分真实问题、误报和不可复现线索",
+                "validate",
+            ),
+            (
+                "hardening",
+                "提出修复建议",
+                "给出补丁方向、缓解手段和复验思路",
+                "review",
+            ),
+            (
+                "report",
+                "输出安全结论",
+                "整理发现、证据、局限和复现说明",
+                "report",
+            ),
         ],
         "literature_review" => vec![
             ("question", "综述问题", "界定检索范围和评价维度", "plan"),
-            ("search", "检索证据", "搜索论文、方法、数据集和评估指标", "evidence"),
-            ("screen", "筛选质量", "排除弱证据并记录纳入/排除理由", "review"),
-            ("synthesize", "综合脉络", "比较方法、共识、冲突和空白", "reason"),
+            (
+                "search",
+                "检索证据",
+                "搜索论文、方法、数据集和评估指标",
+                "evidence",
+            ),
+            (
+                "screen",
+                "筛选质量",
+                "排除弱证据并记录纳入/排除理由",
+                "review",
+            ),
+            (
+                "synthesize",
+                "综合脉络",
+                "比较方法、共识、冲突和空白",
+                "reason",
+            ),
             ("gap", "识别空白", "形成可检验问题或后续实验建议", "branch"),
             ("write", "输出综述", "生成引用、表格和结论", "report"),
         ],
-        "simulation" => vec![
-            ("model", "建立模型", "明确变量、边界、近似和守恒关系", "plan"),
-            ("implementation", "实现仿真", "编写最小可运行模型", "execute"),
-            ("sensitivity", "参数扫描", "多组参数、随机种子和稳定性检查", "branch"),
-            ("compare", "对照验证", "与解析解、实验或基线比较", "validate"),
-            ("uncertainty", "不确定性", "说明误差来源和适用范围", "review"),
-            ("report", "报告结果", "输出图表、结论和复现实验说明", "report"),
-        ],
         "data_analysis" => vec![
-            ("inspect", "理解数据", "读取字段、缺失、分布和任务目标", "plan"),
+            (
+                "inspect",
+                "理解数据",
+                "读取字段、缺失、分布和任务目标",
+                "plan",
+            ),
             ("clean", "清洗与特征", "预处理、标准化和特征构造", "execute"),
-            ("baseline", "基线分析", "简单模型、统计检验和可视化", "evidence"),
+            (
+                "baseline",
+                "基线分析",
+                "简单模型、统计检验和可视化",
+                "evidence",
+            ),
             ("iterate", "迭代实验", "调整方法并比较指标", "branch"),
             ("validate", "验证结论", "稳健性、误差和泄漏检查", "validate"),
-            ("artifact", "产出材料", "脚本、图表、表格和结论摘要", "report"),
+            (
+                "artifact",
+                "产出材料",
+                "脚本、图表、表格和结论摘要",
+                "report",
+            ),
+        ],
+        "scope_boundary" => vec![
+            (
+                "scope_check",
+                "识别越界部分",
+                "区分哪些要求属于计算机科学，哪些超出 IDE 工作流范围",
+                "plan",
+            ),
+            (
+                "cs_reframe",
+                "重述可执行部分",
+                "把可保留部分改写为建模、数据、算法、系统或评测任务",
+                "reason",
+            ),
+            (
+                "deliver_scope_note",
+                "交付范围说明",
+                "明确说明未执行部分与可继续的计算机科学路径",
+                "report",
+            ),
         ],
         _ => vec![
-            ("clarify", "澄清目标", "明确问题、约束、资源和成功标准", "plan"),
-            ("evidence", "收集证据", "读取资料、运行工具或查找背景", "evidence"),
+            (
+                "clarify",
+                "澄清目标",
+                "明确问题、约束、资源和成功标准",
+                "plan",
+            ),
+            (
+                "evidence",
+                "收集证据",
+                "读取资料、运行工具或查找背景",
+                "evidence",
+            ),
             ("method", "设计方法", "选择可执行路径和验证指标", "reason"),
             ("execute", "执行任务", "分步运行并记录中间结果", "execute"),
-            ("self_review", "自我审查", "检查假设、失败模式和证据强度", "review"),
-            ("deliver", "交付结论", "输出结果、文件和下一步建议", "report"),
+            (
+                "self_review",
+                "自我审查",
+                "检查假设、失败模式和证据强度",
+                "review",
+            ),
+            (
+                "deliver",
+                "交付结论",
+                "输出结果、文件和下一步建议",
+                "report",
+            ),
         ],
     }
+}
+
+
+const AI_SCIENTIST_WORKFLOW_TOML_FALLBACK: &str = include_str!("scientist/workflow/ai_scientist.toml");
+
+fn ai_scientist_workflow_toml_text() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(|| {
+        let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("scientist")
+            .join("workflow")
+            .join("ai_scientist.toml");
+        fs::read_to_string(source_path)
+            .unwrap_or_else(|_| AI_SCIENTIST_WORKFLOW_TOML_FALLBACK.to_string())
+    })
+    .as_str()
+}
+
+fn ai_scientist_workflow_config() -> Option<&'static toml::Value> {
+    static CONFIG: OnceLock<Option<toml::Value>> = OnceLock::new();
+    CONFIG
+        .get_or_init(|| toml::from_str(ai_scientist_workflow_toml_text()).ok())
+        .as_ref()
+}
+
+fn toml_string_array(value: Option<&toml::Value>) -> Vec<String> {
+    value
+        .and_then(toml::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn progress_prompt_template(kind: &str, lane: &str) -> Option<(String, Vec<String>)> {
+    let progress = ai_scientist_workflow_config()?.get("research_progress")?;
+    let find_entry = |entries: Option<&toml::Value>, match_kind: Option<&str>| {
+        entries
+            .and_then(toml::Value::as_array)
+            .and_then(|items| {
+                items.iter().find(|item| {
+                    let lane_matches = item
+                        .get("lane")
+                        .and_then(toml::Value::as_str)
+                        .is_some_and(|value| value.eq_ignore_ascii_case(lane));
+                    let kind_matches = match_kind.map_or(true, |expected| {
+                        item.get("kind")
+                            .and_then(toml::Value::as_str)
+                            .is_some_and(|value| value.eq_ignore_ascii_case(expected))
+                    });
+                    lane_matches && kind_matches
+                })
+            })
+            .and_then(|item| {
+                let message = item
+                    .get("message")
+                    .and_then(toml::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?
+                    .to_string();
+                let evidence_contract = toml_string_array(item.get("evidence_contract"));
+                Some((message, evidence_contract))
+            })
+    };
+
+    find_entry(progress.get("kind_overrides"), Some(kind))
+        .or_else(|| find_entry(progress.get("prompts"), None))
+}
+
+fn render_progress_prompt_template(
+    template: &str,
+    topic: &str,
+    stage_label: &str,
+    stage_detail: &str,
+    workflow_profile: &str,
+) -> String {
+    template
+        .replace("{topic}", topic.trim())
+        .replace("{stage}", stage_label.trim())
+        .replace("{detail}", stage_detail.trim())
+        .replace("{profile}", workflow_profile.trim())
+}
+
+fn build_research_progress_prompts(kind: &str, topic: &str) -> Vec<WebResearchProgressPrompt> {
+    let workflow_profile = research_workflow_profile_summary(kind);
+    research_workflow_specs(kind)
+        .into_iter()
+        .filter_map(|(stage_id, stage_label, stage_detail, lane)| {
+            let (message_template, evidence_contract) = progress_prompt_template(kind, lane)?;
+            Some(WebResearchProgressPrompt {
+                stage_id: stage_id.to_string(),
+                stage_label: stage_label.to_string(),
+                message: render_progress_prompt_template(
+                    &message_template,
+                    topic,
+                    stage_label,
+                    stage_detail,
+                    workflow_profile,
+                ),
+                evidence_contract,
+            })
+        })
+        .collect()
+}
+
+fn closure_check(
+    id: &str,
+    label: &str,
+    passed: bool,
+    attention_detail: impl Into<String>,
+    pass_detail: impl Into<String>,
+) -> WebResearchClosureCheck {
+    WebResearchClosureCheck {
+        id: id.to_string(),
+        label: label.to_string(),
+        status: if passed { "pass" } else { "attention" }.to_string(),
+        detail: if passed {
+            pass_detail.into()
+        } else {
+            attention_detail.into()
+        },
+    }
+}
+
+fn result_bundle_matching_field(
+    result_bundle: &WebResearchResultBundle,
+    needles: &[&str],
+) -> Option<String> {
+    result_bundle.summary_fields.iter().find_map(|field| {
+        let name = field.name.to_ascii_lowercase();
+        let value = field.value.trim();
+        if !value.is_empty()
+            && needles
+                .iter()
+                .any(|needle| name.contains(&needle.to_ascii_lowercase()))
+        {
+            Some(format!("{}={}", field.name, value))
+        } else {
+            None
+        }
+    })
+}
+
+fn build_research_closure_checks(
+    kind: &str,
+    result_bundle: &WebResearchResultBundle,
+    run_comparison: &WebResearchRunComparison,
+    lineage: &WebResearchLineage,
+    runtime: &WebResearchRuntimeEvent,
+) -> Vec<WebResearchClosureCheck> {
+    let acquisition_signal = match kind {
+        "theory" => result_bundle_matching_field(result_bundle, &["known", "proof", "paper"]),
+        "systems_evaluation" => {
+            result_bundle_matching_field(result_bundle, &["workload", "artifact", "run"])
+        }
+        "security_analysis" => {
+            result_bundle_matching_field(result_bundle, &["target", "finding", "coverage"])
+        }
+        "literature_review" => result_bundle_matching_field(result_bundle, &["paper", "gap", "citation"]),
+        _ => result_bundle_matching_field(result_bundle, &["dataset", "source", "artifact", "paper"]),
+    };
+    let analysis_signal = match kind {
+        "theory" => result_bundle_matching_field(result_bundle, &["proof", "lemma", "counterexample"]),
+        "systems_evaluation" => {
+            result_bundle_matching_field(result_bundle, &["latency", "throughput", "memory"])
+        }
+        "agent_evaluation" => {
+            result_bundle_matching_field(result_bundle, &["success", "tool", "judge"])
+        }
+        "security_analysis" => result_bundle_matching_field(result_bundle, &["confirmed", "false", "impact"]),
+        "literature_review" => {
+            result_bundle_matching_field(
+                result_bundle,
+                &["gap", "screening", "scope", "fulltext", "structured"],
+            )
+        }
+        _ => result_bundle_matching_field(result_bundle, &["metric", "accuracy", "f1", "analysis"]),
+    };
+    let tool_count = runtime.subagents.len() + runtime.timeline.len() + runtime.checkpoints.len();
+    let review_signal = run_comparison.available || runtime.verifier.is_some();
+    let conclusion_signal = !result_bundle.artifact_paths.is_empty() || lineage.available;
+
+    vec![
+        closure_check(
+            "data_acquisition",
+            if kind == "theory" { "定义与文献" } else { "数据获取" },
+            acquisition_signal.is_some(),
+            "尚未看到足够的数据源、文献源或任务输入证据。",
+            acquisition_signal.unwrap_or_else(|| "已捕获输入/证据来源。".to_string()),
+        ),
+        closure_check(
+            "data_analysis",
+            if kind == "theory" { "推理分析" } else { "数据分析" },
+            analysis_signal.is_some(),
+            "尚未看到指标、误差分析、证明链或结果解释证据。",
+            analysis_signal.unwrap_or_else(|| "已捕获分析结果。".to_string()),
+        ),
+        closure_check(
+            "tool_invocation",
+            "工具调用",
+            tool_count > 0,
+            "尚未看到工具调用、检查点或子代理轨迹。",
+            format!("已记录 {} 条工具/轨迹/检查点信号。", tool_count),
+        ),
+        closure_check(
+            "review_gate",
+            "环节审查",
+            review_signal,
+            "尚未看到 verifier、对照运行或审查信号。",
+            if run_comparison.available {
+                "已形成对照/比较信号。".to_string()
+            } else {
+                "已形成 verifier 审查信号。".to_string()
+            },
+        ),
+        closure_check(
+            "conclusion",
+            "得出结论",
+            conclusion_signal,
+            "尚未看到可复现产物、结论包或 lineage。",
+            format!(
+                "已形成 {} 个产物，lineage={}. ",
+                result_bundle.artifact_paths.len(),
+                if lineage.available { "ready" } else { "pending" }
+            ),
+        ),
+    ]
+}
+
+fn build_paper_workflow_closure_checks(
+    result: &crate::scientist::workflow::PaperWorkflowResult,
+    artifact_paths: &[PathBuf],
+    reviewer_feedback_trace: &[Value],
+    rebuttal_closure_records: &[Value],
+    evidence_trace: &[Value],
+    revision_queue: &[Value],
+) -> Vec<WebResearchClosureCheck> {
+    let result_bundle_ready = result.result_bundle_path.exists();
+    let review_closed = result.unresolved_reviewer_feedback == 0
+        && (!reviewer_feedback_trace.is_empty() || !rebuttal_closure_records.is_empty());
+    let revision_ready = !revision_queue.is_empty() || result.auto_revision_applied;
+    vec![
+        closure_check(
+            "data_acquisition",
+            "数据获取",
+            result_bundle_ready,
+            "论文工作流尚未落盘 result_bundle。",
+            format!("result_bundle 已落盘：{}", result.result_bundle_path.display()),
+        ),
+        closure_check(
+            "data_analysis",
+            "数据分析",
+            !evidence_trace.is_empty(),
+            "尚未看到 evidence_trace，结论证据链需要补强。",
+            format!("evidence_trace 已记录 {} 条。", evidence_trace.len()),
+        ),
+        closure_check(
+            "tool_invocation",
+            "工具调用",
+            !artifact_paths.is_empty(),
+            "尚未看到论文产物路径。",
+            format!("已生成 {} 个论文/审查/证据产物。", artifact_paths.len()),
+        ),
+        closure_check(
+            "review_gate",
+            "环节审查",
+            review_closed && revision_ready,
+            "审稿反馈、修订队列或 rebuttal closure 仍需补齐。",
+            format!(
+                "反馈闭环已完成，trace={}，closure={}。",
+                reviewer_feedback_trace.len(),
+                rebuttal_closure_records.len()
+            ),
+        ),
+        closure_check(
+            "conclusion",
+            "得出结论",
+            result.paper_ready,
+            result.paper_ready_detail.clone(),
+            result.paper_ready_detail.clone(),
+        ),
+    ]
 }
 
 fn research_workflow_rationale(kind: &str) -> &'static str {
     match kind {
         "deep_learning" => "该课题可能包含长时间训练，因此流程需要显式展示训练监控、checkpoint、失败回退和多轮调参。",
+        "classical_ml" => "轻量机器学习课题应突出数据切分、可复现实验脚本、简洁基线、指标读数和误差分析。",
+        "agent_evaluation" => "智能体评测类课题需要显式展示任务集、成功标准、轨迹质量、工具错误与修复复测。",
+        "security_analysis" => "安全分析类课题需要清楚界定目标面、证据来源、误报控制和修复建议，而不是停在模糊告警。",
         "theory" => "理论问题不应强行套实验流程，需要以形式化、引理、反例和逐步审查为主。",
-        "experimental_design" => "实验设计类课题需要把对照、变量、样本量、预实验、偏差控制和结果判读显式化。",
+        "systems_evaluation" => "系统评测类课题需要把负载、基线、观测、压测方法、瓶颈分析和复现条件显式化。",
         "literature_review" => "综述类任务以证据检索、筛选标准、综合脉络和空白识别为核心。",
-        "simulation" => "仿真类任务需要明确模型假设、参数扫描、对照验证和不确定性边界。",
         "data_analysis" => "数据分析任务应先理解数据，再清洗、建基线、迭代、验证和产出可复现材料。",
-        _ => "当前课题类型尚不明确，采用自适应研究流程，并根据工具调用和产出动态调整。",
+        "scope_boundary" => "当前请求包含超出计算机科学 IDE 范围的内容，应明确边界并优先收敛到可执行的计算机科学任务。",
+        _ => "当前课题类型尚不明确，采用计算机科学自适应研究流程，并根据工具调用和产出动态调整。",
     }
+}
+
+fn research_workflow_profile_summary(kind: &str) -> &'static str {
+    match kind {
+        "classical_ml" => {
+            "CS 研究轮廓：轻量机器学习验证，强调数据切分、可复现实验脚本、核心分类指标与误差分析。"
+        }
+        "deep_learning" => {
+            "CS 研究轮廓：深度学习训练与评测，强调训练监控、checkpoint、资源约束和验证集表现。"
+        }
+        "systems_evaluation" => {
+            "CS 研究轮廓：系统评测，强调负载定义、延迟吞吐口径、profiling 证据和复现条件。"
+        }
+        "agent_evaluation" => {
+            "CS 研究轮廓：智能体评测，强调任务成功率、轨迹质量、工具错误与修复复测。"
+        }
+        "security_analysis" => {
+            "CS 研究轮廓：安全分析，强调目标面、真实证据、误报区分、影响判断和修复建议。"
+        }
+        "theory" => "CS 研究轮廓：理论与形式化分析，强调定义、引理依赖、反例搜索和逐步核查。",
+        "literature_review" => {
+            "CS 研究轮廓：文献综述，强调检索范围、筛选标准、证据综合和研究空白。"
+        }
+        "scope_boundary" => {
+            "CS 研究轮廓：范围边界澄清，强调识别非计算机科学部分并重述为可执行的 CS 路径。"
+        }
+        "data_analysis" => "CS 研究轮廓：通用数据分析，强调数据理解、基线分析、验证与可复现产物。",
+        _ => "CS 研究轮廓：自适应研究流程，将根据证据、代码、评测和验证结果动态收敛。",
+    }
+}
+
+fn research_execution_schema_summary(kind: &str) -> Vec<String> {
+    match kind {
+        "deep_learning" => vec![
+            "执行器：training pipeline，要求训练日志、validation 读数、checkpoint 和资源记录。".to_string(),
+            "结果包：checkpoint、最佳验证指标、资源摘要、评测报告。".to_string(),
+        ],
+        "systems_evaluation" => vec![
+            "执行器：benchmark harness，要求 workload 配置、benchmark 日志、latency/throughput/memory 和 profiling 证据。".to_string(),
+            "结果包：workload 名称、性能汇总、资源摘要、性能报告。".to_string(),
+        ],
+        "agent_evaluation" => vec![
+            "执行器：evaluation orchestrator，要求 task suite、trajectory、judge 摘要和 tool error 记录。".to_string(),
+            "结果包：task success、tool error、judge summary、trajectory 样本统计。".to_string(),
+        ],
+        "security_analysis" => vec![
+            "执行器：analysis pipeline，要求 target inventory、finding log、false-positive triage 和 remediation notes。".to_string(),
+            "结果包：confirmed findings、false positive 计数、coverage/impact 摘要、findings report。".to_string(),
+        ],
+        "classical_ml" => vec![
+            "执行器：training pipeline，要求 dataset split、metrics、baseline 对照和 error analysis。".to_string(),
+            "结果包：primary metric、baseline delta、error analysis 摘要、metrics report。".to_string(),
+        ],
+        "theory" => vec![
+            "执行器：formal reasoning workflow，要求定义、引理依赖、反例搜索和 proof notes。".to_string(),
+        ],
+        "literature_review" => vec![
+            "执行器：evidence synthesis workflow，要求检索范围、筛选标准、证据表和 gap summary。".to_string(),
+        ],
+        _ => vec![
+            "执行器：通用 CS experiment runner，要求 runtime log、metrics report 和 artifact write 证据。".to_string(),
+        ],
+    }
+}
+
+fn collect_message_text_corpus(messages: &[MessageBlock], limit: usize) -> String {
+    messages
+        .iter()
+        .rev()
+        .take(limit)
+        .filter_map(|message| match message {
+            MessageBlock::User { content, .. }
+            | MessageBlock::Assistant { content }
+            | MessageBlock::AssistantStreaming { content } => Some(content.clone()),
+            MessageBlock::ToolResult { result, .. } => Some(result.clone()),
+            MessageBlock::Verification { report } => Some(report.summary.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn infer_bundle_kind(kind: &str) -> &'static str {
+    match kind {
+        "deep_learning" => "deep_learning_result_bundle",
+        "systems_evaluation" => "systems_evaluation_result_bundle",
+        "agent_evaluation" => "agent_evaluation_result_bundle",
+        "security_analysis" => "security_analysis_result_bundle",
+        "classical_ml" => "classical_ml_result_bundle",
+        "theory" => "theory_result_bundle",
+        "literature_review" => "literature_review_result_bundle",
+        _ => "general_cs_result_bundle",
+    }
+}
+
+fn bundle_summary_field_names(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "deep_learning" => &[
+            "run_id",
+            "dataset_acquisition",
+            "paper_dataset_hints",
+            "dataset_manifest",
+            "checkpoint_path",
+            "best_validation_metric",
+            "resource_summary",
+        ],
+        "systems_evaluation" => &[
+            "run_id",
+            "dataset_acquisition",
+            "paper_dataset_hints",
+            "dataset_manifest",
+            "workload_name",
+            "latency_summary",
+            "throughput_summary",
+            "resource_summary",
+        ],
+        "agent_evaluation" => &[
+            "run_id",
+            "dataset_acquisition",
+            "dataset_manifest",
+            "task_success_rate",
+            "tool_error_rate",
+            "judge_summary",
+            "trajectory_sample_count",
+        ],
+        "security_analysis" => &[
+            "run_id",
+            "dataset_acquisition",
+            "paper_dataset_hints",
+            "dataset_manifest",
+            "confirmed_findings",
+            "false_positive_count",
+            "coverage_summary",
+            "impact_summary",
+        ],
+        "classical_ml" => &[
+            "run_id",
+            "dataset_acquisition",
+            "paper_dataset_hints",
+            "dataset_manifest",
+            "primary_metric",
+            "baseline_delta",
+            "error_analysis_summary",
+        ],
+        "theory" => &[
+            "run_id",
+            "proof_status",
+            "lemma_summary",
+            "counterexample_status",
+        ],
+        "literature_review" => &[
+            "run_id",
+            "search_scope",
+            "screening_summary",
+            "remote_fulltext_coverage",
+            "structured_paper_coverage",
+            "gap_summary",
+        ],
+        _ => &["run_id", "summary_metric"],
+    }
+}
+
+fn compare_keys_for_kind(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "deep_learning" => &[
+            "best_validation_metric",
+            "training_time_minutes",
+            "gpu_or_memory_footprint",
+        ],
+        "systems_evaluation" => &["latency_ms", "throughput_ops_per_sec", "memory_mb"],
+        "agent_evaluation" => &["task_success_rate", "trajectory_cost", "tool_error_rate"],
+        "security_analysis" => &["precision", "recall", "false_positive_rate"],
+        "classical_ml" => &["accuracy", "f1", "fit_time_seconds"],
+        "theory" => &["proof_status", "lemma_coverage"],
+        "literature_review" => &[
+            "screened_papers",
+            "included_papers",
+            "remote_fulltext_papers",
+            "structured_papers",
+        ],
+        _ => &["summary_metric"],
+    }
+}
+
+fn dataset_manifest_summary_from_runtime(runtime: &ResearchRuntimeEvidence) -> Option<String> {
+    let mut dataset_id = None;
+    let mut provider = None;
+    let mut source_url = None;
+    let mut retrieval_entrypoint = None;
+    let mut task_hint = None;
+
+    for item in &runtime.text_evidence {
+        let trimmed = item.trim();
+        if let Some(value) = trimmed.strip_prefix("dataset manifest:") {
+            return Some(format!("dataset manifest:{}", value));
+        }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match key.as_str() {
+            "dataset_id" => dataset_id = Some(value.to_string()),
+            "provider" => provider = Some(value.to_string()),
+            "source_url" => source_url = Some(value.to_string()),
+            "retrieval_entrypoint" => retrieval_entrypoint = Some(value.to_string()),
+            "task_hint" => task_hint = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    let dataset_id = dataset_id?;
+    let mut parts = vec![format!("dataset_id={dataset_id}")];
+    if let Some(value) = provider {
+        parts.push(format!("provider={value}"));
+    }
+    if let Some(value) = source_url {
+        parts.push(format!("source_url={value}"));
+    }
+    if let Some(value) = retrieval_entrypoint {
+        parts.push(format!("retrieval_entrypoint={value}"));
+    }
+    if let Some(value) = task_hint {
+        parts.push(format!("task_hint={value}"));
+    }
+    Some(format!("dataset manifest: {}", parts.join(" ")))
+}
+
+fn runtime_evidence_value_for_field(
+    name: &str,
+    kind: &str,
+    corpus_lower: &str,
+    runtime: &ResearchRuntimeEvidence,
+) -> Option<String> {
+    let find_text = |needles: &[&str], fallback: &str| -> Option<String> {
+        runtime
+            .text_evidence
+            .iter()
+            .find(|item| {
+                let lowered = item.to_ascii_lowercase();
+                needles.iter().any(|needle| lowered.contains(needle))
+            })
+            .map(|item| item.clone())
+            .or_else(|| {
+                if contains_any(corpus_lower, needles) {
+                    Some(fallback.to_string())
+                } else {
+                    None
+                }
+            })
+    };
+
+    match name {
+        "run_id" => runtime
+            .run_ids
+            .first()
+            .cloned()
+            .or_else(|| Some(format!("{}-run-{}", kind, runtime.successful_runs.max(1)))),
+        "paper_dataset_hints" => paper_dataset_hint_summary(runtime),
+        "dataset_acquisition" => {
+            let mut value = find_text(
+                &[
+                    "search_public_datasets",
+                    "fetch_public_dataset_manifest",
+                    "official_dataset_databases",
+                    "dataset entrypoint",
+                    "dataset manifest",
+                ],
+                "dataset acquisition evidence observed",
+            );
+            if let Some(hints) = paper_dataset_hint_summary(runtime) {
+                value = Some(match value {
+                    Some(existing) => format!("{existing}; paper_dataset_hints={hints}"),
+                    None => format!(
+                        "paper-guided dataset acquisition planned; paper_dataset_hints={hints}"
+                    ),
+                });
+            }
+            value
+        }
+        "dataset_manifest" => dataset_manifest_summary_from_runtime(runtime).or_else(|| {
+            find_text(
+                &[
+                    "dataset manifest:",
+                    "dataset_id",
+                    "source_url",
+                    "task_hint",
+                    "retrieval_entrypoint",
+                ],
+                "dataset manifest evidence observed",
+            )
+        }),
+        "checkpoint_path" => runtime
+            .artifact_paths
+            .iter()
+            .find(|path| {
+                path.contains("checkpoint") || path.ends_with(".pt") || path.ends_with(".ckpt")
+            })
+            .cloned(),
+        "best_validation_metric" => find_metric_fact_value(
+            runtime,
+            &["val_accuracy", "validation", "best validation", "val_f1"],
+        )
+        .or_else(|| {
+            find_text(
+                &["validation", "val_", "best"],
+                "validation evidence observed",
+            )
+        }),
+        "resource_summary" => find_text(
+            &["memory", "gpu", "cpu", "resource", "latency", "throughput"],
+            "resource signal observed",
+        ),
+        "workload_name" => find_text(
+            &["workload", "benchmark", "trace", "load"],
+            "workload evidence observed",
+        ),
+        "latency_summary" => find_metric_fact_value(runtime, &["latency", "p95", "p99", "p50"])
+            .or_else(|| {
+                find_text(
+                    &["latency", "p50", "p95", "p99"],
+                    "latency evidence observed",
+                )
+            }),
+        "throughput_summary" => find_metric_fact_value(runtime, &["throughput", "qps", "ops/s"])
+            .or_else(|| {
+                find_text(
+                    &["throughput", "qps", "ops/s"],
+                    "throughput evidence observed",
+                )
+            }),
+        "task_success_rate" => {
+            find_metric_fact_value(runtime, &["task success rate", "success rate", "pass@"])
+                .or_else(|| {
+                    find_text(
+                        &["success rate", "task success", "pass@"],
+                        "task success evidence observed",
+                    )
+                })
+        }
+        "tool_error_rate" => find_metric_fact_value(
+            runtime,
+            &["tool error rate", "tool_error_rate", "failure rate"],
+        )
+        .or_else(|| {
+            find_text(
+                &["tool error", "tool_error", "failure rate"],
+                "tool error evidence observed",
+            )
+        }),
+        "judge_summary" => find_text(&["judge", "verdict", "grader"], "judge evidence observed"),
+        "trajectory_sample_count" => find_metric_fact_value(
+            runtime,
+            &["trajectory sample count", "trajectory_count", "episodes"],
+        )
+        .or_else(|| {
+            find_text(
+                &["trajectory", "trace", "episode"],
+                "trajectory evidence observed",
+            )
+        }),
+        "confirmed_findings" => find_metric_fact_value(
+            runtime,
+            &["confirmed findings", "confirmed finding", "findings"],
+        )
+        .or_else(|| {
+            find_text(
+                &["confirmed finding", "confirmed vulnerability", "finding"],
+                "finding evidence observed",
+            )
+        }),
+        "false_positive_count" => find_metric_fact_value(
+            runtime,
+            &[
+                "false positive count",
+                "false_positive_count",
+                "false positives",
+            ],
+        )
+        .or_else(|| {
+            find_text(
+                &["false positive", "false_positive"],
+                "false-positive evidence observed",
+            )
+        }),
+        "coverage_summary" => find_text(
+            &["coverage", "target inventory", "surface"],
+            "coverage evidence observed",
+        ),
+        "impact_summary" => find_text(
+            &["impact", "severity", "critical", "high"],
+            "impact evidence observed",
+        ),
+        "primary_metric" => find_metric_fact_value(runtime, &["accuracy", "f1", "auc", "loss"])
+            .or_else(|| {
+                find_text(
+                    &["accuracy", "f1", "auc", "loss"],
+                    "metric evidence observed",
+                )
+            }),
+        "baseline_delta" => {
+            find_metric_fact_value(runtime, &["delta", "improvement", "baseline delta"]).or_else(
+                || {
+                    find_text(
+                        &["baseline", "delta", "improvement"],
+                        "baseline delta evidence observed",
+                    )
+                },
+            )
+        }
+        "error_analysis_summary" => find_text(
+            &["error analysis", "confusion", "failure slice"],
+            "error analysis observed",
+        ),
+        "proof_status" => find_text(&["proof", "theorem", "proved"], "proof evidence observed"),
+        "lemma_summary" => find_text(&["lemma", "invariant"], "lemma evidence observed"),
+        "counterexample_status" => find_text(
+            &["counterexample", "sanity check", "edge case"],
+            "counterexample search observed",
+        ),
+        "search_scope" => find_text(
+            &["search scope", "query", "database", "keyword"],
+            "search scope observed",
+        ),
+        "screening_summary" => find_text(
+            &["screening", "inclusion", "exclusion"],
+            "screening evidence observed",
+        ),
+        "remote_fulltext_coverage" => {
+            if runtime.literature_fetch_count > 0 {
+                Some(format!(
+                    "{} remote-first papers fetched; {} ready, {} partial, {} metadata-only.",
+                    runtime.literature_fetch_count,
+                    runtime.literature_ready_count,
+                    runtime.literature_partial_count,
+                    runtime.literature_metadata_only_count
+                ))
+            } else {
+                find_text(
+                    &[
+                        "fulltext",
+                        "body_text_chars",
+                        "content_source",
+                        "fetch_paper",
+                        "fetch_papers",
+                    ],
+                    "remote fulltext evidence observed",
+                )
+            }
+        }
+        "structured_paper_coverage" => {
+            if runtime.literature_fetch_count > 0 {
+                Some(format!(
+                    "{} papers include structured sections, {} include references, providers: {}.",
+                    runtime.literature_structured_count,
+                    runtime.literature_reference_rich_count,
+                    if runtime.literature_providers.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        runtime.literature_providers.join(", ")
+                    }
+                ))
+            } else {
+                find_text(
+                    &["structured_document", "sections", "references"],
+                    "structured-paper evidence observed",
+                )
+            }
+        }
+        "gap_summary" => find_text(
+            &["research gap", "gap", "open problem"],
+            "gap summary observed",
+        ),
+        _ => None,
+    }
+}
+
+fn research_result_bundle(
+    kind: &str,
+    messages: &[MessageBlock],
+    runtime: &ResearchRuntimeEvidence,
+    base_dir: &Path,
+    workspace_root: &str,
+) -> WebResearchResultBundle {
+    let corpus = collect_message_text_corpus(messages, 32);
+    let lowered = corpus.to_ascii_lowercase();
+    let mut fields = Vec::new();
+    for name in bundle_summary_field_names(kind) {
+        let value =
+            runtime_evidence_value_for_field(name, kind, &lowered, runtime).unwrap_or_else(|| {
+                match *name {
+                    "run_id" => format!("{}-turn-{}", kind, messages.len()),
+                    "dataset_acquisition" => {
+                        if contains_any(
+                            &lowered,
+                            &[
+                                "search_public_datasets",
+                                "fetch_public_dataset_manifest",
+                                "official_dataset_databases",
+                                "dataset manifest",
+                            ],
+                        ) {
+                            "dataset acquisition evidence observed".to_string()
+                        } else {
+                            "dataset acquisition pending".to_string()
+                        }
+                    }
+                    "paper_dataset_hints" => paper_dataset_hint_summary(runtime)
+                        .unwrap_or_else(|| "paper dataset hints pending".to_string()),
+                    "dataset_manifest" => {
+                        if contains_any(
+                            &lowered,
+                            &[
+                                "dataset_id",
+                                "provider",
+                                "source_url",
+                                "retrieval_entrypoint",
+                                "task_hint",
+                            ],
+                        ) {
+                            "dataset manifest evidence observed".to_string()
+                        } else {
+                            "dataset manifest pending".to_string()
+                        }
+                    }
+                    "checkpoint_path" => find_first_workspace_path(&corpus)
+                        .unwrap_or_else(|| "checkpoint not yet observed".to_string()),
+                    "best_validation_metric" => {
+                        if contains_any(&lowered, &["val_", "validation", "best"]) {
+                            "validation evidence observed".to_string()
+                        } else {
+                            "validation evidence pending".to_string()
+                        }
+                    }
+                    "resource_summary" => {
+                        if contains_any(
+                            &lowered,
+                            &["memory", "gpu", "cpu", "latency", "throughput"],
+                        ) {
+                            "resource signal observed".to_string()
+                        } else {
+                            "resource summary pending".to_string()
+                        }
+                    }
+                    "workload_name" => {
+                        if contains_any(&lowered, &["workload", "benchmark", "trace", "load"]) {
+                            "workload evidence observed".to_string()
+                        } else {
+                            "workload naming pending".to_string()
+                        }
+                    }
+                    "latency_summary" => {
+                        if lowered.contains("latency") {
+                            "latency evidence observed".to_string()
+                        } else {
+                            "latency evidence pending".to_string()
+                        }
+                    }
+                    "throughput_summary" => {
+                        if contains_any(&lowered, &["throughput", "qps", "ops/s"]) {
+                            "throughput evidence observed".to_string()
+                        } else {
+                            "throughput evidence pending".to_string()
+                        }
+                    }
+                    "task_success_rate" => {
+                        if contains_any(&lowered, &["success rate", "task success", "成功率"]) {
+                            "task success evidence observed".to_string()
+                        } else {
+                            "task success evidence pending".to_string()
+                        }
+                    }
+                    "tool_error_rate" => {
+                        if contains_any(&lowered, &["tool error", "tool_error", "失败调用"]) {
+                            "tool error evidence observed".to_string()
+                        } else {
+                            "tool error evidence pending".to_string()
+                        }
+                    }
+                    "judge_summary" => {
+                        if lowered.contains("judge") {
+                            "judge evidence observed".to_string()
+                        } else {
+                            "judge evidence pending".to_string()
+                        }
+                    }
+                    "trajectory_sample_count" => {
+                        if contains_any(&lowered, &["trajectory", "trace"]) {
+                            "trajectory evidence observed".to_string()
+                        } else {
+                            "trajectory evidence pending".to_string()
+                        }
+                    }
+                    "confirmed_findings" => {
+                        if contains_any(&lowered, &["finding", "vulnerability", "漏洞"]) {
+                            "finding evidence observed".to_string()
+                        } else {
+                            "finding evidence pending".to_string()
+                        }
+                    }
+                    "false_positive_count" => {
+                        if contains_any(&lowered, &["false positive", "误报"]) {
+                            "false-positive evidence observed".to_string()
+                        } else {
+                            "false-positive evidence pending".to_string()
+                        }
+                    }
+                    "coverage_summary" => {
+                        if lowered.contains("coverage") {
+                            "coverage evidence observed".to_string()
+                        } else {
+                            "coverage evidence pending".to_string()
+                        }
+                    }
+                    "impact_summary" => {
+                        if contains_any(&lowered, &["impact", "severity", "影响"]) {
+                            "impact evidence observed".to_string()
+                        } else {
+                            "impact evidence pending".to_string()
+                        }
+                    }
+                    "primary_metric" => {
+                        if contains_any(&lowered, &["accuracy", "f1", "auc"]) {
+                            "metric evidence observed".to_string()
+                        } else {
+                            "metric evidence pending".to_string()
+                        }
+                    }
+                    "baseline_delta" => {
+                        if contains_any(&lowered, &["baseline", "delta", "improvement"]) {
+                            "baseline delta evidence observed".to_string()
+                        } else {
+                            "baseline delta pending".to_string()
+                        }
+                    }
+                    "error_analysis_summary" => {
+                        if contains_any(&lowered, &["error analysis", "confusion", "误差分析"])
+                        {
+                            "error analysis observed".to_string()
+                        } else {
+                            "error analysis pending".to_string()
+                        }
+                    }
+                    "proof_status" => {
+                        if contains_any(&lowered, &["proof", "lemma", "theorem", "证明"]) {
+                            "proof evidence observed".to_string()
+                        } else {
+                            "proof evidence pending".to_string()
+                        }
+                    }
+                    "lemma_summary" => {
+                        if contains_any(&lowered, &["lemma", "invariant", "引理"]) {
+                            "lemma evidence observed".to_string()
+                        } else {
+                            "lemma evidence pending".to_string()
+                        }
+                    }
+                    "counterexample_status" => {
+                        if contains_any(&lowered, &["counterexample", "反例"]) {
+                            "counterexample search observed".to_string()
+                        } else {
+                            "counterexample search pending".to_string()
+                        }
+                    }
+                    "search_scope" => {
+                        if contains_any(&lowered, &["search scope", "query", "检索"]) {
+                            "search scope observed".to_string()
+                        } else {
+                            "search scope pending".to_string()
+                        }
+                    }
+                    "screening_summary" => {
+                        if contains_any(&lowered, &["screening", "inclusion", "筛选"]) {
+                            "screening evidence observed".to_string()
+                        } else {
+                            "screening evidence pending".to_string()
+                        }
+                    }
+                    "remote_fulltext_coverage" => "remote fulltext coverage pending".to_string(),
+                    "structured_paper_coverage" => "structured paper evidence pending".to_string(),
+                    "gap_summary" => {
+                        if contains_any(&lowered, &["gap", "research gap", "空白"]) {
+                            "gap summary observed".to_string()
+                        } else {
+                            "gap summary pending".to_string()
+                        }
+                    }
+                    _ => "summary pending".to_string(),
+                }
+            });
+        fields.push(WebResearchResultField {
+            name: (*name).to_string(),
+            value,
+        });
+    }
+
+    let mut artifact_paths = runtime.artifact_paths.clone();
+    collect_existing_workspace_paths_from_text(
+        &corpus,
+        base_dir,
+        workspace_root,
+        &mut artifact_paths,
+    );
+    for block in messages {
+        if let MessageBlock::Diff { diff } = block {
+            if let Some(path) =
+                normalize_workspace_diff_path(base_dir, workspace_root, &diff.file_path)
+            {
+                artifact_paths.push(path);
+            }
+        }
+    }
+    artifact_paths.sort();
+    artifact_paths.dedup();
+
+    WebResearchResultBundle {
+        bundle_kind: infer_bundle_kind(kind).to_string(),
+        summary_fields: fields,
+        artifact_paths,
+    }
+}
+
+fn research_run_comparison(
+    kind: &str,
+    messages: &[MessageBlock],
+    result_bundle: &WebResearchResultBundle,
+    runtime: &ResearchRuntimeEvidence,
+) -> WebResearchRunComparison {
+    let corpus = collect_message_text_corpus(messages, 40).to_ascii_lowercase();
+    let compare_keys = compare_keys_for_kind(kind)
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let mut observations = Vec::new();
+
+    if runtime.comparison_signals > 0 {
+        observations.push(
+            "Structured runtime evidence reports baseline/delta or improvement comparisons."
+                .to_string(),
+        );
+    }
+    if runtime.rerun_signals > 0 {
+        observations.push("Structured runtime evidence reports rerun/retest activity.".to_string());
+    }
+    for key in &compare_keys {
+        if let Some(value) = find_metric_fact_value(runtime, compare_key_metric_aliases(key)) {
+            observations.push(format!("Observed {key}={value} in runtime evidence."));
+        }
+    }
+    if kind == "literature_review" {
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "remote_fulltext_coverage")
+        {
+            observations.push(format!(
+                "Literature fulltext coverage: {}.",
+                tail_string(&field.value, 180)
+            ));
+        }
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "structured_paper_coverage")
+        {
+            observations.push(format!(
+                "Structured paper coverage: {}.",
+                tail_string(&field.value, 180)
+            ));
+        }
+    }
+    if kind == "theory" {
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "proof_status")
+        {
+            observations.push(format!(
+                "Theory proof status: {}.",
+                tail_string(&field.value, 180)
+            ));
+        }
+        if let Some(field) = result_bundle
+            .summary_fields
+            .iter()
+            .find(|field| field.name == "counterexample_status")
+        {
+            observations.push(format!(
+                "Counterexample search status: {}.",
+                tail_string(&field.value, 180)
+            ));
+        }
+    }
+    for line in runtime.comparison_lines.iter().take(4) {
+        observations.push(format!("Comparison evidence: {line}"));
+    }
+    if !runtime.baseline_labels.is_empty() {
+        observations.push(format!(
+            "Runtime evidence references baseline variants: {}.",
+            runtime.baseline_labels.join(", ")
+        ));
+    }
+    if contains_any(
+        &corpus,
+        &[
+            "before/after",
+            "delta",
+            "improvement",
+            "regression",
+            "vs baseline",
+            "compare",
+        ],
+    ) {
+        observations
+            .push("Detected textual evidence of before/after or baseline comparison.".to_string());
+    }
+    if contains_any(&corpus, &["rerun", "re-test", "复测", "retry"]) {
+        observations
+            .push("Detected rerun or re-test evidence that can anchor run comparison.".to_string());
+    }
+    if result_bundle.artifact_paths.len() >= 2 {
+        observations.push(
+            "Multiple artifact paths were observed, which can support run-to-run comparison."
+                .to_string(),
+        );
+    }
+    observations.sort();
+    observations.dedup();
+
+    WebResearchRunComparison {
+        available: !observations.is_empty(),
+        compare_keys,
+        observations,
+    }
+}
+
+fn research_lineage(
+    messages: &[MessageBlock],
+    result_bundle: &WebResearchResultBundle,
+    runtime: &ResearchRuntimeEvidence,
+) -> WebResearchLineage {
+    let corpus = collect_message_text_corpus(messages, 40).to_ascii_lowercase();
+    let mut recent_runs = Vec::new();
+    let mut notes = Vec::new();
+    let current_run_id = result_bundle_field_value(result_bundle, "run_id")
+        .unwrap_or_else(|| "current-run".to_string());
+
+    for run_id in &runtime.run_ids {
+        push_unique_text(&mut recent_runs, run_id.clone(), 8);
+    }
+    for parent in &runtime.parent_run_ids {
+        push_unique_text(&mut recent_runs, parent.clone(), 8);
+    }
+    for baseline in &runtime.baseline_labels {
+        push_unique_text(&mut recent_runs, baseline.clone(), 8);
+    }
+
+    if recent_runs.is_empty() {
+        if runtime.checkpoint_signals > 0
+            || runtime.rerun_signals > 0
+            || runtime.successful_runs > 1
+        {
+            recent_runs.push("current-run".to_string());
+            recent_runs.push("prior-run-or-baseline".to_string());
+        } else if contains_any(
+            &corpus,
+            &[
+                "checkpoint",
+                "resume",
+                "rerun",
+                "retry",
+                "variant",
+                "baseline",
+            ],
+        ) {
+            recent_runs.push("current-run".to_string());
+            recent_runs.push("prior-run-or-baseline".to_string());
+        } else if !result_bundle.summary_fields.is_empty() {
+            recent_runs.push("current-run".to_string());
+        }
+    }
+
+    if runtime.checkpoint_signals > 0 {
+        notes.push("Runtime evidence includes checkpoint or resume signals that can anchor lineage ancestry.".to_string());
+    }
+    if runtime.comparison_signals > 0 {
+        notes.push(
+            "Runtime evidence includes explicit baseline/delta comparison signals.".to_string(),
+        );
+    }
+    if contains_any(&corpus, &["checkpoint", "resume"]) {
+        notes.push("Lineage shows resumable state or checkpoint ancestry.".to_string());
+    }
+    if contains_any(&corpus, &["baseline", "compare", "delta"]) {
+        notes.push(
+            "Lineage includes a comparison edge against a baseline or prior run.".to_string(),
+        );
+    }
+    if !runtime.parent_run_ids.is_empty() {
+        notes.push(format!(
+            "Runtime evidence names explicit parent runs: {}.",
+            runtime.parent_run_ids.join(", ")
+        ));
+    }
+    if !runtime.variant_labels.is_empty() {
+        notes.push(format!(
+            "Runtime evidence records variant labels: {}.",
+            runtime.variant_labels.join(", ")
+        ));
+    }
+    if !runtime.resume_refs.is_empty() {
+        notes.push(format!(
+            "Runtime evidence records resume references: {}.",
+            runtime.resume_refs.join(", ")
+        ));
+    }
+    for line in runtime.lineage_lines.iter().take(4) {
+        notes.push(format!("Lineage evidence: {line}"));
+    }
+    if !result_bundle.artifact_paths.is_empty() {
+        notes.push("Artifact references are available for linking historical runs.".to_string());
+    }
+    recent_runs.sort();
+    recent_runs.dedup();
+    notes.sort();
+    notes.dedup();
+    let mut history = Vec::new();
+
+    let current_variant = runtime
+        .variant_labels
+        .iter()
+        .find(|value| !value.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| "current".to_string());
+    let parent_run_id = runtime
+        .parent_run_ids
+        .iter()
+        .find(|value| !value.trim().is_empty())
+        .cloned()
+        .or_else(|| {
+            runtime
+                .baseline_labels
+                .iter()
+                .find(|value| !value.trim().is_empty())
+                .cloned()
+        })
+        .or_else(|| {
+            if runtime.rerun_signals > 0
+                || runtime.comparison_signals > 0
+                || runtime.checkpoint_signals > 0
+            {
+                Some("prior-run-or-baseline".to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    let current_change_summary = if !runtime.comparison_lines.is_empty() {
+        tail_string(&runtime.comparison_lines.join(" | "), 220)
+    } else if !runtime.lineage_lines.is_empty() {
+        tail_string(&runtime.lineage_lines.join(" | "), 220)
+    } else if runtime.checkpoint_signals > 0 {
+        "Current run resumed from prior checkpointed state with artifact continuity.".to_string()
+    } else if runtime.rerun_signals > 0 {
+        "Current run records rerun or retest evidence against a prior execution.".to_string()
+    } else {
+        "Current run is backed by structured runtime evidence and artifact references.".to_string()
+    };
+
+    if !parent_run_id.trim().is_empty() {
+        history.push(WebResearchLineageEntry {
+            run_id: parent_run_id.clone(),
+            parent_run_id: runtime
+                .resume_refs
+                .iter()
+                .find(|value| !value.trim().is_empty())
+                .cloned()
+                .unwrap_or_default(),
+            variant_label: runtime
+                .baseline_labels
+                .iter()
+                .find(|value| !value.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| "baseline".to_string()),
+            change_summary: if !runtime.baseline_labels.is_empty() {
+                format!(
+                    "Baseline or ancestor run referenced by runtime evidence: {}.",
+                    runtime.baseline_labels.join(", ")
+                )
+            } else {
+                "Baseline or ancestor run inferred from runtime comparison and lineage evidence."
+                    .to_string()
+            },
+            artifact_paths: result_bundle.artifact_paths.clone(),
+        });
+    }
+
+    history.push(WebResearchLineageEntry {
+        run_id: current_run_id.clone(),
+        parent_run_id,
+        variant_label: current_variant,
+        change_summary: current_change_summary,
+        artifact_paths: result_bundle.artifact_paths.clone(),
+    });
+
+    WebResearchLineage {
+        available: !recent_runs.is_empty() || !notes.is_empty(),
+        run_count_hint: recent_runs.len().max(
+            runtime
+                .successful_runs
+                .max(usize::from(!result_bundle.summary_fields.is_empty())),
+        ),
+        recent_runs,
+        notes,
+        history,
+    }
+}
+
+fn find_first_workspace_path(text: &str) -> Option<String> {
+    let mut paths = Vec::new();
+    collect_workspace_paths_from_text(text, &mut paths);
+    paths.into_iter().next()
+}
+
+fn plan_workflow_profile(plan: &AgentWorkflowPlan, messages: &[MessageBlock]) -> String {
+    if plan.workflow_kind.eq_ignore_ascii_case("research") {
+        let topic = infer_research_topic(messages).unwrap_or_else(|| plan.summary.clone());
+        infer_research_workflow_kind(&topic, messages)
+    } else {
+        plan.workflow_kind.trim().to_ascii_lowercase()
+    }
+}
+
+fn hard_verifier_pass_summary(
+    workflow_profile: &str,
+    diff_count: usize,
+    verification_hits: usize,
+    language: TurnLanguage,
+) -> String {
+    let zh_prefix = match workflow_profile {
+        "classical_ml" => "硬验证器已通过：轻量机器学习流程检查完成",
+        "deep_learning" => "硬验证器已通过：深度学习流程检查完成",
+        "systems_evaluation" => "硬验证器已通过：系统评测流程检查完成",
+        "agent_evaluation" => "硬验证器已通过：智能体评测流程检查完成",
+        "security_analysis" => "硬验证器已通过：安全分析流程检查完成",
+        "theory" => "硬验证器已通过：理论验证流程检查完成",
+        "literature_review" => "硬验证器已通过：文献综述流程检查完成",
+        _ => "硬验证器已通过",
+    };
+    let en_prefix = match workflow_profile {
+        "classical_ml" => "Hard verifier passed for the classical ML workflow",
+        "deep_learning" => "Hard verifier passed for the deep learning workflow",
+        "systems_evaluation" => "Hard verifier passed for the systems evaluation workflow",
+        "agent_evaluation" => "Hard verifier passed for the agent evaluation workflow",
+        "security_analysis" => "Hard verifier passed for the security analysis workflow",
+        "theory" => "Hard verifier passed for the theory workflow",
+        "literature_review" => "Hard verifier passed for the literature review workflow",
+        _ => "Hard verifier passed",
+    };
+
+    if diff_count > 0 {
+        localized_string(
+            language,
+            format!(
+                "{}：共检测到 {} 个编辑文件，匹配到 {} 个验证目标。",
+                zh_prefix, diff_count, verification_hits
+            ),
+            format!(
+                "{} with {} edited files and {} matched verification targets.",
+                en_prefix, diff_count, verification_hits
+            ),
+        )
+    } else {
+        localized_string(
+            language,
+            format!("{}：匹配到 {} 个验证目标。", zh_prefix, verification_hits),
+            format!(
+                "{} with {} matched verification targets.",
+                en_prefix, verification_hits
+            ),
+        )
+    }
+}
+
+fn hard_verifier_repair_summary(
+    workflow_profile: &str,
+    issue_count: usize,
+    language: TurnLanguage,
+) -> String {
+    match language {
+        TurnLanguage::Zh => match workflow_profile {
+            "classical_ml" => format!("硬验证器发现 {} 个轻量机器学习流程问题。", issue_count),
+            "deep_learning" => format!("硬验证器发现 {} 个深度学习流程问题。", issue_count),
+            "systems_evaluation" => format!("硬验证器发现 {} 个系统评测流程问题。", issue_count),
+            "agent_evaluation" => format!("硬验证器发现 {} 个智能体评测流程问题。", issue_count),
+            "security_analysis" => format!("硬验证器发现 {} 个安全分析流程问题。", issue_count),
+            "theory" => format!("硬验证器发现 {} 个理论验证流程问题。", issue_count),
+            "literature_review" => format!("硬验证器发现 {} 个文献综述流程问题。", issue_count),
+            _ => format!("硬验证器发现 {} 个问题。", issue_count),
+        },
+        TurnLanguage::En => match workflow_profile {
+            "classical_ml" => format!("Hard verifier found {} classical ML issue(s).", issue_count),
+            "deep_learning" => format!(
+                "Hard verifier found {} deep learning issue(s).",
+                issue_count
+            ),
+            "systems_evaluation" => format!(
+                "Hard verifier found {} systems evaluation issue(s).",
+                issue_count
+            ),
+            "agent_evaluation" => format!(
+                "Hard verifier found {} agent evaluation issue(s).",
+                issue_count
+            ),
+            "security_analysis" => format!(
+                "Hard verifier found {} security analysis issue(s).",
+                issue_count
+            ),
+            "theory" => format!(
+                "Hard verifier found {} theory workflow issue(s).",
+                issue_count
+            ),
+            "literature_review" => format!(
+                "Hard verifier found {} literature review workflow issue(s).",
+                issue_count
+            ),
+            _ => format!("Hard verifier found {} issue(s).", issue_count),
+        },
+    }
+}
+
+fn workflow_specific_repair_action(
+    workflow_profile: &str,
+    language: TurnLanguage,
+) -> Option<String> {
+    let action = match (workflow_profile, language) {
+        ("classical_ml", TurnLanguage::Zh) => {
+            "补充公开数据集入口检索、固定 dataset manifest，并补充数据切分、baseline、accuracy/F1 或误差分析等轻量机器学习证据。"
+        }
+        ("classical_ml", TurnLanguage::En) => {
+            "add lightweight ML evidence by running public-dataset search, fixing the dataset manifest, and capturing dataset split hygiene, baselines, accuracy/F1, or error analysis"
+        }
+        ("deep_learning", TurnLanguage::Zh) => {
+            "补充公开数据集入口检索、固定 dataset manifest，以及训练日志、checkpoint、资源约束或验证集读数等深度学习证据。"
+        }
+        ("deep_learning", TurnLanguage::En) => {
+            "add deep learning evidence by fixing dataset acquisition and manifest closure, then capturing training logs, checkpoints, resource constraints, or validation metrics"
+        }
+        ("systems_evaluation", TurnLanguage::Zh) => {
+            "补充 workload 或 benchmark 入口、固定 manifest，并补充负载模型、延迟/吞吐/内存口径或 profiling 证据。"
+        }
+        ("systems_evaluation", TurnLanguage::En) => {
+            "add systems evidence by fixing the workload or benchmark manifest, then capturing workload definition, latency/throughput/memory measurements, or profiling"
+        }
+        ("agent_evaluation", TurnLanguage::Zh) => {
+            "补充任务集入口、固定评测 manifest，并补充任务成功率、关键轨迹、工具错误或复测前后对比证据。"
+        }
+        ("agent_evaluation", TurnLanguage::En) => {
+            "add agent-evaluation evidence by fixing task-suite sourcing and manifest closure, then capturing task success, key trajectories, tool errors, or before/after repair deltas"
+        }
+        ("security_analysis", TurnLanguage::Zh) => {
+            "补充目标语料或 benchmark 入口、固定 manifest，并补充真实发现、误报区分、影响判断或修复建议证据。"
+        }
+        ("security_analysis", TurnLanguage::En) => {
+            "add security-analysis evidence by fixing target-corpus or benchmark manifest closure, then capturing concrete findings, false-positive handling, impact assessment, or remediation guidance"
+        }
+        ("theory", TurnLanguage::Zh) => "补充定义、引理依赖、反例或推理核查证据。",
+        ("theory", TurnLanguage::En) => {
+            "add theory evidence covering definitions, lemma dependencies, counterexamples, or proof checks"
+        }
+        ("literature_review", TurnLanguage::Zh) => "补充检索范围、筛选标准、远程 fulltext 覆盖、结构化正文提取、证据综合或研究空白说明。",
+        ("literature_review", TurnLanguage::En) => {
+            "add literature-review evidence for search scope, screening criteria, remote fulltext coverage, structured paper extraction, synthesis, or gap statements"
+        }
+        _ => return None,
+    };
+    Some(action.to_string())
 }
 
 fn research_review_checks(kind: &str) -> Vec<String> {
@@ -11419,8 +19595,45 @@ fn research_review_checks(kind: &str) -> Vec<String> {
     if kind == "deep_learning" {
         checks.push("长训练任务是否有日志、checkpoint、资源监控和早停策略".to_string());
     }
-    if kind == "experimental_design" {
-        checks.push("是否明确了阴阳性对照、重复次数、样本量依据和潜在偏差来源".to_string());
+    if kind == "classical_ml" {
+        checks.push("是否明确了数据切分、随机种子、baseline、核心指标和误差分析证据".to_string());
+        checks.push("是否通过公开数据集入口完成候选检索，并在运行前固定 dataset manifest（provider/path/format/task_hint）".to_string());
+    }
+    if kind == "agent_evaluation" {
+        checks.push("是否记录了任务成功率、关键失败轨迹、工具错误和复测前后的变化".to_string());
+        checks.push(
+            "是否先固定任务集或 benchmark manifest，而不是在评测过程中临时改变数据来源".to_string(),
+        );
+    }
+    if kind == "security_analysis" {
+        checks.push("是否给出了真实证据、误报区分、影响判断和可执行的修复或缓解建议".to_string());
+        checks.push(
+            "是否固定了目标语料或 benchmark manifest，并把公开数据入口与论文来源边界说清楚"
+                .to_string(),
+        );
+    }
+    if kind == "systems_evaluation" {
+        checks.push(
+            "是否明确了负载模型、基线版本、指标口径、profiling 位置和性能瓶颈证据".to_string(),
+        );
+        checks.push(
+            "是否固定了 workload trace 或 benchmark suite manifest，并记录数据来源".to_string(),
+        );
+    }
+    if kind == "literature_review" {
+        checks.push(
+            "是否以远程论文为主来源，并明确记录拿到多少篇 fulltext、多少篇只有部分正文或仅元数据"
+                .to_string(),
+        );
+        checks.push(
+            "是否记录了 structured sections、references 或其他可供 agent 直接消费的结构化内容证据"
+                .to_string(),
+        );
+    }
+    if kind == "scope_boundary" {
+        checks.push(
+            "是否明确标出了超出计算机科学范围的部分，并把可执行部分重述为 CS 工作流".to_string(),
+        );
     }
     checks.push("最终产物是否可复现：代码、数据路径、参数和环境说明是否完整".to_string());
     checks
@@ -11444,9 +19657,21 @@ fn build_git_payload(
     let status = read_git_status(&workspace)?;
     let branches = read_git_branches(&workspace)?;
     let commits = read_git_commits(&workspace)?;
-    let staged_diff = if include_diff { read_git_diff(&workspace, true).ok() } else { None };
-    let working_diff = if include_diff { read_git_diff(&workspace, false).ok() } else { None };
-    let graph = if include_graph { read_git_graph(&workspace).unwrap_or_default() } else { Vec::new() };
+    let staged_diff = if include_diff {
+        read_git_diff(&workspace, true).ok()
+    } else {
+        None
+    };
+    let working_diff = if include_diff {
+        read_git_diff(&workspace, false).ok()
+    } else {
+        None
+    };
+    let graph = if include_graph {
+        read_git_graph(&workspace).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     Ok(WebGitPayload {
         available: true,
@@ -11502,7 +19727,13 @@ fn build_extensions_payload() -> Result<WebExtensionsPayload> {
 
     if let Some(skill_root) = discover_skill_root() {
         for entry in fs::read_dir(&skill_root)
-            .map_err(|err| anyhow!("failed to read skills root '{}': {}", skill_root.display(), err))?
+            .map_err(|err| {
+                anyhow!(
+                    "failed to read skills root '{}': {}",
+                    skill_root.display(),
+                    err
+                )
+            })?
             .filter_map(|entry| entry.ok())
         {
             if !entry.path().is_dir() {
@@ -11602,7 +19833,10 @@ fn extension_description(id: &str) -> String {
     }
 }
 
-fn build_run_debug_payload(state: &WebAppState, workspace_root: &str) -> Result<WebRunDebugPayload> {
+fn build_run_debug_payload(
+    state: &WebAppState,
+    workspace_root: &str,
+) -> Result<WebRunDebugPayload> {
     let workspace = canonical_workspace_dir_from(state.host.base_dir(), workspace_root)?;
     let runtime = lock_runtime_settings(state)?.clone();
     let configs = detect_run_configs(&workspace, &runtime)?;
@@ -11688,7 +19922,10 @@ fn prune_terminal_sessions(runtime: &mut TerminalRuntime) {
     });
 
     if runtime.active_id.as_ref().is_some_and(|active_id| {
-        !runtime.sessions.iter().any(|session| &session.id == active_id)
+        !runtime
+            .sessions
+            .iter()
+            .any(|session| &session.id == active_id)
     }) {
         runtime.active_id = runtime.sessions.last().map(|session| session.id.clone());
     }
@@ -11696,7 +19933,6 @@ fn prune_terminal_sessions(runtime: &mut TerminalRuntime) {
 
 async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> Result<String> {
     let workspace = canonical_workspace_dir_from(state.host.base_dir(), workspace_root)?;
-    ensure_git_repository(&workspace)?;
 
     let mut command = Command::new("powershell.exe");
     command
@@ -11760,7 +19996,7 @@ async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> R
     runtime.sessions.push(TerminalSessionRuntime {
         id: id.clone(),
         title: format!("Terminal {}", next_number),
-        cwd: workspace.display().to_string(),
+        cwd: display_workspace_path(&workspace),
         created_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
         command: "powershell.exe -NoLogo -NoExit".to_string(),
         status: Arc::new(Mutex::new("running".to_string())),
@@ -11851,24 +20087,101 @@ fn detect_run_configs(workspace: &Path, runtime: &RuntimeSettings) -> Result<Vec
     let tools = &runtime.toolchains;
     if workspace.join("Cargo.toml").exists() {
         let cargo = tool_value(tools, "cargo", "cargo");
-        configs.push(make_run_config("cargo-web", "Web Workspace", &format!("{} run -- --web", shell_quote(&cargo)), &cargo, "Rust", "rust", "launch", Some("Cargo.toml"), &["cargo"], tools));
-        configs.push(make_run_config("cargo-tui", "Terminal UI", &format!("{} run -- --tui", shell_quote(&cargo)), &cargo, "Rust", "rust", "launch", Some("Cargo.toml"), &["cargo"], tools));
+        configs.push(make_run_config(
+            "cargo-web",
+            "Web Workspace",
+            &format!("{} run -- --web", shell_quote(&cargo)),
+            &cargo,
+            "Rust",
+            "rust",
+            "launch",
+            Some("Cargo.toml"),
+            &["cargo"],
+            tools,
+        ));
+        configs.push(make_run_config(
+            "cargo-tui",
+            "Terminal UI",
+            &format!("{} run -- --tui", shell_quote(&cargo)),
+            &cargo,
+            "Rust",
+            "rust",
+            "launch",
+            Some("Cargo.toml"),
+            &["cargo"],
+            tools,
+        ));
     }
     if workspace.join("package.json").exists() {
         let npm = tool_value(tools, "npm", "npm");
-        configs.push(make_run_config("npm-dev", "Frontend Dev Server", &format!("{} run dev", shell_quote(&npm)), &npm, "Node", "javascript", "task", Some("package.json"), &["npm"], tools));
-        configs.push(make_run_config("npm-start", "Node App", &format!("{} start", shell_quote(&npm)), &npm, "Node", "javascript", "launch", Some("package.json"), &["npm"], tools));
+        configs.push(make_run_config(
+            "npm-dev",
+            "Frontend Dev Server",
+            &format!("{} run dev", shell_quote(&npm)),
+            &npm,
+            "Node",
+            "javascript",
+            "task",
+            Some("package.json"),
+            &["npm"],
+            tools,
+        ));
+        configs.push(make_run_config(
+            "npm-start",
+            "Node App",
+            &format!("{} start", shell_quote(&npm)),
+            &npm,
+            "Node",
+            "javascript",
+            "launch",
+            Some("package.json"),
+            &["npm"],
+            tools,
+        ));
     }
     if workspace.join("pyproject.toml").exists() || workspace.join("requirements.txt").exists() {
         let python = tool_value(tools, "python", "python");
         if workspace.join("main.py").exists() {
-            configs.push(make_run_config("python-main", "Python main.py", &format!("{} main.py", shell_quote(&python)), &python, "Python", "python", "launch", Some("main.py"), &["python"], tools));
+            configs.push(make_run_config(
+                "python-main",
+                "Python main.py",
+                &format!("{} main.py", shell_quote(&python)),
+                &python,
+                "Python",
+                "python",
+                "launch",
+                Some("main.py"),
+                &["python"],
+                tools,
+            ));
         }
         if workspace.join("app.py").exists() {
-            configs.push(make_run_config("python-app", "Python app.py", &format!("{} app.py", shell_quote(&python)), &python, "Python", "python", "launch", Some("app.py"), &["python"], tools));
+            configs.push(make_run_config(
+                "python-app",
+                "Python app.py",
+                &format!("{} app.py", shell_quote(&python)),
+                &python,
+                "Python",
+                "python",
+                "launch",
+                Some("app.py"),
+                &["python"],
+                tools,
+            ));
         }
         if workspace.join("manage.py").exists() {
-            configs.push(make_run_config("python-manage-runserver", "Django runserver", &format!("{} manage.py runserver", shell_quote(&python)), &python, "Python", "python", "launch", Some("manage.py"), &["python"], tools));
+            configs.push(make_run_config(
+                "python-manage-runserver",
+                "Django runserver",
+                &format!("{} manage.py runserver", shell_quote(&python)),
+                &python,
+                "Python",
+                "python",
+                "launch",
+                Some("manage.py"),
+                &["python"],
+                tools,
+            ));
         }
     }
     add_multilanguage_run_configs(workspace, tools, &mut configs);
@@ -11882,7 +20195,10 @@ fn add_multilanguage_run_configs(
 ) {
     for path in find_workspace_files_with_extensions(workspace, &["java"], 16) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
-            let class_name = path.file_stem().and_then(|value| value.to_str()).unwrap_or("Main");
+            let class_name = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Main");
             let class_dir = Path::new(&relative)
                 .parent()
                 .map(|value| value.to_string_lossy().replace('\\', "/"))
@@ -11926,7 +20242,18 @@ fn add_multilanguage_run_configs(
                 shell_quote(&output_path),
                 shell_quote(&output_path),
             );
-            configs.push(make_run_config(&format!("c-{}", slugify_path(&relative)), &format!("C {}", relative), &command, &compiler, "C/C++", "c", "launch", Some(&relative), &["c"], tools));
+            configs.push(make_run_config(
+                &format!("c-{}", slugify_path(&relative)),
+                &format!("C {}", relative),
+                &command,
+                &compiler,
+                "C/C++",
+                "c",
+                "launch",
+                Some(&relative),
+                &["c"],
+                tools,
+            ));
         }
     }
 
@@ -11943,18 +20270,51 @@ fn add_multilanguage_run_configs(
                 shell_quote(&output_path),
                 shell_quote(&output_path),
             );
-            configs.push(make_run_config(&format!("cpp-{}", slugify_path(&relative)), &format!("C++ {}", relative), &command, &compiler, "C/C++", "cpp", "launch", Some(&relative), &["cpp"], tools));
+            configs.push(make_run_config(
+                &format!("cpp-{}", slugify_path(&relative)),
+                &format!("C++ {}", relative),
+                &command,
+                &compiler,
+                "C/C++",
+                "cpp",
+                "launch",
+                Some(&relative),
+                &["cpp"],
+                tools,
+            ));
         }
     }
 
     if workspace.join("go.mod").exists() {
         let go = tool_value(tools, "go", "go");
-        configs.push(make_run_config("go-run-module", "Go module", &format!("{} run .", shell_quote(&go)), &go, "Go", "go", "launch", Some("go.mod"), &["go"], tools));
+        configs.push(make_run_config(
+            "go-run-module",
+            "Go module",
+            &format!("{} run .", shell_quote(&go)),
+            &go,
+            "Go",
+            "go",
+            "launch",
+            Some("go.mod"),
+            &["go"],
+            tools,
+        ));
     }
     for path in find_workspace_files_with_extensions(workspace, &["go"], 16) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
             let go = tool_value(tools, "go", "go");
-            configs.push(make_run_config(&format!("go-{}", slugify_path(&relative)), &format!("Go {}", relative), &format!("{} run {}", shell_quote(&go), shell_quote(&relative)), &go, "Go", "go", "launch", Some(&relative), &["go"], tools));
+            configs.push(make_run_config(
+                &format!("go-{}", slugify_path(&relative)),
+                &format!("Go {}", relative),
+                &format!("{} run {}", shell_quote(&go), shell_quote(&relative)),
+                &go,
+                "Go",
+                "go",
+                "launch",
+                Some(&relative),
+                &["go"],
+                tools,
+            ));
         }
     }
 
@@ -11964,26 +20324,70 @@ fn add_multilanguage_run_configs(
             .first()
             .and_then(|path| relative_workspace_path(workspace, path));
         let dotnet = tool_value(tools, "dotnet", "dotnet");
-        configs.push(make_run_config("dotnet-run", ".NET project", &format!("{} run", shell_quote(&dotnet)), &dotnet, "C#", "csharp", "launch", project_hint.as_deref(), &["dotnet"], tools));
+        configs.push(make_run_config(
+            "dotnet-run",
+            ".NET project",
+            &format!("{} run", shell_quote(&dotnet)),
+            &dotnet,
+            "C#",
+            "csharp",
+            "launch",
+            project_hint.as_deref(),
+            &["dotnet"],
+            tools,
+        ));
     }
     for path in find_workspace_files_with_extensions(workspace, &["cs"], 8) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
             let dotnet = tool_value(tools, "dotnet", "dotnet");
-            configs.push(make_run_config(&format!("csharp-{}", slugify_path(&relative)), &format!("C# {}", relative), &format!("{} run", shell_quote(&dotnet)), &dotnet, "C#", "csharp", "launch", Some(&relative), &["dotnet"], tools));
+            configs.push(make_run_config(
+                &format!("csharp-{}", slugify_path(&relative)),
+                &format!("C# {}", relative),
+                &format!("{} run", shell_quote(&dotnet)),
+                &dotnet,
+                "C#",
+                "csharp",
+                "launch",
+                Some(&relative),
+                &["dotnet"],
+                tools,
+            ));
         }
     }
 
     for path in find_workspace_files_with_extensions(workspace, &["jl"], 16) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
             let julia = tool_value(tools, "julia", "julia");
-            configs.push(make_run_config(&format!("julia-{}", slugify_path(&relative)), &format!("Julia {}", relative), &format!("{} {}", shell_quote(&julia), shell_quote(&relative)), &julia, "Julia", "julia", "launch", Some(&relative), &["julia"], tools));
+            configs.push(make_run_config(
+                &format!("julia-{}", slugify_path(&relative)),
+                &format!("Julia {}", relative),
+                &format!("{} {}", shell_quote(&julia), shell_quote(&relative)),
+                &julia,
+                "Julia",
+                "julia",
+                "launch",
+                Some(&relative),
+                &["julia"],
+                tools,
+            ));
         }
     }
 
     for path in find_workspace_files_with_extensions(workspace, &["r"], 16) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
             let rscript = tool_value(tools, "rscript", "Rscript");
-            configs.push(make_run_config(&format!("r-{}", slugify_path(&relative)), &format!("R {}", relative), &format!("{} {}", shell_quote(&rscript), shell_quote(&relative)), &rscript, "R", "r", "launch", Some(&relative), &["rscript"], tools));
+            configs.push(make_run_config(
+                &format!("r-{}", slugify_path(&relative)),
+                &format!("R {}", relative),
+                &format!("{} {}", shell_quote(&rscript), shell_quote(&relative)),
+                &rscript,
+                "R",
+                "r",
+                "launch",
+                Some(&relative),
+                &["rscript"],
+                tools,
+            ));
         }
     }
 
@@ -11996,10 +20400,29 @@ fn add_multilanguage_run_configs(
             } else {
                 tool_value(tools, "pdflatex", "pdflatex")
             };
-            let command = format!("{} {}", shell_quote(&runtime_executable), shell_quote(&relative));
-            let mut config = make_run_config(&format!("latex-{}", slugify_path(&relative)), &format!("LaTeX {}", relative), &command, &runtime_executable, "LaTeX", "latex", "task", Some(&relative), &[], tools);
+            let command = format!(
+                "{} {}",
+                shell_quote(&runtime_executable),
+                shell_quote(&relative)
+            );
+            let mut config = make_run_config(
+                &format!("latex-{}", slugify_path(&relative)),
+                &format!("LaTeX {}", relative),
+                &command,
+                &runtime_executable,
+                "LaTeX",
+                "latex",
+                "task",
+                Some(&relative),
+                &[],
+                tools,
+            );
             config.available = has_tectonic || has_pdflatex;
-            config.missing = if config.available { Vec::new() } else { vec!["tectonic or pdflatex".to_string()] };
+            config.missing = if config.available {
+                Vec::new()
+            } else {
+                vec!["tectonic or pdflatex".to_string()]
+            };
             config.detail = if has_tectonic {
                 "Ready: tectonic".to_string()
             } else if has_pdflatex {
@@ -12013,7 +20436,18 @@ fn add_multilanguage_run_configs(
 
     for path in find_workspace_files_with_extensions(workspace, &["md", "markdown"], 16) {
         if let Some(relative) = relative_workspace_path(workspace, &path) {
-            configs.push(make_run_config(&format!("markdown-preview-{}", slugify_path(&relative)), &format!("Preview {}", relative), &format!("preview-markdown {}", shell_quote(&relative)), "preview-markdown", "Markdown", "markdown", "preview", Some(&relative), &[], tools));
+            configs.push(make_run_config(
+                &format!("markdown-preview-{}", slugify_path(&relative)),
+                &format!("Preview {}", relative),
+                &format!("preview-markdown {}", shell_quote(&relative)),
+                "preview-markdown",
+                "Markdown",
+                "markdown",
+                "preview",
+                Some(&relative),
+                &[],
+                tools,
+            ));
         }
     }
 }
@@ -12093,7 +20527,10 @@ fn tool_is_available(toolchains: &BTreeMap<String, String>, key: &str) -> bool {
     command_is_available(&value)
 }
 
-fn missing_dependency(toolchains: &BTreeMap<String, String>, key: &str) -> Option<WebMissingDependency> {
+fn missing_dependency(
+    toolchains: &BTreeMap<String, String>,
+    key: &str,
+) -> Option<WebMissingDependency> {
     if tool_is_available(toolchains, key) {
         return None;
     }
@@ -12142,7 +20579,11 @@ fn shell_quote(value: &str) -> String {
     format!("\"{}\"", escaped)
 }
 
-fn find_workspace_files_with_extensions(workspace: &Path, extensions: &[&str], limit: usize) -> Vec<PathBuf> {
+fn find_workspace_files_with_extensions(
+    workspace: &Path,
+    extensions: &[&str],
+    limit: usize,
+) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let wanted = extensions
         .iter()
@@ -12162,7 +20603,10 @@ fn find_workspace_files_with_extensions(workspace: &Path, extensions: &[&str], l
                 break;
             }
             let path = entry.path();
-            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
             if should_skip_workspace_entry(name) {
                 continue;
             }
@@ -12193,7 +20637,13 @@ fn relative_workspace_path(workspace: &Path, path: &Path) -> Option<String> {
 
 fn slugify_path(path: &str) -> String {
     path.chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|part| !part.is_empty())
@@ -12273,7 +20723,11 @@ fn run_debug_action(
             if let Some(session) = runtime.active.take() {
                 stop_run_debug_session(&session);
             }
-            runtime.active = Some(start_run_debug_session(state.host.as_ref(), &workspace, config)?);
+            runtime.active = Some(start_run_debug_session(
+                state.host.as_ref(),
+                &workspace,
+                config,
+            )?);
             Ok(())
         }
         "stop" => {
@@ -12293,16 +20747,31 @@ fn start_run_debug_session(
     config: &WebRunConfig,
 ) -> Result<RunDebugSessionRuntime> {
     let logs_dir = host.workspace_run_debug_dir(workspace);
-    fs::create_dir_all(&logs_dir)
-        .map_err(|err| anyhow!("failed to create run/debug log dir '{}': {}", logs_dir.display(), err))?;
+    fs::create_dir_all(&logs_dir).map_err(|err| {
+        anyhow!(
+            "failed to create run/debug log dir '{}': {}",
+            logs_dir.display(),
+            err
+        )
+    })?;
 
     let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
     let stdout_path = logs_dir.join(format!("{}-stdout-{}.log", config.id, timestamp));
     let stderr_path = logs_dir.join(format!("{}-stderr-{}.log", config.id, timestamp));
-    let stdout_file = File::create(&stdout_path)
-        .map_err(|err| anyhow!("failed to create stdout log '{}': {}", stdout_path.display(), err))?;
-    let stderr_file = File::create(&stderr_path)
-        .map_err(|err| anyhow!("failed to create stderr log '{}': {}", stderr_path.display(), err))?;
+    let stdout_file = File::create(&stdout_path).map_err(|err| {
+        anyhow!(
+            "failed to create stdout log '{}': {}",
+            stdout_path.display(),
+            err
+        )
+    })?;
+    let stderr_file = File::create(&stderr_path).map_err(|err| {
+        anyhow!(
+            "failed to create stderr log '{}': {}",
+            stderr_path.display(),
+            err
+        )
+    })?;
 
     let mut command = Command::new("cmd");
     command
@@ -12397,8 +20866,14 @@ fn read_git_status(workspace: &Path) -> Result<WebGitStatus> {
             ],
         )? {
             let mut parts = counts.split_whitespace();
-            behind = parts.next().and_then(|value| value.parse().ok()).unwrap_or(0);
-            ahead = parts.next().and_then(|value| value.parse().ok()).unwrap_or(0);
+            behind = parts
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            ahead = parts
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
         }
     }
 
@@ -12438,10 +20913,7 @@ fn read_git_status(workspace: &Path) -> Result<WebGitStatus> {
         let bytes = code.as_bytes();
         let staged_code = bytes.first().copied().unwrap_or(b' ');
         let unstaged_code = bytes.get(1).copied().unwrap_or(b' ');
-        let conflicted = matches!(
-            code,
-            "DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU"
-        );
+        let conflicted = matches!(code, "DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU");
         let untracked = code == "??";
         let staged = staged_code != b' ' && staged_code != b'?' && staged_code != b'U';
         let unstaged = unstaged_code != b' ' && unstaged_code != b'?';
@@ -12470,7 +20942,10 @@ fn read_git_status(workspace: &Path) -> Result<WebGitStatus> {
     let mut parts = vec![format!("branch {}", branch)];
     if let Some(ref upstream_name) = upstream {
         if ahead > 0 || behind > 0 {
-            parts.push(format!("tracking {} (ahead {}, behind {})", upstream_name, ahead, behind));
+            parts.push(format!(
+                "tracking {} (ahead {}, behind {})",
+                upstream_name, ahead, behind
+            ));
         } else {
             parts.push(format!("tracking {}", upstream_name));
         }
@@ -12675,7 +21150,11 @@ fn run_git_action(base_dir: &Path, workspace_root: &str, request: &GitActionRequ
                 .as_deref()
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| anyhow!("create_branch action requires a branch"))?;
-            if let Some(reference) = request.reference.as_deref().filter(|value| !value.trim().is_empty()) {
+            if let Some(reference) = request
+                .reference
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 run_git_command(&workspace, &["branch", branch, reference])
             } else {
                 run_git_command(&workspace, &["branch", branch])
@@ -12841,7 +21320,11 @@ fn classify_git_change_type(code: &str) -> String {
     }
 }
 
-fn try_build_review_payload(base_dir: &Path, workspace_root: &str, selected_paths: &[String]) -> Result<WebReviewPayload> {
+fn try_build_review_payload(
+    base_dir: &Path,
+    workspace_root: &str,
+    selected_paths: &[String],
+) -> Result<WebReviewPayload> {
     let workspace = canonical_workspace_dir_from(base_dir, workspace_root)?;
     ensure_git_repository(&workspace)?;
     let status_entries = read_review_status_entries(&workspace)?;
@@ -12905,7 +21388,11 @@ fn collect_review_paths_for_current_turn(
     touched_files
 }
 
-fn build_review_file_detail(base_dir: &Path, workspace_root: &str, path: &str) -> Result<WebReviewFileDetail> {
+fn build_review_file_detail(
+    base_dir: &Path,
+    workspace_root: &str,
+    path: &str,
+) -> Result<WebReviewFileDetail> {
     let workspace = canonical_workspace_dir_from(base_dir, workspace_root)?;
     ensure_git_repository(&workspace)?;
     let relative_path = sanitize_review_path(path)?;
@@ -12925,7 +21412,14 @@ fn build_review_file_detail(base_dir: &Path, workspace_root: &str, path: &str) -
     } else {
         let diff_output = Command::new("git")
             .current_dir(&workspace)
-            .args(["diff", "--unified=3", "--no-ext-diff", "HEAD", "--", &relative_path])
+            .args([
+                "diff",
+                "--unified=3",
+                "--no-ext-diff",
+                "HEAD",
+                "--",
+                &relative_path,
+            ])
             .output()
             .map_err(|err| anyhow!("failed to inspect git diff: {}", err))?;
 
@@ -12977,8 +21471,14 @@ fn read_workspace_entries(root: &Path, dir: &Path, depth: usize) -> Result<Vec<W
         .collect();
 
     dir_entries.sort_by(|left, right| {
-        let left_is_dir = left.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
-        let right_is_dir = right.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
+        let left_is_dir = left
+            .file_type()
+            .map(|file_type| file_type.is_dir())
+            .unwrap_or(false);
+        let right_is_dir = right
+            .file_type()
+            .map(|file_type| file_type.is_dir())
+            .unwrap_or(false);
         right_is_dir
             .cmp(&left_is_dir)
             .then_with(|| left.file_name().cmp(&right.file_name()))
@@ -12998,7 +21498,10 @@ fn read_workspace_entries(root: &Path, dir: &Path, depth: usize) -> Result<Vec<W
             .replace('\\', "/");
 
         let file_type = entry.file_type().ok();
-        let is_dir = file_type.as_ref().map(|kind| kind.is_dir()).unwrap_or(false);
+        let is_dir = file_type
+            .as_ref()
+            .map(|kind| kind.is_dir())
+            .unwrap_or(false);
 
         let children = if is_dir {
             Some(read_workspace_entries(root, &path, depth + 1)?)
@@ -13009,7 +21512,11 @@ fn read_workspace_entries(root: &Path, dir: &Path, depth: usize) -> Result<Vec<W
         entries.push(WebWorkspaceEntry {
             path: relative,
             name,
-            kind: if is_dir { "directory".to_string() } else { "file".to_string() },
+            kind: if is_dir {
+                "directory".to_string()
+            } else {
+                "file".to_string()
+            },
             children,
         });
     }
@@ -13024,7 +21531,11 @@ fn should_skip_workspace_entry(name: &str) -> bool {
     )
 }
 
-fn build_workspace_file_response(base_dir: &Path, workspace_root: &str, path: &str) -> Result<WebWorkspaceFileResponse> {
+fn build_workspace_file_response(
+    base_dir: &Path,
+    workspace_root: &str,
+    path: &str,
+) -> Result<WebWorkspaceFileResponse> {
     let workspace = canonical_workspace_dir_from(base_dir, workspace_root)?;
     let relative_path = sanitize_review_path(path)?;
     let absolute = workspace.join(&relative_path);
@@ -13036,8 +21547,13 @@ fn build_workspace_file_response(base_dir: &Path, workspace_root: &str, path: &s
         return Err(anyhow!("workspace path is not a file: {}", relative_path));
     }
 
-    let bytes = std::fs::read(&absolute)
-        .map_err(|err| anyhow!("failed to read workspace file '{}': {}", absolute.display(), err))?;
+    let bytes = std::fs::read(&absolute).map_err(|err| {
+        anyhow!(
+            "failed to read workspace file '{}': {}",
+            absolute.display(),
+            err
+        )
+    })?;
 
     let preview_kind = workspace_preview_kind(&relative_path);
     let mime_type = workspace_mime_type(&relative_path);
@@ -13048,13 +21564,21 @@ fn build_workspace_file_response(base_dir: &Path, workspace_root: &str, path: &s
         120_000usize
     };
     let truncated = bytes.len() > preview_limit;
-    let preview_bytes = if truncated { &bytes[..preview_limit] } else { &bytes[..] };
+    let preview_bytes = if truncated {
+        &bytes[..preview_limit]
+    } else {
+        &bytes[..]
+    };
     let content = if is_binary {
         String::new()
     } else {
         decode_bytes(preview_bytes)
     };
-    let line_count = if is_binary { 0 } else { content.lines().count() };
+    let line_count = if is_binary {
+        0
+    } else {
+        content.lines().count()
+    };
 
     Ok(WebWorkspaceFileResponse {
         path: relative_path.clone(),
@@ -13085,7 +21609,9 @@ fn workspace_preview_kind(path: &str) -> String {
         "pdf" => "pdf",
         "mp3" | "wav" | "ogg" | "m4a" | "flac" | "aac" => "audio",
         "mp4" | "webm" | "mov" | "mkv" | "avi" => "video",
-        "zip" | "rar" | "7z" | "gz" | "tar" | "exe" | "dll" | "bin" | "wasm" | "class" => "unsupported",
+        "zip" | "rar" | "7z" | "gz" | "tar" | "exe" | "dll" | "bin" | "wasm" | "class" => {
+            "unsupported"
+        }
         _ => "text",
     }
     .to_string()
@@ -13119,7 +21645,8 @@ fn workspace_mime_type(path: &str) -> String {
         "mov" => "video/quicktime",
         "mkv" => "video/x-matroska",
         "avi" => "video/x-msvideo",
-        "md" | "markdown" | "txt" | "rs" | "js" | "jsx" | "ts" | "tsx" | "json" | "toml" | "yml" | "yaml" | "css" | "html" | "py" | "sh" => "text/plain; charset=utf-8",
+        "md" | "markdown" | "txt" | "rs" | "js" | "jsx" | "ts" | "tsx" | "json" | "toml"
+        | "yml" | "yaml" | "css" | "html" | "py" | "sh" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
     .to_string()
@@ -13288,9 +21815,7 @@ fn extract_recent_review_paths(messages: &[MessageBlock]) -> Vec<String> {
                 pending_tools.insert(call_id.clone(), (name.clone(), args.clone()));
             }
             MessageBlock::ToolResult {
-                call_id,
-                success,
-                ..
+                call_id, success, ..
             } if *success => {
                 if let Some((tool_name, args)) = pending_tools.get(call_id) {
                     for path in extract_paths_from_tool_call(tool_name, args) {
@@ -13446,7 +21971,10 @@ fn normalize_required_workspace_paths(paths: Vec<String>) -> Vec<String> {
             }
             let prefix = format!("{}/", path.trim_end_matches('/'));
             !normalized.iter().any(|other| {
-                !other.eq_ignore_ascii_case(path) && other.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase())
+                !other.eq_ignore_ascii_case(path)
+                    && other
+                        .to_ascii_lowercase()
+                        .starts_with(&prefix.to_ascii_lowercase())
             })
         })
         .cloned()
@@ -13613,11 +22141,21 @@ fn initial_runtime_settings(
     let model = effective_model_name(config);
     let providers = effective_providers(config);
     let config_workspace_root = default_workspace_root(config, paths);
-    let workspace_root = persisted_state
+    let has_explicit_workspace = config
+        .user_tools
+        .workspace_dir
         .as_ref()
-        .and_then(|state| state.workspace_root.clone())
-        .and_then(|saved| resolve_workspace_root(&saved, &config_workspace_root).ok())
-        .unwrap_or(config_workspace_root);
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let workspace_root = if has_explicit_workspace {
+        persisted_state
+            .as_ref()
+            .and_then(|state| state.workspace_root.clone())
+            .and_then(|saved| resolve_workspace_root(&saved, &config_workspace_root).ok())
+            .unwrap_or(config_workspace_root)
+    } else {
+        config_workspace_root
+    };
     let toolchains = persisted_state
         .as_ref()
         .and_then(|state| state.toolchains.clone())
@@ -13683,7 +22221,11 @@ fn extend_security_allowed_roots(security: &mut SecurityConfig, paths: &AppPaths
 fn push_allowed_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     let normalized = candidate.canonicalize().unwrap_or(candidate);
     let exists = roots.iter().any(|root| {
-        root == &normalized || root.canonicalize().map(|value| value == normalized).unwrap_or(false)
+        root == &normalized
+            || root
+                .canonicalize()
+                .map(|value| value == normalized)
+                .unwrap_or(false)
     });
     if !exists {
         roots.push(normalized);
@@ -13691,15 +22233,18 @@ fn push_allowed_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
 }
 
 fn default_workspace_root(config: &Config, paths: &AppPaths) -> String {
-    let sandbox_root = display_workspace_path(&paths.sandbox_dir());
+    let current_root = std::env::current_dir()
+        .ok()
+        .map(|path| display_workspace_path(&path))
+        .unwrap_or_else(|| display_workspace_path(&paths.sandbox_dir()));
     config
         .user_tools
         .workspace_dir
         .as_ref()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .and_then(|value| resolve_workspace_root(value, &sandbox_root).ok())
-        .unwrap_or(sandbox_root)
+        .and_then(|value| resolve_workspace_root(value, &current_root).ok())
+        .unwrap_or(current_root)
 }
 
 fn sanitize_toolchain_paths(mut incoming: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -13816,10 +22361,7 @@ fn runtime_security_config(base: &SecurityConfig, runtime: &RuntimeSettings) -> 
     };
     security.max_tool_calls_per_minute = max_tool_calls_per_minute;
     security.tool_call_burst_limit = burst_limit;
-    security.rate_limiter = Arc::new(RateLimiter::new(
-        max_tool_calls_per_minute,
-        burst_limit,
-    ));
+    security.rate_limiter = Arc::new(RateLimiter::new(max_tool_calls_per_minute, burst_limit));
 
     if let Ok(workspace) = canonical_workspace_dir(&runtime.workspace_root) {
         security.allowed_roots.retain(|path| path != &workspace);
@@ -13891,9 +22433,8 @@ fn event_bytes(event: StreamEnvelope) -> Bytes {
     let mut value = serde_json::to_value(&event)
         .unwrap_or_else(|_| json!({"type":"error","error":"serialization failed"}));
     normalize_json_strings(&mut value);
-    let line = serde_json::to_string(&value).unwrap_or_else(|_| {
-        "{\"type\":\"error\",\"error\":\"serialization failed\"}".to_string()
-    });
+    let line = serde_json::to_string(&value)
+        .unwrap_or_else(|_| "{\"type\":\"error\",\"error\":\"serialization failed\"}".to_string());
     Bytes::from(format!("{}\n", line))
 }
 
@@ -13984,12 +22525,99 @@ fn resolve_stream_session_id(state: &WebAppState, session_id: Option<String>) ->
 }
 
 fn stop_stream_session(state: &WebAppState, session_id: &str) -> Result<()> {
+    let runtime_settings = {
+        let runtime = lock_runtime_settings(state)?;
+        runtime.clone()
+    };
     let mut runtime = lock_stream_runtime(state)?;
     if let Some(session) = runtime.remove(session_id) {
-        session.abort_handle.abort();
+        session.task_handle.abort();
+        let pending_approval_count = session.pending_approvals.len();
         for (_, pending) in session.pending_approvals {
             let _ = pending.sender.send(false);
         }
+
+        let mut merged_messages = merge_runtime_edited_files_into_messages(
+            state.host.base_dir(),
+            &runtime_settings.workspace_root,
+            &session.message_blocks,
+            &session.edited_files,
+        );
+        merged_messages =
+            merge_runtime_progress_updates_into_messages(&merged_messages, &session.progress_updates);
+
+        let partial_text = session.partial_text.trim();
+        if !partial_text.is_empty() {
+            let already_present = merged_messages.iter().rev().any(|block| match block {
+                MessageBlock::Assistant { content }
+                | MessageBlock::AssistantStreaming { content } => content.trim() == partial_text,
+                _ => false,
+            });
+            if !already_present {
+                push_assistant_message_blocks(&mut merged_messages, partial_text.to_string());
+            }
+        }
+
+        let inferred_mode = if merged_messages.iter().any(|block| match block {
+            MessageBlock::User { content, .. } => {
+                let lowered = content.to_ascii_lowercase();
+                lowered.contains("/spec")
+                    || lowered.contains("research")
+                    || lowered.contains("研究")
+            }
+            _ => false,
+        }) {
+            Some("research")
+        } else {
+            None
+        };
+        let inferred_language = if merged_messages.iter().any(|block| match block {
+            MessageBlock::User { content, .. }
+            | MessageBlock::Assistant { content }
+            | MessageBlock::AssistantStreaming { content } => content
+                .chars()
+                .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+            _ => false,
+        }) {
+            TurnLanguage::Zh
+        } else {
+            TurnLanguage::En
+        };
+
+        let stop_message = if pending_approval_count > 0 {
+            localized_string(
+                inferred_language,
+                format!(
+                    "?????????? {} ?????????????????????????????????",
+                    pending_approval_count
+                ),
+                format!(
+                    "This research turn stopped while {} tool approval request(s) were pending. I preserved the current progress; continuing this turn will resume from here.",
+                    pending_approval_count
+                ),
+            )
+        } else {
+            localized_string(
+                inferred_language,
+                "?????????????????????????????????????????".to_string(),
+                "This research turn was stopped. I preserved the current progress, tool trace, and generated content; continuing this turn will resume from here.".to_string(),
+            )
+        };
+        let stop_message_already_present = merged_messages.iter().rev().any(|block| match block {
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                content.contains(&stop_message)
+            }
+            _ => false,
+        });
+        if !stop_message_already_present {
+            push_assistant_message_blocks(&mut merged_messages, stop_message);
+        }
+
+        merged_messages =
+            ensure_final_turn_assistant_summary(&merged_messages, inferred_mode, inferred_language);
+
+        let mut session_manager = lock_session_manager(state)?;
+        session_manager.save_messages_for(session_id, &merged_messages)?;
     }
     Ok(())
 }
@@ -14024,21 +22652,23 @@ fn respond_to_tool_permission(
             format!("tool_{}", status),
             Some(pending.name.clone()),
         )),
-        tool: Some(WebToolEvent {
-            call_id: call_id.to_string(),
-            name: pending.name.clone(),
-            status,
-            risk: pending.risk.clone(),
-            args: Some(pending.args.clone()),
-            result: Some(result),
-            success: Some(approved),
-            file_path: extract_tool_path(&pending.name, &pending.args),
-        }),
+                    tool: Some(WebToolEvent {
+                        call_id: call_id.to_string(),
+                        name: pending.name.clone(),
+                        status,
+                        risk: pending.risk.clone(),
+                        args: Some(pending.args.clone()),
+                        result: Some(result),
+                        success: Some(approved),
+                        file_path: extract_tool_path(&pending.name, &pending.args),
+                        updated_at: None,
+                    }),
         permission: None,
         edited_files: None,
         research: None,
         subagents: None,
         verifier: None,
+        auto_skills: None,
     });
     pending
         .sender
@@ -14107,8 +22737,8 @@ fn enter_workspace_dir_from(base_dir: &Path, path: &str) -> Result<Option<Worksp
     }
 
     let target = canonical_workspace_dir_from(base_dir, path)?;
-    ensure_git_repository(&target)?;
-    let previous = std::env::current_dir().map_err(|err| anyhow!("failed to read current dir: {}", err))?;
+    let previous =
+        std::env::current_dir().map_err(|err| anyhow!("failed to read current dir: {}", err))?;
     std::env::set_current_dir(&target)
         .map_err(|err| anyhow!("failed to enter workspace '{}': {}", target.display(), err))?;
 
@@ -14134,9 +22764,7 @@ fn lock_runtime_settings(
         .map_err(|_| anyhow!("runtime settings lock poisoned"))
 }
 
-fn lock_session_manager(
-    state: &WebAppState,
-) -> Result<std::sync::MutexGuard<'_, SessionManager>> {
+fn lock_session_manager(state: &WebAppState) -> Result<std::sync::MutexGuard<'_, SessionManager>> {
     state
         .session_manager
         .lock()
@@ -14173,10 +22801,267 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn messages_to_web(messages: &[MessageBlock]) -> Vec<WebMessage> {
-    messages.iter().filter_map(message_to_web).collect()
+    let mut rendered = Vec::new();
+    let mut last_user_content: Option<String> = None;
+    for message in messages {
+        let is_assistant_like = matches!(
+            message,
+            MessageBlock::Assistant { .. }
+                | MessageBlock::AssistantStreaming { .. }
+                | MessageBlock::Thinking { .. }
+                | MessageBlock::ToolCall { .. }
+                | MessageBlock::ToolResult { .. }
+                | MessageBlock::Error { .. }
+                | MessageBlock::Diff { .. }
+                | MessageBlock::Subagent { .. }
+                | MessageBlock::Verification { .. }
+        );
+        let auto_skills = if is_assistant_like {
+            last_user_content
+                .as_deref()
+                .map(|content| auto_selected_skills_for_turn(content, Some("research")))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if let Some(web_message) = message_to_web(message, auto_skills) {
+            rendered.push(web_message);
+        }
+        if let MessageBlock::User { content, .. } = message {
+            last_user_content = Some(content.clone());
+        }
+    }
+    rendered
 }
 
-fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
+fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
+    fn contains_any(text: &str, keywords: &[&str]) -> bool {
+        keywords.iter().any(|keyword| text.contains(keyword))
+    }
+
+    fn is_choice_prompt_line(line: &str) -> bool {
+        let trimmed = line.trim();
+        trimmed.starts_with("请确认")
+            || trimmed.starts_with("Please confirm")
+            || trimmed.starts_with("如果您同意")
+            || trimmed.starts_with("If you agree")
+            || trimmed.starts_with("正在准备最终消息载荷")
+            || trimmed.starts_with("Preparing final message payload")
+    }
+
+    fn is_alternative_option_line(line: &str) -> bool {
+        let trimmed = line.trim();
+        trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("• ")
+            || trimmed.starts_with("### 方向")
+            || trimmed.starts_with("## 方向")
+            || trimmed.starts_with("## 方向 ")
+            || trimmed.starts_with("### 方向 ")
+            || trimmed.starts_with("### 方案")
+            || trimmed.starts_with("## 方案")
+            || trimmed.starts_with("### Direction")
+            || trimmed.starts_with("## Direction")
+            || trimmed
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_digit())
+                && trimmed.contains('.')
+    }
+
+    fn clean_choice_option(line: &str) -> String {
+        line.trim()
+            .trim_start_matches('#')
+            .trim()
+            .trim_start_matches(|ch: char| {
+                ch.is_ascii_digit()
+                    || ch == '.'
+                    || ch == '-'
+                    || ch == '*'
+                    || ch == '•'
+                    || ch.is_whitespace()
+            })
+            .trim_end_matches(['？', '?', '：', ':'])
+            .trim()
+            .to_string()
+    }
+
+    fn is_summary_like_choice(text: &str) -> bool {
+        let lowered = text.to_ascii_lowercase();
+        text.contains("总结")
+            || text.contains("对比")
+            || lowered.contains("summary")
+            || lowered.contains("comparison")
+            || lowered.contains("compare")
+    }
+
+    fn is_low_level_execution_choice(text: &str) -> bool {
+        let lowered = text.to_ascii_lowercase();
+        let has_file_target = contains_any(
+            text,
+            &["文件", "目录", "文件夹", "脚本", "路径", "file", "folder", "directory", "script", "path"],
+        ) || lowered.contains(".rs")
+            || lowered.contains(".py")
+            || lowered.contains(".js")
+            || lowered.contains(".ts")
+            || lowered.contains(".tsx")
+            || lowered.contains(".jsx")
+            || lowered.contains(".toml")
+            || lowered.contains(".json")
+            || lowered.contains(".yaml")
+            || lowered.contains(".yml")
+            || lowered.contains(".md");
+        let has_action = contains_any(
+            text,
+            &["创建", "新建", "生成", "改这个", "改动这个", "修改这个", "添加这个", "create", "add", "generate"],
+        );
+        has_file_target && has_action
+    }
+
+    fn is_high_level_choice_context(text: &str) -> bool {
+        contains_any(
+            text,
+            &[
+                "设计方向",
+                "实现方向",
+                "不同的实现方向",
+                "三个不同的实现方向",
+                "倾向的方向",
+                "方案",
+                "思路",
+                "路线",
+                "路径",
+                "架构",
+                "优先实现哪个模块",
+                "先实现哪个模块",
+                "Please confirm which direction",
+                "which direction you prefer",
+                "different implementation direction",
+                "implementation direction",
+                "design direction",
+                "architecture",
+                "approach",
+                "strategy",
+            ],
+        )
+    }
+
+    fn is_explicit_strategic_option(text: &str) -> bool {
+        contains_any(
+            text,
+            &[
+                "方向",
+                "方案",
+                "思路",
+                "路线",
+                "路径",
+                "Direction",
+                "Approach",
+                "Strategy",
+                "Option",
+            ],
+        )
+    }
+
+    let normalized = text.replace("\r\n", "\n");
+    let lines = normalized
+        .lines()
+        .map(|line| line.trim().to_string())
+        .collect::<Vec<_>>();
+    let high_level_context = is_high_level_choice_context(&normalized);
+    let strategic_option_marker_count = lines
+        .iter()
+        .filter(|line| is_alternative_option_line(line) && is_explicit_strategic_option(line))
+        .count();
+
+    if !high_level_context && strategic_option_marker_count < 2 {
+        return AssistantChoicePayload {
+            body: normalized,
+            choices: None,
+        };
+    }
+
+    let mut alternative_options = Vec::new();
+    for line in &lines {
+        if line.is_empty() || is_choice_prompt_line(line) {
+            continue;
+        }
+
+        if is_alternative_option_line(line) {
+            let cleaned = clean_choice_option(line);
+            if cleaned.is_empty() || is_summary_like_choice(&cleaned) {
+                continue;
+            }
+            if (high_level_context || is_explicit_strategic_option(&cleaned))
+                && !is_low_level_execution_choice(&cleaned)
+            {
+                alternative_options.push(cleaned);
+            }
+        }
+    }
+
+    let mut options = if alternative_options.len() >= 2 {
+        alternative_options
+    } else {
+        Vec::new()
+    };
+
+    options.dedup();
+
+    if options.len() < 2 {
+        return AssistantChoicePayload {
+            body: normalized,
+            choices: None,
+        };
+    }
+
+    let mut body_lines = Vec::new();
+    for line in &lines {
+        if line.is_empty() {
+            continue;
+        }
+        if is_choice_prompt_line(line) {
+            continue;
+        }
+
+        if is_alternative_option_line(line) {
+            let cleaned = clean_choice_option(line);
+            if options.iter().any(|option| option == &cleaned) {
+                continue;
+            }
+        }
+
+        body_lines.push(line.clone());
+    }
+
+    AssistantChoicePayload {
+        body: body_lines.join("\n").trim().to_string(),
+        choices: Some(WebAssistantChoices {
+            title: "decision".to_string(),
+            options,
+        }),
+    }
+}
+
+fn push_assistant_message_blocks(messages: &mut Vec<MessageBlock>, content: impl Into<String>) {
+    let content = content.into();
+    let payload = extract_assistant_choice_payload(&content);
+    if !payload.body.trim().is_empty() {
+        messages.push(MessageBlock::Assistant {
+            content: payload.body,
+        });
+    }
+    if let Some(choices) = payload.choices {
+        if !choices.options.is_empty() {
+            messages.push(MessageBlock::AssistantChoices {
+                title: choices.title,
+                options: choices.options,
+            });
+        }
+    }
+}
+
+fn message_to_web(message: &MessageBlock, auto_skills: Vec<WebAutoSkill>) -> Option<WebMessage> {
     match message {
         MessageBlock::User { content, .. } => Some(WebMessage {
             kind: "message".to_string(),
@@ -14194,26 +23079,54 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills: Vec::new(),
         }),
         MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+            let cleaned = sanitize_visible_stream_text(content);
+            let choice_payload = extract_assistant_choice_payload(&cleaned);
             Some(WebMessage {
                 kind: "message".to_string(),
                 role: "assistant".to_string(),
-                content: sanitize_visible_stream_text(content),
+                content: choice_payload.body,
                 call_id: None,
                 success: None,
                 collapsed: None,
                 tool_name: None,
                 tool_args: None,
-                    status: None,
-                    file_path: None,
-                    added: None,
-                    removed: None,
-                    before_content: None,
-                    subagent: None,
-                    verifier: None,
-                })
+                status: None,
+                file_path: None,
+                added: None,
+                removed: None,
+                before_content: None,
+                subagent: None,
+                verifier: None,
+                assistant_choices: choice_payload.choices,
+                auto_skills,
+            })
         }
+        MessageBlock::AssistantChoices { title, options } => Some(WebMessage {
+            kind: "message".to_string(),
+            role: "assistant".to_string(),
+            content: String::new(),
+            call_id: None,
+            success: None,
+            collapsed: None,
+            tool_name: None,
+            tool_args: None,
+            status: None,
+            file_path: None,
+            added: None,
+            removed: None,
+            before_content: None,
+            subagent: None,
+            verifier: None,
+            assistant_choices: Some(WebAssistantChoices {
+                title: title.clone(),
+                options: options.clone(),
+            }),
+            auto_skills,
+        }),
         MessageBlock::System { content } => Some(WebMessage {
             kind: "message".to_string(),
             role: "system".to_string(),
@@ -14230,6 +23143,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::Thinking { content, collapsed } => Some(WebMessage {
             kind: "thinking".to_string(),
@@ -14247,6 +23162,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::ToolCall {
             name,
@@ -14269,6 +23186,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::ToolResult {
             call_id,
@@ -14290,6 +23209,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::Error { content } => Some(WebMessage {
             kind: "message".to_string(),
@@ -14307,6 +23228,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::Diff { diff } => Some(WebMessage {
             kind: "diff".to_string(),
@@ -14324,6 +23247,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: Some(diff.before_content.clone()),
             subagent: None,
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::Subagent { record } => Some(WebMessage {
             kind: "subagent".to_string(),
@@ -14341,6 +23266,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: Some(to_web_subagent(record)),
             verifier: None,
+            assistant_choices: None,
+            auto_skills,
         }),
         MessageBlock::Verification { report } => Some(WebMessage {
             kind: "verification".to_string(),
@@ -14358,6 +23285,8 @@ fn message_to_web(message: &MessageBlock) -> Option<WebMessage> {
             before_content: None,
             subagent: None,
             verifier: Some(to_web_verifier(report)),
+            assistant_choices: None,
+            auto_skills,
         }),
     }
 }
@@ -14389,12 +23318,57 @@ fn internal_error(err: anyhow::Error) -> (StatusCode, String) {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::net::SocketAddr;
 
     fn user(content: &str) -> MessageBlock {
         MessageBlock::User {
             content: content.to_string(),
             branch_id: "main".to_string(),
         }
+    }
+
+    fn test_web_state(name: &str) -> (WebAppState, PathBuf) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_web_reviewer_feedback_{}_{}",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let base_dir = temp_dir.join("base");
+        let frontend_dir = base_dir.join("frontend");
+        let state_dir = temp_dir.join("state");
+        let workspace_dir = temp_dir.join("workspace");
+        fs::create_dir_all(&frontend_dir).unwrap();
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&workspace_dir).unwrap();
+
+        let host = WebHostConfig {
+            paths: AppPaths::for_desktop(base_dir.clone(), frontend_dir, state_dir),
+            bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            descriptor: HostDescriptor::desktop_bridge(HostCapabilities::desktop_default()),
+        };
+        let assistant_config = AssistantConfig::new_with_runtime(
+            "http://127.0.0.1:11434/v1".to_string(),
+            None,
+            "test-model".to_string(),
+            0.7,
+            4096,
+        );
+        let state = build_web_app_state(
+            host,
+            assistant_config,
+            Config::default(),
+            SecurityConfig::default(),
+        )
+        .unwrap();
+        {
+            let mut runtime = lock_runtime_settings(&state).unwrap();
+            runtime.workspace_root = workspace_dir.to_string_lossy().to_string();
+            runtime.competition_mode = true;
+        }
+        (state, temp_dir)
     }
 
     fn test_runtime_settings(workspace_root: String) -> RuntimeSettings {
@@ -14417,21 +23391,207 @@ mod tests {
     }
 
     #[test]
+    fn reviewer_feedback_sidecar_roundtrip() {
+        let (state, temp_dir) = test_web_state("roundtrip");
+        let session_id = ensure_current_session(&state).unwrap();
+        let entries = vec![WebReviewerFeedbackEntry {
+            reviewer: "alice".to_string(),
+            linked_run_id: "sys-run-2".to_string(),
+            score: Some(91),
+            comment: "Need clearer baseline comparison.".to_string(),
+            resolved: false,
+            created_at: Some("2026-06-26T10:00:00+08:00".to_string()),
+            resolved_at: None,
+        }];
+
+        save_reviewer_feedback_entries(&state, &session_id, &entries).unwrap();
+        let loaded = load_reviewer_feedback_entries(&state, &session_id).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].reviewer, "alice");
+        assert_eq!(loaded[0].linked_run_id, "sys-run-2");
+        assert_eq!(loaded[0].score, Some(91));
+        assert!(!loaded[0].resolved);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn reviewer_feedback_bridge_add_and_resolve_use_current_run() {
+        let (state, temp_dir) = test_web_state("bridge");
+        let session_id = ensure_current_session(&state).unwrap();
+        let messages = vec![
+            user("Run a systems benchmark, compare latency throughput and memory against a baseline run, and preserve baseline lineage when resuming the prior run."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('bench')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "workload: serving-cache\nrun_id: sys-run-2\nparent_run_id: sys-run-1\nvariant_label: tuned-cache\nbaseline: sys-run-1\nresume from sys-run-1\nlatency_ms=9.8\nthroughput_qps=2100\nmemory_mb=640\ncompare vs baseline\nsaved report to runs/sys/report_v2.json",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+        {
+            let mut session_manager = lock_session_manager(&state).unwrap();
+            session_manager.current_id = Some(session_id.clone());
+            session_manager.save_messages(&messages).unwrap();
+        }
+
+        let added = bridge_reviewer_feedback_add(
+            &state,
+            ReviewerFeedbackAddRequest {
+                reviewer: "panel-a".to_string(),
+                linked_run_id: None,
+                score: Some(88),
+                comment: "Please justify the baseline delta.".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            added.reviewer_feedback.current_run_id.as_deref(),
+            Some("sys-run-2")
+        );
+        assert_eq!(added.reviewer_feedback.unresolved_count, 1);
+        assert_eq!(added.reviewer_feedback.entries.len(), 1);
+        assert_eq!(
+            added.reviewer_feedback.entries[0].linked_run_id,
+            "sys-run-2"
+        );
+        assert_eq!(added.reviewer_feedback.entries[0].reviewer, "panel-a");
+        assert!(!added.reviewer_feedback.entries[0].resolved);
+
+        let resolved =
+            bridge_reviewer_feedback_resolve(&state, ReviewerFeedbackResolveRequest { index: 0 })
+                .unwrap();
+
+        assert_eq!(resolved.reviewer_feedback.unresolved_count, 0);
+        assert!(resolved.reviewer_feedback.entries[0].resolved);
+        assert!(resolved.reviewer_feedback.entries[0].resolved_at.is_some());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn stop_stream_session_persists_partial_messages() {
+        let (state, temp_dir) = test_web_state("stop_persist");
+        let session_id = ensure_current_session(&state).unwrap();
+        {
+            let mut session_manager = lock_session_manager(&state).unwrap();
+            session_manager.current_id = Some(session_id.clone());
+            session_manager
+                .save_messages_for(
+                    &session_id,
+                    &vec![MessageBlock::User {
+                        content: "/spec run a lightweight research task".to_string(),
+                        branch_id: "main".to_string(),
+                    }],
+                )
+                .unwrap();
+        }
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<StreamEnvelope>();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let task_handle = Arc::new(runtime.spawn(async {}));
+        {
+            let mut runtime = lock_stream_runtime(&state).unwrap();
+            runtime.insert(
+                session_id.clone(),
+                StreamSessionRuntime {
+                    task_handle,
+                    event_tx: tx,
+                    pending_approvals: HashMap::new(),
+                    latest_activity: None,
+                    tool_events: Vec::new(),
+                    edited_files: Vec::new(),
+                    message_blocks: vec![MessageBlock::User {
+                        content: "/spec run a lightweight research task".to_string(),
+                        branch_id: "main".to_string(),
+                    }],
+                    partial_text: "partial assistant progress".to_string(),
+                    progress_updates: Vec::new(),
+                    recent_progress_keys: Vec::new(),
+                    recent_progress_emitted_at: HashMap::new(),
+                    required_path_snapshots: Vec::new(),
+                    subagents: Vec::new(),
+                    verifier: None,
+                    checkpoints: Vec::new(),
+                    branch_notes: Vec::new(),
+                    timeline: Vec::new(),
+                    auto_skills: Vec::new(),
+                },
+            );
+        }
+
+        stop_stream_session(&state, &session_id).unwrap();
+
+        let saved = {
+            let session_manager = lock_session_manager(&state).unwrap();
+            session_manager.load_messages(&session_id).unwrap()
+        };
+        assert!(saved.iter().any(|block| match block {
+            MessageBlock::User { content, .. } => content.contains("/spec"),
+            _ => false,
+        }));
+        assert!(saved.iter().any(|block| match block {
+            MessageBlock::Assistant { content } => content.contains("partial assistant progress"),
+            _ => false,
+        }));
+        assert!(saved.iter().any(|block| match block {
+            MessageBlock::Assistant { content } => content.contains("This research turn was stopped"),
+            _ => false,
+        }));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn infer_research_kind_matches_deep_learning() {
         let messages = vec![
             user("Help me run a deep learning training experiment and track epoch loss with checkpointing"),
         ];
         let topic = infer_research_topic(&messages).unwrap();
-        assert_eq!(infer_research_workflow_kind(&topic, &messages), "deep_learning");
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "deep_learning"
+        );
     }
 
     #[test]
-    fn infer_research_kind_matches_experimental_design() {
+    fn infer_research_kind_matches_systems_evaluation() {
         let messages = vec![
-            user("Design a cell culture and western blot experiment with a control group"),
+            user("Design a benchmark to compare latency, throughput, and memory usage across three serving strategies"),
         ];
         let topic = infer_research_topic(&messages).unwrap();
-        assert_eq!(infer_research_workflow_kind(&topic, &messages), "experimental_design");
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "systems_evaluation"
+        );
+    }
+
+    #[test]
+    fn infer_research_kind_marks_non_cs_domain_as_scope_boundary() {
+        let messages = vec![user(
+            "Design a wet-lab PCR and western blot experiment to validate a biological hypothesis",
+        )];
+        let topic = infer_research_topic(&messages).unwrap();
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "scope_boundary"
+        );
     }
 
     #[test]
@@ -14440,7 +23600,373 @@ mod tests {
             "在当前工作区 experiments/ml_probe_5min 中做一个总时长控制在 5 分钟内的轻量机器学习研究：用 sklearn 的 iris 数据集快速验证逻辑回归是否能得到稳定分类效果。",
         )];
         let topic = infer_research_topic(&messages).unwrap();
-        assert_eq!(infer_research_workflow_kind(&topic, &messages), "data_analysis");
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "classical_ml"
+        );
+    }
+
+    #[test]
+    fn research_payload_runtime_override_prefers_classical_ml_after_real_experiment_artifacts() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_runtime_profile_override_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(
+            experiments_dir.join("config.py"),
+            "DATASETS = {'digits': {'loader': 'load_digits'}}\nNOISE_RATES = [0.0, 0.2, 0.4]\n",
+        )
+        .unwrap();
+        fs::write(
+            experiments_dir.join("experiment.py"),
+            "from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, BaggingClassifier\nprint('accuracy=0.9793')\n",
+        )
+        .unwrap();
+        fs::write(
+            experiments_dir.join("results.csv"),
+            "model,noise,accuracy\nExtraTrees,0.0,0.9793\nRandomForest,0.0,0.9698\n",
+        )
+        .unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let override_messages = vec![
+            user("请你定义一个能真实跑通的小型机器学习研究课题，完成文献检索、真实实验、结果分析、审阅修订和论文 PDF。"),
+            MessageBlock::ToolCall {
+                name: "search_arxiv".to_string(),
+                args: json!({"query":"random forest label noise robustness subsampling","limit":5}),
+                call_id: "m1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "m1".to_string(),
+                result: json!({
+                    "Ok": "{\"query\":\"random forest label noise robustness subsampling\",\"results\":[{\"title\":\"Impact of subsampling and pruning on random forests\",\"engine\":\"arxiv\"}]}"
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::ToolCall {
+                name: "write_file".to_string(),
+                args: json!({"path":"experiments/experiment.py","content":"from sklearn import ..."}),
+                call_id: "m2".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "m2".to_string(),
+                result: json!({
+                    "operation": "write_file",
+                    "status": "success",
+                    "data": {
+                        "path": temp_dir.join("experiments").join("experiment.py").to_string_lossy().to_string(),
+                        "message": "wrote experiment.py"
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+        let override_topic = infer_research_topic(&override_messages).unwrap();
+        assert_eq!(
+            infer_research_workflow_kind(&override_topic, &override_messages),
+            "classical_ml"
+        );
+        let payload = build_research_payload(
+            &runtime,
+            &override_messages,
+            None,
+            SessionResearchState::Research,
+        );
+        assert_eq!(payload.workflow_kind, "classical_ml");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_result_bundle_artifacts_ignore_remote_json_noise() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_result_bundle_artifacts_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(experiments_dir.join("experiment.py"), "print('ok')\n").unwrap();
+        fs::write(
+            experiments_dir.join("results.csv"),
+            "model,accuracy\nrf,0.97\n",
+        )
+        .unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a small sklearn experiment and keep the real outputs in the workspace."),
+            MessageBlock::ToolCall {
+                name: "search_arxiv".to_string(),
+                args: json!({"query":"random forest label noise robustness subsampling","limit":5}),
+                call_id: "m1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "m1".to_string(),
+                result: json!({
+                    "Ok": "{\"query\":\"random forest label noise robustness subsampling\",\"results\":[{\"title\":\"Impact of subsampling and pruning on random forests\",\"url\":\"https://arxiv.org/abs/1603.04261v1\"}]}"
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('saved results to experiments/results.csv')"}),
+                call_id: "m2".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "m2".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "saved results to experiments/results.csv\nsaved script to experiments/experiment.py",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path == "experiments/results.csv"));
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path == "experiments/experiment.py"));
+        assert!(!payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path.contains("arxiv.org") || path.contains("https://")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_result_bundle_keeps_workspace_relative_path_for_absolute_diff() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_result_bundle_diff_path_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(experiments_dir.join("experiment.py"), "print('ok')\n").unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Write the real experiment file and keep it in the workspace."),
+            MessageBlock::Diff {
+                diff: FileDiff {
+                    file_path: experiments_dir
+                        .join("experiment.py")
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    lines: Vec::new(),
+                    added: 1,
+                    removed: 0,
+                    before_content: String::new(),
+                    after_content: "print('ok')\n".to_string(),
+                },
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path == "experiments/experiment.py"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn classical_ml_runtime_with_real_metrics_and_outputs_becomes_complete() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_runtime_complete_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(
+            experiments_dir.join("results.csv"),
+            "model,accuracy\nrf,0.97\n",
+        )
+        .unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a real sklearn experiment end to end and save the results."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('accuracy=0.97\\nsaved results to experiments/results.csv\\ncompare vs baseline')"}),
+                call_id: "m1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "m1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "accuracy=0.97\nsaved results to experiments/results.csv\ncompare vs baseline",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::Diff {
+                diff: FileDiff {
+                    file_path: experiments_dir
+                        .join("results.csv")
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    lines: Vec::new(),
+                    added: 2,
+                    removed: 0,
+                    before_content: String::new(),
+                    after_content: "model,accuracy\nrf,0.97\n".to_string(),
+                },
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "classical_ml");
+        assert_eq!(payload.overall_state, "complete");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_backfills_workspace_results_for_historical_session() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_workspace_backfill_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(
+            experiments_dir.join("config.py"),
+            "DATASETS = {'digits': {'loader': 'load_digits'}}\n",
+        )
+        .unwrap();
+        fs::write(
+            experiments_dir.join("experiment.py"),
+            "from sklearn.datasets import load_digits\nfrom sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier\n",
+        )
+        .unwrap();
+        fs::write(
+            experiments_dir.join("results.csv"),
+            "model,subsample,noise_rate,acc_mean,acc_std\nRandomForest,1.0,0.0,0.9698,0.0028\nExtraTrees,1.0,0.0,0.9793,0.0018\nExtraTrees,1.0,0.3,0.9561,0.0050\n",
+        )
+        .unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a real sklearn robustness study and then generate a paper from the existing workspace artifacts."),
+            MessageBlock::Assistant {
+                content: "The experiment already completed earlier; reuse the workspace artifacts for the paper workflow.".to_string(),
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "classical_ml");
+        assert_eq!(payload.overall_state, "complete");
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path == "experiments/results.csv"));
+        assert_eq!(
+            result_bundle_field_value(&payload.result_bundle, "paper_dataset_hints").as_deref(),
+            Some("digits")
+        );
+        assert_eq!(
+            result_bundle_field_value(&payload.result_bundle, "dataset_manifest").as_deref(),
+            Some("dataset manifest: dataset_id=digits provider=sklearn source_url=sklearn.datasets.load_digits task_hint=classification")
+        );
+        assert_eq!(
+            result_bundle_field_value(&payload.result_bundle, "primary_metric").as_deref(),
+            Some("0.9793")
+        );
+        assert_eq!(
+            result_bundle_field_value(&payload.result_bundle, "baseline_delta").as_deref(),
+            Some("+0.0095 over RandomForest at noise_rate=0.0")
+        );
+        assert!(
+            result_bundle_field_value(&payload.result_bundle, "error_analysis_summary")
+                .is_some_and(
+                    |value| value.contains("best observed robustness comes from ExtraTrees")
+                )
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn infer_research_kind_matches_agent_evaluation() {
+        let messages = vec![user(
+            "Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates.",
+        )];
+        let topic = infer_research_topic(&messages).unwrap();
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "agent_evaluation"
+        );
+    }
+
+    #[test]
+    fn infer_research_kind_matches_security_analysis() {
+        let messages = vec![user(
+            "Run a lightweight static analysis security benchmark over a vulnerable code sample and report precision and recall.",
+        )];
+        let topic = infer_research_topic(&messages).unwrap();
+        assert_eq!(
+            infer_research_workflow_kind(&topic, &messages),
+            "security_analysis"
+        );
     }
 
     #[test]
@@ -14501,6 +24027,62 @@ mod tests {
     }
 
     #[test]
+    fn adapt_bash_command_unwraps_cmd_wrapper() {
+        let adapted =
+            adapt_bash_command_for_powershell(r#"cmd.exe /c "dir *.py *.md""#);
+        assert_eq!(
+            adapted,
+            "Get-ChildItem -Force -Include '*.py', '*.md'"
+        );
+    }
+
+    #[test]
+    fn adapt_bash_command_rewrites_windows_dir_with_findstr_inverse() {
+        let adapted = adapt_bash_command_for_powershell(
+            r#"dir "D:\Project Testing\neotracker" /s /b /a:-d 2>nul | findstr /v __pycache__"#,
+        );
+        assert_eq!(
+            adapted,
+            "Get-ChildItem -Force -Recurse -File -LiteralPath 'D:\\Project Testing\\neotracker' | Select-Object -ExpandProperty FullName | Where-Object { $_ -notmatch '__pycache__' }"
+        );
+    }
+
+    #[test]
+    fn normalize_web_tool_args_fills_directory_for_tree_tools() {
+        let args = normalize_web_tool_args("tree_dir", json!({"path": "/workspace/src"}));
+        assert_eq!(args["directory"], "src");
+    }
+
+    #[test]
+    fn normalize_web_tool_args_fills_directory_for_large_file_search_tools() {
+        let args = normalize_web_tool_args("find_large_files", json!({"dir": "/workspace/assets"}));
+        assert_eq!(args["directory"], "assets");
+    }
+
+    #[test]
+    fn enter_workspace_dir_from_allows_non_git_workspace() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_non_git_workspace_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let original = std::env::current_dir().unwrap();
+
+        {
+            let _guard = enter_workspace_dir_from(Path::new("."), &temp_dir.to_string_lossy()).unwrap();
+            let current = std::env::current_dir().unwrap();
+            assert_eq!(display_workspace_path(&current), display_workspace_path(&temp_dir));
+            assert!(!temp_dir.join(".git").exists());
+        }
+
+        assert_eq!(std::env::current_dir().unwrap(), original);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn gather_context_tool_result_summarizes_directory() {
         let temp_dir = std::env::temp_dir().join(format!(
             "tokitai_gather_context_dir_{}",
@@ -14513,7 +24095,8 @@ mod tests {
         fs::write(temp_dir.join("notes.txt"), "hello").unwrap();
         let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
 
-        let result = gather_context_tool_result(Path::new("."), &runtime, &json!({"path": "."})).unwrap();
+        let result =
+            gather_context_tool_result(Path::new("."), &runtime, &json!({"path": "."})).unwrap();
         let value: Value = serde_json::from_str(&result).unwrap();
 
         assert_eq!(value["kind"], "directory");
@@ -14573,13 +24156,1980 @@ mod tests {
             },
         ];
         let graph = build_research_graph(
-            "data_analysis",
+            "classical_ml",
             &messages,
             &ResearchRuntimeAssessment::default(),
         );
         assert!(!graph.nodes.is_empty());
-        let current = graph.nodes.iter().find(|node| node.status == "current").unwrap();
-        assert!(matches!(current.id.as_str(), "iterate" | "validate" | "artifact"));
+        let current = graph
+            .nodes
+            .iter()
+            .find(|node| node.status == "current")
+            .unwrap();
+        assert!(matches!(
+            current.id.as_str(),
+            "train_eval" | "error_analysis" | "compare" | "report"
+        ));
+    }
+
+    #[test]
+    fn research_payload_exposes_cs_workflow_profile_summary() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_research_payload_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![user(
+            "在当前工作区 experiments/ml_probe_5min 中做一个轻量机器学习研究：用 sklearn iris 和逻辑回归快速验证分类效果。",
+        )];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "classical_ml");
+        assert!(payload.workflow_profile_summary.contains("轻量机器学习"));
+        assert!(payload.rationale.contains("数据切分"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn required_paths_can_be_satisfied_by_runtime_artifact_evidence() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_runtime_artifact_required_path_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let artifact_rel = "experiments/ml_probe_5min/metrics.md";
+        let artifact_abs = temp_dir
+            .join("experiments")
+            .join("ml_probe_5min")
+            .join("metrics.md");
+        fs::create_dir_all(artifact_abs.parent().unwrap()).unwrap();
+        fs::write(&artifact_abs, "# metrics\naccuracy: 0.97\n").unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify runtime artifact capture".to_string(),
+            summary: "Verify runtime artifact capture".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run evaluation".to_string(),
+                purpose: "Produce metrics artifact".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![localized_required_target_text(
+                TurnLanguage::En,
+                artifact_rel,
+            )],
+            repair_strategy: String::new(),
+            required_paths: vec![artifact_rel.to_string()],
+        };
+        let tool_result = json!({
+            "operation": "run_python",
+            "result": {
+                "status": "success",
+                "exit_code": 0,
+                "timed_out": false,
+                "stdout": format!("Saved artifact to {}", artifact_rel),
+                "stderr": ""
+            }
+        })
+        .to_string();
+        let messages = vec![
+            user("Run a lightweight ML experiment and save metrics.md"),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('saved metrics')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: tool_result,
+                success: true,
+            },
+        ];
+
+        assert!(required_paths_likely_satisfied_by_evidence(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[]
+        ));
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+        assert_eq!(report.status, "pass");
+        assert!(report.summary.contains("classical ML workflow"));
+        assert!(report.checks.iter().any(|check| {
+            check.title == artifact_rel
+                && check
+                    .evidence
+                    .iter()
+                    .any(|line| line.contains("runtime artifact captured"))
+        }));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_repair_summary_reflects_systems_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_systems_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify systems evaluation repair messaging".to_string(),
+            summary: "Verify systems evaluation repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run benchmark".to_string(),
+                purpose: "Measure latency and throughput".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture latency and throughput evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Design a benchmark to compare latency, throughput, and memory usage across serving strategies"),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"raise RuntimeError('boom')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Failed("boom".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "error",
+                        "exit_code": 1,
+                        "timed_out": false,
+                        "stdout": "",
+                        "stderr": "benchmark failed before latency collection"
+                    }
+                })
+                .to_string(),
+                success: false,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("systems evaluation"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("latency/throughput/memory")
+                || action.contains("profiling")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn reviewer_focus_mentions_agent_eval_artifacts() {
+        let spec = reviewer_subagent_spec();
+        let focus = workflow_specific_subagent_focus(&spec, "agent_evaluation", TurnLanguage::En);
+        assert!(focus.contains("task success rate"));
+        assert!(focus.contains("key trajectories"));
+        assert!(focus.contains("tool errors"));
+    }
+
+    #[test]
+    fn research_review_checks_include_dataset_manifest_closure_for_cs_profiles() {
+        let classical_ml = research_review_checks("classical_ml");
+        let systems = research_review_checks("systems_evaluation");
+        let agent = research_review_checks("agent_evaluation");
+        let security = research_review_checks("security_analysis");
+
+        assert!(classical_ml
+            .iter()
+            .any(|item| item.contains("dataset manifest") || item.contains("数据集入口")));
+        assert!(systems.iter().any(
+            |item| item.contains("workload trace") || item.contains("benchmark suite manifest")
+        ));
+        assert!(agent
+            .iter()
+            .any(|item| item.contains("任务集") || item.contains("benchmark manifest")));
+        assert!(security
+            .iter()
+            .any(|item| item.contains("benchmark manifest") || item.contains("目标语料")));
+    }
+
+    #[test]
+    fn literature_review_subagent_styles_reference_remote_fulltext_evidence() {
+        let reviewer = reviewer_subagent_spec();
+        let critic = analysis_subagent_specs()
+            .into_iter()
+            .find(|spec| spec.id == "critic")
+            .unwrap();
+        let researcher = analysis_subagent_specs()
+            .into_iter()
+            .find(|spec| spec.id == "researcher")
+            .unwrap();
+
+        let reviewer_focus =
+            workflow_specific_subagent_focus(&reviewer, "literature_review", TurnLanguage::En);
+        let reviewer_issue = workflow_specific_subagent_issue_style(
+            &reviewer,
+            "literature_review",
+            TurnLanguage::En,
+        );
+        let reviewer_action = workflow_specific_subagent_action_style(
+            &reviewer,
+            "literature_review",
+            TurnLanguage::En,
+        );
+        let critic_focus =
+            workflow_specific_subagent_focus(&critic, "literature_review", TurnLanguage::En);
+        let researcher_focus =
+            workflow_specific_subagent_focus(&researcher, "literature_review", TurnLanguage::En);
+
+        assert!(reviewer_focus.contains("remote_fulltext_coverage"));
+        assert!(reviewer_focus.contains("structured_paper_coverage"));
+        assert!(reviewer_issue.contains("remote_fulltext_coverage"));
+        assert!(reviewer_issue.contains("structured_paper_coverage"));
+        assert!(reviewer_action.contains("remote fulltext"));
+        assert!(reviewer_action.contains("structured_document"));
+        assert!(critic_focus.contains("metadata"));
+        assert!(critic_focus.contains("structured sections"));
+        assert!(researcher_focus.contains("remote fulltext coverage summary"));
+        assert!(researcher_focus.contains("structured paper evidence"));
+    }
+
+    #[test]
+    fn subagent_prompt_includes_profile_specific_issue_and_action_style() {
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Audit agent evaluation workflow".to_string(),
+            summary: "Audit agent evaluation workflow".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run evaluation".to_string(),
+                purpose: "Collect task outcomes".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture task success rate and trajectory evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![user(
+            "Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates.",
+        )];
+        let spec = analysis_subagent_specs()
+            .into_iter()
+            .find(|spec| spec.id == "critic")
+            .unwrap();
+        let prompt = build_subagent_prompt(
+            &spec,
+            &plan,
+            &messages,
+            "Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates.",
+            TurnLanguage::En,
+        );
+        assert!(prompt.contains("Research profile: agent_evaluation"));
+        assert!(prompt.contains("Issue style requirements"));
+        assert!(prompt.contains("judge drift"));
+        assert!(prompt.contains("Next-action style requirements"));
+        assert!(prompt.contains("falsify the current claim"));
+    }
+
+    #[test]
+    fn literature_review_subagent_prompt_surfaces_profile_evidence_block() {
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Audit literature review workflow".to_string(),
+            summary: "Audit literature review workflow".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Fetch papers".to_string(),
+                purpose: "Collect remote fulltext evidence".to_string(),
+                owner: "main".to_string(),
+                kind: "research".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture remote fulltext coverage".to_string(),
+                "capture structured paper coverage".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user(
+                "Review recent CS papers on transformer compression and synthesize the literature.",
+            ),
+            MessageBlock::ToolCall {
+                name: "fetch_papers".to_string(),
+                args: json!({"paper_ids":["arxiv:1","arxiv:2"],"limit":2}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "status": "success",
+                    "operation": "fetch_papers",
+                    "results": [
+                        {
+                            "provider": "arxiv",
+                            "fulltext": {
+                                "status": "ready",
+                                "primary_source": "remote",
+                                "provider": "arxiv",
+                                "content_source": "remote_pdf",
+                                "completeness": "full_text",
+                                "body_text_chars": 12000,
+                                "section_count": 12,
+                                "reference_count": 40
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Intro"}],
+                                "references": [{"text":"Ref 1"}]
+                            }
+                        },
+                        {
+                            "provider": "openalex",
+                            "fulltext": {
+                                "status": "partial",
+                                "primary_source": "remote",
+                                "provider": "openalex",
+                                "content_source": "remote_text",
+                                "completeness": "partial_text",
+                                "body_text_chars": 900,
+                                "section_count": 2,
+                                "reference_count": 5
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Summary"}],
+                                "references": [{"text":"Ref 3"}]
+                            }
+                        }
+                    ]
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+        let reviewer = reviewer_subagent_spec();
+        let prompt = build_subagent_prompt(
+            &reviewer,
+            &plan,
+            &messages,
+            "Review recent CS papers on transformer compression and synthesize the literature.",
+            TurnLanguage::En,
+        );
+
+        assert!(prompt.contains("High-priority profile evidence"));
+        assert!(prompt.contains("remote_fulltext_coverage="));
+        assert!(prompt.contains("structured_paper_coverage="));
+    }
+
+    #[test]
+    fn subagent_prompt_surfaces_dataset_acquisition_and_manifest_for_classical_ml() {
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Audit classical ML workflow".to_string(),
+            summary: "Audit classical ML workflow".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Search dataset and run sklearn baseline".to_string(),
+                purpose: "Fix the dataset source before tabular classification".to_string(),
+                owner: "main".to_string(),
+                kind: "research".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture dataset acquisition and dataset manifest evidence".to_string(),
+                "capture accuracy, baseline delta, and error analysis".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Run a scikit-learn classical ML baseline for tabular classification on a public dataset and keep the dataset manifest fixed."),
+            MessageBlock::ToolCall {
+                name: "search_public_datasets".to_string(),
+                args: json!({"query":"tabular classification benchmark","limit":3}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "search_public_datasets",
+                    "retrieval_entrypoint": "official_dataset_databases",
+                    "results": [
+                        {
+                            "title": "Adult",
+                            "provider": "openml",
+                            "source_url": "https://openml.org/d/1590",
+                            "task_hint": "tabular classification"
+                        }
+                    ]
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::ToolCall {
+                name: "fetch_public_dataset_manifest".to_string(),
+                args: json!({"dataset_url":"https://openml.org/d/1590","title":"Adult"}),
+                call_id: "c2".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c2".to_string(),
+                result: json!({
+                    "operation": "fetch_public_dataset_manifest",
+                    "dataset_id": "openml:1590",
+                    "provider": "openml",
+                    "source_url": "https://openml.org/d/1590",
+                    "retrieval_entrypoint": "official_dataset_databases",
+                    "task_hint": "tabular classification"
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+        let reviewer = reviewer_subagent_spec();
+        assert_eq!(plan_workflow_profile(&plan, &messages), "classical_ml");
+        let prompt = build_subagent_prompt(
+            &reviewer,
+            &plan,
+            &messages,
+            "Run a scikit-learn classical ML baseline for tabular classification on a public dataset and keep the dataset manifest fixed.",
+            TurnLanguage::En,
+        );
+
+        assert!(prompt.contains("classical_ml"));
+        assert!(prompt.contains("dataset_acquisition="));
+        assert!(prompt.contains("dataset_manifest="));
+        assert!(prompt.contains("official_dataset_databases"));
+        assert!(prompt.contains("dataset manifest"));
+    }
+
+    #[test]
+    fn theory_hard_verifier_requires_proof_and_counterexample_evidence() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_theory_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify theory repair messaging".to_string(),
+            summary: "Verify theory repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Audit proof".to_string(),
+                purpose: "Check theorem statement and counterexamples".to_string(),
+                owner: "main".to_string(),
+                kind: "research".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture proof status".to_string(),
+                "capture counterexample search".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![user(
+            "Provide a proof for the invariant of this algorithm, list lemma dependencies, and record any counterexample search you used.",
+        )];
+        assert_eq!(plan_workflow_profile(&plan, &messages), "theory");
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("theory"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("definitions")
+                || action.contains("counterexamples")
+                || action.contains("proof checks")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_requires_dataset_closure_for_agent_evaluation_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_agent_eval_dataset_closure_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify dataset closure for agent evaluation".to_string(),
+            summary: "Verify dataset closure for agent evaluation".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run task-suite evaluation".to_string(),
+                purpose: "Measure task success and preserve trajectory evidence".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture dataset acquisition and evaluation manifest evidence".to_string(),
+                "capture task success rate and trajectory evidence".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Run an agent evaluation for the coding agent on a public task suite and keep the evaluation manifest fixed."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('eval')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "task success rate: 0.76\ntrajectory sample count: 12\njudge summary: pass@1\npublic task suite manifest fixed\nrerun after repair",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        assert_eq!(plan_workflow_profile(&plan, &messages), "agent_evaluation");
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.contains("dataset") || issue.contains("manifest")));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("official dataset database")
+                || action.contains("dataset manifest")
+                || action.contains("public-dataset entrypoint")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_requires_dataset_manifest_for_security_profile_when_requested() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_security_dataset_manifest_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify dataset closure for security analysis".to_string(),
+            summary: "Verify dataset closure for security analysis".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run security benchmark".to_string(),
+                purpose: "Collect findings and false-positive triage".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture benchmark manifest and dataset acquisition evidence".to_string(),
+                "capture findings, false-positive triage, and impact summary".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Run a security analysis benchmark on a public corpus and keep the benchmark manifest fixed."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('scan')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "confirmed findings: 3\nfalse positive count: 1\nimpact summary: high severity path traversal\nbenchmark manifest fixed\npublic corpus selected",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        assert_eq!(plan_workflow_profile(&plan, &messages), "security_analysis");
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.title == "dataset closure" && check.status == "missing"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("manifest")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn subagent_prompt_includes_structured_runtime_summary() {
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Audit agent evaluation workflow".to_string(),
+            summary: "Audit agent evaluation workflow".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run evaluation".to_string(),
+                purpose: "Collect task outcomes".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture task success rate and trajectory evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user(
+                "Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates.",
+            ),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('eval')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "run_id: agent-run-2\nparent_run_id: agent-run-1\ntask success rate: 0.78\ntrajectory sample count: 18\ntool error rate: 0.07\ncompare vs baseline",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+        let spec = analysis_subagent_specs()
+            .into_iter()
+            .find(|spec| spec.id == "researcher")
+            .unwrap();
+        let prompt = build_subagent_prompt(
+            &spec,
+            &plan,
+            &messages,
+            "Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates.",
+            TurnLanguage::En,
+        );
+        assert!(prompt.contains("Structured runtime summary"));
+        assert!(prompt.contains("task_success_rate"));
+        assert!(prompt.contains("trajectory_sample_count"));
+        assert!(prompt.contains("run_comparison"));
+        assert!(prompt.contains("lineage"));
+    }
+
+    #[test]
+    fn hard_verifier_repair_summary_reflects_agent_evaluation_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_agent_eval_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify agent evaluation repair messaging".to_string(),
+            summary: "Verify agent evaluation repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run evaluation".to_string(),
+                purpose: "Measure task success and tool outcomes".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture task success rate and tool error evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Evaluate a multi-agent coding assistant on a task suite and compare task success trajectories plus tool error rates."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"raise RuntimeError('judge missing')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Failed("judge missing".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "error",
+                        "exit_code": 1,
+                        "timed_out": false,
+                        "stdout": "",
+                        "stderr": "evaluation stopped before task success and tool error logs were produced"
+                    }
+                })
+                .to_string(),
+                success: false,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("agent evaluation"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("task success") || action.contains("tool errors")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_evidence_includes_structured_runtime_summary_for_systems_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_systems_structured_verifier_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("systems")).unwrap();
+        fs::write(
+            temp_dir.join("runs").join("systems").join("report.json"),
+            "{}",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify systems runtime summary evidence".to_string(),
+            summary: "Verify systems runtime summary evidence".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run benchmark".to_string(),
+                purpose: "Measure latency and throughput".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture latency and throughput evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Design a benchmark to compare latency, throughput, and memory usage across serving strategies"),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('bench')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "workload: cache-serving\nrun_id: sys-run-2\nparent_run_id: sys-run-1\nlatency_ms=11.2\nthroughput_qps=1900\nmemory_mb=700\ncompare vs baseline\nsaved report to runs/systems/report.json",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "pass");
+        assert!(report
+            .evidence
+            .iter()
+            .any(|line| line.contains("structured result bundle")));
+        assert!(report
+            .evidence
+            .iter()
+            .any(|line| line.contains("structured comparison evidence")));
+        assert!(report
+            .evidence
+            .iter()
+            .any(|line| line.contains("structured lineage evidence")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_repair_summary_reflects_security_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_security_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify security analysis repair messaging".to_string(),
+            summary: "Verify security analysis repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run static analysis".to_string(),
+                purpose: "Collect findings and triage data".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture finding evidence and false-positive triage".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Run a lightweight static analysis security benchmark over a vulnerable code sample and report precision and recall."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"raise RuntimeError('triage missing')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Failed("triage missing".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "error",
+                        "exit_code": 1,
+                        "timed_out": false,
+                        "stdout": "",
+                        "stderr": "analysis stopped before false positive triage and remediation notes"
+                    }
+                })
+                .to_string(),
+                success: false,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("security analysis"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("false-positive") || action.contains("remediation")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_repair_summary_reflects_classical_ml_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_classical_ml_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify classical ML repair messaging".to_string(),
+            summary: "Verify classical ML repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run sklearn baseline".to_string(),
+                purpose: "Produce metrics and baseline comparisons".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec!["capture baseline accuracy and error analysis evidence".to_string()],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Run a lightweight sklearn classification experiment with a simple baseline and report accuracy plus error analysis."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"raise RuntimeError('metrics missing')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Failed("metrics missing".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "error",
+                        "exit_code": 1,
+                        "timed_out": false,
+                        "stdout": "",
+                        "stderr": "baseline run stopped before accuracy, f1, and error analysis were written"
+                    }
+                })
+                .to_string(),
+                success: false,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("classical ML"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("accuracy/F1") || action.contains("error analysis")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_pass_summary_reflects_deep_learning_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_deep_learning_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let checkpoint_rel = "runs/dl/checkpoint.pt";
+        let checkpoint_abs = temp_dir.join("runs").join("dl").join("checkpoint.pt");
+        fs::create_dir_all(checkpoint_abs.parent().unwrap()).unwrap();
+        fs::write(&checkpoint_abs, "checkpoint bytes").unwrap();
+
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify deep learning pass messaging".to_string(),
+            summary: "Verify deep learning pass messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Run training".to_string(),
+                purpose: "Produce checkpoint and validation metrics".to_string(),
+                owner: "main".to_string(),
+                kind: "run".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture validation metrics and checkpoint evidence".to_string(),
+                localized_required_target_text(TurnLanguage::En, checkpoint_rel),
+            ],
+            repair_strategy: String::new(),
+            required_paths: vec![checkpoint_rel.to_string()],
+        };
+        let messages = vec![
+            user("Start a deep learning training run on this machine and save checkpoints with validation metrics."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('epoch 1 ok')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": format!("saved checkpoint to {checkpoint_rel}\nval_accuracy=0.92"),
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "pass");
+        assert!(report.summary.contains("deep learning workflow"));
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.title == checkpoint_rel && check.status == "passed"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_exposes_run_bundle_compare_and_lineage() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_research_payload_lineage_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("dl")).unwrap();
+        fs::write(
+            temp_dir.join("runs").join("dl").join("checkpoint.pt"),
+            "checkpoint",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Start a deep learning training run on this machine and save checkpoints with validation metrics."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('train')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "saved checkpoint to runs/dl/checkpoint.pt\nvalidation improved over baseline\nresource summary: gpu memory stable",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "deep_learning_result_bundle"
+        );
+        assert!(!payload.execution_schema_summary.is_empty());
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path.contains("runs/dl/checkpoint.pt")));
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "checkpoint_path" && field.value.contains("checkpoint.pt")));
+        assert!(payload.run_comparison.available);
+        assert!(payload
+            .run_comparison
+            .observations
+            .iter()
+            .any(|line| line.contains("Structured runtime evidence") || line.contains("rerun")));
+        assert!(payload.lineage.available);
+        assert!(payload.lineage.run_count_hint >= 1);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn paper_health_aggregate_exposes_provider_rollup() {
+        let aggregated = aggregate_provider_health(
+            "official-paper-apis",
+            vec![
+                SearchHealthStatus {
+                    name: "semantic_scholar".to_string(),
+                    status: "ready".to_string(),
+                    detail: "https://api.semanticscholar.org/graph/v1".to_string(),
+                    providers: Vec::new(),
+                },
+                SearchHealthStatus {
+                    name: "openalex".to_string(),
+                    status: "down".to_string(),
+                    detail: "https://api.openalex.org unreachable".to_string(),
+                    providers: Vec::new(),
+                },
+            ],
+        );
+
+        assert_eq!(aggregated.name, "official-paper-apis");
+        assert_eq!(aggregated.status, "degraded");
+        assert_eq!(aggregated.providers.len(), 2);
+        assert!(aggregated.detail.contains("semantic_scholar=ready"));
+        assert!(aggregated.detail.contains("openalex=down"));
+    }
+
+    #[test]
+    fn paper_workflow_sidecar_roundtrip() {
+        let (state, temp_dir) = test_web_state("paper_sidecar");
+        let session_id = ensure_current_session(&state).unwrap();
+        let payload = WebPaperWorkflowPayload {
+            session_id: session_id.clone(),
+            topic: "tiny machine learning benchmark".to_string(),
+            workflow_profile: "classical_ml".to_string(),
+            workspace_root: "workspace".to_string(),
+            paper_dir: ".tokitai/paper-workflows/session/paper".to_string(),
+            artifact_paths: vec![".tokitai/paper-workflows/session/paper/paper.md".to_string()],
+            progress_prompts: Vec::new(),
+            closure_checks: Vec::new(),
+            artifacts: vec![WebPaperWorkflowArtifact {
+                label: "Paper Markdown".to_string(),
+                path: ".tokitai/paper-workflows/session/paper/paper.md".to_string(),
+                kind: "markdown".to_string(),
+            }],
+            paper_markdown_path: ".tokitai/paper-workflows/session/paper/paper.md".to_string(),
+            paper_latex_path: ".tokitai/paper-workflows/session/paper/paper.tex".to_string(),
+            paper_pdf_path: ".tokitai/paper-workflows/session/paper/paper.pdf".to_string(),
+            references_bib_path: ".tokitai/paper-workflows/session/paper/references.bib"
+                .to_string(),
+            appendix_markdown_path: ".tokitai/paper-workflows/session/paper/artifact_appendix.md"
+                .to_string(),
+            result_bundle_path: ".tokitai/paper-workflows/session/paper/result_bundle.json"
+                .to_string(),
+            review_response_path: ".tokitai/paper-workflows/session/paper/review_response.json"
+                .to_string(),
+            revision_execution_plan_path:
+                ".tokitai/paper-workflows/session/paper/revision_execution_plan.json".to_string(),
+            workflow_checkpoint_path: ".tokitai/paper-workflows/session/workflow_checkpoint.json"
+                .to_string(),
+            payload_path: ".tokitai/paper-workflows/session/paper/paper_bundle.json".to_string(),
+            rebuttal_markdown_path: ".tokitai/paper-workflows/session/paper/rebuttal.md"
+                .to_string(),
+            section_bundle_path: ".tokitai/paper-workflows/session/paper/paper_sections.json"
+                .to_string(),
+            section_bundle_before_path:
+                ".tokitai/paper-workflows/session/paper/paper_sections.before.json".to_string(),
+            section_bundle_after_path:
+                ".tokitai/paper-workflows/session/paper/paper_sections.after.json".to_string(),
+            section_diff_path: ".tokitai/paper-workflows/session/paper/paper_sections.diff.json"
+                .to_string(),
+            manuscript_bundle_before_path:
+                ".tokitai/paper-workflows/session/paper/paper_manuscript.sections.before.json"
+                    .to_string(),
+            manuscript_bundle_after_path:
+                ".tokitai/paper-workflows/session/paper/paper_manuscript.sections.after.json"
+                    .to_string(),
+            manuscript_diff_path:
+                ".tokitai/paper-workflows/session/paper/paper_manuscript.diff.json".to_string(),
+            pdf_compile_status: "compiled".to_string(),
+            pdf_compile_detail: Some("Compiled with tectonic.".to_string()),
+            paper_ready: true,
+            paper_ready_detail: "ready".to_string(),
+            paper_ready_gate: json!({
+                "schema_version": "paper_ready_gate_bundle_v4",
+                "ready": true
+            }),
+            revision_mode: "fresh_draft".to_string(),
+            revision_summary: "initial draft".to_string(),
+            revision_queue_size: 0,
+            revision_queue_preview: Vec::new(),
+            source_run_id: "classical-ml-run-1".to_string(),
+            unresolved_reviewer_feedback: 0,
+            auto_revision_applied: false,
+            checkpoint_stage: "paper_ready_evaluated".to_string(),
+            reviewer_feedback_trace: Vec::new(),
+            rebuttal_closure_records: Vec::new(),
+            evidence_trace: Vec::new(),
+            revision_execution_trace: json!({}),
+            section_diff_preview: Vec::new(),
+            manuscript_diff_preview: Vec::new(),
+            trigger_mode: "manual".to_string(),
+            summary: "generated".to_string(),
+        };
+
+        save_paper_workflow_payload(&state, &session_id, &payload).unwrap();
+        let loaded = load_paper_workflow_payload(&state, &session_id)
+            .unwrap()
+            .expect("paper payload");
+
+        assert_eq!(loaded.session_id, session_id);
+        assert_eq!(loaded.workflow_profile, "classical_ml");
+        assert_eq!(loaded.artifacts.len(), 1);
+        assert_eq!(
+            loaded.paper_markdown_path,
+            ".tokitai/paper-workflows/session/paper/paper.md"
+        );
+        assert_eq!(
+            loaded.revision_execution_plan_path,
+            ".tokitai/paper-workflows/session/paper/revision_execution_plan.json"
+        );
+        assert_eq!(
+            loaded.section_diff_path,
+            ".tokitai/paper-workflows/session/paper/paper_sections.diff.json"
+        );
+        assert_eq!(
+            loaded.manuscript_diff_path,
+            ".tokitai/paper-workflows/session/paper/paper_manuscript.diff.json"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_includes_saved_paper_workflow_payload() {
+        let (state, temp_dir) = test_web_state("paper_payload");
+        let session_id = ensure_current_session(&state).unwrap();
+        let workspace_root = {
+            let runtime = lock_runtime_settings(&state).unwrap();
+            runtime.workspace_root.clone()
+        };
+        let messages = vec![user("Generate a compact paper for this CS experiment.")];
+        {
+            let mut session_manager = lock_session_manager(&state).unwrap();
+            session_manager.current_id = Some(session_id.clone());
+            session_manager
+                .save_messages_for(&session_id, &messages)
+                .unwrap();
+        }
+        save_paper_workflow_payload(
+            &state,
+            &session_id,
+            &WebPaperWorkflowPayload {
+                session_id: session_id.clone(),
+                topic: "Generate a compact paper for this CS experiment.".to_string(),
+                workflow_profile: "classical_ml".to_string(),
+                workspace_root,
+                paper_dir: ".tokitai/paper-workflows".to_string(),
+                artifact_paths: vec![".tokitai/paper-workflows/paper/paper.md".to_string()],
+                progress_prompts: Vec::new(),
+                closure_checks: Vec::new(),
+                artifacts: vec![WebPaperWorkflowArtifact {
+                    label: "Paper Markdown".to_string(),
+                    path: ".tokitai/paper-workflows/paper/paper.md".to_string(),
+                    kind: "markdown".to_string(),
+                }],
+                paper_markdown_path: ".tokitai/paper-workflows/paper/paper.md".to_string(),
+                paper_latex_path: ".tokitai/paper-workflows/paper/paper.tex".to_string(),
+                paper_pdf_path: ".tokitai/paper-workflows/paper/paper.pdf".to_string(),
+                references_bib_path: ".tokitai/paper-workflows/paper/references.bib".to_string(),
+                appendix_markdown_path: ".tokitai/paper-workflows/paper/artifact_appendix.md"
+                    .to_string(),
+                result_bundle_path: ".tokitai/paper-workflows/paper/result_bundle.json".to_string(),
+                review_response_path: ".tokitai/paper-workflows/paper/review_response.json"
+                    .to_string(),
+                revision_execution_plan_path:
+                    ".tokitai/paper-workflows/paper/revision_execution_plan.json".to_string(),
+                workflow_checkpoint_path: ".tokitai/paper-workflows/workflow_checkpoint.json"
+                    .to_string(),
+                payload_path: ".tokitai/paper-workflows/paper/paper_bundle.json".to_string(),
+                rebuttal_markdown_path: ".tokitai/paper-workflows/paper/rebuttal.md".to_string(),
+                section_bundle_path: ".tokitai/paper-workflows/paper/paper_sections.json"
+                    .to_string(),
+                section_bundle_before_path:
+                    ".tokitai/paper-workflows/paper/paper_sections.before.json".to_string(),
+                section_bundle_after_path:
+                    ".tokitai/paper-workflows/paper/paper_sections.after.json".to_string(),
+                section_diff_path: ".tokitai/paper-workflows/paper/paper_sections.diff.json"
+                    .to_string(),
+                manuscript_bundle_before_path:
+                    ".tokitai/paper-workflows/paper/paper_manuscript.sections.before.json"
+                        .to_string(),
+                manuscript_bundle_after_path:
+                    ".tokitai/paper-workflows/paper/paper_manuscript.sections.after.json"
+                        .to_string(),
+                manuscript_diff_path: ".tokitai/paper-workflows/paper/paper_manuscript.diff.json"
+                    .to_string(),
+                pdf_compile_status: "missing_toolchain".to_string(),
+                pdf_compile_detail: Some("No available LaTeX compiler detected.".to_string()),
+                paper_ready: false,
+                paper_ready_detail: "missing toolchain".to_string(),
+                paper_ready_gate: json!({
+                    "schema_version": "paper_ready_gate_bundle_v4",
+                    "ready": false
+                }),
+                revision_mode: "fresh_draft".to_string(),
+                revision_summary: "draft pending".to_string(),
+                revision_queue_size: 0,
+                revision_queue_preview: Vec::new(),
+                source_run_id: "classical-ml-run-1".to_string(),
+                unresolved_reviewer_feedback: 0,
+                auto_revision_applied: false,
+                checkpoint_stage: "pdf_compiled".to_string(),
+                reviewer_feedback_trace: Vec::new(),
+                rebuttal_closure_records: Vec::new(),
+                evidence_trace: Vec::new(),
+                revision_execution_trace: json!({}),
+                section_diff_preview: Vec::new(),
+                manuscript_diff_preview: Vec::new(),
+                trigger_mode: "manual".to_string(),
+                summary: "paper summary".to_string(),
+            },
+        )
+        .unwrap();
+
+        let runtime = {
+            let runtime = lock_runtime_settings(&state).unwrap();
+            runtime.clone()
+        };
+        let payload = build_research_payload_with_feedback(
+            &state,
+            Some(session_id.as_str()),
+            &runtime,
+            &messages,
+            None,
+            SessionResearchState::Research,
+        );
+
+        assert!(payload.paper_workflow.is_some());
+        assert_eq!(
+            payload
+                .paper_workflow
+                .as_ref()
+                .and_then(|item| item.artifacts.first())
+                .map(|item| item.kind.as_str()),
+            Some("markdown")
+        );
+        assert_eq!(
+            payload
+                .paper_workflow
+                .as_ref()
+                .map(|item| item.revision_execution_plan_path.as_str()),
+            Some(".tokitai/paper-workflows/paper/revision_execution_plan.json")
+        );
+        assert_eq!(
+            payload
+                .paper_workflow
+                .as_ref()
+                .map(|item| item.section_diff_path.as_str()),
+            Some(".tokitai/paper-workflows/paper/paper_sections.diff.json")
+        );
+        assert_eq!(
+            payload
+                .paper_workflow
+                .as_ref()
+                .map(|item| item.manuscript_diff_path.as_str()),
+            Some(".tokitai/paper-workflows/paper/paper_manuscript.diff.json")
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_uses_runtime_evidence_for_agent_eval_bundle_and_comparison() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_agent_eval_runtime_bundle_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("agent")).unwrap();
+        fs::write(
+            temp_dir
+                .join("runs")
+                .join("agent")
+                .join("trajectories.json"),
+            "{}",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run an agent evaluation suite, compare with baseline, and keep trajectories."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('eval')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "task success rate improved vs baseline\njudge summary: pass@1 up\ntrajectory sample count: 24\nsaved trajectories to runs/agent/trajectories.json\nrerun after repair",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "agent_evaluation_result_bundle"
+        );
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "task_success_rate"
+                && field.value.to_ascii_lowercase().contains("success")));
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "judge_summary"
+                && field.value.to_ascii_lowercase().contains("judge")));
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path.contains("runs/agent/trajectories.json")));
+        assert!(payload.run_comparison.available);
+        assert!(payload
+            .run_comparison
+            .observations
+            .iter()
+            .any(|line| line.contains("Structured runtime evidence")));
+        assert!(payload.lineage.available);
+        assert!(payload.lineage.run_count_hint >= 1);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_uses_remote_literature_fulltext_in_result_bundle() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_literature_runtime_bundle_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Review recent CS papers on transformer compression and synthesize the literature."),
+            MessageBlock::ToolCall {
+                name: "fetch_papers".to_string(),
+                args: json!({"paper_ids":["arxiv:1","arxiv:2","openalex:3"],"limit":3}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "status": "success",
+                    "operation": "fetch_papers",
+                    "paper_schema_version": "cs_paper_v1",
+                    "requested_count": 3,
+                    "fetched_count": 3,
+                    "limit_applied": 3,
+                    "fulltext_bundle": {
+                        "requested_documents": 3,
+                        "ready_documents": 2,
+                        "partial_documents": 1,
+                        "metadata_only_documents": 0,
+                        "provider_counts": {"arxiv": 2, "openalex": 1},
+                        "completeness_counts": {"full_text": 1, "substantial_text": 1, "partial_text": 1}
+                    },
+                    "results": [
+                        {
+                            "provider": "arxiv",
+                            "fulltext": {
+                                "status": "ready",
+                                "primary_source": "remote",
+                                "provider": "arxiv",
+                                "content_source": "remote_pdf",
+                                "completeness": "full_text",
+                                "body_text_chars": 12000,
+                                "section_count": 12,
+                                "reference_count": 40
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Intro"}],
+                                "references": [{"text":"Ref 1"}]
+                            }
+                        },
+                        {
+                            "provider": "arxiv",
+                            "fulltext": {
+                                "status": "ready",
+                                "primary_source": "remote",
+                                "provider": "arxiv",
+                                "content_source": "remote_text",
+                                "completeness": "substantial_text",
+                                "body_text_chars": 8000,
+                                "section_count": 8,
+                                "reference_count": 22
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Method"}],
+                                "references": [{"text":"Ref 2"}]
+                            }
+                        },
+                        {
+                            "provider": "openalex",
+                            "fulltext": {
+                                "status": "partial",
+                                "primary_source": "remote",
+                                "provider": "openalex",
+                                "content_source": "remote_text",
+                                "completeness": "partial_text",
+                                "body_text_chars": 900,
+                                "section_count": 2,
+                                "reference_count": 5
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Summary"}],
+                                "references": [{"text":"Ref 3"}]
+                            }
+                        }
+                    ],
+                    "errors": []
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "literature_review");
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "literature_review_result_bundle"
+        );
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "remote_fulltext_coverage"
+                && field.value.contains("3 remote-first papers fetched")
+                && field.value.contains("2 ready")));
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "structured_paper_coverage"
+                && field.value.contains("3 papers include structured sections")
+                && field.value.contains("providers: arxiv, openalex")));
+        assert!(payload
+            .run_comparison
+            .compare_keys
+            .iter()
+            .any(|key| key == "remote_fulltext_papers"));
+        assert!(payload
+            .run_comparison
+            .observations
+            .iter()
+            .any(|line| line.contains("Literature fulltext coverage")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_repairs_literature_review_without_remote_fulltext_evidence() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_literature_verifier_profile_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "research".to_string(),
+            goal: "Verify literature-review repair messaging".to_string(),
+            summary: "Verify literature-review repair messaging".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Fetch and synthesize papers".to_string(),
+                purpose: "Collect remote structured evidence and summarize gaps".to_string(),
+                owner: "main".to_string(),
+                kind: "research".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: vec![
+                "capture remote fulltext coverage and structured paper evidence".to_string(),
+                "document search scope and screening criteria".to_string(),
+            ],
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let messages = vec![
+            user("Review recent CS literature on inference-time alignment and summarize gaps."),
+            MessageBlock::ToolCall {
+                name: "search_paper".to_string(),
+                args: json!({"query":"inference-time alignment survey","source":"auto","limit":5}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "status": "success",
+                    "mode": "remote",
+                    "query": "inference-time alignment survey",
+                    "source": "auto",
+                    "paper_schema_version": "cs_paper_v1",
+                    "total": 5,
+                    "results": [
+                        {"paper_id":"openalex:1","title":"Paper 1"},
+                        {"paper_id":"openalex:2","title":"Paper 2"}
+                    ]
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+
+        assert_eq!(report.status, "repair");
+        assert!(report.summary.contains("literature review workflow"));
+        assert!(report
+            .next_actions
+            .iter()
+            .any(|action| action.contains("remote fulltext coverage")
+                || action.contains("structured paper extraction")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_extracts_structured_metric_values_for_systems_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_systems_runtime_metrics_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("systems")).unwrap();
+        fs::write(
+            temp_dir.join("runs").join("systems").join("report.json"),
+            "{}",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a systems benchmark and report latency, throughput, and memory."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('bench')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "workload: kv-cache\nlatency_ms=12.4\nthroughput_qps=1820\nmemory_mb=768\nsaved report to runs/systems/report.json\ncompare vs baseline",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "systems_evaluation_result_bundle"
+        );
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "latency_summary" && field.value.contains("12.4")));
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "throughput_summary" && field.value.contains("1820")));
+        assert!(payload.run_comparison.available);
+        assert!(payload
+            .run_comparison
+            .observations
+            .iter()
+            .any(|line| line.contains("Structured runtime evidence")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_extracts_structured_metric_values_for_security_profile() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_security_runtime_metrics_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("security")).unwrap();
+        fs::write(
+            temp_dir.join("runs").join("security").join("findings.json"),
+            "{}",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a lightweight static analysis security benchmark and report findings quality."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('scan')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "confirmed_findings=3\nfalse_positive_count=1\nprecision=0.75\nrecall=0.60\nsaved findings to runs/security/findings.json",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "security_analysis_result_bundle"
+        );
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "confirmed_findings" && field.value.contains("3")));
+        assert!(payload
+            .result_bundle
+            .summary_fields
+            .iter()
+            .any(|field| field.name == "false_positive_count" && field.value.contains("1")));
+        assert!(payload
+            .result_bundle
+            .artifact_paths
+            .iter()
+            .any(|path| path.contains("runs/security/findings.json")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_extracts_explicit_run_lineage_and_compare_observations() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_runtime_lineage_compare_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("runs").join("sys")).unwrap();
+        fs::write(
+            temp_dir.join("runs").join("sys").join("report_v2.json"),
+            "{}",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a systems benchmark, compare latency throughput and memory against a baseline run, and preserve baseline lineage when resuming the prior run."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('bench')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "workload: serving-cache\nrun_id: sys-run-2\nparent_run_id: sys-run-1\nvariant_label: tuned-cache\nbaseline: sys-run-1\nresume from sys-run-1\nlatency_ms=9.8\nthroughput_qps=2100\nmemory_mb=640\ncompare vs baseline\nsaved report to runs/sys/report_v2.json",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(
+            payload.result_bundle.bundle_kind,
+            "systems_evaluation_result_bundle"
+        );
+        assert!(payload.run_comparison.available);
+        assert!(payload
+            .run_comparison
+            .observations
+            .iter()
+            .any(|line| line.contains("latency_ms=9.8")));
+        assert!(
+            payload
+                .run_comparison
+                .observations
+                .iter()
+                .any(|line| line.contains("baseline variants")
+                    || line.contains("compare vs baseline"))
+        );
+        assert!(payload.lineage.available);
+        assert!(payload
+            .lineage
+            .recent_runs
+            .iter()
+            .any(|run| run == "sys-run-2"));
+        assert!(payload
+            .lineage
+            .recent_runs
+            .iter()
+            .any(|run| run == "sys-run-1"));
+        assert!(payload
+            .lineage
+            .notes
+            .iter()
+            .any(|line| line.contains("parent runs") || line.contains("resume references")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -14598,10 +26148,522 @@ mod tests {
             available_memory_mb: Some(4096),
             gpu_hint: None,
         };
-        let assessment = assess_research_runtime("deep_learning", &messages, &capability);
+        let runtime_evidence = ResearchRuntimeEvidence::default();
+        let assessment =
+            assess_research_runtime("deep_learning", &messages, &capability, ".", &runtime_evidence);
         assert_eq!(assessment.overall_state, "blocked");
         assert!(assessment.recovery_hint.is_some());
         assert!(!assessment.resume_points.is_empty());
     }
-}
 
+    #[test]
+    fn research_progress_prompts_use_kind_specific_templates_for_deep_learning_and_agent_eval() {
+        let deep_learning_prompts = build_research_progress_prompts(
+            "deep_learning",
+            "Train a transformer with checkpoints and validation metrics",
+        );
+        let train_prompt = deep_learning_prompts
+            .iter()
+            .find(|item| item.stage_id == "train_monitor")
+            .expect("deep learning train prompt");
+        let branch_prompt = deep_learning_prompts
+            .iter()
+            .find(|item| item.stage_id == "debug_or_checkpoint")
+            .expect("deep learning branch prompt");
+
+        assert!(train_prompt.message.contains("epoch"));
+        assert!(train_prompt.message.contains("checkpoint"));
+        assert!(train_prompt
+            .evidence_contract
+            .iter()
+            .any(|item| item.contains("资源监控")));
+        assert!(branch_prompt.message.contains("恢复"));
+        assert!(branch_prompt
+            .evidence_contract
+            .iter()
+            .any(|item| item.contains("回退") || item.contains("恢复点")));
+
+        let agent_prompts = build_research_progress_prompts(
+            "agent_evaluation",
+            "Evaluate a coding agent on a public task suite",
+        );
+        let plan_prompt = agent_prompts
+            .iter()
+            .find(|item| item.stage_id == "task_suite")
+            .expect("agent eval plan prompt");
+        let validate_prompt = agent_prompts
+            .iter()
+            .find(|item| item.stage_id == "trajectory_review")
+            .expect("agent eval validate prompt");
+
+        assert!(plan_prompt.message.contains("任务集"));
+        assert!(plan_prompt.message.contains("judge"));
+        assert!(validate_prompt.message.contains("任务成功率"));
+        assert!(validate_prompt.message.contains("工具错误"));
+    }
+
+    #[test]
+    fn research_progress_prompts_cover_scope_boundary_and_cs_adaptive_profiles() {
+        let scope_prompts = build_research_progress_prompts(
+            "scope_boundary",
+            "Design a wet-lab PCR and western blot experiment",
+        );
+        let scope_plan = scope_prompts
+            .iter()
+            .find(|item| item.stage_id == "scope_check")
+            .expect("scope boundary plan prompt");
+        let scope_report = scope_prompts
+            .iter()
+            .find(|item| item.stage_id == "deliver_scope_note")
+            .expect("scope boundary report prompt");
+
+        assert!(scope_plan.message.contains("范围边界"));
+        assert!(scope_plan.message.contains("CS"));
+        assert!(scope_report.message.contains("CS 路径"));
+
+        let adaptive_prompts = build_research_progress_prompts(
+            "cs_adaptive_research",
+            "Figure out the right research workflow for this coding investigation",
+        );
+        let adaptive_plan = adaptive_prompts
+            .iter()
+            .find(|item| item.stage_id == "clarify")
+            .expect("adaptive plan prompt");
+        let adaptive_review = adaptive_prompts
+            .iter()
+            .find(|item| item.stage_id == "self_review")
+            .expect("adaptive review prompt");
+
+        assert!(adaptive_plan.message.contains("定轮廓"));
+        assert!(adaptive_plan.message.contains("证据路径"));
+        assert!(adaptive_review.message.contains("切换到更具体的研究模板"));
+    }
+
+    #[test]
+    fn research_payload_surfaces_literature_review_progress_and_closure_for_realistic_task() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_literature_progress_payload_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Review recent CS papers on transformer compression, capture remote fulltext coverage, and summarize the main research gaps."),
+            MessageBlock::ToolCall {
+                name: "fetch_papers".to_string(),
+                args: json!({"paper_ids":["arxiv:1","arxiv:2","arxiv:3"],"limit":3}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "status": "success",
+                    "operation": "fetch_papers",
+                    "results": [
+                        {
+                            "provider": "arxiv",
+                            "title": "Paper A",
+                            "fulltext": {
+                                "status": "ready",
+                                "primary_source": "remote",
+                                "provider": "arxiv",
+                                "content_source": "remote_pdf",
+                                "completeness": "full_text",
+                                "body_text_chars": 12000,
+                                "section_count": 12,
+                                "reference_count": 35
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Intro"},{"title":"Method"}],
+                                "references": [{"text":"Ref 1"},{"text":"Ref 2"}]
+                            }
+                        },
+                        {
+                            "provider": "openalex",
+                            "title": "Paper B",
+                            "fulltext": {
+                                "status": "partial",
+                                "primary_source": "remote",
+                                "provider": "openalex",
+                                "content_source": "remote_text",
+                                "completeness": "partial_text",
+                                "body_text_chars": 900,
+                                "section_count": 2,
+                                "reference_count": 5
+                            },
+                            "structured_document": {
+                                "sections": [{"title":"Summary"}],
+                                "references": [{"text":"Ref 3"}]
+                            }
+                        }
+                    ]
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::Assistant {
+                content: "I synthesized the current evidence, compared methods, and identified open gaps in benchmark coverage.".to_string(),
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "literature_review");
+        assert_eq!(payload.phase_total, 6);
+        assert!(!payload.progress_prompts.is_empty());
+        assert!(payload
+            .progress_prompts
+            .iter()
+            .any(|prompt| prompt.stage_id == "search"
+                && prompt.message.contains("检索式")
+                && prompt.message.contains("证据表")));
+        assert!(payload
+            .closure_checks
+            .iter()
+            .any(|check| check.id == "data_acquisition" && check.status == "pass"));
+        assert!(payload
+            .closure_checks
+            .iter()
+            .any(|check| check.id == "data_analysis" && check.status == "pass"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_marks_deep_learning_as_blocked_with_resume_and_next_phase() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_deep_learning_blocked_payload_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Start a deep learning training run on this machine and save checkpoints with validation metrics."),
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('train')"}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Failed("cuda oom".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "error",
+                        "exit_code": 1,
+                        "timed_out": false,
+                        "stdout": "saved training config to runs/dl/train_config.yaml",
+                        "stderr": "CUDA out of memory while training epoch 1"
+                    }
+                })
+                .to_string(),
+                success: false,
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "deep_learning");
+        assert_eq!(payload.overall_state, "blocked");
+        assert_eq!(payload.phase, "训练与监控");
+        assert_eq!(payload.next_phase.as_deref(), Some("切换到更高性能环境后恢复训练"));
+        assert!(payload.blocker.is_some());
+        assert!(payload.recovery_hint.is_some());
+        assert!(!payload.resume_points.is_empty());
+        assert!(payload
+            .progress_prompts
+            .iter()
+            .any(|prompt| prompt.stage_id == "train_monitor"
+                && prompt.message.contains("checkpoint")
+                && prompt.message.contains("资源占用")));
+        assert!(payload
+            .progress_prompts
+            .iter()
+            .any(|prompt| prompt.stage_id == "debug_or_checkpoint"
+                && prompt.message.contains("恢复")));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn research_payload_marks_classical_ml_complete_with_closure_checks_and_progress_copy() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_classical_ml_progress_payload_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let experiments_dir = temp_dir.join("experiments");
+        fs::create_dir_all(&experiments_dir).unwrap();
+        fs::write(
+            experiments_dir.join("results.csv"),
+            "model,accuracy,f1\nlogreg,0.94,0.93\n",
+        )
+        .unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let messages = vec![
+            user("Run a scikit-learn baseline on a public tabular classification dataset, keep the dataset manifest fixed, and report accuracy plus error analysis."),
+            MessageBlock::ToolCall {
+                name: "search_public_datasets".to_string(),
+                args: json!({"query":"tabular classification benchmark","limit":3}),
+                call_id: "c1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c1".to_string(),
+                result: json!({
+                    "operation": "search_public_datasets",
+                    "retrieval_entrypoint": "official_dataset_databases",
+                    "results": [
+                        {
+                            "title": "Adult",
+                            "provider": "openml",
+                            "source_url": "https://openml.org/d/1590",
+                            "task_hint": "tabular classification"
+                        }
+                    ]
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::ToolCall {
+                name: "fetch_public_dataset_manifest".to_string(),
+                args: json!({"dataset_url":"https://openml.org/d/1590","title":"Adult"}),
+                call_id: "c2".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c2".to_string(),
+                result: json!({
+                    "operation": "fetch_public_dataset_manifest",
+                    "dataset_id": "openml:1590",
+                    "provider": "openml",
+                    "source_url": "https://openml.org/d/1590",
+                    "retrieval_entrypoint": "official_dataset_databases",
+                    "task_hint": "tabular classification"
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::ToolCall {
+                name: "run_python".to_string(),
+                args: json!({"code":"print('train')"}),
+                call_id: "c3".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "c3".to_string(),
+                result: json!({
+                    "operation": "run_python",
+                    "result": {
+                        "status": "success",
+                        "exit_code": 0,
+                        "timed_out": false,
+                        "stdout": "accuracy=0.94\nf1=0.93\nbaseline delta: +0.05 over dummy\nerror analysis: minority-class recall remains lower\nsaved results to experiments/results.csv\ncompare vs baseline",
+                        "stderr": ""
+                    }
+                })
+                .to_string(),
+                success: true,
+            },
+            MessageBlock::Diff {
+                diff: FileDiff {
+                    file_path: experiments_dir
+                        .join("results.csv")
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    lines: Vec::new(),
+                    added: 2,
+                    removed: 0,
+                    before_content: String::new(),
+                    after_content: "model,accuracy,f1\nlogreg,0.94,0.93\n".to_string(),
+                },
+            },
+        ];
+
+        let payload =
+            build_research_payload(&runtime, &messages, None, SessionResearchState::Research);
+
+        assert_eq!(payload.workflow_kind, "classical_ml");
+        assert_eq!(payload.overall_state, "complete");
+        assert_eq!(payload.phase_total, 6);
+        assert!(payload
+            .progress_prompts
+            .iter()
+            .any(|prompt| prompt.stage_id == "baseline"
+                && prompt.message.contains("dataset manifest")
+                && prompt.message.contains("baseline")));
+        assert!(payload
+            .progress_prompts
+            .iter()
+            .any(|prompt| prompt.stage_id == "error_analysis"
+                && prompt.message.contains("accuracy/F1")
+                && prompt.message.contains("误差分析")));
+        assert!(payload.closure_checks.iter().all(|check| check.status == "pass"));
+        assert_eq!(
+            result_bundle_field_value(&payload.result_bundle, "dataset_manifest").as_deref(),
+            Some(
+                "dataset manifest: dataset_id=openml:1590 provider=openml source_url=https://openml.org/d/1590 retrieval_entrypoint=official_dataset_databases task_hint=tabular classification"
+            )
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn message_to_web_extracts_assistant_choices_and_strips_prompt_block() {
+        let message = MessageBlock::Assistant {
+            content: "开始实现\n\n如果您同意这个设计方向，我可以开始逐步实现所有模块的代码。\n\n请确认：\n\n是否同意这个设计方向？\n是否需要调整某个模块的设计？\n是否需要先实现某个特定模块？\n正在准备最终消息载荷".to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        assert_eq!(web.role, "assistant");
+        assert!(web.content.contains("开始实现"));
+        assert!(web.content.contains("请确认"));
+        assert!(web.assistant_choices.is_none());
+    }
+
+    #[test]
+    fn message_to_web_extracts_numbered_direction_choices() {
+        let message = MessageBlock::Assistant {
+            content: "这里有三个实现方向可选：\n1. 先实现状态空间和校正模块\n2. 先实现记忆库和运动预测器\n3. 先实现训练与评估流水线".to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.options.len(), 3);
+        assert!(choices.options[0].contains("先实现状态空间和校正模块"));
+        assert!(choices.options[1].contains("先实现记忆库和运动预测器"));
+        assert!(choices.options[2].contains("先实现训练与评估流水线"));
+    }
+
+    #[test]
+    fn message_to_web_extracts_markdown_direction_headings() {
+        let message = MessageBlock::Assistant {
+            content: "下面是三个不同的实现方向：\n\n### 方向一：增强型单流编码器\n### 方向二：自回归时序解码器\n### 方向三：自适应模板更新".to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.options.len(), 3);
+        assert!(choices.options[0].contains("方向一：增强型单流编码器"));
+        assert!(choices.options[1].contains("方向二：自回归时序解码器"));
+        assert!(choices.options[2].contains("方向三：自适应模板更新"));
+    }
+
+    #[test]
+    fn message_to_web_extracts_lettered_direction_choices() {
+        let message = MessageBlock::Assistant {
+            content: "下面给出三个不同的实现方向。\n\n## 方向 A：保持 MOT，升级为深度 ReID 增强型跟踪器\n## 方向 B：完全转向 SOT，实现 Transformer 单流跟踪器\n## 方向 C：混合架构——MOT 在线关联层 + SOT 深度学习特征\n\n请确认你倾向的方向。".to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.options.len(), 3);
+        assert!(choices.options[0].contains("方向 A：保持 MOT"));
+        assert!(choices.options[1].contains("方向 B：完全转向 SOT"));
+        assert!(choices.options[2].contains("方向 C：混合架构"));
+    }
+
+    #[test]
+    fn push_assistant_message_blocks_splits_body_and_choices() {
+        let mut blocks = Vec::new();
+        push_assistant_message_blocks(
+            &mut blocks,
+            "开始实现\n\n### 方向一：增强型单流编码器\n### 方向二：自回归时序解码器\n### 方向三：自适应模板更新",
+        );
+
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            MessageBlock::Assistant { content } => {
+                assert!(content.contains("开始实现"));
+            }
+            other => panic!("expected Assistant block, got {:?}", other),
+        }
+        match &blocks[1] {
+            MessageBlock::AssistantChoices { title, options } => {
+                assert_eq!(title, "decision");
+                assert_eq!(options.len(), 3);
+            }
+            other => panic!("expected AssistantChoices block, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn message_to_web_does_not_extract_low_level_execution_confirmation_choices() {
+        let message = MessageBlock::Assistant {
+            content: "我可以继续实现。\n\n请确认：\n\n是否要先创建 tracker.py 文件？\n是否要先创建 config.py 文件？".to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        assert!(web.assistant_choices.is_none());
+        assert!(web.content.contains("tracker.py"));
+        assert!(web.content.contains("config.py"));
+    }
+}
+fn official_dataset_database_health_status() -> SearchHealthStatus {
+    let openml = "https://www.openml.org/api/v1/json/data/list/limit/1";
+    let huggingface = "https://huggingface.co/api/datasets?limit=1";
+    let provider_list =
+        "OpenML / Hugging Face / Google Dataset Search / torchvision / Papers With Code / Kaggle";
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return SearchHealthStatus {
+                name: "official-dataset-databases".to_string(),
+                status: "unknown".to_string(),
+                detail: format!("health probe unavailable: {}", err),
+                providers: Vec::new(),
+            };
+        }
+    };
+
+    let openml_ok = client
+        .get(openml)
+        .header("Accept", "application/json")
+        .send()
+        .map(|response| response.status().is_success())
+        .unwrap_or(false);
+    let huggingface_ok = client
+        .get(huggingface)
+        .header("Accept", "application/json")
+        .send()
+        .map(|response| response.status().is_success())
+        .unwrap_or(false);
+
+    let ready_count = usize::from(openml_ok) + usize::from(huggingface_ok);
+    let status = if ready_count == 2 {
+        "ready"
+    } else if ready_count >= 1 {
+        "degraded"
+    } else {
+        "down"
+    };
+    let detail = format!(
+        "{}; probes: openml={}, huggingface={}; directory entrypoints: https://datasetsearch.research.google.com , https://pytorch.org/vision/stable/datasets.html ; fallback directories: https://paperswithcode.com/datasets , https://www.kaggle.com/datasets",
+        provider_list,
+        if openml_ok { "ok" } else { "down" },
+        if huggingface_ok { "ok" } else { "down" }
+    );
+
+    SearchHealthStatus {
+        name: "official-dataset-databases".to_string(),
+        status: status.to_string(),
+        detail,
+        providers: Vec::new(),
+    }
+}

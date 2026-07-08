@@ -18,8 +18,8 @@
 use crate::external_process::metadata::{
     ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel, ToolExecutionResult,
 };
-use crate::text_encoding::decode_bytes;
 use crate::external_process::wrapper::{validation, ExternalTool};
+use crate::text_encoding::decode_bytes;
 use crate::tool_matrix::matrix::ToolDefinition;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;

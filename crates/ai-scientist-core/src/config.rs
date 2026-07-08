@@ -254,6 +254,9 @@ mod tests {
         let config = ScientistConfig::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: ScientistConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.agents.researcher_count, config.agents.researcher_count);
+        assert_eq!(
+            parsed.agents.researcher_count,
+            config.agents.researcher_count
+        );
     }
 }

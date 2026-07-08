@@ -27,7 +27,9 @@ impl ToolCallBlock {
         let (status_icon, status_color) = match status {
             ToolCallStatus::Pending => ("⏳ Pending", Color::Yellow),
             ToolCallStatus::Approved => ("✓ Approved", Color::Green),
-            ToolCallStatus::Denied(reason) => return Self::render_denied(frame, area, name, reason),
+            ToolCallStatus::Denied(reason) => {
+                return Self::render_denied(frame, area, name, reason)
+            }
             ToolCallStatus::Executing => ("⚙ Executing...", Color::Cyan),
             ToolCallStatus::Complete => ("✓ Done", Color::Green),
             ToolCallStatus::Failed(err) => return Self::render_failed(frame, area, name, err),
@@ -48,7 +50,9 @@ impl ToolCallBlock {
                 ),
                 Span::styled(
                     format!("Tool: {}", name),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  ({})", call_id),
@@ -83,7 +87,10 @@ impl ToolCallBlock {
         let text = vec![
             Line::from(vec![
                 Span::styled("✗ Denied: ", Style::default().fg(Color::Red)),
-                Span::styled(name, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    name,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
             ]),
             Line::from(Span::styled(
                 format!("  Reason: {}", reason),
@@ -100,7 +107,10 @@ impl ToolCallBlock {
         let text = vec![
             Line::from(vec![
                 Span::styled("✗ Failed: ", Style::default().fg(Color::Red)),
-                Span::styled(name, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    name,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
             ]),
             Line::from(Span::styled(
                 format!("  Error: {}", error),
@@ -119,18 +129,16 @@ pub struct ToolResultBlock;
 
 impl ToolResultBlock {
     /// Render a collapsible tool result
-    pub fn render(
-        frame: &mut Frame,
-        area: Rect,
-        result: &str,
-        success: bool,
-        call_id: &str,
-    ) {
+    pub fn render(frame: &mut Frame, area: Rect, result: &str, success: bool, call_id: &str) {
         let color = if success { Color::Green } else { Color::Red };
         let icon = if success { "✓" } else { "✗" };
 
         let result_preview: String = if result.len() > 500 {
-            format!("{}...\n\n[Result truncated, {} total chars]", &result[..497], result.len())
+            format!(
+                "{}...\n\n[Result truncated, {} total chars]",
+                &result[..497],
+                result.len()
+            )
         } else {
             result.to_string()
         };

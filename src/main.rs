@@ -1,10 +1,11 @@
 #![recursion_limit = "256"]
 
 mod app_paths;
+mod agent_skills;
 mod command_resolver;
 mod config;
-mod domain_prompt;
 mod desktop_host;
+mod domain_prompt;
 mod host;
 mod path_resolver;
 mod sandbox;
@@ -120,7 +121,8 @@ fn main() -> Result<()> {
         let app_paths = AppPaths::for_local_dev(detected_project_root.clone());
         let _ = std::fs::create_dir_all(app_paths.state_dir());
         let log_file = std::fs::File::create(app_paths.tui_log_path()).unwrap_or_else(|_| {
-            let fallback = std::env::temp_dir().join(format!("tokitai_tui_{}.log", std::process::id()));
+            let fallback =
+                std::env::temp_dir().join(format!("tokitai_tui_{}.log", std::process::id()));
             std::fs::File::create(fallback).unwrap()
         });
         tracing_subscriber::fmt()
@@ -156,6 +158,13 @@ fn main() -> Result<()> {
                 let value = value.trim();
                 if key.starts_with("PROVIDER_")
                     || key.starts_with("AI_")
+                    || key.starts_with("BRAVE_SEARCH_")
+                    || key == "GITHUB_TOKEN"
+                    || key == "GH_TOKEN"
+                    || key == "GITHUB_API_TOKEN"
+                    || key == "GITHUB_PAT"
+                    || key == "GITHUB_ACCESS_TOKEN"
+                    || key == "GITHUB_API_BASE"
                     || key == "PROVIDERS"
                     || key == "SEARXNG_URL"
                 {
@@ -243,9 +252,7 @@ fn main() -> Result<()> {
     if use_web {
         println!("?? ??? Web Workspace ???\n");
         let config_file = crate::config::Config::load(None).unwrap_or_default();
-        let host = web::WebHostConfig::from_env_or_local_dev(
-            detected_project_root.clone(),
-        );
+        let host = web::WebHostConfig::from_env_or_local_dev(detected_project_root.clone());
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(web::start_web_mode(
@@ -269,14 +276,17 @@ fn main() -> Result<()> {
         // Build tool executor closure from CliAssistant's call_tool
         // We need to put assistant in a shared container
         let assistant = std::sync::Arc::new(std::sync::Mutex::new(assistant));
-        let tool_executor: Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync> =
-            Arc::new({
-                let a = assistant.clone();
-                move |name: &str, args: &serde_json::Value| {
-                    a.lock().unwrap().call_tool(name, args)
-                        .map_err(|e| e.to_string())
-                }
-            });
+        let tool_executor: Arc<
+            dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync,
+        > = Arc::new({
+            let a = assistant.clone();
+            move |name: &str, args: &serde_json::Value| {
+                a.lock()
+                    .unwrap()
+                    .call_tool(name, args)
+                    .map_err(|e| e.to_string())
+            }
+        });
 
         if let Some(provider) = llm_manager.current_provider() {
             let provider: Arc<dyn crate::llm::LLMProvider> = Arc::clone(provider);
@@ -324,12 +334,9 @@ fn main() -> Result<()> {
         println!();
 
         // 创建自主助手
-        let assistant = AutonomousAssistant::new(
-            config,
-            std::env::current_dir().unwrap(),
-            security_config,
-        )
-            .map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
+        let assistant =
+            AutonomousAssistant::new(config, std::env::current_dir().unwrap(), security_config)
+                .map_err(|e| anyhow::anyhow!("创建自主模式失败：{}", e))?;
 
         // 运行自主进化
         assistant.run_autonomous_evolution()?;
@@ -354,9 +361,9 @@ fn main() -> Result<()> {
 
         // 创建临时消息向量
         let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
-            "role": "system",
-        "content": science_expert_system_prompt()
-    })];
+                "role": "system",
+            "content": science_expert_system_prompt()
+        })];
 
         match assistant.chat_and_handle_tools(&mut messages, &input) {
             Ok(response) => {

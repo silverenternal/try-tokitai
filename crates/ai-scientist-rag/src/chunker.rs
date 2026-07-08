@@ -184,9 +184,7 @@ impl TextChunker {
 
         for ch in text.chars() {
             current.push(ch);
-            if matches!(ch, '.' | '!' | '?')
-                && current.len() > 5
-            {
+            if matches!(ch, '.' | '!' | '?') && current.len() > 5 {
                 // Don't split on abbreviations like "et al." or "e.g."
                 let trimmed = current.trim();
                 if !trimmed.ends_with("al.")

@@ -141,11 +141,7 @@ impl SymPyTool {
     /// ## Parameters
     /// - `matrix`: 2D array of numbers
     /// - `operation`: One of "det", "inv", "eigenvals", "eigenvects", "rref", "rank", "transpose"
-    pub fn sympy_matrix(
-        &self,
-        matrix: Vec<Vec<f64>>,
-        operation: String,
-    ) -> Result<Value, String> {
+    pub fn sympy_matrix(&self, matrix: Vec<Vec<f64>>, operation: String) -> Result<Value, String> {
         let data = json!({
             "matrix": matrix,
             "op": operation

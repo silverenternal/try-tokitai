@@ -2,6 +2,7 @@ pub mod error;
 #[allow(dead_code)]
 pub mod file_cache;
 pub mod file_ops;
+pub mod file_ops_ext;
 pub mod file_search;
 pub mod pdf_tools;
 pub mod project_templates;

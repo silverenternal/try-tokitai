@@ -7,14 +7,14 @@
 //! - VerificationAgent: mathematical and formal verification
 //! - ReportAgent: paper/report generation
 
-mod research;
-mod hypothesis;
 mod experiment;
-mod verification;
+mod hypothesis;
 mod report;
+mod research;
+mod verification;
 
-pub use research::ResearchAgent;
-pub use hypothesis::HypothesisAgent;
 pub use experiment::ExperimentAgent;
-pub use verification::VerificationAgent;
+pub use hypothesis::HypothesisAgent;
 pub use report::ReportAgent;
+pub use research::ResearchAgent;
+pub use verification::VerificationAgent;

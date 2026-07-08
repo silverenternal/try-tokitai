@@ -9,7 +9,9 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io;
@@ -18,13 +20,15 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
-use crate::llm::LLMProvider;
 use crate::llm::ChatRequest;
+use crate::llm::LLMProvider;
 use crate::tui::commands::CommandRegistry;
 use crate::tui::components::chat_panel::ChatPanel;
 use crate::tui::components::input_bar::{InputBar, InputBarState};
 use crate::tui::components::message_block::MessageBlock;
-use crate::tui::components::permission_dialog::{PendingToolCall, PermissionAction, PermissionDialog};
+use crate::tui::components::permission_dialog::{
+    PendingToolCall, PermissionAction, PermissionDialog,
+};
 use crate::tui::components::status_bar::{StatusBar, StatusBarState};
 use crate::tui::event::AppEvent;
 use crate::tui::layout::TuiLayout;
@@ -92,7 +96,8 @@ pub struct TuiApp {
     /// Privacy guard for research security
     pub privacy: crate::tui::privacy_guard::PrivacyGuard,
     /// Real tool executor: (tool_name, args) -> Result<result_string, error_string>
-    pub tool_executor: Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
+    pub tool_executor:
+        Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
     /// Config screen state
     pub config_state: crate::tui::components::ConfigScreenState,
     /// Frame counter for animation (breathing dot)
@@ -167,7 +172,8 @@ impl ThinkingLevel {
         match self {
             ThinkingLevel::Custom(t, _) => *t,
             _ => {
-                let model_limit = crate::tui::model_config::ModelRegistry::get_max_tokens(model_name, usize::MAX);
+                let model_limit =
+                    crate::tui::model_config::ModelRegistry::get_max_tokens(model_name, usize::MAX);
                 let fraction = self.fraction();
                 ((model_limit as f64) * fraction).max(256.0) as usize
             }
@@ -189,7 +195,9 @@ impl TuiApp {
     pub fn new(
         provider: Arc<dyn LLMProvider>,
         tool_definitions: Option<Vec<serde_json::Value>>,
-        tool_executor: Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
+        tool_executor: Option<
+            Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>,
+        >,
         security_config: crate::security::SecurityConfig,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
@@ -199,7 +207,7 @@ impl TuiApp {
         let api_key_preview = std::env::var("AI_API_KEY")
             .map(|k| {
                 if k.len() > 12 {
-                    format!("{}...{}", &k[..8], &k[k.len()-4..])
+                    format!("{}...{}", &k[..8], &k[k.len() - 4..])
                 } else {
                     k
                 }
@@ -211,7 +219,9 @@ impl TuiApp {
         status_bar.provider = provider_name.clone();
 
         let config_state = crate::tui::components::ConfigScreenState::new(
-            model.clone(), provider_name, api_key_preview,
+            model.clone(),
+            provider_name,
+            api_key_preview,
         );
 
         let app = Self {
@@ -238,7 +248,9 @@ impl TuiApp {
             config_state,
             frame_count: 0,
             status_word: String::new(),
-            max_tokens: (crate::tui::model_config::ModelRegistry::get_max_tokens(&model, usize::MAX) as f64 * 0.5) as usize,
+            max_tokens: (crate::tui::model_config::ModelRegistry::get_max_tokens(&model, usize::MAX)
+                as f64
+                * 0.5) as usize,
             temperature: 0.7,
             security_config,
             session_manager: crate::tui::session::SessionManager::new().unwrap(),
@@ -260,7 +272,8 @@ impl TuiApp {
     /// Add a message to the conversation
     pub fn add_message(&mut self, block: MessageBlock) {
         // Skip transient streaming/thinking blocks from persistence
-        let persistable = !matches!(&block,
+        let persistable = !matches!(
+            &block,
             MessageBlock::AssistantStreaming { .. } | MessageBlock::Thinking { .. }
         );
         self.messages.push(block);
@@ -282,7 +295,11 @@ impl TuiApp {
     }
 
     /// Handle a key event
-    pub fn handle_key_event(&mut self, key: &crossterm::event::KeyEvent, rt: &tokio::runtime::Runtime) {
+    pub fn handle_key_event(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+        rt: &tokio::runtime::Runtime,
+    ) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         // ── Global Ctrl+C: two-step quit (like Claude Code) ──
@@ -305,8 +322,11 @@ impl TuiApp {
                     self.ctrl_c_pending = true;
                     return;
                 }
-                AppMode::Idle | AppMode::SessionPicker | AppMode::GraphView
-                | AppMode::WaitingForPermission | AppMode::Error(_) => {
+                AppMode::Idle
+                | AppMode::SessionPicker
+                | AppMode::GraphView
+                | AppMode::WaitingForPermission
+                | AppMode::Error(_) => {
                     if self.ctrl_c_pending {
                         self.running = false;
                         return;
@@ -352,9 +372,15 @@ impl TuiApp {
         // Handle key editing mode
         if self.config_state.editing_key {
             match key.code {
-                KeyCode::Esc | KeyCode::Enter => { self.config_state.editing_key = false; }
-                KeyCode::Backspace => { self.config_state.pop_key_char(); }
-                KeyCode::Char(c) => { self.config_state.push_key_char(c); }
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.config_state.editing_key = false;
+                }
+                KeyCode::Backspace => {
+                    self.config_state.pop_key_char();
+                }
+                KeyCode::Char(c) => {
+                    self.config_state.push_key_char(c);
+                }
                 _ => {}
             }
             return;
@@ -364,32 +390,34 @@ impl TuiApp {
             KeyCode::Up | KeyCode::Char('k') => self.config_state.select_prev(),
             KeyCode::Down | KeyCode::Char('j') => self.config_state.select_next(),
             KeyCode::Left => {
-                if self.config_state.selected_field == crate::tui::components::ConfigField::ModelSelect {
+                if self.config_state.selected_field
+                    == crate::tui::components::ConfigField::ModelSelect
+                {
                     self.config_state.prev_model();
                 } else {
                     self.toggle_config_field();
                 }
             }
             KeyCode::Right => {
-                if self.config_state.selected_field == crate::tui::components::ConfigField::ModelSelect {
+                if self.config_state.selected_field
+                    == crate::tui::components::ConfigField::ModelSelect
+                {
                     self.config_state.next_model();
                 } else {
                     self.toggle_config_field();
                 }
             }
-            KeyCode::Enter => {
-                match self.config_state.selected_field {
-                    crate::tui::components::ConfigField::KeyInput => {
-                        self.config_state.editing_key = true;
-                    }
-                    crate::tui::components::ConfigField::Start => {
-                        self.apply_config();
-                    }
-                    _ => {
-                        self.toggle_config_field();
-                    }
+            KeyCode::Enter => match self.config_state.selected_field {
+                crate::tui::components::ConfigField::KeyInput => {
+                    self.config_state.editing_key = true;
                 }
-            }
+                crate::tui::components::ConfigField::Start => {
+                    self.apply_config();
+                }
+                _ => {
+                    self.toggle_config_field();
+                }
+            },
             KeyCode::Char('q') => self.running = false,
             _ => {}
         }
@@ -399,9 +427,15 @@ impl TuiApp {
         use crate::tui::components::ConfigField;
         match self.config_state.selected_field {
             ConfigField::DeepThink => self.config_state.deep_think = !self.config_state.deep_think,
-            ConfigField::Competition => self.config_state.competition_mode = !self.config_state.competition_mode,
-            ConfigField::Privacy => self.config_state.privacy_mode = !self.config_state.privacy_mode,
-            ConfigField::ToolPermission => self.config_state.security_level = self.config_state.security_level.next(),
+            ConfigField::Competition => {
+                self.config_state.competition_mode = !self.config_state.competition_mode
+            }
+            ConfigField::Privacy => {
+                self.config_state.privacy_mode = !self.config_state.privacy_mode
+            }
+            ConfigField::ToolPermission => {
+                self.config_state.security_level = self.config_state.security_level.next()
+            }
             _ => {}
         }
     }
@@ -460,7 +494,11 @@ impl TuiApp {
                     self.add_message(MessageBlock::System {
                         content: format!(
                             "Ready - Deep Think: {}, {} tokens (temp {})",
-                            if self.config_state.deep_think { "ON" } else { "OFF" },
+                            if self.config_state.deep_think {
+                                "ON"
+                            } else {
+                                "OFF"
+                            },
                             self.max_tokens,
                             self.temperature,
                         ),
@@ -477,7 +515,8 @@ impl TuiApp {
                     } else {
                         // Reset selection if needed
                         if self.session_picker_idx >= self.session_manager.index.len() {
-                            self.session_picker_idx = self.session_manager.index.len().saturating_sub(1);
+                            self.session_picker_idx =
+                                self.session_manager.index.len().saturating_sub(1);
                         }
                         // If all sessions deleted, go to idle
                         if self.session_manager.index.is_empty() {
@@ -498,7 +537,11 @@ impl TuiApp {
                 self.add_message(MessageBlock::System {
                     content: format!(
                         "Ready - Deep Think: {}, {} tokens (temp {})",
-                        if self.config_state.deep_think { "ON" } else { "OFF" },
+                        if self.config_state.deep_think {
+                            "ON"
+                        } else {
+                            "OFF"
+                        },
                         self.max_tokens,
                         self.temperature,
                     ),
@@ -517,12 +560,16 @@ impl TuiApp {
                     let id = id.clone();
                     match self.session_manager.resume_session(&id) {
                         Ok(msgs) => {
-                            if let Some(meta) = self.session_manager.index.iter().find(|m| m.id == id) {
+                            if let Some(meta) =
+                                self.session_manager.index.iter().find(|m| m.id == id)
+                            {
                                 self.status_bar.model = meta.model.clone();
                             }
 
                             // Check if selected node is the LAST on its own branch
-                            let user_nodes: Vec<(usize, String)> = msgs.iter().enumerate()
+                            let user_nodes: Vec<(usize, String)> = msgs
+                                .iter()
+                                .enumerate()
                                 .filter_map(|(msg_i, m)| {
                                     if let MessageBlock::User { branch_id, .. } = m {
                                         Some((
@@ -533,15 +580,26 @@ impl TuiApp {
                                                 branch_id.clone()
                                             },
                                         ))
-                                    } else { None }
+                                    } else {
+                                        None
+                                    }
                                 })
                                 .collect();
 
-                            let current_branch = user_nodes.get(self.graph_selected)
-                                .map(|(_, bid)| if bid.is_empty() { "main".to_string() } else { bid.clone() })
+                            let current_branch = user_nodes
+                                .get(self.graph_selected)
+                                .map(|(_, bid)| {
+                                    if bid.is_empty() {
+                                        "main".to_string()
+                                    } else {
+                                        bid.clone()
+                                    }
+                                })
                                 .unwrap_or_else(|| "main".to_string());
                             // Find the last NODE INDEX (not msg index) on this branch
-                            let last_node_on_branch = user_nodes.iter().enumerate()
+                            let last_node_on_branch = user_nodes
+                                .iter()
+                                .enumerate()
                                 .filter(|(_, (_, bid))| bid == &current_branch)
                                 .map(|(node_i, _)| node_i)
                                 .max()
@@ -561,8 +619,12 @@ impl TuiApp {
                                 });
                             } else {
                                 // Non-last node: fork new branch, keep all messages
-                                let fork_id = self.session_manager.fork_at_node(self.graph_selected, &current_branch)
-                                    .unwrap_or_else(|_| format!("fork-{}", self.graph_selected + 1));
+                                let fork_id = self
+                                    .session_manager
+                                    .fork_at_node(self.graph_selected, &current_branch)
+                                    .unwrap_or_else(|_| {
+                                        format!("fork-{}", self.graph_selected + 1)
+                                    });
                                 self.current_branch_id = fork_id.clone();
 
                                 // Keep full history; new messages tagged with fork branch_id
@@ -604,9 +666,9 @@ impl TuiApp {
                         self.graph_messages.clear();
                         self.graph_branches.clear();
                         self.graph_selected = 0;
-                        self.session_picker_idx = self.session_picker_idx.min(
-                            self.session_manager.index.len().saturating_sub(1)
-                        );
+                        self.session_picker_idx = self
+                            .session_picker_idx
+                            .min(self.session_manager.index.len().saturating_sub(1));
                         if self.session_manager.index.is_empty() {
                             self.session_picker_visible = false;
                             self.mode = AppMode::Idle;
@@ -622,15 +684,17 @@ impl TuiApp {
                 self.graph_selected = self.graph_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.graph_selected = self.graph_selected.saturating_add(1)
+                self.graph_selected = self
+                    .graph_selected
+                    .saturating_add(1)
                     .min(self.graph_total.saturating_sub(1));
             }
             KeyCode::PageUp => {
                 self.graph_selected = self.graph_selected.saturating_sub(10);
             }
             KeyCode::PageDown => {
-                self.graph_selected = (self.graph_selected + 10)
-                    .min(self.graph_total.saturating_sub(1));
+                self.graph_selected =
+                    (self.graph_selected + 10).min(self.graph_total.saturating_sub(1));
             }
             _ => {}
         }
@@ -639,7 +703,8 @@ impl TuiApp {
     /// Apply the config settings and start chatting
     fn apply_config(&mut self) {
         let model = self.config_state.model_name.clone();
-        let model_limit = crate::tui::model_config::ModelRegistry::get_max_tokens(&model, usize::MAX);
+        let model_limit =
+            crate::tui::model_config::ModelRegistry::get_max_tokens(&model, usize::MAX);
         if self.config_state.deep_think {
             self.max_tokens = model_limit;
             self.temperature = 0.9;
@@ -662,16 +727,18 @@ impl TuiApp {
 
         // Build the provider URL from the selected model's known API
         let info = self.config_state.selected_model_info();
-        let api_url = info.map(|i| match i.provider {
-            "deepseek" => "https://api.deepseek.com/v1/chat/completions",
-            "openai" => "https://api.openai.com/v1/chat/completions",
-            "moonshot" => "https://api.moonshot.cn/v1/chat/completions",
-            "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-            "zhipu" => "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            "anthropic" => "https://api.anthropic.com/v1/messages",
-            "ollama" => "http://localhost:11434/v1/chat/completions",
-            _ => "https://api.deepseek.com/v1/chat/completions",
-        }).unwrap_or("https://api.deepseek.com/v1/chat/completions");
+        let api_url = info
+            .map(|i| match i.provider {
+                "deepseek" => "https://api.deepseek.com/v1/chat/completions",
+                "openai" => "https://api.openai.com/v1/chat/completions",
+                "moonshot" => "https://api.moonshot.cn/v1/chat/completions",
+                "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                "zhipu" => "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "anthropic" => "https://api.anthropic.com/v1/messages",
+                "ollama" => "http://localhost:11434/v1/chat/completions",
+                _ => "https://api.deepseek.com/v1/chat/completions",
+            })
+            .unwrap_or("https://api.deepseek.com/v1/chat/completions");
 
         // API key: custom > env > empty
         let api_key = if !self.config_state.custom_key.is_empty() {
@@ -682,11 +749,15 @@ impl TuiApp {
 
         // Create provider with selected model's URL
         self.provider = Arc::new(crate::llm::providers::OpenAIProvider::with_base_url(
-            api_key, api_url.to_string(), Some(model.clone()),
+            api_key,
+            api_url.to_string(),
+            Some(model.clone()),
         ));
 
         self.status_bar.model = model.clone();
-        self.status_bar.provider = info.map(|i| i.provider.to_string()).unwrap_or_else(|| "custom".to_string());
+        self.status_bar.provider = info
+            .map(|i| i.provider.to_string())
+            .unwrap_or_else(|| "custom".to_string());
 
         // Show session picker if history exists, otherwise jump straight to chat
         if self.session_manager.index.is_empty() {
@@ -762,17 +833,27 @@ impl TuiApp {
     }
 
     /// Handle key during permission dialog
-    fn handle_key_permission(&mut self, key: &crossterm::event::KeyEvent, rt: &tokio::runtime::Runtime) {
+    fn handle_key_permission(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+        rt: &tokio::runtime::Runtime,
+    ) {
         match PermissionDialog::handle_key(key) {
             PermissionAction::ApproveAll => {
                 let pending = std::mem::take(&mut self.pending_tool_calls);
                 self.execute_tools(pending, rt);
             }
             PermissionAction::DenyAll => {
-                let call_ids: Vec<String> = self.pending_tool_calls.iter().map(|tc| tc.call_id.clone()).collect();
-                let tc_names: Vec<(String, String, serde_json::Value)> = self.pending_tool_calls.iter().map(|tc| {
-                    (tc.call_id.clone(), tc.name.clone(), tc.args.clone())
-                }).collect();
+                let call_ids: Vec<String> = self
+                    .pending_tool_calls
+                    .iter()
+                    .map(|tc| tc.call_id.clone())
+                    .collect();
+                let tc_names: Vec<(String, String, serde_json::Value)> = self
+                    .pending_tool_calls
+                    .iter()
+                    .map(|tc| (tc.call_id.clone(), tc.name.clone(), tc.args.clone()))
+                    .collect();
                 for (call_id, name, args) in &tc_names {
                     if let Some(block) = self.find_tool_call_block_mut(call_id) {
                         *block = MessageBlock::ToolCall {
@@ -861,6 +942,15 @@ impl TuiApp {
         self.status_word = words[idx].to_string();
     }
 
+    fn sync_reviewer_feedback_status(&mut self) {
+        self.status_bar.reviewer_open_items = self.research.unresolved_feedback_count();
+        if self.research.phase == crate::tui::research_pipeline::ResearchPhase::Review
+            && !self.research.reviewer_feedback.is_empty()
+        {
+            self.research.show_reviewer_panel();
+        }
+    }
+
     /// Start streaming from the LLM
     fn start_llm_stream(&mut self, rt: &tokio::runtime::Runtime) {
         // Update privacy level for current research phase
@@ -875,8 +965,7 @@ impl TuiApp {
         };
 
         // Privacy check: block if confidential content would go to cloud
-        let is_cloud = !self.privacy.local_model_available
-            || self.privacy.level.allows_cloud();
+        let is_cloud = !self.privacy.local_model_available || self.privacy.level.allows_cloud();
         match self.privacy.is_safe_to_send(is_cloud) {
             crate::tui::privacy_guard::SafetyVerdict::Blocked { reason } => {
                 self.add_message(MessageBlock::System {
@@ -906,14 +995,43 @@ impl TuiApp {
             content: String::new(),
         });
 
-        // Determine system prompt priority: Research Pipeline > Active Agent > Default
+        // Determine system prompt priority: Research Pipeline > Active Agent > auto-matched research skill > Default
         let agent_prompt = if self.research.active {
             let rp = self.research.system_prompt();
-            if !rp.is_empty() { Some(rp) } else { None }
+            if !rp.is_empty() {
+                Some(rp)
+            } else {
+                None
+            }
         } else if self.active_agent.is_active {
             Some(self.active_agent.prompt.clone())
         } else {
-            None
+            let user_text = self
+                .messages
+                .iter()
+                .rev()
+                .find_map(|block| {
+                    if let MessageBlock::User { content, .. } = block {
+                        Some(content.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("");
+            let matched = self
+                .agent_loader
+                .auto_match_research_agents(user_text, Some("agent"));
+            if matched.is_empty() {
+                None
+            } else {
+                Some(
+                    matched
+                        .iter()
+                        .map(|agent| agent.prompt.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                )
+            }
         };
         let agent_prompt_ref = agent_prompt.as_deref();
         let messages = build_conversation(
@@ -923,7 +1041,11 @@ impl TuiApp {
 
         // Don't send empty tools array — filter out None/empty
         let tools = self.tool_definitions.as_ref().and_then(|td| {
-            if td.is_empty() { None } else { Some(td.clone()) }
+            if td.is_empty() {
+                None
+            } else {
+                Some(td.clone())
+            }
         });
 
         let model_name = self.provider.default_model().to_string();
@@ -950,7 +1072,12 @@ impl TuiApp {
     /// Handle an app event from the streaming channel
     pub fn handle_app_event(&mut self, event: AppEvent, rt: &tokio::runtime::Runtime) {
         match event {
-            AppEvent::StreamChunk { content, tool_calls, finish_reason, usage } => {
+            AppEvent::StreamChunk {
+                content,
+                tool_calls,
+                finish_reason,
+                usage,
+            } => {
                 // Update the streaming block
                 self.update_streaming_block(&content);
 
@@ -960,7 +1087,9 @@ impl TuiApp {
                 }
 
                 // Check if streaming is complete
-                if is_tool_call_finish(&finish_reason) || (finish_reason.is_some() && tool_calls.is_some()) {
+                if is_tool_call_finish(&finish_reason)
+                    || (finish_reason.is_some() && tool_calls.is_some())
+                {
                     self.finish_stream_with_tools(tool_calls, rt);
                 } else if finish_reason.is_some() {
                     self.finish_stream(rt);
@@ -979,16 +1108,28 @@ impl TuiApp {
                 self.status_bar.error = Some("stream".to_string());
                 self.abort_handle = None;
             }
-            AppEvent::ToolResult { call_id, result, success } => {
+            AppEvent::ToolResult {
+                call_id,
+                result,
+                success,
+            } => {
                 // Update the ToolCall block status (keep it for API conversation history)
                 // and add a separate ToolResult block for display
                 if let Some(block) = self.find_tool_call_block_mut(&call_id) {
                     let status = if success {
                         crate::tui::components::message_block::ToolCallStatus::Complete
                     } else {
-                        crate::tui::components::message_block::ToolCallStatus::Failed(result.clone())
+                        crate::tui::components::message_block::ToolCallStatus::Failed(
+                            result.clone(),
+                        )
                     };
-                    if let MessageBlock::ToolCall { name, args, call_id: id, .. } = block {
+                    if let MessageBlock::ToolCall {
+                        name,
+                        args,
+                        call_id: id,
+                        ..
+                    } = block
+                    {
                         *block = MessageBlock::ToolCall {
                             name: name.clone(),
                             args: args.clone(),
@@ -1006,7 +1147,11 @@ impl TuiApp {
 
                 // Auto-detect file write and show diff
                 if success {
-                    if let Some(tc) = self.pending_tool_calls.iter().find(|t| t.call_id == call_id) {
+                    if let Some(tc) = self
+                        .pending_tool_calls
+                        .iter()
+                        .find(|t| t.call_id == call_id)
+                    {
                         if let Some(diff) = crate::tui::components::diff_viewer::detect_file_write(
                             &tc.name, &tc.args, &result,
                         ) {
@@ -1038,7 +1183,9 @@ impl TuiApp {
         let content = self.extract_streaming_content();
         self.remove_streaming_blocks();
         if !content.is_empty() {
-            self.add_message(MessageBlock::Assistant { content: content.clone() });
+            self.add_message(MessageBlock::Assistant {
+                content: content.clone(),
+            });
             // If this was a /summarize response, save it as session summary
             if self.pending_summarize {
                 self.pending_summarize = false;
@@ -1059,6 +1206,7 @@ impl TuiApp {
                 if self.research.competition_mode {
                     // Competition mode: pause for human checkpoints
                     self.research.waiting_approval = true;
+                    self.research.show_reviewer_panel();
                     let phase = self.research.phase.label().to_string();
                     let next_phase = self.research.phase.next();
                     self.add_message(MessageBlock::System {
@@ -1066,13 +1214,15 @@ impl TuiApp {
                             "[CHECKPOINT] Phase **{}** complete.\n\n\
                              Next: **{}**\n\n\
                              Type `/approve` to continue or `/stop` to end.",
-                            phase, next_phase.label(),
+                            phase,
+                            next_phase.label(),
                         ),
                     });
                 } else {
                     // Autonomous mode: auto-advance
                     self.research.advance();
-                    if self.research.phase == crate::tui::research_pipeline::ResearchPhase::Complete {
+                    if self.research.phase == crate::tui::research_pipeline::ResearchPhase::Complete
+                    {
                         let ctx = self.research.full_context();
                         self.research.stop();
                         self.add_message(MessageBlock::System {
@@ -1111,12 +1261,18 @@ impl TuiApp {
     }
 
     /// Finish streaming with tool calls detected
-    fn finish_stream_with_tools(&mut self, tool_calls: Option<Vec<serde_json::Value>>, rt: &tokio::runtime::Runtime) {
+    fn finish_stream_with_tools(
+        &mut self,
+        tool_calls: Option<Vec<serde_json::Value>>,
+        rt: &tokio::runtime::Runtime,
+    ) {
         // Extract text content (before tool calls) then remove streaming block
         let text_before_tools = self.extract_streaming_content();
         self.remove_streaming_blocks();
         if !text_before_tools.is_empty() {
-            self.add_message(MessageBlock::Assistant { content: text_before_tools.clone() });
+            self.add_message(MessageBlock::Assistant {
+                content: text_before_tools.clone(),
+            });
             // Check if this was a /summarize response (text before tool calls)
             if self.pending_summarize {
                 self.pending_summarize = false;
@@ -1137,10 +1293,22 @@ impl TuiApp {
 
         if let Some(tc_list) = tool_calls {
             for tc in &tc_list {
-                let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let id = tc
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let func = tc.get("function").unwrap_or(&serde_json::Value::Null);
-                let name = func.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                let args = func.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
+                let name = func
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let args = func
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}")
+                    .to_string();
                 let args_value: serde_json::Value =
                     serde_json::from_str(&args).unwrap_or(serde_json::json!({}));
 
@@ -1247,9 +1415,17 @@ impl TuiApp {
             // Rate limit check before execution
             if let Err(rate_err) = self.security_config.rate_limiter.check(&name) {
                 if let Some(block) = self.find_tool_call_block_mut(&call_id) {
-                    if let MessageBlock::ToolCall { name: n, args: a, call_id: id, .. } = block {
+                    if let MessageBlock::ToolCall {
+                        name: n,
+                        args: a,
+                        call_id: id,
+                        ..
+                    } = block
+                    {
                         *block = MessageBlock::ToolCall {
-                            name: n.clone(), args: a.clone(), call_id: id.clone(),
+                            name: n.clone(),
+                            args: a.clone(),
+                            call_id: id.clone(),
                             status: crate::tui::components::message_block::ToolCallStatus::Denied(
                                 format!("Rate limit: {}", rate_err),
                             ),
@@ -1266,9 +1442,17 @@ impl TuiApp {
 
             // Update to Executing status (visible immediately on next render)
             if let Some(block) = self.find_tool_call_block_mut(&call_id) {
-                if let MessageBlock::ToolCall { name: n, args: a, call_id: id, .. } = block {
+                if let MessageBlock::ToolCall {
+                    name: n,
+                    args: a,
+                    call_id: id,
+                    ..
+                } = block
+                {
                     *block = MessageBlock::ToolCall {
-                        name: n.clone(), args: a.clone(), call_id: id.clone(),
+                        name: n.clone(),
+                        args: a.clone(),
+                        call_id: id.clone(),
                         status: crate::tui::components::message_block::ToolCallStatus::Executing,
                     };
                 }
@@ -1282,8 +1466,14 @@ impl TuiApp {
                         Err(e) => (format!("Tool error: {}", e), false),
                     }
                 } else {
-                    (format!("No tool executor. Tool '{}' called with args: {}",
-                        name, serde_json::to_string(&args).unwrap_or_default()), false)
+                    (
+                        format!(
+                            "No tool executor. Tool '{}' called with args: {}",
+                            name,
+                            serde_json::to_string(&args).unwrap_or_default()
+                        ),
+                        false,
+                    )
                 };
 
                 let _ = tx.send(AppEvent::ToolResult {
@@ -1323,7 +1513,9 @@ impl TuiApp {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Recent Conversations",
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ))),
             Rect::new(x, y, w, 1),
         );
@@ -1368,8 +1560,13 @@ impl TuiApp {
                 Paragraph::new(Line::from(vec![
                     Span::styled(
                         format!("{} ", cursor),
-                        if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) }
-                        else { Style::default().fg(Color::DarkGray) },
+                        if is_selected {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
                     ),
                     Span::styled(&session.title, highlight),
                 ])),
@@ -1383,8 +1580,11 @@ impl TuiApp {
                 frame.render_widget(
                     Paragraph::new(Span::styled(
                         format!("   {}", summary_display),
-                        if is_selected { Style::default().fg(Color::Gray) }
-                        else { Style::default().fg(Color::DarkGray) },
+                        if is_selected {
+                            Style::default().fg(Color::Gray)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
                     )),
                     Rect::new(x, y, w, 1),
                 );
@@ -1416,8 +1616,13 @@ impl TuiApp {
             Paragraph::new(Line::from(vec![
                 Span::styled(
                     format!("{} ", cursor),
-                    if is_new_selected { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
-                    else { Style::default().fg(Color::DarkGray) },
+                    if is_new_selected {
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
                 ),
                 Span::styled("[N] New Conversation", highlight),
             ])),
@@ -1437,14 +1642,16 @@ impl TuiApp {
 
     /// Find a tool call block by call_id and return a mutable reference
     fn find_tool_call_block_mut(&mut self, call_id: &str) -> Option<&mut MessageBlock> {
-        self.messages.iter_mut().rev().find(|m| {
-            matches!(m, MessageBlock::ToolCall { call_id: id, .. } if id == call_id)
-        })
+        self.messages
+            .iter_mut()
+            .rev()
+            .find(|m| matches!(m, MessageBlock::ToolCall { call_id: id, .. } if id == call_id))
     }
 
     /// Remove all streaming blocks from messages
     fn remove_streaming_blocks(&mut self) {
-        self.messages.retain(|m| !matches!(m, MessageBlock::AssistantStreaming { .. }));
+        self.messages
+            .retain(|m| !matches!(m, MessageBlock::AssistantStreaming { .. }));
     }
 
     /// Abort the current LLM stream
@@ -1470,6 +1677,7 @@ impl TuiApp {
     pub fn render(&mut self, frame: &mut ratatui::Frame) {
         self.frame_count = self.frame_count.wrapping_add(1);
         self.update_status_word();
+        self.sync_reviewer_feedback_status();
 
         if std::env::var_os("TOKITAI_TUI_MINIMAL").is_some() {
             use ratatui::{
@@ -1495,7 +1703,12 @@ impl TuiApp {
         }
 
         if self.mode == AppMode::Config {
-            crate::tui::components::ConfigScreen::render(frame, frame.size(), &self.config_state, self.frame_count);
+            crate::tui::components::ConfigScreen::render(
+                frame,
+                frame.size(),
+                &self.config_state,
+                self.frame_count,
+            );
             return;
         }
 
@@ -1521,7 +1734,12 @@ impl TuiApp {
         let thinking_h: u16 = if thinking_on { 1 } else { 0 };
         let suggestions_on = self.input.buffer.starts_with('/') && !self.input.buffer.contains(' ');
         let suggestions_h: u16 = if suggestions_on { 3 } else { 0 };
-        let layout = TuiLayout::calculate(frame.size(), 3, thinking_h, suggestions_h);
+        let review_h: u16 = if self.research.reviewer_panel_visible {
+            7
+        } else {
+            0
+        };
+        let layout = TuiLayout::calculate(frame.size(), 3, thinking_h, suggestions_h, review_h);
 
         // Compute effective scroll offset
         let scroll = if self.auto_scroll {
@@ -1531,16 +1749,42 @@ impl TuiApp {
         };
 
         // Chat panel (full area, no thinking split)
-        ChatPanel::render(frame, layout.chat_area, &self.messages, scroll, self.frame_count, &self.status_word);
+        ChatPanel::render(
+            frame,
+            layout.chat_area,
+            &self.messages,
+            scroll,
+            self.frame_count,
+            &self.status_word,
+        );
 
         // Thinking bar between chat and input
         if thinking_on {
-            render_thinking_bar(frame, layout.thinking_area, self.frame_count, &self.status_word);
+            render_thinking_bar(
+                frame,
+                layout.thinking_area,
+                self.frame_count,
+                &self.status_word,
+            );
         }
 
         // Command suggestions above input when typing /
         if suggestions_on {
-            render_suggestions(frame, layout.suggestions_area, &self.input.buffer, &self.commands);
+            render_suggestions(
+                frame,
+                layout.suggestions_area,
+                &self.input.buffer,
+                &self.commands,
+            );
+        }
+
+        if self.research.reviewer_panel_visible {
+            crate::tui::components::ReviewerPanel::render(
+                frame,
+                layout.review_area,
+                self.research.current_run_id.as_deref(),
+                &self.research.reviewer_feedback,
+            );
         }
 
         // Permission bar at bottom of chat area
@@ -1568,7 +1812,11 @@ fn render_thinking_bar(
 ) {
     use ratatui::style::Color;
 
-    let word = if status_word.is_empty() { "Thinking" } else { status_word };
+    let word = if status_word.is_empty() {
+        "Thinking"
+    } else {
+        status_word
+    };
 
     // 80-frame breathing cycle (~1.3s) with two sub-cycles for the dot
     let cycle = (frame_count % 80) as f32 / 80.0;
@@ -1600,7 +1848,11 @@ fn render_thinking_bar(
     let shimmer: String = (0..3)
         .map(|i| {
             let fade = (intensity * 0.6) - (i as f32 * 0.20);
-            if fade > 0.0 { "." } else { " " }
+            if fade > 0.0 {
+                "."
+            } else {
+                " "
+            }
         })
         .collect();
 
@@ -1633,7 +1885,12 @@ fn smoothstep(t: f32) -> f32 {
 }
 
 /// Render slash command suggestions
-fn render_suggestions(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, input: &str, registry: &crate::tui::commands::CommandRegistry) {
+fn render_suggestions(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    input: &str,
+    registry: &crate::tui::commands::CommandRegistry,
+) {
     use ratatui::style::{Color, Style};
     use ratatui::text::{Line, Span};
 
@@ -1642,7 +1899,10 @@ fn render_suggestions(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, i
     let matches: Vec<&(&str, &str)> = if prefix.is_empty() {
         completions.iter().collect()
     } else {
-        completions.iter().filter(|(name, _)| name.starts_with(prefix)).collect()
+        completions
+            .iter()
+            .filter(|(name, _)| name.starts_with(prefix))
+            .collect()
     };
 
     let mut lines: Vec<Line> = Vec::new();
@@ -1673,7 +1933,9 @@ impl InputBarState {
 pub fn run_tui(
     provider: Arc<dyn LLMProvider>,
     tool_definitions: Option<Vec<serde_json::Value>>,
-    tool_executor: Option<Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>>,
+    tool_executor: Option<
+        Arc<dyn Fn(&str, &serde_json::Value) -> Result<String, String> + Send + Sync>,
+    >,
     security_config: crate::security::SecurityConfig,
 ) -> Result<()> {
     info!("Starting Claude Code-style TUI");

@@ -20,10 +20,7 @@ impl ThinkingBlock {
 
         if collapsed {
             let line = Line::from(vec![
-                Span::styled(
-                    format!("{} ", toggle),
-                    Style::default().fg(Color::Blue),
-                ),
+                Span::styled(format!("{} ", toggle), Style::default().fg(Color::Blue)),
                 Span::styled(
                     "Thinking...",
                     Style::default()
@@ -32,21 +29,20 @@ impl ThinkingBlock {
                 ),
             ]);
 
-            let block = Block::default().borders(Borders::LEFT).border_style(
-                Style::default().fg(Color::Blue),
-            );
+            let block = Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::Blue));
             frame.render_widget(Paragraph::new(line).block(block), area);
         } else {
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(
                         format!("{} Thinking ", toggle),
-                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        "(click to collapse)",
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled("(click to collapse)", Style::default().fg(Color::DarkGray)),
                 ]),
                 Line::from(""),
             ];

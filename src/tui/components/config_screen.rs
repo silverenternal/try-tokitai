@@ -197,7 +197,12 @@ fn render_debug_title(frame: &mut Frame, inner: Rect) {
     );
 }
 
-fn render_rich(frame: &mut Frame, inner: Rect, state: &ConfigScreenState, show_logo_override: bool) {
+fn render_rich(
+    frame: &mut Frame,
+    inner: Rect,
+    state: &ConfigScreenState,
+    show_logo_override: bool,
+) {
     let logo_lines = if show_logo_override {
         super::logo::render_logo(0)
     } else {
@@ -228,7 +233,9 @@ fn render_rich(frame: &mut Frame, inner: Rect, state: &ConfigScreenState, show_l
         Paragraph::new(Line::from(vec![
             Span::styled(
                 "Configure before starting",
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "  tuned for a safe quick start",
@@ -501,7 +508,9 @@ fn render_compact(frame: &mut Frame, inner: Rect, state: &ConfigScreenState) {
                     .bg(Color::Green)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             },
         )]),
         &mut y,
@@ -538,7 +547,9 @@ fn render_toggle_row(
     let value_style = if selected {
         Style::default().fg(Color::Black).bg(Color::Cyan)
     } else if enabled {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -552,7 +563,10 @@ fn render_toggle_row(
     );
     if area.height > 1 {
         frame.render_widget(
-            Paragraph::new(Span::styled(desc.to_string(), Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                desc.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )),
             Rect::new(area.x, area.y + 1, area.width, 1),
         );
     }
@@ -584,7 +598,10 @@ fn render_value_row(
     );
     if area.height > 1 {
         frame.render_widget(
-            Paragraph::new(Span::styled(desc.to_string(), Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(
+                desc.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )),
             Rect::new(area.x, area.y + 1, area.width, 1),
         );
     }

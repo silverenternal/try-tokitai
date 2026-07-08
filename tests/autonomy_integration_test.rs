@@ -8,9 +8,7 @@
 
 #[cfg(test)]
 mod tests {
-    use ai_assistant::autonomy::gap_detector::{
-        TaskExecutionRecord, ToolGapDetector,
-    };
+    use ai_assistant::autonomy::gap_detector::{TaskExecutionRecord, ToolGapDetector};
     use ai_assistant::autonomy::tool_optimizer::{OptimizationType, ToolMetrics, ToolOptimizer};
     use tempfile::TempDir;
 
@@ -153,14 +151,8 @@ mod tests {
         optimizer.calculate_health_scores();
 
         let scores = optimizer.get_health_scores();
-        let healthy_score = scores
-            .get("healthy_tool")
-            .unwrap()
-            .health_score;
-        let unhealthy_score = scores
-            .get("unhealthy_tool")
-            .unwrap()
-            .health_score;
+        let healthy_score = scores.get("healthy_tool").unwrap().health_score;
+        let unhealthy_score = scores.get("unhealthy_tool").unwrap().health_score;
 
         assert!(healthy_score > 0.8, "健康工具应该有高分数");
         assert!(unhealthy_score < 0.5, "不健康工具应该有低分数");

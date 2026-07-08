@@ -16,9 +16,9 @@
 use serde_json::json;
 use tokitai::tool;
 
-use crate::text_encoding::decode_bytes;
 use super::config;
 use super::error::CommandError;
+use crate::text_encoding::decode_bytes;
 
 /// 系统命令执行工具集
 ///
@@ -204,9 +204,7 @@ impl SystemCommands {
                 .args(["-c", &command])
                 .output()
         }
-        .map_err(|e| {
-            CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
-        })?;
+        .map_err(|e| CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string())?;
 
         let mut stdout = decode_bytes(&output.stdout);
         let mut stderr = decode_bytes(&output.stderr);

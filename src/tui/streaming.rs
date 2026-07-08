@@ -21,18 +21,20 @@ pub fn start_llm_stream(
     tx: UnboundedSender<AppEvent>,
     runtime: &tokio::runtime::Runtime,
 ) -> AbortHandle {
-    runtime.spawn(async move {
-        let result = stream_llm_response(provider, request, tx.clone()).await;
-        match result {
-            Ok(()) => {
-                let _ = tx.send(AppEvent::StreamComplete);
+    runtime
+        .spawn(async move {
+            let result = stream_llm_response(provider, request, tx.clone()).await;
+            match result {
+                Ok(()) => {
+                    let _ = tx.send(AppEvent::StreamComplete);
+                }
+                Err(e) => {
+                    // If the channel is closed, the receiver has been dropped — no need to send
+                    let _ = tx.send(AppEvent::StreamError(e.to_string()));
+                }
             }
-            Err(e) => {
-                // If the channel is closed, the receiver has been dropped — no need to send
-                let _ = tx.send(AppEvent::StreamError(e.to_string()));
-            }
-        }
-    }).abort_handle()
+        })
+        .abort_handle()
 }
 
 /// Core streaming logic: calls the provider and forwards AppEvents.
@@ -48,12 +50,15 @@ async fn stream_llm_response(
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(chunk) => {
-                if tx.send(AppEvent::StreamChunk {
-                    content: chunk.content,
-                    tool_calls: chunk.tool_calls,
-                    finish_reason: chunk.finish_reason,
-                    usage: chunk.usage,
-                }).is_err() {
+                if tx
+                    .send(AppEvent::StreamChunk {
+                        content: chunk.content,
+                        tool_calls: chunk.tool_calls,
+                        finish_reason: chunk.finish_reason,
+                        usage: chunk.usage,
+                    })
+                    .is_err()
+                {
                     // Receiver dropped — stop streaming
                     break;
                 }
@@ -115,7 +120,12 @@ pub fn build_conversation(
                 }
                 result.push(Message::assistant(content));
             }
-            MessageBlock::ToolCall { name, args, call_id, .. } => {
+            MessageBlock::ToolCall {
+                name,
+                args,
+                call_id,
+                ..
+            } => {
                 // Tool calls must merge with the PREVIOUS assistant message
                 // (the text before tool calls is in a preceding Assistant block)
                 let tc_json = serde_json::json!({
@@ -151,7 +161,11 @@ pub fn build_conversation(
                     tool_call_id: None,
                 });
             }
-            MessageBlock::ToolResult { call_id, result: tool_result, success: _ } => {
+            MessageBlock::ToolResult {
+                call_id,
+                result: tool_result,
+                success: _,
+            } => {
                 result.push(Message {
                     role: "tool".to_string(),
                     content: tool_result.clone(),
@@ -169,7 +183,9 @@ pub fn build_conversation(
 }
 
 /// Get the current streaming buffer text from messages
-pub fn get_streaming_text(messages: &[crate::tui::components::message_block::MessageBlock]) -> String {
+pub fn get_streaming_text(
+    messages: &[crate::tui::components::message_block::MessageBlock],
+) -> String {
     use crate::tui::components::message_block::MessageBlock;
     for block in messages.iter().rev() {
         if let MessageBlock::AssistantStreaming { content } = block {
@@ -181,5 +197,8 @@ pub fn get_streaming_text(messages: &[crate::tui::components::message_block::Mes
 
 /// Check if a finish reason indicates tool calls should be extracted
 pub fn is_tool_call_finish(finish_reason: &Option<String>) -> bool {
-    matches!(finish_reason.as_deref(), Some("tool_calls") | Some("function_call"))
+    matches!(
+        finish_reason.as_deref(),
+        Some("tool_calls") | Some("function_call")
+    )
 }

@@ -95,13 +95,11 @@ pub enum MessageBlock {
         branch_id: String,
     },
     /// A complete assistant response
-    Assistant {
-        content: String,
-    },
+    Assistant { content: String },
+    /// Structured choices associated with the preceding assistant response
+    AssistantChoices { title: String, options: Vec<String> },
     /// A streaming/partial assistant response (renders with cursor)
-    AssistantStreaming {
-        content: String,
-    },
+    AssistantStreaming { content: String },
     /// An LLM tool call
     ToolCall {
         name: String,
@@ -116,30 +114,17 @@ pub enum MessageBlock {
         success: bool,
     },
     /// A collapsible thinking/reasoning block
-    Thinking {
-        content: String,
-        collapsed: bool,
-    },
+    Thinking { content: String, collapsed: bool },
     /// An error message
-    Error {
-        content: String,
-    },
+    Error { content: String },
     /// A system message
-    System {
-        content: String,
-    },
+    System { content: String },
     /// A file diff (code changes: green +, red -)
-    Diff {
-        diff: FileDiff,
-    },
+    Diff { diff: FileDiff },
     /// A durable subagent execution record
-    Subagent {
-        record: AgentSubagentRecord,
-    },
+    Subagent { record: AgentSubagentRecord },
     /// A durable verifier report
-    Verification {
-        report: AgentVerifierReport,
-    },
+    Verification { report: AgentVerifierReport },
 }
 
 impl MessageBlock {
@@ -148,6 +133,7 @@ impl MessageBlock {
         match self {
             MessageBlock::User { .. } => "You",
             MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. } => "Assistant",
+            MessageBlock::AssistantChoices { .. } => "Assistant",
             MessageBlock::ToolCall { .. } => "Tool",
             MessageBlock::ToolResult { .. } => "Result",
             MessageBlock::Thinking { .. } => "Thinking",
@@ -163,7 +149,10 @@ impl MessageBlock {
     pub fn color(&self) -> Color {
         match self {
             MessageBlock::User { .. } => Color::Cyan,
-            MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. } => Color::Green,
+            MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. } => {
+                Color::Green
+            }
+            MessageBlock::AssistantChoices { .. } => Color::Green,
             MessageBlock::ToolCall { .. } => Color::Yellow,
             MessageBlock::ToolResult { .. } => Color::Gray,
             MessageBlock::Thinking { .. } => Color::Blue,
@@ -184,6 +173,7 @@ impl MessageBlock {
             | MessageBlock::Thinking { content, .. }
             | MessageBlock::Error { content }
             | MessageBlock::System { content } => content,
+            MessageBlock::AssistantChoices { title, .. } => title,
             MessageBlock::ToolCall { name, .. } => name,
             MessageBlock::ToolResult { result, .. } => result,
             MessageBlock::Diff { diff } => &diff.file_path,
@@ -282,7 +272,9 @@ impl MessageBlock {
                 let result_color = if *success { Color::Green } else { Color::Red };
                 lines.push(Line::from(vec![Span::styled(
                     format!("{} Result", icon),
-                    Style::default().fg(result_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(result_color)
+                        .add_modifier(Modifier::BOLD),
                 )]));
                 for line in wrap_text(result, max_chars) {
                     lines.push(Line::from(Span::styled(
@@ -340,10 +332,7 @@ impl MessageBlock {
                         format!("{} ", label),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        format!("[{}]", status),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(format!("[{}]", status), Style::default().fg(Color::White)),
                 ]));
                 if !report.summary.is_empty() {
                     for line in wrap_text(&report.summary, max_chars) {

@@ -423,7 +423,8 @@ pub struct SegmentFile {
     /// CFG-003: 全内存密集索引 (key -> DenseIndexEntry)
     /// 使用 RwLock 保护以支持并发更新
     /// PERF-005 P2: Uses HashMap for O(1) lookups in the dense index.
-    dense_index: Option<parking_lot::RwLock<std::collections::HashMap<String, crate::core::sparse_index::DenseIndexEntry>>>,
+    dense_index:
+        Option<parking_lot::RwLock<std::collections::HashMap<String, crate::core::sparse_index::DenseIndexEntry>>>,
 }
 
 impl std::fmt::Debug for SegmentFile {

@@ -179,7 +179,7 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     use crate::tools::system::system_monitor::SystemMonitor;
     use crate::tools::{
         CodeTools, DownloadTools, FileOperations, FileSearchTools, GitOperations, HttpClientTools,
-        NetworkTools, PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools,
+        IdeTools, NetworkTools, PdfTools, ProcessTools, ProjectTemplates, SearchTools, SystemTools,
         WikipediaTools,
     };
 
@@ -258,6 +258,8 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     // 注册系统监控工具
     let _ = tool_registry
         .register_from_provider_sync::<SystemMonitor>(Some("system"), ToolSource::Builtin);
+    let _ =
+        tool_registry.register_from_provider_sync::<IdeTools>(Some("system"), ToolSource::Builtin);
 
     // 注册集成模块工具
     let _ = tool_registry
@@ -267,16 +269,26 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
     let _ = tool_registry
         .register_from_provider_sync::<PromptTools>(Some("system"), ToolSource::Builtin);
 
-    // Register Scientist tools
+    // Register CS-focused scientist tools only. Domain-specific science toolboxes
+    // remain available in source for isolated tests, but are intentionally not
+    // mounted into the default scientist runtime.
     use crate::scientist::tools::computation::ComputationTools;
     use crate::scientist::tools::data::DataTools;
+    use crate::scientist::tools::github::GitHubTools;
     use crate::scientist::tools::literature::LiteratureTools;
+    use crate::scientist::tools::verification_center::VerificationCenterTools;
     let _ = tool_registry
         .register_from_provider_sync::<LiteratureTools>(Some("scientist"), ToolSource::Builtin);
     let _ = tool_registry
         .register_from_provider_sync::<ComputationTools>(Some("scientist"), ToolSource::Builtin);
     let _ = tool_registry
         .register_from_provider_sync::<DataTools>(Some("scientist"), ToolSource::Builtin);
+    let _ = tool_registry
+        .register_from_provider_sync::<GitHubTools>(Some("scientist"), ToolSource::Builtin);
+    let _ = tool_registry.register_from_provider_sync::<VerificationCenterTools>(
+        Some("scientist"),
+        ToolSource::Builtin,
+    );
 
     // Register SymPy tools
     use crate::scientist::tools::sympy_tool::SymPyTool;
@@ -287,20 +299,76 @@ pub fn register_all_builtin_tools(tool_registry: &ToolRegistry) {
 pub fn curated_ai_scientist_tool_names() -> &'static [&'static str] {
     &[
         "read_file",
+        "read_file_head",
+        "read_file_range",
+        "inspect_path",
         "write_file",
         "edit_file",
+        "search_and_replace_multi",
+        "apply_patch",
+        "delete_file",
+        "mkdir",
+        "rename_path",
         "list_dir",
         "grep",
         "find_files",
+        "count_file_types",
+        "find_large_files",
+        "tree_dir",
+        "get_file_info",
+        "diagnostics",
+        "go_to_definition",
+        "symbol_search",
+        "references_search",
+        "find_implementations",
+        "document_symbols",
+        "workspace_symbols",
+        "hover",
+        "signature_help",
+        "rename_symbol",
+        "file_complexity",
+        "import_map",
+        "api_surface",
+        "project_dependency_graph",
+        "search_workspace_text",
+        "change_hierarchy",
+        "code_lens",
+        "diagnostic_summary",
+        "dependency_hotspots",
+        "test_impact_analysis",
+        "save_analysis_snapshot",
+        "compare_snapshots",
+        "workspace_risk_report",
+        "recent_change_report",
+        "git_add",
+        "git_commit",
+        "git_restore_file",
+        "git_reset_file",
+        "git_checkout",
+        "git_stash_push",
+        "git_stash_pop",
+        "git_push",
+        "git_pull",
+        "git_branch_create",
+        "git_branch_delete",
+        "git_log_file",
+        "format_file",
+        "test_target",
         "read_pdf",
         "search_web",
         "fetch_url",
         "search_arxiv",
         "search_paper",
         "fetch_paper",
+        "fetch_papers",
         "run_python",
         "run_python_file",
         "inspect_dataset",
+        "search_public_datasets",
+        "fetch_public_dataset_manifest",
+        "search_github_repositories",
+        "search_github_code",
+        "search_github_datasets",
         "sympy_simplify",
         "sympy_solve",
         "sympy_integrate",
@@ -308,6 +376,7 @@ pub fn curated_ai_scientist_tool_names() -> &'static [&'static str] {
         "sympy_matrix",
         "git_status",
         "git_diff",
+        "git_diff_file",
         "git_log",
         "git_current_branch",
     ]

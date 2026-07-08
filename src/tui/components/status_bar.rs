@@ -29,6 +29,8 @@ pub struct StatusBarState {
     pub privacy_level: String,
     /// Whether privacy is enforced
     pub privacy_enforced: bool,
+    /// Unresolved reviewer feedback items
+    pub reviewer_open_items: usize,
 }
 
 impl Default for StatusBarState {
@@ -42,6 +44,7 @@ impl Default for StatusBarState {
             error: None,
             privacy_level: "OFF".to_string(),
             privacy_enforced: false,
+            reviewer_open_items: 0,
         }
     }
 }
@@ -79,6 +82,14 @@ impl StatusBar {
             Span::styled(
                 format!("[privacy:{}] ", state.privacy_level),
                 Style::default().fg(privacy_color),
+            ),
+            Span::styled(
+                format!("[review:{}] ", state.reviewer_open_items),
+                Style::default().fg(if state.reviewer_open_items > 0 {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
                 format!(

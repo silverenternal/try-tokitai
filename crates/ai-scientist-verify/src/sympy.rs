@@ -21,7 +21,9 @@ pub struct SymPyVerifier {
 
 impl SymPyVerifier {
     pub fn new(python_path: impl Into<String>) -> Self {
-        Self { python_path: python_path.into() }
+        Self {
+            python_path: python_path.into(),
+        }
     }
 
     /// Build a Python script that imports sympy and runs the operation

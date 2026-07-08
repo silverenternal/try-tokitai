@@ -55,11 +55,19 @@ fn python_module_status(name: &str, module: &str) -> BackendStatus {
         BackendStatus {
             name: name.to_string(),
             available,
-            mode: if available { "python_sdk" } else { "local_fallback" }.to_string(),
+            mode: if available {
+                "python_sdk"
+            } else {
+                "local_fallback"
+            }
+            .to_string(),
             detail: if available {
                 format!("Python module '{}' is importable via {}", module, python)
             } else {
-                format!("Python module '{}' is not available; local fallback will be used", module)
+                format!(
+                    "Python module '{}' is not available; local fallback will be used",
+                    module
+                )
             },
         }
     } else {
@@ -121,21 +129,27 @@ fn lean_status() -> BackendStatus {
 
 fn mathlib_status() -> BackendStatus {
     let cwd = std::env::current_dir().ok();
-    let has_mathlib = cwd.as_ref().map(|dir| {
-        [
-            ".lake/packages/mathlib",
-            ".lake/packages/Mathlib",
-            "Mathlib",
-        ]
-        .iter()
-        .any(|candidate| dir.join(candidate).exists())
-    }).unwrap_or(false);
-
-    let has_lean_project_files = cwd.as_ref().map(|dir| {
-        ["lean-toolchain", "lakefile.lean", "lakefile.toml"]
+    let has_mathlib = cwd
+        .as_ref()
+        .map(|dir| {
+            [
+                ".lake/packages/mathlib",
+                ".lake/packages/Mathlib",
+                "Mathlib",
+            ]
             .iter()
             .any(|candidate| dir.join(candidate).exists())
-    }).unwrap_or(false);
+        })
+        .unwrap_or(false);
+
+    let has_lean_project_files = cwd
+        .as_ref()
+        .map(|dir| {
+            ["lean-toolchain", "lakefile.lean", "lakefile.toml"]
+                .iter()
+                .any(|candidate| dir.join(candidate).exists())
+        })
+        .unwrap_or(false);
 
     BackendStatus {
         name: "mathlib".to_string(),
@@ -150,7 +164,8 @@ fn mathlib_status() -> BackendStatus {
         detail: if has_mathlib {
             "Detected a local Mathlib checkout in the current workspace".to_string()
         } else if has_lean_project_files {
-            "Lean project files detected, but Mathlib was not found under .lake/packages".to_string()
+            "Lean project files detected, but Mathlib was not found under .lake/packages"
+                .to_string()
         } else {
             "No local Lean project or Mathlib checkout detected".to_string()
         },
@@ -180,7 +195,10 @@ pub fn detect_domain_environment() -> DomainEnvironmentReport {
         biopython: python_module_status("biopython", "Bio"),
         ase: python_module_status("ase", "ase"),
         lammps: cli_status("lammps", &[("lmp", "-help"), ("lammps", "-help")]),
-        openfoam: cli_status("openfoam", &[("simpleFoam", "-help"), ("foamExec", "-help")]),
+        openfoam: cli_status(
+            "openfoam",
+            &[("simpleFoam", "-help"), ("foamExec", "-help")],
+        ),
         lean: lean_status(),
         mathlib: mathlib_status(),
         psi4: cli_status("psi4", &[("psi4", "--version")]),

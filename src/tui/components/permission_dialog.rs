@@ -63,14 +63,22 @@ impl PermissionDialog {
         let y = chat_area.y + chat_area.height.saturating_sub(needed_height);
         let area = Rect::new(chat_area.x, y, chat_area.width, needed_height);
 
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(" Tool call", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(": ", Style::default().fg(Color::White)),
-                Span::styled(&tool.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                Span::styled(&count_note, Style::default().fg(Color::DarkGray)),
-            ]),
-        ];
+        let mut lines = vec![Line::from(vec![
+            Span::styled(
+                " Tool call",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(": ", Style::default().fg(Color::White)),
+            Span::styled(
+                &tool.name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&count_note, Style::default().fg(Color::DarkGray)),
+        ])];
 
         for arg_line in &arg_lines {
             lines.push(Line::from(Span::styled(

@@ -18,7 +18,11 @@ pub fn find_python_with_module(module: &str) -> Option<String> {
     None
 }
 
-pub fn run_python_json<T: DeserializeOwned>(python: &str, script: &str, args: &[&str]) -> Result<T, String> {
+pub fn run_python_json<T: DeserializeOwned>(
+    python: &str,
+    script: &str,
+    args: &[&str],
+) -> Result<T, String> {
     let output = Command::new(python)
         .arg("-c")
         .arg(script)

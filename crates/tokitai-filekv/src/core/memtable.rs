@@ -31,8 +31,8 @@ use crate::core::error::TransientError;
 use crate::core::types::ValuePointer;
 use bytes::Bytes;
 use dashmap::DashMap;
-use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
+use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -179,10 +179,7 @@ impl MemTable {
         // environment-dependent defaults (for example num_cpus * 4) stay valid.
         let shard_count = Self::normalize_shard_count(config.shards) as u64;
         Self {
-            data: DashMap::with_hasher_and_shard_amount(
-                RandomState::new(),
-                shard_count as usize,
-            ),
+            data: DashMap::with_hasher_and_shard_amount(RandomState::new(), shard_count as usize),
             size_bytes: AtomicUsize::new(0),
             entry_count: AtomicUsize::new(0),
             config,
@@ -435,9 +432,7 @@ impl MemTable {
     /// * Iterator over key-value pairs
     pub fn iter(
         &self,
-    ) -> impl Iterator<
-        Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry, RandomState>,
-    > + '_ {
+    ) -> impl Iterator<Item = dashmap::mapref::multiple::RefMulti<'_, String, MemTableEntry, RandomState>> + '_ {
         self.data.iter()
     }
 

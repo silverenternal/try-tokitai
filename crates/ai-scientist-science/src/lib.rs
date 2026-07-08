@@ -15,5 +15,8 @@ pub mod simulation;
 
 pub use biology::{AutoBiologyTool, BiologyToolInterface, LocalBiologyTool};
 pub use chemistry::{AutoChemistryTool, ChemistryToolInterface, LocalChemistryTool};
-pub use environment::{BackendStatus, DomainEnvironmentReport, detect_domain_environment};
-pub use simulation::{AutoSimulationTool, LocalSimulationTool, SimulationConfig, SimulationResult, SimulationToolInterface};
+pub use environment::{detect_domain_environment, BackendStatus, DomainEnvironmentReport};
+pub use simulation::{
+    AutoSimulationTool, LocalSimulationTool, SimulationConfig, SimulationResult,
+    SimulationToolInterface,
+};

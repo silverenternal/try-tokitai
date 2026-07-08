@@ -286,10 +286,10 @@ fn default_mcp_auth_required() -> bool {
     true
 }
 fn default_max_tool_calls() -> u32 {
-    60
+    0
 }
 fn default_tool_call_burst() -> u32 {
-    10
+    0
 }
 
 impl Default for SecurityTomlConfig {
@@ -304,8 +304,8 @@ impl Default for SecurityTomlConfig {
             max_path_depth: 100,
             mcp_api_key: String::new(),
             mcp_auth_required: true,
-            max_tool_calls_per_minute: 60,
-            tool_call_burst_limit: 10,
+            max_tool_calls_per_minute: 0,
+            tool_call_burst_limit: 0,
             auto_discover_external_tools: false,
             allowed_tool_gen_paths: vec![],
             allow_autonomous_git_push: false,
@@ -880,5 +880,7 @@ mod tests {
         assert!(!config.auto_approve_tools);
         assert_eq!(config.max_file_size, 10 * 1024 * 1024);
         assert!(config.mcp_auth_required);
+        assert_eq!(config.max_tool_calls_per_minute, 0);
+        assert_eq!(config.tool_call_burst_limit, 0);
     }
 }
