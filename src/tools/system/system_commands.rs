@@ -116,9 +116,7 @@ impl SystemCommands {
         }
 
         // 执行命令（不使用 shell 解释器，直接执行）
-        let output = std::process::Command::new(&parts[0])
-            .args(&parts[1..])
-            .output()
+        let output = run_whitelisted_command(&parts)
             .map_err(|e| {
                 CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
             })?;
@@ -398,6 +396,22 @@ fn safe_split_command(command: &str) -> Result<Vec<String>, String> {
 }
 
 /// 检查是否是危险命令（黑名单）
+fn run_whitelisted_command(parts: &[String]) -> std::io::Result<std::process::Output> {
+    #[cfg(windows)]
+    {
+        if parts.first().is_some_and(|command| command == "ls") {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/D", "/C", "dir", "/A"]);
+            command.args(parts.iter().skip(1).filter(|arg| !arg.starts_with('-')));
+            return command.output();
+        }
+    }
+
+    std::process::Command::new(&parts[0])
+        .args(&parts[1..])
+        .output()
+}
+
 fn is_dangerous_command(command: &str) -> bool {
     // 包含完整路径的命令也要检查
     let command_base = command.rsplit('/').next().unwrap_or(command);

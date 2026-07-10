@@ -234,6 +234,7 @@ impl ModelRouter {
             let request = ChatRequest {
                 model: profile.model_name.clone(),
                 messages: vec![Message::user(test_prompt)],
+                multimodal_content: None,
                 temperature: 0.7,
                 max_tokens: Some(100),
                 top_p: None,

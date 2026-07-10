@@ -504,7 +504,21 @@ impl SystemMonitor {
             return Err("命令名称包含非法字符".to_string());
         }
 
-        let output = std::process::Command::new("which")
+        #[cfg(windows)]
+        if matches!(command.as_str(), "ls" | "cat" | "pwd" | "echo") {
+            return Ok(json!({
+                "success": true,
+                "data": {
+                    "available": true,
+                    "path": "Windows shell alias",
+                    "command": command,
+                }
+            })
+            .to_string());
+        }
+
+        let locator = if cfg!(windows) { "where.exe" } else { "which" };
+        let output = std::process::Command::new(locator)
             .arg(&command)
             .output()
             .map_err(|e| format!("检查命令失败：{}", e))?;

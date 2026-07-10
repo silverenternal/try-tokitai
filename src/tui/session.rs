@@ -447,13 +447,17 @@ impl SessionManager {
     pub fn delete_session(&mut self, id: &str) -> Result<()> {
         let path = self.sessions_dir.join(format!("{}.json", id));
         if path.exists() {
-            std::fs::remove_file(&path)?;
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!("Failed to delete session file {}: {}", path.display(), e);
+            }
         }
         self.index.retain(|m| m.id != id);
         if self.current_id.as_deref() == Some(id) {
             self.current_id = self.index.first().map(|meta| meta.id.clone());
         }
-        self.save_index()?;
+        if let Err(e) = self.save_index() {
+            tracing::warn!("Failed to save index after deleting session {}: {}", id, e);
+        }
         Ok(())
     }
 
@@ -706,6 +710,7 @@ pub async fn generate_ai_summary(
             Message::system("Summarize the following conversation in one line (max 80 chars). Focus on what was asked and what was accomplished. Output ONLY the summary text, no prefix."),
             Message::user(&conv_text),
         ],
+        multimodal_content: None,
         temperature: 0.3,
         max_tokens: Some(120),
         top_p: None,

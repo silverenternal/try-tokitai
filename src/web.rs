@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Result};
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 use axum::body::{Body, Bytes};
 use axum::extract::{Query, State};
+use axum::extract::DefaultBodyLimit;
 use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -205,6 +208,7 @@ struct PersistedWebState {
     current_session_id: Option<String>,
     api_url: Option<String>,
     model: Option<String>,
+    api_key: Option<String>,
     reasoning_effort: Option<String>,
     auto_approve_tools: Option<bool>,
     max_auto_approve_risk: Option<String>,
@@ -1757,6 +1761,23 @@ struct SendMessageRequest {
     content: String,
     mode: Option<String>,
     language: Option<String>,
+    #[serde(default)]
+    attachments: Vec<ChatAttachment>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChatAttachment {
+    name: String,
+    mime_type: Option<String>,
+    size: Option<usize>,
+    data_url: String,
+}
+
+#[derive(Debug, Default)]
+struct PreparedChatAttachments {
+    prompt_suffix: String,
+    multimodal_content: Option<Value>,
+    has_images: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2275,6 +2296,7 @@ struct StreamSessionRuntime {
     edited_files: Vec<WebEditedFile>,
     message_blocks: Vec<MessageBlock>,
     partial_text: String,
+    partial_thinking: String,
     progress_updates: Vec<String>,
     recent_progress_keys: Vec<String>,
     recent_progress_emitted_at: HashMap<String, Instant>,
@@ -2301,6 +2323,8 @@ struct StreamEnvelope {
     session_id: Option<String>,
     messages: Option<Vec<WebMessage>>,
     delta: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_delta: Option<String>,
     error: Option<String>,
     activity: Option<WebActivityEvent>,
     tool: Option<WebToolEvent>,
@@ -2317,6 +2341,7 @@ struct StreamEnvelope {
 struct WebSessionRuntimeSnapshot {
     session_id: String,
     partial_text: String,
+    partial_thinking: String,
     progress_updates: Vec<String>,
     latest_activity: Option<WebActivityEvent>,
     tool_events: Vec<WebToolEvent>,
@@ -2448,6 +2473,7 @@ pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
         .route("/api/terminals/create", post(api_create_terminal))
         .route("/api/terminals/input", post(api_terminal_input))
         .route("/api/terminals/close", post(api_close_terminal))
+        .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .nest_service("/", ServeDir::new(frontend_dir))
         .with_state(state)
 }
@@ -2828,6 +2854,7 @@ pub fn dispatch_bridge_stream(
     let content = request.content;
     let mode = request.mode;
     let language = request.language;
+    let attachments = request.attachments;
     let recovery_user_content = content.clone();
     let recovery_mode = mode.clone();
     let recovery_language = language.clone();
@@ -2841,6 +2868,7 @@ pub fn dispatch_bridge_stream(
             content,
             mode,
             language,
+            attachments,
             tx_stream.clone(),
         ))
         .catch_unwind()
@@ -2996,6 +3024,7 @@ pub fn dispatch_bridge_stream(
                 edited_files: Vec::new(),
                 message_blocks: Vec::new(),
                 partial_text: String::new(),
+                partial_thinking: String::new(),
                 progress_updates: Vec::new(),
                 recent_progress_keys: Vec::new(),
                 recent_progress_emitted_at: HashMap::new(),
@@ -3902,6 +3931,7 @@ async fn api_send_message_stream(
     let content = payload.content;
     let mode = payload.mode;
     let language = payload.language;
+    let attachments = payload.attachments;
     let recovery_user_content = content.clone();
     let recovery_mode = mode.clone();
     let recovery_language = language.clone();
@@ -3915,6 +3945,7 @@ async fn api_send_message_stream(
             content,
             mode,
             language,
+            attachments,
             tx.clone(),
         ))
         .catch_unwind()
@@ -4070,6 +4101,7 @@ async fn api_send_message_stream(
                 edited_files: Vec::new(),
                 message_blocks: Vec::new(),
                 partial_text: String::new(),
+                partial_thinking: String::new(),
                 progress_updates: Vec::new(),
                 recent_progress_keys: Vec::new(),
                 recent_progress_emitted_at: HashMap::new(),
@@ -6040,10 +6072,11 @@ async fn run_chat_request_stream(
     content: String,
     mode: Option<String>,
     language: Option<String>,
+    attachments: Vec<ChatAttachment>,
     tx: tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<()> {
     let abort_after_first_workspace_edit = content.contains("[[TEST_ABORT_AFTER_FIRST_EDIT]]");
-    let content = content.replace("[[TEST_ABORT_AFTER_FIRST_EDIT]]", "");
+    let mut content = content.replace("[[TEST_ABORT_AFTER_FIRST_EDIT]]", "");
     let existing_blocks = {
         let session_manager = lock_session_manager(&state)?;
         session_manager.load_messages(&session_id)?
@@ -6058,6 +6091,13 @@ async fn run_chat_request_stream(
         let runtime = lock_runtime_settings(&state)?;
         runtime.clone()
     };
+    let prepared_attachments = prepare_chat_attachments(
+        state.host.base_dir(),
+        &runtime.workspace_root,
+        &content,
+        &attachments,
+    )?;
+    content.push_str(&prepared_attachments.prompt_suffix);
 
     let provider = build_streaming_provider(&state, &runtime)?;
     let tool_definitions = assistant_tool_definitions(&state, &runtime).await?;
@@ -6089,27 +6129,11 @@ async fn run_chat_request_stream(
         }
     }
     let mut repair_attempts = 0usize;
-    let mut pseudo_tool_repair_attempted = false;
-
-    emit_activity(
-        &tx,
-        &state,
-        &session_id,
-        &runtime,
-        &persisted_blocks,
-        stream_mode,
-        workflow_activity_event(
-            "starting",
-            None,
-            Some("initialize".to_string()),
-            Some("running".to_string()),
-            None,
-            Some("main".to_string()),
-        ),
-    );
+    let mut pseudo_tool_repair_attempts = 0usize;
 
     let structured_workflow = should_run_structured_workflow(stream_mode, &user_content);
-    let max_repair_attempts = if structured_workflow { 6usize } else { 4usize };
+    let lightweight_tool_reasoning = should_use_lightweight_tool_reasoning(&user_content, structured_workflow);
+    let max_repair_attempts = if structured_workflow { 18usize } else { 10usize };
     let plan = if structured_workflow {
         emit_activity(
             &tx,
@@ -6310,9 +6334,13 @@ async fn run_chat_request_stream(
     let max_turn_rounds = dynamic_turn_round_limit(plan.as_ref(), structured_workflow);
     let mut stagnant_rounds = 0usize;
     let mut rounds_with_real_progress = 0usize;
+    let mut missing_workspace_progress_repair_attempts = 0usize;
+    let max_protocol_repair_attempts = if structured_workflow { 12usize } else { 6usize };
+    let max_workspace_recovery_attempts = if structured_workflow { 16usize } else { 8usize };
+    let mut multimodal_sent = false;
     for _ in 0..max_turn_rounds {
         let turn_start = persisted_blocks.len();
-        let request = build_stream_chat_request_with_prompt(
+        let mut request = build_stream_chat_request_with_prompt(
             &persisted_blocks,
             &runtime,
             &dynamic_system_prompt,
@@ -6320,26 +6348,17 @@ async fn run_chat_request_stream(
             &tool_definitions,
             state.host.base_dir(),
         )?;
-        emit_activity(
-            &tx,
-            &state,
-            &session_id,
-            &runtime,
-            &persisted_blocks,
-            stream_mode,
-            workflow_activity_event(
-                "execution",
-                Some(localized_text(
-                    turn_language,
-                    "Main agent is executing the current step",
-                    "Main agent is executing the current step",
-                )),
-                Some("execute".to_string()),
-                Some("running".to_string()),
-                None,
-                Some("main".to_string()),
-            ),
-        );
+        if prepared_attachments.has_images {
+            request.model = "qwen3.7-plus".to_string();
+            if !multimodal_sent {
+                request.multimodal_content = prepared_attachments.multimodal_content.clone();
+                multimodal_sent = true;
+            }
+        }
+        if lightweight_tool_reasoning {
+            request.thinking_mode = Some("disabled".to_string());
+            request.reasoning_effort = Some("low".to_string());
+        }
         let has_workspace_edits = persisted_blocks
             .iter()
             .rev()
@@ -6355,6 +6374,7 @@ async fn run_chat_request_stream(
             has_workspace_edits,
             stream_mode,
             turn_language,
+            lightweight_tool_reasoning,
             &tx,
         )
         .await?;
@@ -6371,6 +6391,8 @@ async fn run_chat_request_stream(
             turn_language,
         )
         .unwrap_or(raw_assistant_text);
+        let assistant_text_nonempty = !assistant_text.trim().is_empty();
+        let assistant_text_contains_xml_tool_payload = contains_xml_tool_payload(&assistant_text);
         if !assistant_text.is_empty() {
             visible_assistant = combine_assistant_segments(&visible_assistant, &assistant_text);
             push_assistant_message_blocks(&mut persisted_blocks, assistant_text);
@@ -6394,6 +6416,25 @@ async fn run_chat_request_stream(
             rounds_with_real_progress = rounds_with_real_progress.saturating_add(1);
         } else {
             stagnant_rounds = stagnant_rounds.saturating_add(1);
+            if let Some(directive) = stagnation_recovery_directive(stagnant_rounds, turn_language) {
+                dynamic_system_prompt = format!("{}\n\n{}", dynamic_system_prompt, directive);
+                emit_activity(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &persisted_blocks,
+                    stream_mode,
+                    workflow_activity_event(
+                        "repair",
+                        Some(stagnation_recovery_summary(stagnant_rounds, turn_language)),
+                        Some("repair".to_string()),
+                        Some("running".to_string()),
+                        Some(format!("stagnant-rounds={}", stagnant_rounds)),
+                        Some("main".to_string()),
+                    ),
+                );
+            }
         }
 
         let needs_tools = is_tool_call_finish(&turn.finish_reason)
@@ -6419,6 +6460,32 @@ async fn run_chat_request_stream(
                     ),
                 );
             } else {
+                let missing_tool_args = tool_calls
+                    .iter()
+                    .filter_map(|call| {
+                        let missing = tool_call_missing_required_args(call);
+                        if missing.is_empty() {
+                            return None;
+                        }
+                        let name = call
+                            .pointer("/function/name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("tool");
+                        Some(format!("{}: {}", name, missing.join(", ")))
+                    })
+                    .collect::<Vec<_>>();
+                if !missing_tool_args.is_empty() && pseudo_tool_repair_attempts < max_protocol_repair_attempts {
+                    pseudo_tool_repair_attempts = pseudo_tool_repair_attempts.saturating_add(1);
+                    let recent_target = recent_workspace_target(&persisted_blocks)
+                        .unwrap_or_else(|| "no recent workspace file is available".to_string());
+                    dynamic_system_prompt = format!(
+                        "{}\n\nTool argument repair directive:\n- The previous native tool call omitted required arguments: {}.\n- Do not execute an empty or partial tool call.\n- The most recent concrete workspace target is: {}.\n- Reuse that path when the user refers to 'this file' or asks to make the current document more detailed.\n- Retry immediately with every required argument populated.",
+                        dynamic_system_prompt,
+                        missing_tool_args.join("; "),
+                        recent_target,
+                    );
+                    continue;
+                }
                 if structured_workflow {
                     let tool_names = tool_calls
                         .iter()
@@ -6501,8 +6568,8 @@ async fn run_chat_request_stream(
 
         if !turn.pseudo_tool_names.is_empty() {
             let pseudo_tools = turn.pseudo_tool_names.join(", ");
-            if !pseudo_tool_repair_attempted {
-                pseudo_tool_repair_attempted = true;
+            if pseudo_tool_repair_attempts < max_protocol_repair_attempts {
+                pseudo_tool_repair_attempts = pseudo_tool_repair_attempts.saturating_add(1);
                 dynamic_system_prompt = localized_string(
                     turn_language,
                     format!(
@@ -6538,6 +6605,108 @@ async fn run_chat_request_stream(
             return Err(anyhow!(
                 "model emitted pseudo tool narration instead of native tool calls: {}",
                 pseudo_tools
+            ));
+        }
+
+        if assistant_text_contains_xml_tool_payload {
+            if pseudo_tool_repair_attempts < max_protocol_repair_attempts {
+                pseudo_tool_repair_attempts = pseudo_tool_repair_attempts.saturating_add(1);
+                dynamic_system_prompt = localized_string(
+                    turn_language,
+                    format!(
+                        "{existing}\n\nNative tool-call repair directive:\n- Your previous response printed XML-style tool markup in assistant text.\n- Do not emit <tool_call>, <function>, or <parameter> blocks in assistant text.\n- Resume from the exact pending step and use only native tool/function calls for every required action.",
+                        existing = dynamic_system_prompt,
+                    ),
+                    format!(
+                        "{existing}\n\nNative tool-call repair directive:\n- Your previous response printed XML-style tool markup in assistant text.\n- Do not emit <tool_call>, <function>, or <parameter> blocks in assistant text.\n- Resume from the exact pending step and use only native tool/function calls for every required action.",
+                        existing = dynamic_system_prompt,
+                    ),
+                );
+                emit_activity(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &persisted_blocks,
+                    stream_mode,
+                    workflow_activity_event(
+                        "execution",
+                        Some(localized_text(
+                            turn_language,
+                            "The model printed XML-style tool markup instead of a real tool call, so the turn is retrying from the pending step.",
+                            "The model printed XML-style tool markup instead of a real tool call, so the turn is retrying from the pending step.",
+                        )),
+                        Some("execute".to_string()),
+                        Some("repair".to_string()),
+                        Some("xml_tool_payload".to_string()),
+                        Some("main".to_string()),
+                    ),
+                );
+                continue;
+            }
+
+            return Err(anyhow!(
+                "model emitted XML-style tool payload in assistant text instead of native tool calls"
+            ));
+        }
+
+        let missing_required_workspace_progress = plan.as_ref().is_some_and(|plan| {
+            !plan.required_paths.is_empty()
+                && !made_progress_this_round
+                && !needs_tools
+                && assistant_text_nonempty
+                && !required_paths_ready_for_review(state.host.base_dir(), &runtime, plan)
+                && !required_paths_likely_satisfied_by_evidence(
+                    plan,
+                    &persisted_blocks,
+                    state.host.base_dir(),
+                    &runtime.workspace_root,
+                    &required_path_snapshots,
+                )
+        });
+
+        if missing_required_workspace_progress {
+            if missing_workspace_progress_repair_attempts < max_workspace_recovery_attempts {
+                missing_workspace_progress_repair_attempts = missing_workspace_progress_repair_attempts.saturating_add(1);
+                dynamic_system_prompt = localized_string(
+                    turn_language,
+                    format!(
+                        "{existing}\n\nWorkspace-evidence repair directive:\n- Your previous response ended as plain assistant text without completing the required workspace paths.\n- Do not stop at an explanation, summary, or code sample.\n- Resume from the exact pending step and produce real tool evidence for the remaining required paths before finalizing.\n- If you need to inspect first, do that via native tools, then continue the actual write/edit actions.",
+                        existing = dynamic_system_prompt,
+                    ),
+                    format!(
+                        "{existing}\n\nWorkspace-evidence repair directive:\n- Your previous response ended as plain assistant text without completing the required workspace paths.\n- Do not stop at an explanation, summary, or code sample.\n- Resume from the exact pending step and produce real tool evidence for the remaining required paths before finalizing.\n- If you need to inspect first, do that via native tools, then continue the actual write/edit actions.",
+                        existing = dynamic_system_prompt,
+                    ),
+                );
+                emit_activity(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &persisted_blocks,
+                    stream_mode,
+                    workflow_activity_event(
+                        "execution",
+                        Some(localized_text(
+                            turn_language,
+                            "The model replied with plain text before producing required workspace evidence, so the turn is retrying from the pending step.",
+                            "The model replied with plain text before producing required workspace evidence, so the turn is retrying from the pending step.",
+                        )),
+                        Some("execute".to_string()),
+                        Some("repair".to_string()),
+                        Some(plan
+                            .as_ref()
+                            .map(|value| value.required_paths.join(" | "))
+                            .unwrap_or_default()),
+                        Some("main".to_string()),
+                    ),
+                );
+                continue;
+            }
+
+            return Err(anyhow!(
+                "model ended with plain assistant text before completing the required workspace paths"
             ));
         }
 
@@ -7004,7 +7173,7 @@ async fn run_chat_request_stream(
                 )
         })
         .unwrap_or(false);
-    if incomplete_required_paths && stagnant_rounds <= 2 {
+    if incomplete_required_paths && stagnant_rounds <= 12 {
         emit_activity(
             &tx,
             &state,
@@ -7026,13 +7195,13 @@ async fn run_chat_request_stream(
             ),
         );
         let extra_rounds = if structured_workflow {
-            48usize
+            240usize
         } else {
-            24usize
+            96usize
         };
         for _ in 0..extra_rounds {
             let turn_start = persisted_blocks.len();
-            let request = build_stream_chat_request_with_prompt(
+            let mut request = build_stream_chat_request_with_prompt(
                 &persisted_blocks,
                 &runtime,
                 &dynamic_system_prompt,
@@ -7040,26 +7209,17 @@ async fn run_chat_request_stream(
                 &tool_definitions,
                 state.host.base_dir(),
             )?;
-            emit_activity(
-                &tx,
-                &state,
-                &session_id,
-                &runtime,
-                &persisted_blocks,
-                stream_mode,
-                workflow_activity_event(
-                    "execution",
-                    Some(localized_text(
-                        turn_language,
-                        "Main agent is continuing the current step",
-                        "Main agent is continuing the current step",
-                    )),
-                    Some("execute".to_string()),
-                    Some("running".to_string()),
-                    None,
-                    Some("main".to_string()),
-                ),
-            );
+            if prepared_attachments.has_images {
+                request.model = "qwen3.7-plus".to_string();
+                if !multimodal_sent {
+                    request.multimodal_content = prepared_attachments.multimodal_content.clone();
+                    multimodal_sent = true;
+                }
+            }
+            if lightweight_tool_reasoning {
+                request.thinking_mode = Some("disabled".to_string());
+                request.reasoning_effort = Some("low".to_string());
+            }
             let has_workspace_edits = persisted_blocks
                 .iter()
                 .rev()
@@ -7075,6 +7235,7 @@ async fn run_chat_request_stream(
                 has_workspace_edits,
                 stream_mode,
                 turn_language,
+                lightweight_tool_reasoning,
                 &tx,
             )
             .await?;
@@ -7091,6 +7252,8 @@ async fn run_chat_request_stream(
                 turn_language,
             )
             .unwrap_or(raw_assistant_text);
+            let assistant_text_nonempty = !assistant_text.trim().is_empty();
+            let assistant_text_contains_xml_tool_payload = contains_xml_tool_payload(&assistant_text);
             if !assistant_text.is_empty() {
                 visible_assistant = combine_assistant_segments(&visible_assistant, &assistant_text);
                 push_assistant_message_blocks(&mut persisted_blocks, assistant_text);
@@ -7104,9 +7267,9 @@ async fn run_chat_request_stream(
                     }
                 }
             }
-            if is_tool_call_finish(&turn.finish_reason)
-                || (turn.finish_reason.is_some() && turn.tool_calls.is_some())
-            {
+            let needs_tools = is_tool_call_finish(&turn.finish_reason)
+                || (turn.finish_reason.is_some() && turn.tool_calls.is_some());
+            if needs_tools {
                 let tool_calls = turn.tool_calls.unwrap_or_default();
                 if !tool_calls.is_empty() {
                     execute_tool_calls(
@@ -7143,6 +7306,47 @@ async fn run_chat_request_stream(
                     }
                 }
             }
+            if assistant_text_contains_xml_tool_payload {
+                if pseudo_tool_repair_attempts < max_protocol_repair_attempts {
+                    pseudo_tool_repair_attempts = pseudo_tool_repair_attempts.saturating_add(1);
+                    dynamic_system_prompt = localized_string(
+                        turn_language,
+                        format!(
+                            "{existing}\n\nNative tool-call repair directive:\n- Your previous response printed XML-style tool markup in assistant text.\n- Do not emit <tool_call>, <function>, or <parameter> blocks in assistant text.\n- Resume from the exact pending step and use only native tool/function calls for every required action.",
+                            existing = dynamic_system_prompt,
+                        ),
+                        format!(
+                            "{existing}\n\nNative tool-call repair directive:\n- Your previous response printed XML-style tool markup in assistant text.\n- Do not emit <tool_call>, <function>, or <parameter> blocks in assistant text.\n- Resume from the exact pending step and use only native tool/function calls for every required action.",
+                            existing = dynamic_system_prompt,
+                        ),
+                    );
+                    emit_activity(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &persisted_blocks,
+                        stream_mode,
+                        workflow_activity_event(
+                            "execution",
+                            Some(localized_text(
+                                turn_language,
+                                "The model printed XML-style tool markup instead of a real tool call, so the turn is retrying from the pending step.",
+                                "The model printed XML-style tool markup instead of a real tool call, so the turn is retrying from the pending step.",
+                            )),
+                            Some("execute".to_string()),
+                            Some("repair".to_string()),
+                            Some("xml_tool_payload".to_string()),
+                            Some("main".to_string()),
+                        ),
+                    );
+                    continue;
+                }
+
+                return Err(anyhow!(
+                    "model emitted XML-style tool payload in assistant text instead of native tool calls"
+                ));
+            }
             if let Some(plan) = &plan {
                 if try_finalize_current_turn_with_hard_verifier(
                     &tx,
@@ -7169,9 +7373,87 @@ async fn run_chat_request_stream(
                 state.host.base_dir(),
                 &runtime.workspace_root,
             );
+            let missing_required_workspace_progress = plan.as_ref().is_some_and(|plan| {
+                !plan.required_paths.is_empty()
+                    && !still_progressing
+                    && !needs_tools
+                    && assistant_text_nonempty
+                    && !required_paths_ready_for_review(state.host.base_dir(), &runtime, plan)
+                    && !required_paths_likely_satisfied_by_evidence(
+                        plan,
+                        &persisted_blocks,
+                        state.host.base_dir(),
+                        &runtime.workspace_root,
+                        &required_path_snapshots,
+                    )
+            });
+            if missing_required_workspace_progress {
+                if missing_workspace_progress_repair_attempts < max_workspace_recovery_attempts {
+                    missing_workspace_progress_repair_attempts = missing_workspace_progress_repair_attempts.saturating_add(1);
+                    let missing_paths = plan
+                        .as_ref()
+                        .map(|value| value.required_paths.join(" | "))
+                        .unwrap_or_default();
+                    dynamic_system_prompt = localized_string(
+                        turn_language,
+                        format!(
+                            "{existing}\n\nWorkspace-evidence repair directive:\n- Your previous response ended as plain assistant text without completing the required workspace paths.\n- Do not stop at an explanation, summary, or code sample.\n- Resume from the exact pending step and produce real tool evidence for the remaining required paths before finalizing.\n- If you need to inspect first, do that via native tools, then continue the actual write/edit actions.",
+                            existing = dynamic_system_prompt,
+                        ),
+                        format!(
+                            "{existing}\n\nWorkspace-evidence repair directive:\n- Your previous response ended as plain assistant text without completing the required workspace paths.\n- Do not stop at an explanation, summary, or code sample.\n- Resume from the exact pending step and produce real tool evidence for the remaining required paths before finalizing.\n- If you need to inspect first, do that via native tools, then continue the actual write/edit actions.",
+                            existing = dynamic_system_prompt,
+                        ),
+                    );
+                    emit_activity(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &persisted_blocks,
+                        stream_mode,
+                        workflow_activity_event(
+                            "execution",
+                            Some(localized_text(
+                                turn_language,
+                                "The model replied with plain text before producing required workspace evidence, so the turn is retrying from the pending step.",
+                                "The model replied with plain text before producing required workspace evidence, so the turn is retrying from the pending step.",
+                            )),
+                            Some("execute".to_string()),
+                            Some("repair".to_string()),
+                            Some(missing_paths),
+                            Some("main".to_string()),
+                        ),
+                    );
+                    continue;
+                }
+
+                return Err(anyhow!(
+                    "model ended with plain assistant text before completing the required workspace paths"
+                ));
+            }
             if !still_progressing {
                 stagnant_rounds = stagnant_rounds.saturating_add(1);
-                if stagnant_rounds > 2 {
+                if let Some(directive) = stagnation_recovery_directive(stagnant_rounds, turn_language) {
+                    dynamic_system_prompt = format!("{}\n\n{}", dynamic_system_prompt, directive);
+                    emit_activity(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &persisted_blocks,
+                        stream_mode,
+                        workflow_activity_event(
+                            "repair",
+                            Some(stagnation_recovery_summary(stagnant_rounds, turn_language)),
+                            Some("repair".to_string()),
+                            Some("running".to_string()),
+                            Some(format!("stagnant-rounds={}", stagnant_rounds)),
+                            Some("main".to_string()),
+                        ),
+                    );
+                }
+                if stagnant_rounds > 12 {
                     break;
                 }
             } else {
@@ -7252,7 +7534,13 @@ fn finalize_stream_success(
         .and_then(|sessions| {
             sessions
                 .get(session_id)
-                .map(|session| (session.edited_files.clone(), session.progress_updates.clone()))
+                .map(|session| {
+                    (
+                        session.edited_files.clone(),
+                        session.progress_updates.clone(),
+                        session.partial_thinking.clone(),
+                    )
+                })
         })
         .unwrap_or_default();
     let finalized_blocks = merge_runtime_edited_files_into_messages(
@@ -7263,6 +7551,8 @@ fn finalize_stream_success(
     );
     let finalized_blocks =
         merge_runtime_progress_updates_into_messages(&finalized_blocks, &runtime_files.1);
+    let finalized_blocks =
+        merge_runtime_thinking_into_messages(&finalized_blocks, &runtime_files.2);
     let finalized_blocks =
         ensure_final_turn_assistant_summary(&finalized_blocks, stream_mode, language);
     {
@@ -7324,6 +7614,7 @@ fn finalize_stream_success(
         session_id: Some(session_id.to_string()),
         messages: Some(final_messages),
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(workflow_activity_event(
             "complete",
@@ -7438,6 +7729,37 @@ fn merge_runtime_progress_updates_into_messages(
     merged
 }
 
+fn merge_runtime_thinking_into_messages(
+    messages: &[MessageBlock],
+    partial_thinking: &str,
+) -> Vec<MessageBlock> {
+    let trimmed = partial_thinking.trim();
+    if trimmed.is_empty() {
+        return messages.to_vec();
+    }
+
+    let mut merged = messages.to_vec();
+    let already_present = merged.iter().rev().any(|block| match block {
+        MessageBlock::Thinking { content, .. } => {
+            let existing = content.trim();
+            existing == trimmed || existing.contains(trimmed) || trimmed.contains(existing)
+        }
+        _ => false,
+    });
+    if !already_present {
+        let thinking_block = MessageBlock::Thinking {
+            content: trimmed.to_string(),
+            collapsed: false,
+        };
+        let insert_at = merged
+            .iter()
+            .rposition(|block| matches!(block, MessageBlock::Assistant { .. } | MessageBlock::AssistantStreaming { .. }))
+            .unwrap_or(merged.len());
+        merged.insert(insert_at, thinking_block);
+    }
+    merged
+}
+
 fn finalize_stream_failure(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
     state: &WebAppState,
@@ -7452,7 +7774,13 @@ fn finalize_stream_failure(
             .and_then(|sessions| {
                 sessions
                     .get(session_id)
-                    .map(|session| (session.edited_files.clone(), session.progress_updates.clone()))
+                    .map(|session| {
+                        (
+                            session.edited_files.clone(),
+                            session.progress_updates.clone(),
+                            session.partial_thinking.clone(),
+                        )
+                    })
             })
             .unwrap_or_default();
         let mut merged_messages = merge_runtime_edited_files_into_messages(
@@ -7463,6 +7791,8 @@ fn finalize_stream_failure(
         );
         merged_messages =
             merge_runtime_progress_updates_into_messages(&merged_messages, &runtime_files.1);
+        merged_messages =
+            merge_runtime_thinking_into_messages(&merged_messages, &runtime_files.2);
         append_stream_failure_message(&mut merged_messages, language, err);
         sync_stream_runtime_messages(state, session_id, &merged_messages);
         if let Ok(mut session_manager) = lock_session_manager(state) {
@@ -7476,6 +7806,7 @@ fn finalize_stream_failure(
         session_id: Some(session_id.to_string()),
         messages: final_messages,
         delta: None,
+        thinking_delta: None,
         error: Some(err.to_string()),
         activity: None,
         tool: None,
@@ -7542,17 +7873,30 @@ fn append_stream_failure_message(
         return;
     }
 
+    let public_detail = if trimmed.contains("panicked")
+        || trimmed.contains("regex parse error")
+        || trimmed.len() > 240
+    {
+        localized_text(
+            language,
+            "\u{5185}\u{90e8}\u{6267}\u{884c}\u{7ec4}\u{4ef6}\u{53d1}\u{751f}\u{5f02}\u{5e38}",
+            "an internal execution component failed",
+        )
+    } else {
+        trimmed.to_string()
+    };
+
     push_assistant_message_blocks(
         messages,
         localized_string(
             language,
             format!(
-                "这轮执行被外部服务打断了：{}。我已经保留当前工作区改动和执行痕迹，继续本轮后会从这里接着完成剩余写入与验证。",
-                trimmed
+                "\u{8fd9}\u{8f6e}\u{6267}\u{884c}\u{88ab}\u{5916}\u{90e8}\u{670d}\u{52a1}\u{6253}\u{65ad}\u{4e86}\u{ff1a}{}\u{3002}\u{6211}\u{5df2}\u{7ecf}\u{4fdd}\u{7559}\u{5f53}\u{524d}\u{5de5}\u{4f5c}\u{533a}\u{6539}\u{52a8}\u{548c}\u{6267}\u{884c}\u{75d5}\u{8ff9}\u{ff0c}\u{7ee7}\u{7eed}\u{672c}\u{8f6e}\u{540e}\u{4f1a}\u{4ece}\u{8fd9}\u{91cc}\u{63a5}\u{7740}\u{5b8c}\u{6210}\u{5269}\u{4f59}\u{5199}\u{5165}\u{4e0e}\u{9a8c}\u{8bc1}\u{3002}",
+                public_detail
             ),
             format!(
                 "This turn was interrupted by an external service error: {}. I preserved the current workspace changes and execution trace, and continuing the turn will resume the remaining writes and verification from here.",
-                trimmed
+                public_detail
             ),
         ),
     );
@@ -7680,6 +8024,10 @@ fn provider_supports_streaming_tools(runtime: &RuntimeSettings) -> bool {
         return true;
     }
 
+    if api_url.contains("compatible-mode") {
+        return true;
+    }
+
     false
 }
 
@@ -7785,6 +8133,7 @@ fn build_workspace_completion_request(
     ChatRequest {
         model: runtime.model.clone(),
         messages: vec![Message::system(system_prompt), Message::user(&user_prompt)],
+        multimodal_content: None,
         temperature: 0.2,
         max_tokens: Some(180),
         top_p: Some(0.95),
@@ -7927,6 +8276,7 @@ fn build_stream_chat_request_with_prompt(
     Ok(ChatRequest {
         model: runtime.model.clone(),
         messages: api_messages,
+        multimodal_content: None,
         temperature: effort_temperature(runtime),
         max_tokens: Some(effort_max_tokens(runtime)),
         top_p: None,
@@ -7973,36 +8323,137 @@ fn compress_messages_for_request(
     messages: &[MessageBlock],
     language: TurnLanguage,
 ) -> Vec<MessageBlock> {
-    const MAX_BLOCKS_BEFORE_COMPRESSION: usize = 48;
-    const RECENT_BLOCKS_TO_KEEP: usize = 18;
+    const CONTEXT_TOKEN_TRIGGER: usize = 18_000;
+    const MAX_BLOCKS_BEFORE_COMPRESSION: usize = 96;
+    const RECENT_TURNS_TO_KEEP: usize = 3;
 
-    if messages.len() <= MAX_BLOCKS_BEFORE_COMPRESSION {
+    let estimated_tokens = estimate_message_blocks_tokens(messages);
+    if messages.len() <= MAX_BLOCKS_BEFORE_COMPRESSION
+        && estimated_tokens <= CONTEXT_TOKEN_TRIGGER
+    {
         return messages.to_vec();
     }
 
-    let split_index = messages.len().saturating_sub(RECENT_BLOCKS_TO_KEEP);
+    let user_turn_starts = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, block)| matches!(block, MessageBlock::User { .. }).then_some(index))
+        .collect::<Vec<_>>();
+    let split_index = user_turn_starts
+        .len()
+        .checked_sub(RECENT_TURNS_TO_KEEP)
+        .and_then(|index| user_turn_starts.get(index).copied())
+        .unwrap_or(0);
+
+    if split_index == 0 {
+        return compact_recent_context(messages);
+    }
+
     let (older, recent) = messages.split_at(split_index);
     let summary = summarize_message_blocks(older, language);
     if summary.trim().is_empty() {
-        return messages.to_vec();
+        return compact_recent_context(recent);
     }
 
-    let mut compressed = Vec::with_capacity(recent.len() + 2);
+    let compacted_recent = compact_recent_context(recent);
+    let mut compressed = Vec::with_capacity(compacted_recent.len() + 1);
     compressed.push(MessageBlock::System {
         content: localized_string(
             language,
             format!(
-                "以下是更早对话轮次压缩后的上下文.\n请保留这些约束与已完成工作:\n{}",
+                "Earlier conversation memory was compressed. Preserve user constraints, completed work, failed paths, and verification evidence. Prefer the three most recent turns if they conflict.\n{}",
                 summary
             ),
             format!(
-                "Context compressed from earlier conversation turns.\nPreserve these constraints and completed work:\n{}",
+                "Compressed memory from earlier turns. Preserve user constraints, completed work, failed paths, and verification evidence. Prefer the three most recent turns if they conflict.\n{}",
                 summary
             ),
         ),
     });
-    compressed.extend_from_slice(recent);
+    compressed.extend(compacted_recent);
     compressed
+}
+
+fn estimate_text_tokens(content: &str) -> usize {
+    let mut ascii = 0usize;
+    let mut non_ascii = 0usize;
+    for character in content.chars() {
+        if character.is_ascii() { ascii += 1; } else { non_ascii += 1; }
+    }
+    ascii.div_ceil(4) + non_ascii.div_ceil(2) + 4
+}
+
+fn estimate_message_block_tokens(block: &MessageBlock) -> usize {
+    match block {
+        MessageBlock::User { content, .. }
+        | MessageBlock::Assistant { content }
+        | MessageBlock::AssistantStreaming { content }
+        | MessageBlock::Thinking { content, .. }
+        | MessageBlock::Error { content }
+        | MessageBlock::System { content } => estimate_text_tokens(content),
+        MessageBlock::AssistantChoices { title, options } => estimate_text_tokens(title) + options.iter().map(|option| estimate_text_tokens(option)).sum::<usize>(),
+        MessageBlock::ToolCall { name, args, .. } => estimate_text_tokens(name) + estimate_text_tokens(&args.to_string()) + 24,
+        MessageBlock::ToolResult { result, .. } => estimate_text_tokens(result) + 16,
+        MessageBlock::Diff { diff } => estimate_text_tokens(&diff.file_path) + estimate_text_tokens(&diff.before_content) + estimate_text_tokens(&diff.after_content),
+        MessageBlock::Subagent { record } => estimate_text_tokens(&record.purpose) + estimate_text_tokens(&record.output) + 32,
+        MessageBlock::Verification { report } => estimate_text_tokens(&report.summary) + report.checks.iter().map(|check| estimate_text_tokens(&check.detail)).sum::<usize>() + 32,
+    }
+}
+
+fn estimate_message_blocks_tokens(messages: &[MessageBlock]) -> usize {
+    messages.iter().map(estimate_message_block_tokens).sum()
+}
+
+fn summary_points_with_anchor(points: &[String], limit: usize) -> Vec<String> {
+    if points.len() <= limit {
+        return points.to_vec();
+    }
+    let mut selected = Vec::with_capacity(limit);
+    if let Some(first) = points.first() {
+        selected.push(first.clone());
+    }
+    let recent_count = limit.saturating_sub(selected.len());
+    selected.extend(
+        points
+            .iter()
+            .skip(1)
+            .rev()
+            .take(recent_count)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev(),
+    );
+    selected
+}
+
+fn compact_recent_context(messages: &[MessageBlock]) -> Vec<MessageBlock> {
+    const LARGE_TOOL_RESULT_CHARS: usize = 2_400;
+    const LARGE_REASONING_CHARS: usize = 1_600;
+    const LARGE_ASSISTANT_CHARS: usize = 4_000;
+
+    messages.iter().filter_map(|block| match block {
+        MessageBlock::AssistantStreaming { .. } => None,
+        MessageBlock::Thinking { content, collapsed } if content.chars().count() > LARGE_REASONING_CHARS => Some(MessageBlock::Thinking {
+            content: tail_string(content, LARGE_REASONING_CHARS),
+            collapsed: *collapsed,
+        }),
+        MessageBlock::Assistant { content } if content.chars().count() > LARGE_ASSISTANT_CHARS => Some(MessageBlock::Assistant {
+            content: tail_string(content, LARGE_ASSISTANT_CHARS),
+        }),
+        MessageBlock::ToolResult { call_id, result, success } if result.chars().count() > LARGE_TOOL_RESULT_CHARS => {
+            let tool_name = messages.iter().rev().find_map(|candidate| match candidate {
+                MessageBlock::ToolCall { call_id: candidate_id, name, .. } if candidate_id == call_id => Some(name.as_str()),
+                _ => None,
+            });
+            let compacted = tool_name
+                .map(|name| summarize_tool_result_for_provider_memory(name, result, *success))
+                .filter(|summary| !summary.trim().is_empty())
+                .unwrap_or_else(|| tail_string(result, LARGE_TOOL_RESULT_CHARS));
+            Some(MessageBlock::ToolResult { call_id: call_id.clone(), result: compacted, success: *success })
+        }
+        other => Some(other.clone()),
+    }).collect()
 }
 
 fn summarize_message_blocks(messages: &[MessageBlock], language: TurnLanguage) -> String {
@@ -8169,16 +8620,7 @@ fn summarize_message_blocks(messages: &[MessageBlock], language: TurnLanguage) -
 
     let mut sections = Vec::new();
     if !user_points.is_empty() {
-        let recent_user_points = user_points
-            .iter()
-            .cloned()
-            .rev()
-            .take(8)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let recent_user_points = summary_points_with_anchor(&user_points, 8).join("\n");
         sections.push(localized_string(
             language,
             format!("更早的目标与请求:\n{}", recent_user_points),
@@ -8834,6 +9276,7 @@ fn build_research_runtime_event(
 
 fn clone_stream_runtime_view(runtime: &StreamSessionRuntime) -> StreamSessionRuntimeView {
     StreamSessionRuntimeView {
+        partial_thinking: runtime.partial_thinking.clone(),
         subagents: runtime.subagents.clone(),
         verifier: runtime.verifier.clone(),
         checkpoints: runtime.checkpoints.clone(),
@@ -8872,6 +9315,7 @@ fn push_runtime_timeline_event(
 
 #[derive(Debug, Clone, Default)]
 struct StreamSessionRuntimeView {
+    partial_thinking: String,
     subagents: Vec<WebSubagentEvent>,
     verifier: Option<WebVerifierReport>,
     checkpoints: Vec<String>,
@@ -8929,6 +9373,7 @@ fn emit_activity(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(activity),
         tool: None,
@@ -9077,6 +9522,7 @@ fn emit_assistant_progress_delta(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: Some(trimmed.to_string()),
+        thinking_delta: None,
         error: None,
         activity: None,
         tool: None,
@@ -9178,6 +9624,7 @@ fn emit_subagent_update(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(workflow_activity_event(
             "subagent",
@@ -9231,6 +9678,7 @@ fn emit_verifier_update(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(workflow_activity_event(
             "verifier",
@@ -12383,6 +12831,7 @@ async fn provider_completion(
         .chat(ChatRequest {
             model: runtime.model.clone(),
             messages,
+            multimodal_content: None,
             temperature: 0.2,
             max_tokens: Some((effort_max_tokens(runtime) / 3).max(256)),
             top_p: Some(0.95),
@@ -13448,23 +13897,115 @@ async fn stream_provider_turn(
     has_workspace_edits: bool,
     mode: Option<&str>,
     language: TurnLanguage,
+    suppress_thinking: bool,
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<StreamTurnResult> {
     let mut stream = provider.chat_stream(request).await?;
     let mut raw_text = String::new();
     let mut text = String::new();
+    let mut thinking = String::new();
+    let mut emitted_thinking = String::new();
     let mut emitted_combined = visible_assistant_prefix.to_string();
     let mut finish_reason = None;
     let mut tool_calls = None;
+    let mut announced_tool_names = BTreeSet::new();
     let mut pseudo_tool_names = Vec::new();
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
         if let Some(next_tool_calls) = chunk.tool_calls.clone() {
+            for call in &next_tool_calls {
+                let name = call
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty());
+                let Some(name) = name else { continue };
+                if !announced_tool_names.insert(name.to_string()) {
+                    continue;
+                }
+                let file_path = call
+                    .pointer("/function/arguments")
+                    .and_then(Value::as_str)
+                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                    .and_then(|args| extract_tool_path(name, &args));
+                let preview = timed_web_tool_event(WebToolEvent {
+                    call_id: call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|call_id| !call_id.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("streaming-{}", name)),
+                    name: name.to_string(),
+                    status: "running".to_string(),
+                    risk: "low".to_string(),
+                    args: None,
+                    result: None,
+                    success: None,
+                    file_path,
+                    updated_at: None,
+                });
+                push_runtime_tool_event(state, session_id, &preview);
+                let _ = tx.send(StreamEnvelope {
+                    r#type: "tool".to_string(),
+                    session_id: Some(session_id.to_string()),
+                    messages: None,
+                    delta: None,
+                    thinking_delta: None,
+                    error: None,
+                    activity: None,
+                    tool: Some(preview),
+                    permission: None,
+                    edited_files: None,
+                    research: None,
+                    subagents: None,
+                    verifier: None,
+                    auto_skills: None,
+                });
+            }
             tool_calls = Some(next_tool_calls);
         }
         if let Some(reason) = chunk.finish_reason.clone() {
             finish_reason = Some(reason);
+        }
+
+        if let Some(chunk_thinking) = chunk.thinking.as_ref() {
+            let merged_thinking = merge_stream_text(&thinking, chunk_thinking);
+            if merged_thinking != thinking {
+                thinking = merged_thinking;
+                if !suppress_thinking {
+                    if let Ok(mut sessions) = lock_stream_runtime(state) {
+                        if let Some(session) = sessions.get_mut(session_id) {
+                            session.partial_thinking = thinking.clone();
+                        }
+                    }
+                }
+                let delta = if thinking.starts_with(&emitted_thinking) {
+                    thinking[emitted_thinking.len()..].to_string()
+                } else {
+                    thinking.clone()
+                };
+                emitted_thinking = thinking.clone();
+                if !suppress_thinking && !delta.trim().is_empty() {
+                    let _ = tx.send(StreamEnvelope {
+                        r#type: "thinking_delta".to_string(),
+                        session_id: Some(session_id.to_string()),
+                        messages: None,
+                        delta: None,
+                        thinking_delta: Some(delta),
+                        error: None,
+                        activity: None,
+                        tool: None,
+                        permission: None,
+                        edited_files: None,
+                        research: None,
+                        subagents: None,
+                        verifier: None,
+                        auto_skills: None,
+                    });
+                }
+            }
         }
 
         if !chunk.content.is_empty() {
@@ -13497,6 +14038,7 @@ async fn stream_provider_turn(
                 session_id: Some(session_id.to_string()),
                 messages: None,
                 delta: Some(delta),
+                thinking_delta: None,
                 error: None,
                 activity: None,
                 tool: None,
@@ -13521,6 +14063,16 @@ async fn stream_provider_turn(
     }
 
     if tool_calls.as_ref().is_none_or(|calls| calls.is_empty()) {
+        let xml_tool_calls = extract_xml_tool_calls(&raw_text);
+        if !xml_tool_calls.is_empty() {
+            tool_calls = Some(xml_tool_calls);
+            if !is_tool_call_finish(&finish_reason) {
+                finish_reason = Some("tool_calls".to_string());
+            }
+        }
+    }
+
+    if tool_calls.as_ref().is_none_or(|calls| calls.is_empty()) {
         pseudo_tool_names = detect_plaintext_tool_narration(&raw_text);
     }
 
@@ -13538,7 +14090,144 @@ fn sanitize_visible_stream_text(input: &str) -> String {
         return String::new();
     }
     let cleaned = strip_provider_tool_narration(trimmed);
+    if looks_like_tool_payload_dump(&cleaned) || looks_like_runtime_json_dump(&cleaned) {
+        return String::new();
+    }
     cleaned.trim_start_matches(char::is_whitespace).to_string()
+}
+
+fn stagnation_recovery_directive(rounds: usize, language: TurnLanguage) -> Option<String> {
+    let instruction = match rounds {
+        3 => localized_text(
+            language,
+            "Stagnation recovery level 1: stop repeating the same call. Change the query, tool, source, file inspection order, or command shape while preserving the goal.",
+            "Stagnation recovery level 1: stop repeating the same call. Change the query, tool, source, file inspection order, or command shape while preserving the goal.",
+        ),
+        6 => localized_text(
+            language,
+            "Stagnation recovery level 2: isolate the blocked step. Continue independent plan steps first, use an alternative evidence source or implementation path, and record the blocked step for later verification.",
+            "Stagnation recovery level 2: isolate the blocked step. Continue independent plan steps first, use an alternative evidence source or implementation path, and record the blocked step for later verification.",
+        ),
+        9 => localized_text(
+            language,
+            "Stagnation recovery level 3: make one final materially different attempt. If it still fails, stop safely and explain the exact blocker, attempts made, preserved artifacts, and the best continuation path. Do not silently loop.",
+            "Stagnation recovery level 3: make one final materially different attempt. If it still fails, stop safely and explain the exact blocker, attempts made, preserved artifacts, and the best continuation path. Do not silently loop.",
+        ),
+        _ => return None,
+    };
+    Some(instruction.to_string())
+}
+
+fn stagnation_recovery_summary(rounds: usize, language: TurnLanguage) -> String {
+    match rounds {
+        3 => localized_text(language, "当前路径没有进展，正在切换工具或查询方式", "No progress on the current path; switching tools or query strategy").to_string(),
+        6 => localized_text(language, "当前步骤仍被阻塞，正在先推进可独立完成的工作", "The step remains blocked; advancing independent work first").to_string(),
+        _ => localized_text(language, "正在进行最后一次不同路径尝试，失败后将说明阻塞并安全退出", "Making one final alternative attempt, then reporting the blocker and exiting safely if needed").to_string(),
+    }
+}
+
+fn should_use_lightweight_tool_reasoning(content: &str, structured_workflow: bool) -> bool {
+    if structured_workflow {
+        return false;
+    }
+    let trimmed = content.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 220 {
+        return false;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    [
+        "write", "create", "edit", "update", "read", "list", "check", "run", "file", "document",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || ["\u{5199}", "\u{521b}\u{5efa}", "\u{7f16}\u{8f91}", "\u{4fee}\u{6539}", "\u{66f4}\u{65b0}", "\u{8bfb}\u{53d6}", "\u{67e5}\u{770b}", "\u{68c0}\u{67e5}", "\u{6587}\u{4ef6}", "\u{6587}\u{6863}", "\u{8be6}\u{7ec6}\u{4e00}\u{70b9}"]
+            .iter()
+            .any(|needle| trimmed.contains(needle))
+}
+
+fn recent_workspace_target(messages: &[MessageBlock]) -> Option<String> {
+    messages.iter().rev().find_map(|block| match block {
+        MessageBlock::Diff { diff } => Some(diff.file_path.clone()),
+        MessageBlock::ToolCall { name, args, .. }
+            if matches!(name.as_str(), "write_file" | "edit_file" | "read_file" | "apply_patch") =>
+        {
+            extract_tool_path(name, args)
+        }
+        _ => None,
+    })
+}
+
+fn tool_call_missing_required_args(tool_call: &Value) -> Vec<&'static str> {
+    let name = tool_call
+        .pointer("/function/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let args = tool_call
+        .pointer("/function/arguments")
+        .and_then(|value| match value {
+            Value::Object(object) => Some(object.clone()),
+            Value::String(raw) => serde_json::from_str::<Value>(raw)
+                .ok()
+                .and_then(|parsed| parsed.as_object().cloned()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let present = |key: &str| {
+        args.get(key).is_some_and(|value| match value {
+            Value::String(text) => !text.trim().is_empty(),
+            Value::Null => false,
+            _ => true,
+        })
+    };
+    match name {
+        "write_file" => ["path", "content"].into_iter().filter(|key| !present(key)).collect(),
+        "edit_file" | "read_file" => ["path"].into_iter().filter(|key| !present(key)).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn looks_like_runtime_json_dump(input: &str) -> bool {
+    let raw = input.trim();
+    if raw.is_empty() || (!raw.starts_with('{') && !raw.starts_with('[')) {
+        return false;
+    }
+    if raw.starts_with('{') {
+        return true;
+    }
+    if raw.starts_with('[') {
+        let json_array_prefix = raw
+            .chars()
+            .nth(1)
+            .is_none_or(|next| next.is_whitespace() || matches!(next, '{' | '[' | '"' | '-' | '0'..='9' | 't' | 'f' | 'n'));
+        if json_array_prefix {
+            return true;
+        }
+    }
+    let normalized = raw.to_ascii_lowercase();
+    let runtime_keys = [
+        "\"tool_calls\"",
+        "\"tool_args\"",
+        "\"call_id\"",
+        "\"function\"",
+        "\"arguments\"",
+        "\"session_id\"",
+        "\"runtime_snapshots\"",
+        "\"edited_files\"",
+        "\"tool_events\"",
+        "\"before_content\"",
+        "\"after_content\"",
+        "\"thinking_delta\"",
+        "\"assistant_delta\"",
+    ];
+    let matched_keys = runtime_keys
+        .iter()
+        .filter(|key| normalized.contains(**key))
+        .count();
+    if matched_keys >= 1 && (normalized.contains("\"type\"") || normalized.contains("\"status\"") || raw.len() > 160) {
+        return true;
+    }
+    serde_json::from_str::<Value>(raw).is_ok()
+        && matched_keys >= 1
 }
 
 fn stream_visible_workspace_text(
@@ -13602,9 +14291,16 @@ fn assistant_text_for_workspace_control_channel(
     if normalized.trim().is_empty() {
         return String::new();
     }
+    if looks_like_tool_payload_dump(&normalized) || looks_like_runtime_json_dump(&normalized) {
+        return String::new();
+    }
     let normalized_mode = workflow_mode(mode);
-    if has_workspace_edits && normalized_mode != "chat" && looks_like_large_inline_code(&normalized) {
-        return workspace_write_notice(language);
+    if normalized_mode != "chat" && looks_like_large_inline_code(&normalized) {
+        return if has_workspace_edits {
+            workspace_write_notice(language)
+        } else {
+            String::new()
+        };
     }
     normalized
 }
@@ -13661,17 +14357,62 @@ fn strip_provider_tool_narration(input: &str) -> String {
     normalized[..cut_at].to_string()
 }
 
+fn looks_like_tool_payload_dump(input: &str) -> bool {
+    let raw = input.trim();
+    if raw.is_empty() {
+        return false;
+    }
+
+    let normalized = raw.to_ascii_lowercase();
+    if normalized.starts_with("```tool_code")
+        || normalized.starts_with("tool write_file ")
+        || normalized.starts_with("tool edit_file ")
+        || normalized.starts_with("{\"operation\":\"write_file\"")
+        || normalized.starts_with("{\"operation\":\"edit_file\"")
+        || normalized.starts_with("<tool_call")
+        || normalized.starts_with("<function=")
+    {
+        return true;
+    }
+
+    if (normalized.contains("\"file_path\"") || normalized.contains("\"path\""))
+        && normalized.contains("\"content\"")
+        && raw.len() > 180
+    {
+        return true;
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        let payload = value.get("data").unwrap_or(&value);
+        if let Some(object) = payload.as_object() {
+            let has_content = object
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.len() > 40);
+            let has_file_target = object
+                .get("file_path")
+                .or_else(|| object.get("path"))
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.trim().is_empty());
+            let is_file_write = object
+                .get("operation")
+                .and_then(Value::as_str)
+                .is_some_and(|name| matches!(name, "write_file" | "edit_file" | "apply_patch"));
+            if (has_file_target && has_content) || is_file_write {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn summarize_workspace_turn_for_chat(
     text: &str,
     recent_blocks: &[MessageBlock],
     mode: Option<&str>,
     language: TurnLanguage,
 ) -> Option<String> {
-    let normalized_mode = workflow_mode(mode);
-    if normalized_mode == "chat" {
-        return None;
-    }
-
     let original = text.trim();
     let write_notice = workspace_write_notice(language);
     let meaningful_assistant_texts = recent_blocks
@@ -14022,6 +14763,12 @@ fn find_dsml_like_start(input: &str) -> Option<usize> {
         "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}",
         "<DSML",
         "</DSML",
+        "<tool_call",
+        "</tool_call",
+        "<function=",
+        "<function ",
+        "<function_",
+        "</function>",
     ];
     for marker in FULL_MARKERS {
         if let Some(index) = input.find(marker) {
@@ -14044,6 +14791,14 @@ fn find_dsml_like_start(input: &str) -> Option<usize> {
         "</\u{FF5C}\u{FF5C}DSM",
         "</\u{FF5C}\u{FF5C}DSML",
         "</\u{FF5C}\u{FF5C}DSML\u{FF5C}",
+        "<tool",
+        "<tool_",
+        "<tool_call",
+        "</tool",
+        "<function",
+        "<function=",
+        "<function_",
+        "</function",
     ];
     for marker in PARTIAL_MARKERS {
         if input.ends_with(marker) {
@@ -14216,6 +14971,123 @@ fn extract_dsml_tool_calls(input: &str) -> Vec<Value> {
     }
 
     tool_calls
+}
+
+fn extract_xml_tool_calls(input: &str) -> Vec<Value> {
+    static TOOL_BLOCK_RE: OnceLock<Regex> = OnceLock::new();
+    static FUNCTION_RE: OnceLock<Regex> = OnceLock::new();
+    static PARAMETER_OPEN_RE: OnceLock<Regex> = OnceLock::new();
+    static ATTRIBUTE_PARAMETER_RE: OnceLock<Regex> = OnceLock::new();
+
+    let block_re = TOOL_BLOCK_RE.get_or_init(|| {
+        Regex::new(r#"(?is)<tool_call\b[^>]*>(.*?)</tool_call>"#)
+            .expect("valid xml tool block regex")
+    });
+    let function_re = FUNCTION_RE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)<function(?:=| name=")([A-Za-z_][A-Za-z0-9_]*)(?:")?>\s*(.*?)\s*</function>"#,
+        )
+        .expect("valid xml function regex")
+    });
+    let parameter_open_re = PARAMETER_OPEN_RE.get_or_init(|| {
+        Regex::new(r#"(?is)<([A-Za-z_][A-Za-z0-9_-]*)>"#)
+            .expect("valid xml parameter opening-tag regex")
+    });
+    let attribute_parameter_re = ATTRIBUTE_PARAMETER_RE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)<parameter(?:=| name=")([A-Za-z_][A-Za-z0-9_-]*)(?:")?>\s*(.*?)\s*</parameter>"#,
+        )
+        .expect("valid xml attribute parameter regex")
+    });
+
+    let mut tool_calls = Vec::new();
+
+    for block_caps in block_re.captures_iter(input) {
+        let Some(block_body) = block_caps.get(1).map(|value| value.as_str()) else {
+            continue;
+        };
+
+        for (index, function_caps) in function_re.captures_iter(block_body).enumerate() {
+            let Some(function_name) = function_caps.get(1).map(|value| value.as_str().trim()) else {
+                continue;
+            };
+            if function_name.is_empty() {
+                continue;
+            }
+            let function_body = function_caps
+                .get(2)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
+
+            let mut args = serde_json::Map::new();
+            for parameter_caps in parameter_open_re.captures_iter(function_body) {
+                let Some(raw_name) = parameter_caps.get(1).map(|value| value.as_str().trim()) else {
+                    continue;
+                };
+                let parameter_name = raw_name.strip_prefix("function_").unwrap_or(raw_name).trim();
+                if parameter_name.is_empty() || matches!(parameter_name, "function" | "parameter" | "tool_call") {
+                    continue;
+                }
+                let Some(open_match) = parameter_caps.get(0) else {
+                    continue;
+                };
+                let close_tag = format!("</{}>", raw_name);
+                let remaining = &function_body[open_match.end()..];
+                let Some(close_offset) = remaining.to_ascii_lowercase().find(&close_tag.to_ascii_lowercase()) else {
+                    continue;
+                };
+                let raw_value = remaining[..close_offset].trim();
+                if raw_value.is_empty() {
+                    continue;
+                }
+                let parsed_value = serde_json::from_str::<Value>(raw_value)
+                    .unwrap_or_else(|_| Value::String(raw_value.to_string()));
+                args.insert(parameter_name.to_string(), parsed_value);
+            }
+            for parameter_caps in attribute_parameter_re.captures_iter(function_body) {
+                let Some(raw_name) = parameter_caps.get(1).map(|value| value.as_str().trim()) else {
+                    continue;
+                };
+                let parameter_name = raw_name.strip_prefix("function_").unwrap_or(raw_name).trim();
+                if parameter_name.is_empty() || args.contains_key(parameter_name) {
+                    continue;
+                }
+                let raw_value = parameter_caps
+                    .get(2)
+                    .map(|value| value.as_str())
+                    .unwrap_or_default()
+                    .trim();
+                if raw_value.is_empty() {
+                    continue;
+                }
+                let parsed_value = serde_json::from_str::<Value>(raw_value)
+                    .unwrap_or_else(|_| Value::String(raw_value.to_string()));
+                args.insert(parameter_name.to_string(), parsed_value);
+            }
+
+            if let Some(tool_call) = normalize_dsml_tool_call(
+                function_name,
+                Value::Object(args),
+                None,
+                index,
+            ) {
+                tool_calls.push(tool_call);
+            }
+        }
+    }
+
+    tool_calls
+}
+
+fn contains_xml_tool_payload(input: &str) -> bool {
+    let trimmed = input.trim();
+    !trimmed.is_empty()
+        && (trimmed.contains("<tool_call")
+            || trimmed.contains("</tool_call>")
+            || trimmed.contains("<function=")
+            || trimmed.contains("<function ")
+            || trimmed.contains("<parameter=")
+            || trimmed.contains("<parameter "))
 }
 
 fn parse_dsml_attributes(raw: &str) -> BTreeMap<String, String> {
@@ -14788,12 +15660,16 @@ async fn execute_tool_calls(
     language: TurnLanguage,
     abort_after_first_workspace_edit: bool,
 ) -> Result<()> {
-    for tool_call in tool_calls {
-        let call_id = tool_call
+    let existing_tool_count = persisted_blocks
+        .iter()
+        .filter(|block| matches!(block, MessageBlock::ToolCall { .. }))
+        .count();
+    for (tool_index, tool_call) in tool_calls.iter().enumerate() {
+        let raw_call_id = tool_call
             .get("id")
             .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
+            .map(str::trim)
+            .unwrap_or("");
         let name = tool_call
             .get("function")
             .and_then(|function| function.get("name"))
@@ -14807,6 +15683,11 @@ async fn execute_tool_calls(
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .unwrap_or_else(|| json!({}));
         let args = bind_tool_args_to_workspace(runtime, &normalize_web_tool_args(&name, args));
+        let call_id = if raw_call_id.is_empty() {
+            format!("tool-{}-{}", existing_tool_count + tool_index + 1, name)
+        } else {
+            raw_call_id.to_string()
+        };
         let tool_target_path = extract_tool_path(&name, &args);
         let risk = default_tool_risk_map()
             .get(&name)
@@ -14830,6 +15711,7 @@ async fn execute_tool_calls(
             session_id: Some(session_id.to_string()),
             messages: None,
             delta: None,
+            thinking_delta: None,
             error: None,
             activity: Some(activity_event(
                 "tool_pending",
@@ -14893,6 +15775,13 @@ async fn execute_tool_calls(
                 wait_for_tool_approval(state, session_id, &call_id, &name, &risk_name, &args, tx)
                     .await?;
             if !approved {
+                upsert_tool_call_block(
+                    persisted_blocks,
+                    &call_id,
+                    &name,
+                    &args,
+                    ToolCallStatus::Denied("Denied by user".to_string()),
+                );
                 persisted_blocks.push(MessageBlock::ToolResult {
                     call_id: call_id.clone(),
                     result: "Tool call denied by user approval gate.".to_string(),
@@ -14904,6 +15793,7 @@ async fn execute_tool_calls(
                     session_id: Some(session_id.to_string()),
                     messages: None,
                     delta: None,
+                    thinking_delta: None,
                     error: None,
                     activity: Some(activity_event(
                         "tool_denied",
@@ -14960,6 +15850,13 @@ async fn execute_tool_calls(
             .rate_limiter
             .check(&name)
         {
+            upsert_tool_call_block(
+                persisted_blocks,
+                &call_id,
+                &name,
+                &args,
+                ToolCallStatus::Failed(rate_err.clone()),
+            );
             persisted_blocks.push(MessageBlock::ToolResult {
                 call_id: call_id.clone(),
                 result: rate_err.clone(),
@@ -14971,6 +15868,7 @@ async fn execute_tool_calls(
                 session_id: Some(session_id.to_string()),
                 messages: None,
                 delta: None,
+                thinking_delta: None,
                 error: None,
                 activity: Some(activity_event(
                     "tool_rate_limited",
@@ -15032,6 +15930,7 @@ async fn execute_tool_calls(
             session_id: Some(session_id.to_string()),
             messages: None,
             delta: None,
+            thinking_delta: None,
             error: None,
             activity: Some(activity_event(
                 "tool_executing",
@@ -15096,6 +15995,13 @@ async fn execute_tool_calls(
                     &result,
                     pending_file_snapshot.as_ref(),
                 );
+                upsert_tool_call_block(
+                    persisted_blocks,
+                    &call_id,
+                    &name,
+                    &args,
+                    ToolCallStatus::Complete,
+                );
                 persisted_blocks.push(MessageBlock::ToolResult {
                     call_id: call_id.clone(),
                     result: result.clone(),
@@ -15127,6 +16033,7 @@ async fn execute_tool_calls(
                         session_id: Some(session_id.to_string()),
                         messages: None,
                         delta: None,
+                        thinking_delta: None,
                         error: None,
                         activity: Some(activity_event(
                             "editing",
@@ -15238,6 +16145,7 @@ async fn execute_tool_calls(
                             session_id: Some(session_id.to_string()),
                             messages: None,
                             delta: None,
+                            thinking_delta: None,
                             error: None,
                             activity: Some(activity_event(
                                 "artifact",
@@ -15312,6 +16220,7 @@ async fn execute_tool_calls(
                             session_id: Some(session_id.to_string()),
                             messages: None,
                             delta: None,
+                            thinking_delta: None,
                             error: None,
                             activity: Some(activity_event(
                                 "tool_complete",
@@ -15376,6 +16285,13 @@ async fn execute_tool_calls(
             }
             Err(err) => {
                 let error_message = format!("Error: {}", err);
+                upsert_tool_call_block(
+                    persisted_blocks,
+                    &call_id,
+                    &name,
+                    &args,
+                    ToolCallStatus::Failed(error_message.clone()),
+                );
                 persisted_blocks.push(MessageBlock::ToolResult {
                     call_id: call_id.clone(),
                     result: error_message.clone(),
@@ -15397,6 +16313,7 @@ async fn execute_tool_calls(
                     session_id: Some(session_id.to_string()),
                     messages: None,
                     delta: None,
+                    thinking_delta: None,
                     error: None,
                     activity: Some(activity_event(
                         "tool_failed",
@@ -16024,9 +16941,14 @@ fn current_research_payload(
 
 fn detect_plaintext_tool_narration(input: &str) -> Vec<String> {
     static PLAIN_TOOL_CALL_RE: OnceLock<Regex> = OnceLock::new();
+    static XML_TOOL_CALL_RE: OnceLock<Regex> = OnceLock::new();
     let tool_re = PLAIN_TOOL_CALL_RE.get_or_init(|| {
         Regex::new(r#"(?m)^Tool\s+([A-Za-z_][A-Za-z0-9_]*)\s*$"#)
             .expect("valid plaintext tool call regex")
+    });
+    let xml_tool_re = XML_TOOL_CALL_RE.get_or_init(|| {
+        Regex::new(r#"(?is)<function(?:=| name=")([A-Za-z_][A-Za-z0-9_]*)(?:")?>"#)
+            .expect("valid xml plaintext tool regex")
     });
 
     let mut tool_names = Vec::new();
@@ -16039,6 +16961,17 @@ fn detect_plaintext_tool_narration(input: &str) -> Vec<String> {
         }
         tool_names.push(normalize_plaintext_tool_name(tool_name));
     }
+    for captures in xml_tool_re.captures_iter(input) {
+        let Some(tool_name) = captures.get(1).map(|value| value.as_str().trim()) else {
+            continue;
+        };
+        if tool_name.is_empty() {
+            continue;
+        }
+        tool_names.push(normalize_plaintext_tool_name(tool_name));
+    }
+    tool_names.sort();
+    tool_names.dedup();
 
     tool_names
 }
@@ -16363,6 +17296,7 @@ async fn wait_for_tool_approval(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(activity_event(
             "permission_required",
@@ -16440,6 +17374,7 @@ async fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
                 .map(|(session_id, session)| WebSessionRuntimeSnapshot {
                     session_id: session_id.clone(),
                     partial_text: session.partial_text.clone(),
+                    partial_thinking: session.partial_thinking.clone(),
                     progress_updates: session.progress_updates.clone(),
                     latest_activity: session.latest_activity.clone(),
                     tool_events: session.tool_events.clone(),
@@ -22141,21 +23076,12 @@ fn initial_runtime_settings(
     let model = effective_model_name(config);
     let providers = effective_providers(config);
     let config_workspace_root = default_workspace_root(config, paths);
-    let has_explicit_workspace = config
-        .user_tools
-        .workspace_dir
+    let workspace_root = persisted_state
         .as_ref()
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    let workspace_root = if has_explicit_workspace {
-        persisted_state
-            .as_ref()
-            .and_then(|state| state.workspace_root.clone())
-            .and_then(|saved| resolve_workspace_root(&saved, &config_workspace_root).ok())
-            .unwrap_or(config_workspace_root)
-    } else {
-        config_workspace_root
-    };
+        .and_then(|state| state.workspace_root.clone())
+        .filter(|saved| !saved.trim().is_empty())
+        .and_then(|saved| resolve_workspace_root(&saved, &config_workspace_root).ok())
+        .unwrap_or(config_workspace_root);
     let toolchains = persisted_state
         .as_ref()
         .and_then(|state| state.toolchains.clone())
@@ -22196,11 +23122,14 @@ fn initial_runtime_settings(
     RuntimeSettings {
         api_url,
         model,
-        deep_think: false,
+        deep_think: true,
         reasoning_effort,
         competition_mode: false,
         privacy_mode: false,
-        api_key: assistant_config.api_key.clone(),
+        api_key: persisted_state
+            .as_ref()
+            .and_then(|state| state.api_key.clone())
+            .or_else(|| assistant_config.api_key.clone()),
         providers,
         workspace_root,
         auto_approve_tools,
@@ -22314,6 +23243,7 @@ fn persist_web_state(
         current_session_id,
         api_url: Some(runtime.api_url.clone()),
         model: Some(runtime.model.clone()),
+        api_key: runtime.api_key.clone(),
         reasoning_effort: Some(runtime.reasoning_effort.clone()),
         auto_approve_tools: Some(runtime.auto_approve_tools),
         max_auto_approve_risk: Some(risk_level_name(&runtime.max_auto_approve_risk).to_string()),
@@ -22322,7 +23252,9 @@ fn persist_web_state(
         toolchains: Some(runtime.toolchains.clone()),
     };
     let content = serde_json::to_string_pretty(&payload)?;
-    fs::write(&state.persisted_state_path, content)?;
+    let tmp_path = state.persisted_state_path.with_extension("json.tmp");
+    fs::write(&tmp_path, &content)?;
+    fs::rename(&tmp_path, &state.persisted_state_path)?;
     Ok(())
 }
 
@@ -22545,6 +23477,8 @@ fn stop_stream_session(state: &WebAppState, session_id: &str) -> Result<()> {
         );
         merged_messages =
             merge_runtime_progress_updates_into_messages(&merged_messages, &session.progress_updates);
+        merged_messages =
+            merge_runtime_thinking_into_messages(&merged_messages, &session.partial_thinking);
 
         let partial_text = session.partial_text.trim();
         if !partial_text.is_empty() {
@@ -22647,6 +23581,7 @@ fn respond_to_tool_permission(
         session_id: Some(session_id.to_string()),
         messages: None,
         delta: None,
+        thinking_delta: None,
         error: None,
         activity: Some(activity_event(
             format!("tool_{}", status),
@@ -22693,6 +23628,98 @@ fn canonical_workspace_dir_from(base_dir: &Path, path: &str) -> Result<PathBuf> 
             }
         })
         .map_err(|err| anyhow!("failed to resolve workspace root '{}': {}", path, err))
+}
+
+fn safe_attachment_name(name: &str, index: usize) -> String {
+    let fallback = format!("attachment-{}", index + 1);
+    let file_name = Path::new(name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&fallback);
+    let sanitized = file_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.trim_matches(['.', '_']).is_empty() {
+        fallback
+    } else {
+        sanitized
+    }
+}
+
+fn decode_attachment_data_url(data_url: &str) -> Result<Vec<u8>> {
+    let (_, encoded) = data_url
+        .split_once(',')
+        .ok_or_else(|| anyhow!("invalid attachment data URL"))?;
+    BASE64_STANDARD
+        .decode(encoded.trim())
+        .map_err(|err| anyhow!("invalid attachment base64: {}", err))
+}
+
+fn prepare_chat_attachments(
+    base_dir: &Path,
+    workspace_root: &str,
+    user_text: &str,
+    attachments: &[ChatAttachment],
+) -> Result<PreparedChatAttachments> {
+    if attachments.is_empty() {
+        return Ok(PreparedChatAttachments::default());
+    }
+    const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+    const MAX_TOTAL_BYTES: usize = 50 * 1024 * 1024;
+    let workspace = canonical_workspace_dir_from(base_dir, workspace_root)?;
+    let attachment_dir = workspace.join(".tokitai").join("attachments");
+    fs::create_dir_all(&attachment_dir)?;
+    let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+    let mut total_bytes = 0usize;
+    let mut saved_paths = Vec::new();
+    let mut content_parts = vec![json!({ "type": "text", "text": user_text })];
+    let mut has_images = false;
+
+    for (index, attachment) in attachments.iter().enumerate() {
+        let bytes = decode_attachment_data_url(&attachment.data_url)?;
+        let declared_size = attachment.size.unwrap_or(bytes.len());
+        if bytes.len() > MAX_ATTACHMENT_BYTES || declared_size > MAX_ATTACHMENT_BYTES {
+            return Err(anyhow!("attachment '{}' exceeds 20 MB", attachment.name));
+        }
+        total_bytes = total_bytes.saturating_add(bytes.len());
+        if total_bytes > MAX_TOTAL_BYTES {
+            return Err(anyhow!("attachments exceed 50 MB total"));
+        }
+        let safe_name = safe_attachment_name(&attachment.name, index);
+        let target = attachment_dir.join(format!("{}-{}-{}", stamp, index + 1, safe_name));
+        fs::write(&target, bytes)?;
+        let relative = target.strip_prefix(&workspace).unwrap_or(&target);
+        saved_paths.push(relative.to_string_lossy().replace('\\', "/"));
+
+        let mime_type = attachment.mime_type.as_deref().unwrap_or("application/octet-stream");
+        if mime_type.starts_with("image/") {
+            has_images = true;
+            content_parts.push(json!({
+                "type": "image_url",
+                "image_url": { "url": attachment.data_url }
+            }));
+        }
+    }
+
+    let prompt_suffix = format!(
+        "\n\nAttached files were saved in the workspace:\n{}",
+        saved_paths.iter().map(|path| format!("- {}", path)).collect::<Vec<_>>().join("\n")
+    );
+    if let Some(Value::Object(text_part)) = content_parts.first_mut() {
+        text_part.insert("text".to_string(), Value::String(format!("{}{}", user_text, prompt_suffix)));
+    }
+    Ok(PreparedChatAttachments {
+        prompt_suffix,
+        multimodal_content: has_images.then_some(Value::Array(content_parts)),
+        has_images,
+    })
 }
 
 fn canonical_workspace_dir(path: &str) -> Result<PathBuf> {
@@ -23327,6 +24354,242 @@ mod tests {
         }
     }
 
+    #[test]
+    fn context_compression_keeps_three_recent_turns_on_user_boundaries() {
+        let mut messages = Vec::new();
+        for turn in 0..6 {
+            messages.push(user(&format!("turn-{turn} {}", "x".repeat(14_000))));
+            messages.push(MessageBlock::Assistant {
+                content: format!("answer-{turn}"),
+            });
+        }
+
+        let compressed = compress_messages_for_request(&messages, TurnLanguage::En);
+        assert!(matches!(compressed.first(), Some(MessageBlock::System { .. })));
+        let retained_users = compressed
+            .iter()
+            .filter_map(|block| match block {
+                MessageBlock::User { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(retained_users.len(), 3);
+        assert!(retained_users[0].starts_with("turn-3"));
+        assert!(retained_users[2].starts_with("turn-5"));
+    }
+
+    #[test]
+    fn compressed_memory_keeps_original_goal_anchor() {
+        let messages = (0..12)
+            .map(|turn| user(&format!("goal-{turn}")))
+            .collect::<Vec<_>>();
+        let summary = summarize_message_blocks(&messages, TurnLanguage::En);
+        assert!(summary.contains("goal-0"));
+        assert!(summary.contains("goal-11"));
+    }
+
+    #[test]
+    fn context_compression_preserves_recent_tool_call_result_pair() {
+        let mut messages = vec![user(&format!("old {}", "x".repeat(80_000)))];
+        for turn in 1..3 {
+            messages.push(user(&format!("turn-{turn}")));
+            messages.push(MessageBlock::Assistant { content: "working".to_string() });
+        }
+        messages.push(user("latest"));
+        messages.push(MessageBlock::ToolCall {
+            name: "write_file".to_string(),
+            args: json!({"path":"result.txt","content":"done"}),
+            call_id: "call-latest".to_string(),
+            status: ToolCallStatus::Complete,
+        });
+        messages.push(MessageBlock::ToolResult {
+            call_id: "call-latest".to_string(),
+            result: "written".to_string(),
+            success: true,
+        });
+
+        let compressed = compress_messages_for_request(&messages, TurnLanguage::En);
+        assert!(compressed.iter().any(|block| matches!(block, MessageBlock::ToolCall { call_id, .. } if call_id == "call-latest")));
+        assert!(compressed.iter().any(|block| matches!(block, MessageBlock::ToolResult { call_id, .. } if call_id == "call-latest")));
+    }
+
+    #[test]
+    fn oversized_recent_tool_result_is_compacted_without_losing_identity() {
+        let messages = vec![
+            user(&format!("inspect {}", "x".repeat(80_000))),
+            MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: json!({"path":"large.log"}),
+                call_id: "large-result".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "large-result".to_string(),
+                result: "payload-line\n".repeat(5_000),
+                success: true,
+            },
+        ];
+
+        let compressed = compress_messages_for_request(&messages, TurnLanguage::En);
+        let result = compressed.iter().find_map(|block| match block {
+            MessageBlock::ToolResult { call_id, result, .. } if call_id == "large-result" => Some(result),
+            _ => None,
+        }).expect("tool result retained");
+        assert!(result.chars().count() < 5_000);
+    }
+
+    #[test]
+    fn xml_tool_call_parameters_do_not_require_regex_backreferences() {
+        let calls = extract_xml_tool_calls(
+            "<tool_call><function=write_file><path>test.txt</path><content>a</content></function></tool_call>",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "write_file");
+        let arguments = calls[0]["function"]["arguments"]
+            .as_str()
+            .unwrap_or_default();
+        let parsed: Value = serde_json::from_str(arguments).unwrap();
+        assert_eq!(parsed["path"], "test.txt");
+        assert_eq!(parsed["content"], "a");
+    }
+
+    #[test]
+    fn initial_runtime_settings_restore_persisted_workspace_without_config_override() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tokitai_workspace_restore_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let base_dir = temp_dir.join("base");
+        let frontend_dir = base_dir.join("frontend");
+        let state_dir = temp_dir.join("state");
+        let selected_workspace = temp_dir.join("selected-workspace");
+        fs::create_dir_all(&frontend_dir).unwrap();
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&selected_workspace).unwrap();
+        let paths = AppPaths::for_desktop(base_dir, frontend_dir, state_dir);
+        let persisted_state_path = paths.web_runtime_state_path();
+        let persisted = PersistedWebState {
+            workspace_root: Some(selected_workspace.to_string_lossy().to_string()),
+            ..PersistedWebState::default()
+        };
+        fs::write(
+            &persisted_state_path,
+            serde_json::to_string_pretty(&persisted).unwrap(),
+        )
+        .unwrap();
+        let assistant_config = AssistantConfig::new_with_runtime(
+            "http://127.0.0.1:11434/v1".to_string(),
+            None,
+            "test-model".to_string(),
+            0.7,
+            4096,
+        );
+
+        let runtime = initial_runtime_settings(
+            &Config::default(),
+            &SecurityConfig::default(),
+            &assistant_config,
+            &persisted_state_path,
+            &paths,
+        );
+
+        assert_eq!(
+            canonical_workspace_dir(&runtime.workspace_root).unwrap(),
+            selected_workspace.canonicalize().unwrap()
+        );
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn runtime_thinking_is_inserted_before_final_assistant_summary() {
+        let messages = vec![
+            MessageBlock::User {
+                content: "write a file".to_string(),
+                branch_id: "main".to_string(),
+            },
+            MessageBlock::Assistant {
+                content: "Completed the file write.".to_string(),
+            },
+        ];
+
+        let merged = merge_runtime_thinking_into_messages(&messages, "tool execution reasoning");
+
+        assert!(matches!(merged[1], MessageBlock::Thinking { .. }));
+        assert!(matches!(merged[2], MessageBlock::Assistant { .. }));
+    }
+
+    #[test]
+    fn simple_file_followup_uses_lightweight_tool_reasoning() {
+        assert!(should_use_lightweight_tool_reasoning("\u{628a}\u{8fd9}\u{4e2a}\u{6587}\u{6863}\u{8be6}\u{7ec6}\u{4e00}\u{70b9}", false));
+        assert!(should_use_lightweight_tool_reasoning("write a test file", false));
+        assert!(!should_use_lightweight_tool_reasoning("research a complete benchmark and literature survey", true));
+    }
+
+    #[test]
+    fn missing_write_file_arguments_are_detected_before_execution() {
+        let call = json!({
+            "function": {
+                "name": "write_file",
+                "arguments": "{}"
+            }
+        });
+        assert_eq!(tool_call_missing_required_args(&call), vec!["path", "content"]);
+    }
+
+    #[test]
+    fn recent_workspace_target_prefers_latest_diff() {
+        let messages = vec![MessageBlock::Diff {
+            diff: FileDiff {
+                file_path: "video_object_tracking.md".to_string(),
+                lines: Vec::new(),
+                added: 1,
+                removed: 0,
+                before_content: String::new(),
+                after_content: "content".to_string(),
+            },
+        }];
+        assert_eq!(recent_workspace_target(&messages).as_deref(), Some("video_object_tracking.md"));
+    }
+
+    #[test]
+    fn chat_file_write_synthesizes_final_summary() {
+        let messages = vec![MessageBlock::Diff {
+            diff: FileDiff {
+                file_path: "tool_smoke_test.txt".to_string(),
+                lines: Vec::new(),
+                added: 1,
+                removed: 0,
+                before_content: String::new(),
+                after_content: "a".to_string(),
+            },
+        }];
+        let summary = summarize_workspace_turn_for_chat("", &messages, Some("chat"), TurnLanguage::En);
+        assert!(summary.is_some_and(|text| text.contains("tool_smoke_test.txt")));
+    }
+
+    #[test]
+    fn stagnation_recovery_escalates_before_exit() {
+        assert!(stagnation_recovery_directive(2, TurnLanguage::En).is_none());
+        assert!(stagnation_recovery_directive(3, TurnLanguage::En)
+            .is_some_and(|text| text.contains("Change the query")));
+        assert!(stagnation_recovery_directive(6, TurnLanguage::En)
+            .is_some_and(|text| text.contains("independent plan steps")));
+        assert!(stagnation_recovery_directive(9, TurnLanguage::En)
+            .is_some_and(|text| text.contains("stop safely")));
+    }
+
+    #[test]
+    fn research_tasks_keep_multi_round_reasoning_enabled() {
+        assert!(!should_use_lightweight_tool_reasoning(
+            "research video tracking methods and verify the report",
+            true,
+        ));
+        assert!(dynamic_turn_round_limit(None, true) > 100);
+    }
+
     fn test_web_state(name: &str) -> (WebAppState, PathBuf) {
         let temp_dir = std::env::temp_dir().join(format!(
             "tokitai_web_reviewer_feedback_{}_{}",
@@ -23522,6 +24785,7 @@ mod tests {
                         branch_id: "main".to_string(),
                     }],
                     partial_text: "partial assistant progress".to_string(),
+                    partial_thinking: "partial reasoning trace".to_string(),
                     progress_updates: Vec::new(),
                     recent_progress_keys: Vec::new(),
                     recent_progress_emitted_at: HashMap::new(),
@@ -23548,6 +24812,10 @@ mod tests {
         }));
         assert!(saved.iter().any(|block| match block {
             MessageBlock::Assistant { content } => content.contains("partial assistant progress"),
+            _ => false,
+        }));
+        assert!(saved.iter().any(|block| match block {
+            MessageBlock::Thinking { content, .. } => content.contains("partial reasoning trace"),
             _ => false,
         }));
         assert!(saved.iter().any(|block| match block {

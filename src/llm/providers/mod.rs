@@ -7,6 +7,23 @@ use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+fn openai_messages(messages: Vec<Message>, multimodal_content: Option<serde_json::Value>) -> Vec<serde_json::Value> {
+    let latest_user = messages.iter().rposition(|message| message.role == "user");
+    messages
+        .into_iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let mut value = serde_json::to_value(message).unwrap_or_else(|_| serde_json::json!({}));
+            if Some(index) == latest_user {
+                if let Some(content) = multimodal_content.as_ref() {
+                    value["content"] = content.clone();
+                }
+            }
+            value
+        })
+        .collect()
+}
+
 /// OpenAI Provider
 pub struct OpenAIProvider {
     client: Client,
@@ -33,6 +50,38 @@ impl OpenAIProvider {
             default_model: model.unwrap_or_else(|| "gpt-4o".to_string()),
         }
     }
+
+    fn normalize_message_tool_calls(message: &OpenAIMessage) -> Option<Vec<serde_json::Value>> {
+        if let Some(tool_calls) = &message.tool_calls {
+            let normalized = tool_calls
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "type": "function",
+                        "function": {
+                            "name": t.function.name,
+                            "arguments": t.function.arguments,
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !normalized.is_empty() {
+                return Some(normalized);
+            }
+        }
+
+        message.function_call.as_ref().map(|function| {
+            vec![serde_json::json!({
+                "id": "function_call_0",
+                "type": "function",
+                "function": {
+                    "name": function.name,
+                    "arguments": function.arguments,
+                }
+            })]
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -52,17 +101,15 @@ impl LLMProvider for OpenAIProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         let payload = OpenAIRequest {
             model: request.model,
-            messages: request.messages,
+            messages: openai_messages(request.messages, request.multimodal_content),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
             tools: request.tools,
-            thinking: request
-                .thinking_mode
-                .clone()
-                .map(|mode| serde_json::json!({ "type": mode })),
+            thinking: None,
+            enable_thinking: request.thinking_mode.as_ref().map(|mode| mode == "enabled"),
             reasoning_effort: request.reasoning_effort,
         };
 
@@ -87,21 +134,7 @@ impl LLMProvider for OpenAIProvider {
             .context("No choices in OpenAI response")?;
 
         // Convert tool_calls to JSON Value format if present
-        let tool_calls_json: Option<Vec<serde_json::Value>> =
-            choice.message.tool_calls.as_ref().map(|tc| {
-                tc.iter()
-                    .map(|t| {
-                        serde_json::json!({
-                            "id": t.id,
-                            "type": "function",
-                            "function": {
-                                "name": t.function.name,
-                                "arguments": t.function.arguments,
-                            }
-                        })
-                    })
-                    .collect()
-            });
+        let tool_calls_json = Self::normalize_message_tool_calls(&choice.message);
 
         Ok(ChatResponse {
             content: tool_calls_json
@@ -128,17 +161,15 @@ impl LLMProvider for OpenAIProvider {
 
         let payload = OpenAIRequest {
             model: request.model,
-            messages: request.messages,
+            messages: openai_messages(request.messages, request.multimodal_content),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(true),
             tools: request.tools,
-            thinking: request
-                .thinking_mode
-                .clone()
-                .map(|mode| serde_json::json!({ "type": mode })),
+            thinking: None,
+            enable_thinking: request.thinking_mode.as_ref().map(|mode| mode == "enabled"),
             reasoning_effort: request.reasoning_effort,
         };
 
@@ -153,6 +184,15 @@ impl LLMProvider for OpenAIProvider {
         let stream = async_stream::stream! {
             // Map to accumulate tool call deltas across SSE events
             let mut tc_index: BTreeMap<usize, serde_json::Value> = BTreeMap::new();
+            let mut legacy_function_call = serde_json::json!({
+                "id": "function_call_0",
+                "type": "function",
+                "function": {
+                    "name": "",
+                    "arguments": ""
+                }
+            });
+            let mut has_legacy_function_call = false;
 
             while let Some(event) = event_source.next().await {
                 match event {
@@ -194,8 +234,26 @@ impl LLMProvider for OpenAIProvider {
                                     }
                                 }
 
+                                if let Some(ref function_call) = choice.delta.function_call {
+                                    has_legacy_function_call = true;
+                                    if let Some(ref name) = function_call.name {
+                                        legacy_function_call["function"]["name"] = serde_json::json!(name);
+                                    }
+                                    if let Some(ref args) = function_call.arguments {
+                                        if let Some(ref existing) = legacy_function_call["function"]["arguments"].as_str() {
+                                            legacy_function_call["function"]["arguments"] = serde_json::json!(format!("{}{}", existing, args));
+                                        } else {
+                                            legacy_function_call["function"]["arguments"] = serde_json::json!(args);
+                                        }
+                                    }
+                                }
+
                                 let tool_calls = if tc_index.is_empty() {
-                                    None
+                                    if has_legacy_function_call {
+                                        Some(vec![legacy_function_call.clone()])
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     Some(tc_index.values().cloned().collect())
                                 };
@@ -206,6 +264,7 @@ impl LLMProvider for OpenAIProvider {
                                     yield Ok(StreamChunk {
                                         content: choice.delta.content.clone().unwrap_or_default(),
                                         finish_reason: choice.finish_reason.clone(),
+                                        thinking: choice.delta.reasoning_content.clone(),
                                         tool_calls: tool_calls.clone(),
                                         usage: None,
                                     });
@@ -497,7 +556,7 @@ impl LLMProvider for ZhipuProvider {
         // Zhipu uses OpenAI-compatible API
         let payload = OpenAIRequest {
             model: request.model,
-            messages: request.messages,
+            messages: openai_messages(request.messages, request.multimodal_content),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             top_p: request.top_p,
@@ -505,6 +564,7 @@ impl LLMProvider for ZhipuProvider {
             stream: Some(false),
             tools: request.tools,
             thinking: None,
+            enable_thinking: None,
             reasoning_effort: None,
         };
 
@@ -587,7 +647,7 @@ impl LLMProvider for MoonshotProvider {
         // Moonshot uses OpenAI-compatible API
         let payload = OpenAIRequest {
             model: request.model,
-            messages: request.messages,
+            messages: openai_messages(request.messages, request.multimodal_content),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             top_p: request.top_p,
@@ -595,6 +655,7 @@ impl LLMProvider for MoonshotProvider {
             stream: Some(false),
             tools: request.tools,
             thinking: None,
+            enable_thinking: None,
             reasoning_effort: None,
         };
 
@@ -649,7 +710,7 @@ impl LLMProvider for MoonshotProvider {
 #[derive(Debug, Serialize)]
 struct OpenAIRequest {
     model: String,
-    messages: Vec<Message>,
+    messages: Vec<serde_json::Value>,
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<usize>,
@@ -663,6 +724,8 @@ struct OpenAIRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<String>,
 }
@@ -687,6 +750,8 @@ struct OpenAIMessage {
     content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenAIToolCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    function_call: Option<OpenAIFunctionCall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -726,7 +791,12 @@ struct OpenAIDelta {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    #[serde(alias = "reasoning_content")]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Option<Vec<OpenAIDeltaToolCall>>,
+    #[serde(default)]
+    function_call: Option<OpenAIDeltaFunction>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

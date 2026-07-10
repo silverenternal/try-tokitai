@@ -165,6 +165,36 @@ impl ToolExecutor for DefaultToolExecutor {
 }
 
 // ============================================================================
+// Sync 函数适配器 — 将同步 Fn 包装为 ToolExecutor
+// ============================================================================
+
+/// 通用同步函数执行器: 将任何 `Fn(&str, &Value) -> Result<String, String>` 包装为 ToolExecutor
+pub struct SyncFnExecutor<F> {
+    handler: F,
+}
+
+impl<F> SyncFnExecutor<F>
+where
+    F: Fn(&str, &Value) -> Result<String, String> + Send + Sync + 'static,
+{
+    pub fn new(handler: F) -> Self {
+        Self { handler }
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> ToolExecutor for SyncFnExecutor<F>
+where
+    F: Fn(&str, &Value) -> Result<String, String> + Send + Sync + 'static,
+{
+    async fn execute(&self, tool_name: &str, args: &Value) -> Result<Value, String> {
+        (self.handler)(tool_name, args).map(|result| {
+            serde_json::from_str::<Value>(&result).unwrap_or_else(|_| Value::String(result))
+        })
+    }
+}
+
+// ============================================================================
 // 与 tokitai 集成的执行器
 // ============================================================================
 

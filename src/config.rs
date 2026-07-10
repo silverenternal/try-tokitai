@@ -67,7 +67,7 @@ fn default_context_window() -> usize {
 }
 
 fn default_model() -> String {
-    "qwen3.5:397b".to_string()
+    "qwen3.7-plus".to_string()
 }
 
 fn default_temperature() -> f32 {

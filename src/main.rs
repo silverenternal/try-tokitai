@@ -409,6 +409,7 @@ async fn test_llm_stream() -> Result<()> {
             Message::system("You are a helpful assistant. Keep responses very short."),
             Message::user("Say hello in exactly one word."),
         ],
+        multimodal_content: None,
         temperature: 0.7,
         max_tokens: Some(50),
         top_p: None,

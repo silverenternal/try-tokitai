@@ -6,7 +6,7 @@
     <title>Agent Workspace</title>
     <link rel="stylesheet" href="./vendor/monaco/vs/editor/editor.main.css" />
     <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260706c" />
+    <link rel="stylesheet" href="./styles.css?v=20260710f" />
   </head>
   <body>
     <div class="app-shell">
@@ -450,6 +450,8 @@
                     </div>
                   </div>
 
+                  <div class="composer-attachments" id="composer-attachments" hidden></div>
+
                   <label class="composer-field" for="message-input">
                     <textarea
                       id="message-input"
@@ -512,8 +514,6 @@
                     </div>
                   </label>
 
-                  <div class="composer-attachments" id="composer-attachments" hidden></div>
-
                   <div class="settings-popovers">
                     <section class="settings-popover" id="settings-panel" hidden>
                       <div class="settings-panel-shell">
@@ -532,19 +532,29 @@
                         <div class="settings-panel-body">
                           <div class="settings-tab-panel is-active" data-settings-tab-panel="model">
                             <label class="field-block">
-                              <span class="field-label">API URL</span>
-                              <input id="primary-api-url" type="text" />
-                            </label>
-
-                            <label class="field-block">
                               <span class="field-label" data-i18n="fieldApiKey">API Key</span>
                               <input id="runtime-api-key" type="password" />
                             </label>
 
                             <label class="field-block">
                               <span class="field-label" data-i18n="fieldPrimaryModel">Primary model</span>
-                              <input id="primary-model" type="text" />
+                              <select id="primary-model">
+                                <option value="qwen3.7-plus">Qwen 3.7 Plus</option>
+                                <option value="qwen3.7-max">Qwen 3.7 Max</option>
+                                <option value="qwen3.6-plus">Qwen 3.6 Plus</option>
+                                <option value="qwen3.6-max-preview">Qwen 3.6 Max (Preview)</option>
+                                <option value="qwen3.6-flash">Qwen 3.6 Flash</option>
+                                <option value="qwen3.5-plus">Qwen 3.5 Plus</option>
+                                <option value="qwen3.5-flash">Qwen 3.5 Flash</option>
+                                <option value="qwq-plus">QwQ Plus (reasoning only)</option>
+                              </select>
                             </label>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label">Deep Think (thinking/reasoning)</span>
+                              <input id="deep-think" type="checkbox" />
+                            </label>
+                            <span class="field-help">Send thinking tokens to the model and display reasoning content.</span>
                           </div>
 
                           <div class="settings-tab-panel" data-settings-tab-panel="security">
@@ -603,6 +613,12 @@
                               <span class="field-label">Language</span>
                               <button class="language-toggle" type="button" id="lang-toggle">EN</button>
                             </label>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label">Show activity panel</span>
+                              <input id="auto-open-activity-panel" type="checkbox" />
+                            </label>
+                            <span class="field-help">Show the activity panel inside assistant messages.</span>
 
                             <label class="field-block">
                               <span class="field-label" data-i18n="fieldWorkspaceRoot">Workspace root</span>
@@ -975,15 +991,9 @@
         },
       });
     </script>
-    <script src="./app.js?v=20260706c"></script>
+    <script src="./app.js?v=20260710f"></script>
   </body>
 </html>
-
-
-
-
-
-
 
 
 

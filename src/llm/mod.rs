@@ -117,6 +117,9 @@ pub struct ChatRequest {
     pub model: String,
     /// Messages in conversation
     pub messages: Vec<Message>,
+    /// Optional OpenAI-compatible content parts for the latest user message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multimodal_content: Option<serde_json::Value>,
     /// Temperature (0.0-2.0)
     #[serde(default = "default_temperature")]
     pub temperature: f32,
@@ -223,6 +226,9 @@ pub struct Usage {
 pub struct StreamChunk {
     pub content: String,
     pub finish_reason: Option<String>,
+    /// Thinking / reasoning content from the model (e.g. DeepSeek R1, Qwen thinking)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     /// Tool calls detected in this chunk (accumulated from stream deltas)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<serde_json::Value>>,

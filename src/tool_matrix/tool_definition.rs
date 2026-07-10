@@ -654,7 +654,8 @@ description = "Count"
         assert!(schema.contains("\"type\": \"object\""));
         assert!(schema.contains("\"name\""));
         assert!(schema.contains("\"count\""));
-        assert!(schema.contains("\"required\": [\"name\"]"));
+        let schema_value: serde_json::Value = serde_json::from_str(&schema)?;
+        assert_eq!(schema_value["required"], serde_json::json!(["name"]));
 
         Ok(())
     }

@@ -271,10 +271,10 @@ impl TuiApp {
 
     /// Add a message to the conversation
     pub fn add_message(&mut self, block: MessageBlock) {
-        // Skip transient streaming/thinking blocks from persistence
+        // Skip transient streaming blocks from persistence (thinking blocks ARE persisted)
         let persistable = !matches!(
             &block,
-            MessageBlock::AssistantStreaming { .. } | MessageBlock::Thinking { .. }
+            MessageBlock::AssistantStreaming { .. }
         );
         self.messages.push(block);
         self.auto_scroll = true; // Auto-scroll to bottom on new message
@@ -1053,6 +1053,7 @@ impl TuiApp {
         let request = ChatRequest {
             model: model_name,
             messages,
+            multimodal_content: None,
             temperature: self.temperature,
             max_tokens: Some(self.max_tokens),
             top_p: None,

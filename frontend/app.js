@@ -1,4 +1,4 @@
-﻿const translations = {
+const translations = {
   zh: {
     newSession: "+ \u65b0\u5efa\u4f1a\u8bdd",
     sessionsLabel: "\u6700\u8fd1\u4f1a\u8bdd",
@@ -911,7 +911,7 @@ let currentMainView = "chat";
 let currentGitView = "overview";
 let gitDataLoadState = { diff: false, graph: false };
 let gitLoadPromise = null;
-let activeActivityPanel = "nav";
+let activeActivityPanel = null;
 let preferredLeftActivityPanel = "nav";
 let extensionCatalog = [];
 let searchMode = "web";
@@ -941,7 +941,7 @@ let browserState = {
   renderRequestId: 0,
 };
 let preferredDockRightSidebarPanelId = "tree";
-let rightSidebarCollapsed = false;
+let rightSidebarCollapsed = true;
 
 function syncBrowserStateFromFrame(options = {}) {
   if (!browserFrame) return;
@@ -1191,7 +1191,12 @@ let liveProcessEvents = [];
 let pinnedEditedFiles = [];
 let activeAssistantTurn = null;
 let pendingAssistantRuntimeNode = null;
+let pendingAssistantRuntimeStatusesNode = null;
+let pendingAssistantStoryNode = null;
+let pendingAssistantOperationsNode = null;
+let pendingAssistantThinkingHost = null;
 let pendingAssistantTextNode = null;
+let pendingAssistantThinkingNode = null;
 let pendingAssistantStableNode = null;
 let pendingAssistantTailNode = null;
 let pendingAssistantStatusTextNode = null;
@@ -1199,12 +1204,20 @@ let pendingAssistantStatusTimeNode = null;
 let pendingAssistantRenderedRuntimeText = null;
 let pendingAssistantRenderedStableText = null;
 let pendingAssistantRenderedTailText = null;
+let pendingAssistantRenderedOperationsHtml = null;
+let pendingAssistantThinkingDirty = false;
+let pendingAssistantStoryDirty = false;
+let pendingAssistantOperationsDirty = false;
+let preservedThinking = [];
 let pendingAssistantTextFrame = null;
 let pendingAssistantStatusFrame = null;
 let pendingAssistantBubbleFrame = null;
+let messageStreamFollowFrame = null;
+let messageStreamFollowTarget = 0;
 let pendingBootstrapRefreshPromise = null;
 let suppressVisibleStreamBootstrap = false;
 let lastVisibleCompletionSignature = "";
+let autoOpenActivityPanel = false;
 const MAX_LIVE_PROCESS_EVENTS = 4;
 let researchDetailOpen = false;
 
@@ -1225,6 +1238,8 @@ function restoreLayoutPreferences() {
     if (["chat", "research"].includes(savedMode)) {
       currentWorkspaceMode = savedMode;
     }
+
+    autoOpenActivityPanel = localStorage.getItem("tokitai-auto-open-activity-panel") === "true";
   } catch (_error) {
     // Ignore storage failures.
   }
@@ -1246,6 +1261,7 @@ const attachButton = document.getElementById("attach-button");
 const fileInput = document.getElementById("file-input");
 const composerAttachments = document.getElementById("composer-attachments");
 const langToggle = document.getElementById("lang-toggle");
+const autoOpenActivityPanelToggle = document.getElementById("auto-open-activity-panel");
 const toast = document.getElementById("toast");
 const sidebarWorkspaceTitle = document.getElementById("sidebar-workspace-title");
 const workspaceRootLabel = document.getElementById("workspace-root-label");
@@ -1255,6 +1271,7 @@ const primaryModel = document.getElementById("primary-model");
 const primaryApiUrl = document.getElementById("primary-api-url");
 const competitionMode = document.getElementById("competition-mode");
 const privacyMode = document.getElementById("privacy-mode");
+const deepThinkToggle = document.getElementById("deep-think");
 const autoApproveTools = document.getElementById("auto-approve-tools");
 const riskBoundary = document.getElementById("risk-boundary");
 const maxToolCalls = document.getElementById("max-tool-calls");
@@ -1375,7 +1392,7 @@ const LEFT_ACTIVITY_ORDER = ["nav", "extensions", "search", "git", "run"];
 const RIGHT_DOCK_PANEL_IDS = ["tree", "code", "research"];
 const DEFAULT_DOCK_LAYOUT = {
   order: ["sidebar", "chat", "research", "code", "tree"],
-  hidden: { sidebar: true, chat: false, research: true, tree: false, code: true },
+  hidden: { sidebar: true, chat: false, research: true, tree: true, code: true },
   widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 520 },
 };
 const MIN_ACTIVITY_FLYOUT_WIDTH = 248;
@@ -1474,6 +1491,11 @@ function readDockLayout() {
 }
 
 let dockLayout = readDockLayout();
+// Force right sidebar panels collapsed on startup to keep clean UI
+dockLayout.hidden.tree = true;
+dockLayout.hidden.code = true;
+dockLayout.hidden.research = true;
+rightSidebarCollapsed = true;
 syncShellLayoutVars();
 let pendingResearchStart = false;
 
@@ -4034,10 +4056,15 @@ function isAssistantProcessPreambleParagraph(text) {
 function isAssistantProcessNarrationParagraph(text) {
   const raw = String(text || "").trim();
   if (!raw) return false;
+  if (isAssistantCompletionSummaryText(raw)) return false;
+  if (/(?:\u672c\u8f6e|\u8fd9\u8f6e).*(?:\u4e2d\u65ad|\u5931\u8d25|\u505c\u6b62|\u6682\u505c)|(?:stream task panicked|panic|error|failed|interrupted|stopped early)/i.test(raw)) return false;
   if (/^#{1,6}\s/.test(raw) || /^[-*+]\s/.test(raw) || /^\d+\.\s/.test(raw) || /^\|.+\|$/.test(raw) || /^```/.test(raw)) {
     return false;
   }
   if (raw.length > 220) return false;
+  if (/^[([]?\s*(?:正在执行|正在查看|正在读取|正在检查|running|inspecting|reading|checking)\s*[:：]/i.test(raw)) {
+    return true;
+  }
   const normalized = raw.replace(/\s+/g, " ").trim();
   const compact = normalizeText(raw).replace(/\s+/g, "");
   const leadSignal = /^(?:let me|first i|i will|i'm going to|next|now|现在|接下来|我先|我会|我来|继续)/i;
@@ -4049,15 +4076,68 @@ function isAssistantProcessNarrationParagraph(text) {
 function isAssistantOperationalStatusParagraph(text) {
   const raw = String(text || "").trim();
   if (!raw) return false;
+  if (isAssistantCompletionSummaryText(raw)) return false;
+  if (/(?:\u672c\u8f6e|\u8fd9\u8f6e).*(?:\u4e2d\u65ad|\u5931\u8d25|\u505c\u6b62|\u6682\u505c)|(?:stream task panicked|panic|error|failed|interrupted|stopped early)/i.test(raw)) return false;
   if (/^#{1,6}\s/.test(raw) || /^[-*+]\s/.test(raw) || /^\d+\.\s/.test(raw) || /^\|.+\|$/.test(raw) || /^```/.test(raw)) {
     return false;
   }
   if (raw.length > 220) return false;
+  if (/(?:\u5df2\u5b8c\u6210|\u5df2\u5199\u5165|\u5df2\u521b\u5efa|\u5df2\u4fee\u6539|\u5199\u5165\u5b8c\u6210|\u521b\u5efa\u5b8c\u6210)|(?:completed|written|created|updated|finished successfully)/i.test(raw)) return false;
   const workspaceSignal = /\b(?:csv|workspace|directory|file|script|report|repo|git)\b/i.test(raw)
     || /(?:工作区|目录|文件|脚本|报告|仓库|Git)/.test(raw);
   const actionSignal = /\b(?:from scratch|create|write|run|generate|inspect|check|scan|edit|read|verify)\b/i.test(raw)
     || /(?:创建|写入|运行|生成|检查|扫描|编辑|读取|验证)/.test(raw);
   return workspaceSignal && actionSignal;
+}
+
+function extractAssistantOperationalMoment(text, options = {}) {
+  const raw = sanitizeMessageContent(String(text || "")).trim();
+  if (!raw) return null;
+  if (isAssistantCompletionSummaryText(raw)) return null;
+  if (/(?:\u5df2\u5b8c\u6210|\u5df2\u5199\u5165|\u5df2\u521b\u5efa|\u5df2\u4fee\u6539|\u5199\u5165\u5b8c\u6210|\u521b\u5efa\u5b8c\u6210)|(?:completed|written|created|updated|finished successfully)/i.test(raw)) return null;
+  if (/(?:\u672c\u8f6e|\u8fd9\u8f6e).*(?:\u4e2d\u65ad|\u5931\u8d25|\u505c\u6b62|\u6682\u505c)|(?:stream task panicked|panic|error|failed|interrupted|stopped early)/i.test(raw)) return null;
+  if (raw.length > 160) return null;
+  if (!isAssistantOperationalStatusParagraph(raw) && !/^[([]?\s*(?:准备执行|准备查看|准备读取|准备检查|正在执行|正在查看|正在读取|正在检查|running|inspecting|reading|checking)\s*[:：]/i.test(raw)) {
+    return null;
+  }
+
+  const compact = raw
+    .replace(/^[([]+\s*/, "")
+    .replace(/\s*[\])]+$/, "")
+    .trim();
+  const normalized = compact.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/^(?:准备执行|准备查看|准备读取|准备检查|正在执行|正在查看|正在读取|正在检查|running|inspecting|reading|checking)\s*[:：]?\s*(.+)$/i);
+  const detailRaw = cleanDisplayText(match?.[1] || normalized, "");
+  if (!detailRaw) return null;
+
+  const detail = detailRaw
+    .replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, "")
+    .trim();
+  if (!detail) return null;
+  if (detail.length > 120) return null;
+  if (/[。！？!?]\s*$/.test(detail) || /[，；;,.].{20,}$/.test(detail)) return null;
+  if (/^(?:我会|我先|我将|让我|接下来|首先|I will|I'll|Let me|Next[, ]|First[, ])/i.test(detail)) return null;
+  const targetLike = /(?:[A-Za-z]:\\|\/|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+|\b(?:frontend|src|app|index|styles|package|cargo|git)\b)/i.test(detail)
+    || /(?:文件|目录|仓库|工作区|页面|模块|组件|函数|脚本)/.test(detail);
+  if (!targetLike) return null;
+
+  const readingSignal = /\b(?:read|reading|inspect|inspecting|check|checking|scan|scanning)\b/i.test(detail)
+    || /(?:读取|查看|检查|扫描|检视)/.test(detail);
+  const editingSignal = /\b(?:edit|editing|write|writing|apply_patch|patch|create|creating|update|updating)\b/i.test(detail)
+    || /(?:编辑|写入|修改|创建|更新)/.test(detail);
+
+  return {
+    kind: editingSignal ? "edit" : "activity",
+    text: editingSignal
+      ? zhLabel("正在编辑", "Editing")
+      : readingSignal
+        ? zhLabel("正在查看", "Inspecting")
+        : zhLabel("正在执行", "Running"),
+    detail,
+    state: options.state || "run",
+    dedupeKey: `moment:assistant-status:${normalizeText(detail)}`,
+    timestamp: Number(options.timestamp) || Date.now(),
+  };
 }
 
 function stripAssistantProcessPreamble(text) {
@@ -4104,9 +4184,16 @@ function normalizedAssistantSubstantiveContent(value) {
   return normalizeAssistantConversationContent(value, { preserveNarrationFallback: false }).trim();
 }
 
+function isAssistantCompletionSummaryText(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (!raw) return false;
+  return /(?:\u5df2\u5b8c\u6210|\u5df2\u5199\u5165|\u5df2\u521b\u5efa|\u5df2\u4fee\u6539|\u5199\u5165\u5b8c\u6210|\u521b\u5efa\u5b8c\u6210|\u5df2\u6210\u529f|\u6210\u529f\u5c06.{0,80}(?:\u5199\u5165|\u521b\u5efa|\u4fee\u6539|\u66f4\u65b0)|(?:\u6587\u4ef6|\u5185\u5bb9).{0,40}\u5df2.{0,20}(?:\u5199\u5165|\u521b\u5efa|\u4fee\u6539|\u66f4\u65b0))|(?:completed|written|created|updated|finished successfully|successfully (?:wrote|created|updated|saved))/i.test(raw);
+}
+
 function assistantTextLooksLikeProcessNarration(value) {
   const raw = sanitizeMessageContent(String(value || "")).trim();
   if (!raw) return false;
+  if (isAssistantCompletionSummaryText(raw)) return false;
   if (normalizedAssistantSubstantiveContent(raw) && !isAssistantOperationalStatusParagraph(raw)) return false;
   const paragraphs = raw.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
   if (!paragraphs.length) return false;
@@ -4185,7 +4272,9 @@ function looksLikeDirectoryTreeDump(value) {
 function looksLikeOperationalContentDump(value) {
   const raw = sanitizeMessageContent(String(value || "")).trim();
   if (!raw) return false;
+  if (isAssistantCompletionSummaryText(raw)) return false;
   if (looksLikeToolPayloadDump(raw) || looksLikeDirectoryTreeDump(raw)) return true;
+  if (/^<(?:tool_call|function=|function\s|function_)/i.test(raw)) return true;
 
   const normalized = raw.toLowerCase();
   if (
@@ -4251,6 +4340,9 @@ function isAssistantPrimaryReplyText(value) {
   const core = assistantPrimaryReplyCore(value);
   if (!core) return false;
   if (isAssistantFailureSummaryText(value) || isAssistantVerificationAppendixText(value)) return false;
+  if (isAssistantCompletionSummaryText(core)) {
+    return true;
+  }
   if (assistantTextLooksLikeProcessNarration(core)) return false;
   if (looksLikeOperationalContentDump(core)) return false;
   return looksLikeStructuredAssistantReport(core) || core.length >= 120;
@@ -5480,11 +5572,12 @@ function renderAssistantRuntimePanel(content, options = {}) {
   const open = options.open !== false;
   const tone = cleanDisplayText(options.tone || "", "");
   const toneClass = tone ? ` is-${escapeHtml(tone)}` : "";
+  const isRunning = tone === "running";
   return `
     <section class="codex-runtime-panel${toneClass}">
       <details class="codex-runtime-panel-shell" data-runtime-panel${open ? " open" : ""}>
         <summary class="codex-runtime-panel-summary" data-runtime-toggle>
-          <span class="codex-runtime-panel-title">${escapeHtml(title)}</span>
+          <span class="codex-runtime-panel-title${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(title)}">${escapeHtml(title)}</span>
           ${meta ? `<span class="codex-runtime-panel-meta">${escapeHtml(meta)}</span>` : ""}
         </summary>
         <div class="codex-runtime-panel-body">
@@ -5493,6 +5586,22 @@ function renderAssistantRuntimePanel(content, options = {}) {
       </details>
     </section>
   `;
+}
+
+function renderThinkingSummaryLabel(index, isStreaming) {
+  const label = currentLanguage === "zh" ? "Thinking..." : "Thinking...";
+  return `
+    <span class="codex-thinking-summary-shell">
+      <span class="codex-thinking-summary-label${isStreaming ? " is-streaming" : ""}">${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function streamAnimationStyle(turn = activeAssistantTurn) {
+  const startedAt = Number(turn?.startedAt || 0);
+  if (!startedAt) return "";
+  const phaseSeconds = ((Date.now() - startedAt) % 2350) / 1000;
+  return ` style="--codex-stream-phase:-${phaseSeconds.toFixed(3)}s;"`;
 }
 
 function renderOperationSection(title, bodyMarkup) {
@@ -5510,10 +5619,10 @@ function extractAssistantDecisionCard(text) {
   if (!source) return { body: "", card: null };
   const normalized = source.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n").map((line) => line.trim());
-  const highLevelContext = /\b(?:please confirm|which direction|direction you prefer|implementation direction|design direction|architecture|approach|strategy|options?)\b/i;
+  const highLevelContext = /\b(?:please confirm|which direction do you prefer|which direction you prefer|if you agree|choose next step|pick one|select one|which option|confirm your choice)\b/i;
   const strategicOptionLine = /^(?:#{2,3}\s*)?(?:direction|approach|strategy|option)\b|^(?:\d+\.\s*)(?:direction|approach|strategy|option)\b/i;
   const lowLevelExecution = /\b(?:file|folder|directory|script|path|create|add|generate|modify|edit|rename|delete|write)\b|\.(?:rs|py|js|ts|tsx|jsx|toml|json|yaml|yml|md)\b/i;
-  if (!highLevelContext.test(normalized) && !lines.some((line) => strategicOptionLine.test(line))) {
+  if (!highLevelContext.test(normalized)) {
     return { body: normalized, card: null };
   }
   const alternativeOptionLines = [];
@@ -5567,6 +5676,14 @@ function extractAssistantDecisionCard(text) {
   };
 }
 
+function shouldRenderAssistantDecisionCard(turn, cleanedText) {
+  const options = Array.isArray(turn?.assistantChoices?.options) ? turn.assistantChoices.options : [];
+  if (!options.length) return false;
+  const source = cleanDisplayText(String(cleanedText || turn?.text || ""), "");
+  if (!source) return false;
+  return /\b(?:please confirm|which direction do you prefer|which direction you prefer|if you agree|choose next step|pick one|select one|which option|confirm your choice)\b/i.test(source);
+}
+
 function renderAssistantDecisionCard(card) {
   if (!card || !Array.isArray(card.options) || !card.options.length) return "";
   return `
@@ -5585,21 +5702,143 @@ function renderAssistantDecisionCard(card) {
   `;
 }
 
+function operationEditArtifactMarkup(turn, label) {
+  const text = cleanDisplayText(String(label || ""), "");
+  if (!turn || !text) return "";
+  if (!/(?:正在编辑|editing)/i.test(text)) return "";
+
+  const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
+  const tools = Array.isArray(turn?.tools) ? turn.tools : [];
+  const latestDiff = diffs.length ? diffs[diffs.length - 1] : null;
+  const latestTool = [...tools].reverse().find((tool) => {
+    const name = String(tool?.name || "").toLowerCase();
+    return ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name);
+  }) || null;
+
+  const path = cleanDisplayText(
+    latestDiff?.path
+    || latestTool?.file_path
+    || latestTool?.params?.file_path
+    || latestTool?.params?.path
+    || latestTool?.params?.target_file
+    || "",
+    "",
+  );
+  if (!path) return "";
+
+  const fileName = displayFileNameOnly(path);
+  const added = Number(latestDiff?.added || 0) || 0;
+  const removed = Number(latestDiff?.removed || 0) || 0;
+  const animationOffset = "";
+  const latestToolRunning = Boolean(latestTool && ["pending", "approved", "executing", "running"].includes(String(latestTool.status || "").toLowerCase()));
+
+  return `
+    <button
+      class="codex-op-edit-artifact"
+      type="button"
+      data-open-workspace-file="${escapeHtml(path)}"
+      data-open-workspace-line="1"
+      data-open-workspace-column="1"
+      title="${escapeHtml(path)}"
+    >
+      <span class="codex-op-edit-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path d="M4 20l3.6-.7L18.3 8.6a1.8 1.8 0 0 0 0-2.6l-.3-.3a1.8 1.8 0 0 0-2.6 0L4.7 16.4 4 20z"></path>
+          <path d="M13.8 7.3l2.9 2.9"></path>
+        </svg>
+      </span>
+      <span class="codex-op-edit-prefix${latestToolRunning ? " is-streaming" : ""}" data-text="${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}"${latestToolRunning ? animationOffset : ""}>${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}</span>
+      <span class="codex-op-edit-file">${escapeHtml(fileName)}</span>
+      <span class="codex-op-edit-stats">
+        <span class="is-added">+${escapeHtml(String(added))}</span>
+        <span class="is-removed">-${escapeHtml(String(removed))}</span>
+      </span>
+    </button>
+  `;
+}
+
+function operationArtifactMarkup(turn, label) {
+  const text = cleanDisplayText(String(label || ""), "");
+  if (!turn || !text) return "";
+  if (!/(?:editing|created file|creating file|running|正在编辑|文件创建|创建文件|新建文件)/i.test(text)) {
+    return operationEditArtifactMarkup(turn, label);
+  }
+
+  const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
+  const tools = Array.isArray(turn?.tools) ? turn.tools : [];
+  const latestDiff = diffs.length ? diffs[diffs.length - 1] : null;
+  const latestTool = [...tools].reverse().find((tool) => {
+    const name = String(tool?.name || "").toLowerCase();
+    return ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name);
+  }) || null;
+  const path = cleanDisplayText(
+    latestDiff?.path
+    || latestTool?.file_path
+    || latestTool?.params?.file_path
+    || latestTool?.params?.path
+    || latestTool?.params?.target_file
+    || "",
+    "",
+  );
+  if (!path) return operationEditArtifactMarkup(turn, label);
+
+  const fileName = displayFileNameOnly(path);
+  const added = Number(latestDiff?.added || 0) || 0;
+  const removed = Number(latestDiff?.removed || 0) || 0;
+  const prefixText = /(?:created file|creating file|文件创建|创建文件|新建文件)/i.test(text)
+    ? (currentLanguage === "zh" ? "文件创建" : "Created")
+    : (currentLanguage === "zh" ? "正在编辑" : "Editing");
+  const showStreaming = Boolean(
+    latestTool
+    && ["pending", "approved", "executing", "running"].includes(String(latestTool.status || "").toLowerCase()),
+  );
+  const animationOffset = "";
+
+  return `
+    <button
+      class="codex-op-edit-artifact"
+      type="button"
+      data-open-workspace-file="${escapeHtml(path)}"
+      data-open-workspace-line="1"
+      data-open-workspace-column="1"
+      title="${escapeHtml(path)}"
+    >
+      <span class="codex-op-edit-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path d="M4 20l3.6-.7L18.3 8.6a1.8 1.8 0 0 0 0-2.6l-.3-.3a1.8 1.8 0 0 0-2.6 0L4.7 16.4 4 20z"></path>
+          <path d="M13.8 7.3l2.9 2.9"></path>
+        </svg>
+      </span>
+      <span class="codex-op-edit-prefix${showStreaming ? " is-streaming" : ""}" data-text="${escapeHtml(prefixText)}"${showStreaming ? animationOffset : ""}>${escapeHtml(prefixText)}</span>
+      <span class="codex-op-edit-file">${escapeHtml(fileName)}</span>
+      <span class="codex-op-edit-stats">
+        <span class="is-added">+${escapeHtml(String(added))}</span>
+        <span class="is-removed">-${escapeHtml(String(removed))}</span>
+      </span>
+    </button>
+  `;
+}
+
 function buildOperationTimeline(turn, { isStreaming = false } = {}) {
   const items = [];
   const seenLabels = new Set();
   const pushItem = (label, timestamp = 0, extraClass = "") => {
     const text = cleanDisplayText(String(label || "").trim(), "");
     if (!text) return;
+    if (/^(?:starting|execution|\u6b63\u5728\u6267\u884c|running|executing the current step)$/i.test(text) || /main agent is executing the current step/i.test(text)) return;
     const key = text.toLowerCase();
     if (seenLabels.has(key)) return;
     seenLabels.add(key);
+    const attachment = operationArtifactMarkup(turn, text);
     items.push({
       timestamp: Number(timestamp || 0) || 0,
       body: `
         <div class="codex-op-row ${escapeHtml(extraClass)}">
           <span class="codex-op-dot" aria-hidden="true"></span>
-          <span class="codex-op-label">${escapeHtml(text)}</span>
+          <div class="codex-op-main">
+            <span class="codex-op-label">${escapeHtml(text)}</span>
+            ${attachment}
+          </div>
         </div>
       `,
     });
@@ -5614,6 +5853,7 @@ function buildOperationTimeline(turn, { isStreaming = false } = {}) {
   worklogEntries.forEach((entry) => {
     const text = cleanDisplayText(entry?.text || "", "");
     if (!text) return;
+    if (/\b(?:list_dir|find_files|read_file(?:_range)?|tree_dir|search_files|write_file|apply_patch|search_and_replace(?:_multi)?|rename_path|mkdir)\b/i.test(text)) return;
     if (progressNarration && (text === progressNarration || progressNarration.includes(text) || text.includes(progressNarration))) {
       return;
     }
@@ -5621,24 +5861,27 @@ function buildOperationTimeline(turn, { isStreaming = false } = {}) {
   });
 
   const tools = Array.isArray(turn?.tools) ? turn.tools : [];
-  const visibleTools = tools.slice(isStreaming ? -3 : -4);
-  const groupedToolSummary = summarizeOperationTools(visibleTools);
-  if (groupedToolSummary) {
-    pushItem(groupedToolSummary.title, Date.now(), "is-primary");
-    pushItem(groupedToolSummary.meta, Date.now() + 1, isStreaming ? "is-active" : "");
-  }
-  visibleTools.forEach((tool, index) => {
-    const statusKey = String(tool.status || "pending");
-    const active = isStreaming && index === Math.max(0, visibleTools.length - 1) && ["pending", "approved", "executing"].includes(statusKey);
-    pushItem(
-      summarizeRuntimeToolNarration(tool),
-      Date.parse(String(tool?.updated_at || "")) || (Date.now() + index),
-      active ? "is-active" : "",
-    );
+  const categoryMoments = new Map();
+  tools.forEach((tool, index) => {
+    const moment = describeToolMoment(tool);
+    if (!moment) return;
+    const existing = categoryMoments.get(moment.kind);
+    const rank = moment.state === "fail" ? 3 : moment.state === "run" ? 2 : 1;
+    const existingRank = existing?.state === "fail" ? 3 : existing?.state === "run" ? 2 : 1;
+    if (!existing || rank >= existingRank) {
+      categoryMoments.set(moment.kind, {
+        ...moment,
+        timestamp: Date.parse(String(tool?.updated_at || "")) || (Date.now() + index),
+      });
+    }
+  });
+  categoryMoments.forEach((moment) => {
+    pushItem(moment.text, moment.timestamp, moment.state === "run" && isStreaming ? "is-active" : "");
   });
 
   const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
   diffs.forEach((diff) => {
+    if (categoryMoments.has("edit")) return;
     pushItem(
       summarizeRuntimeDiffNarration(diff),
       Date.parse(String(diff.updated_at || "")) || Number(diff.updated_at || 0) || Date.now(),
@@ -5983,7 +6226,53 @@ function isNearMessageStreamBottom(threshold = 72) {
 function scrollMessageStreamToBottom(force = false) {
   if (!messageStream) return;
   if (!force && !isNearMessageStreamBottom()) return;
-  messageStream.scrollTop = messageStream.scrollHeight;
+  const target = Math.max(0, messageStream.scrollHeight - messageStream.clientHeight);
+  const distance = target - messageStream.scrollTop;
+  if (distance <= 1) {
+    messageStream.scrollTop = target;
+    return;
+  }
+  const prefersReducedMotion = typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (prefersReducedMotion || Math.abs(distance) > 720) {
+    messageStream.scrollTop = target;
+    return;
+  }
+  messageStreamFollowTarget = target;
+  if (messageStreamFollowFrame != null) return;
+  let lastTimestamp = 0;
+  const tick = (timestamp) => {
+    if (!messageStream) {
+      messageStreamFollowFrame = null;
+      return;
+    }
+    if (!lastTimestamp) lastTimestamp = timestamp;
+    const delta = Math.min(32, timestamp - lastTimestamp || 16);
+    lastTimestamp = timestamp;
+    const currentTarget = Math.max(
+      0,
+      messageStream.scrollHeight - messageStream.clientHeight,
+      messageStreamFollowTarget,
+    );
+    const remaining = currentTarget - messageStream.scrollTop;
+    if (Math.abs(remaining) <= 1) {
+      messageStream.scrollTop = currentTarget;
+      messageStreamFollowFrame = null;
+      return;
+    }
+    const follow = 1 - Math.pow(0.28, delta / 16);
+    messageStream.scrollTop += remaining * follow;
+    messageStreamFollowFrame = window.requestAnimationFrame(tick);
+  };
+  messageStreamFollowFrame = window.requestAnimationFrame(tick);
+}
+
+function waitForNextBrowserPaint() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(resolve);
+    });
+  });
 }
 
 function isVisibleSessionRunning() {
@@ -6235,6 +6524,13 @@ function addProcessEvent(type, label, detail = "", meta = "", extra = {}) {
   const cleanStatus = String(extra.status || "").trim();
   const cleanAgent = String(extra.agent || "").trim();
   if (!cleanLabel && !cleanDetail) return;
+  const placeholderActivity = `${cleanLabel} ${cleanDetail} ${cleanMeta}`.trim();
+  if (
+    /main agent is executing the current step/i.test(placeholderActivity)
+    || (/^(?:starting|execution)$/i.test(cleanLabel) && !cleanMeta && (!cleanDetail || /executing the current step/i.test(cleanDetail)))
+  ) {
+    return;
+  }
 
   const last = liveProcessEvents[liveProcessEvents.length - 1] || null;
   if (
@@ -6285,6 +6581,17 @@ function addProcessEvent(type, label, detail = "", meta = "", extra = {}) {
       agent: cleanAgent,
     });
     pushAssistantWorklog(worklogEntry);
+    const processMoment = describeActivityMoment({
+      type,
+      label: cleanLabel,
+      detail: cleanDetail,
+      meta: cleanMeta,
+      phase: cleanPhase,
+      status: cleanStatus,
+    });
+    if (processMoment) {
+      pushAssistantStreamMoment(processMoment);
+    }
   }
   ensurePendingAssistantBubbleForRuntime();
 
@@ -6554,6 +6861,108 @@ function pushAssistantWorklog(entry) {
   activeAssistantTurn.worklog = items.slice(-6);
 }
 
+function pushTurnStreamMoment(turn, moment) {
+  if (!turn || !moment) return;
+  const text = cleanDisplayText(moment.text || "");
+  if (!text) return;
+  const kind = String(moment.kind || "note").trim() || "note";
+  const dedupeKey = String(moment.dedupeKey || `${kind}:${text}`).trim();
+  const operationKey = String(moment.operationKey || "").trim();
+  const nextTimestamp = Number(moment.timestamp) || Date.now();
+  const items = Array.isArray(turn.streamMoments) ? turn.streamMoments.slice() : [];
+  const existing = operationKey
+    ? [...items].reverse().find((item) => item.operationKey === operationKey)
+    : items[items.length - 1]?.dedupeKey === dedupeKey
+      ? items[items.length - 1]
+      : null;
+  if (existing) {
+    existing.timestamp = nextTimestamp;
+    existing.text = text;
+    existing.kind = kind;
+    existing.dedupeKey = dedupeKey;
+    existing.state = String(moment.state || existing.state || "");
+    existing.detail = cleanDisplayText(moment.detail || existing.detail || "", "");
+    existing.filePath = cleanDisplayText(moment.filePath || existing.filePath || "", "");
+    existing.added = Number(moment.added ?? existing.added ?? 0) || 0;
+    existing.removed = Number(moment.removed ?? existing.removed ?? 0) || 0;
+    turn.streamMoments = items.slice(-12);
+    turn.lastStreamEventKind = kind;
+    return;
+  }
+  items.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    text,
+    detail: cleanDisplayText(moment.detail || "", ""),
+    dedupeKey,
+    operationKey,
+    state: String(moment.state || "").trim(),
+    filePath: cleanDisplayText(moment.filePath || "", ""),
+    added: Number(moment.added || 0) || 0,
+    removed: Number(moment.removed || 0) || 0,
+    timestamp: nextTimestamp,
+  });
+  turn.streamMoments = items.slice(-12);
+  turn.lastStreamEventKind = kind;
+}
+
+function pushAssistantStreamMoment(moment) {
+  if (!activeAssistantTurn) return;
+  pushTurnStreamMoment(activeAssistantTurn, moment);
+  pendingAssistantOperationsDirty = true;
+  ensurePendingAssistantBubbleForRuntime();
+}
+
+function pushTurnTextSegment(turn, text, options = {}) {
+  if (!turn) return;
+  const cleanText = sanitizeMessageContent(String(text || ""));
+  if (!cleanText.trim()) return false;
+  const forceNew = Boolean(options.forceNew);
+  const nextTimestamp = Number(options.timestamp) || Date.now();
+  const items = Array.isArray(turn.textSegments) ? turn.textSegments.slice() : [];
+  const last = items[items.length - 1] || null;
+  if (!forceNew && last && turn.lastStreamEventKind === "text") {
+    last.text = mergeStreamingTextDelta(String(last.text || ""), cleanText);
+    last.timestamp = nextTimestamp;
+    turn.textSegments = items.slice(-10);
+    turn.textUpdatedAt = nextTimestamp;
+    turn.lastStreamEventKind = "text";
+    turn.text = turn.textSegments.map((item) => String(item?.text || "").trim()).filter(Boolean).join("\n\n");
+    return false;
+  }
+  items.push({
+    id: `${nextTimestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    text: cleanText,
+    timestamp: nextTimestamp,
+  });
+  turn.textSegments = items.slice(-10);
+  turn.textUpdatedAt = nextTimestamp;
+  turn.lastStreamEventKind = "text";
+  turn.text = turn.textSegments.map((item) => String(item?.text || "").trim()).filter(Boolean).join("\n\n");
+  return true;
+}
+
+function replaceTurnTextSegments(turn, text, options = {}) {
+  if (!turn) return;
+  const cleanText = sanitizeMessageContent(String(text || ""));
+  if (!cleanText.trim()) {
+    turn.textSegments = [];
+    turn.textUpdatedAt = Number(options.timestamp) || 0;
+    turn.lastStreamEventKind = "";
+    turn.text = "";
+    return;
+  }
+  const nextTimestamp = Number(options.timestamp) || Date.now();
+  turn.textSegments = [{
+    id: `${nextTimestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    text: cleanText,
+    timestamp: nextTimestamp,
+  }];
+  turn.textUpdatedAt = nextTimestamp;
+  turn.lastStreamEventKind = "text";
+  turn.text = cleanText.trim();
+}
+
 function pushAssistantProgressWorklogText(text) {
   const cleanText = normalizeAgentStageNarration(text);
   if (!cleanText) return;
@@ -6580,6 +6989,14 @@ function pushAssistantProgressWorklogText(text) {
     text: cleanText,
     dedupeKey: `progress:${cleanText}`,
   });
+  const derivedMoment = extractAssistantOperationalMoment(cleanText) || {
+    kind: "activity",
+    text: cleanText,
+    detail: "",
+    state: "run",
+    dedupeKey: `moment:progress:${normalizeText(cleanText)}`,
+  };
+  pushAssistantStreamMoment(derivedMoment);
 }
 
 function captureAssistantOperationNarration(text) {
@@ -6605,6 +7022,7 @@ function describeActivityWorklog(event) {
   const detail = normalizeActivityDetail(event?.detail || "");
   const phase = String(event?.phase || "").trim().toLowerCase();
   const meta = cleanDisplayText(event?.meta || "");
+  if (/main agent is executing the current step/i.test(`${label} ${detail} ${meta}`) || /^(?:starting|execution)$/i.test(label) && !detail && !meta) return null;
   if (!label && !detail && !meta) return null;
   if (!detail && !meta) return null;
   return {
@@ -6616,6 +7034,36 @@ function describeActivityWorklog(event) {
 
 function describeActivityNarration(event) {
   return cleanDisplayText(describeActivityWorklog(event)?.text || "", "");
+}
+
+function describeActivityMoment(event) {
+  const label = cleanDisplayText(event?.label || "", "");
+  const detail = cleanDisplayText(event?.detail || event?.meta || "", "");
+  const combined = `${label} ${detail}`.trim();
+  if (!combined) return null;
+  if (/main agent is executing the current step/i.test(combined) || /^(?:starting|execution)$/i.test(label) && !detail) return null;
+  const status = String(event?.status || "").toLowerCase();
+  const phase = String(event?.phase || "").toLowerCase();
+  const failed = /fail|error|denied/.test(`${status} ${phase} ${combined}`);
+  const done = /complete|completed|done|pass|success|succeeded|finished/.test(`${status} ${phase}`);
+  const editing = /edit|write|patch|create|mkdir|rename|\u7f16\u8f91|\u5199\u5165|\u4fee\u6539|\u521b\u5efa|\u65b0\u5efa/.test(combined.toLowerCase());
+  const inspection = /inspect|read|view|scan|search|check|review|\u67e5\u770b|\u8bfb\u53d6|\u626b\u63cf|\u641c\u7d22|\u68c0\u67e5|\u68c0\u89c6/.test(combined.toLowerCase());
+  const checking = /verify|test|lint|build|cargo|node --check|\u9a8c\u8bc1|\u6d4b\u8bd5|\u6784\u5efa/.test(combined.toLowerCase());
+  const state = failed ? "fail" : done ? "done" : "run";
+  const text = checking
+    ? (state === "run" ? zhLabel("\u6b63\u5728\u68c0\u67e5", "Checking") : state === "fail" ? zhLabel("\u68c0\u67e5\u5931\u8d25", "Check failed") : zhLabel("\u68c0\u67e5\u5b8c\u6210", "Check done"))
+    : editing
+      ? (state === "run" ? zhLabel("\u6b63\u5728\u7f16\u8f91", "Editing") : state === "fail" ? zhLabel("\u7f16\u8f91\u5931\u8d25", "Edit failed") : zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done"))
+      : inspection
+        ? (state === "run" ? zhLabel("\u6b63\u5728\u67e5\u770b", "Inspecting") : state === "fail" ? zhLabel("\u67e5\u770b\u5931\u8d25", "Inspection failed") : zhLabel("\u67e5\u770b\u5b8c\u6210", "Inspection done"))
+        : (state === "run" ? zhLabel("\u6b63\u5728\u6267\u884c", "Running") : state === "fail" ? zhLabel("\u5de5\u5177\u5931\u8d25", "Tool failed") : zhLabel("\u5de5\u5177\u5b8c\u6210", "Tool complete"));
+  return {
+    kind: checking ? "check" : editing ? "edit" : inspection ? "inspection" : "tool",
+    text,
+    detail: detail || label,
+    state,
+    dedupeKey: `moment:activity:${normalizeText(label || detail)}:${state}`,
+  };
 }
 
 function normalizeAgentStageNarration(text) {
@@ -6652,6 +7100,37 @@ function describeToolWorklog(tool) {
   return null;
 }
 
+function describeToolMoment(tool) {
+  if (!tool) return null;
+  const status = String(tool.status || "").trim().toLowerCase();
+  const normalizedName = String(tool.name || "").trim().toLowerCase();
+  const fileName = displayFileNameOnly(tool.file_path || tool.params?.file_path || tool.params?.path || tool.params?.target_file || "");
+  const isCommand = isCommandLikeTool(normalizedName);
+  const isInspection = ["list_dir", "find_files", "read_file", "read_file_range", "tree_dir", "search_files"].includes(normalizedName);
+  const isEditing = ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(normalizedName);
+  const isChecking = normalizedName.startsWith("git_") || /(?:test|check|lint|build|verify)/.test(normalizedName);
+  const kind = isCommand ? "command" : isEditing ? "edit" : isInspection ? "inspection" : isChecking ? "check" : "tool";
+  const operationKey = `tool-category:${kind}`;
+  const running = ["pending", "approved", "executing", "running"].includes(status);
+  const failed = status === "failed" || status === "error" || status === "denied";
+  const labels = {
+    inspection: running ? zhLabel("\u6b63\u5728\u67e5\u770b", "Inspecting") : failed ? zhLabel("\u67e5\u770b\u5931\u8d25", "Inspection failed") : zhLabel("\u67e5\u770b\u5b8c\u6210", "Inspection done"),
+    edit: running ? zhLabel("\u6b63\u5728\u7f16\u8f91", "Editing") : failed ? zhLabel("\u7f16\u8f91\u5931\u8d25", "Edit failed") : zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done"),
+    check: running ? zhLabel("\u6b63\u5728\u68c0\u67e5", "Checking") : failed ? zhLabel("\u68c0\u67e5\u5931\u8d25", "Check failed") : zhLabel("\u68c0\u67e5\u5b8c\u6210", "Check done"),
+    command: running ? zhLabel("\u6267\u884c\u547d\u4ee4", "Running command") : failed ? zhLabel("\u547d\u4ee4\u6267\u884c\u5931\u8d25", "Command failed") : zhLabel("\u547d\u4ee4\u5b8c\u6210", "Command complete"),
+    tool: running ? zhLabel("\u6b63\u5728\u6267\u884c", "Running tool") : failed ? zhLabel("\u5de5\u5177\u5931\u8d25", "Tool failed") : zhLabel("\u5de5\u5177\u5b8c\u6210", "Tool complete"),
+  };
+  return {
+    kind,
+    text: labels[kind],
+    detail: fileName || "",
+    state: failed ? "fail" : running ? "run" : "done",
+    filePath: cleanDisplayText(tool.file_path || "", ""),
+    operationKey,
+    dedupeKey: `${operationKey}:${failed ? "fail" : running ? "run" : "done"}`,
+  };
+}
+
 function describeEditedFileWorklog(file) {
   if (!file?.path) return null;
   return {
@@ -6661,6 +7140,85 @@ function describeEditedFileWorklog(file) {
     filePath: file.path,
     added: Number(file.added || 0) || 0,
     removed: Number(file.removed || 0) || 0,
+  };
+}
+
+function describeEditedFileMoment(file) {
+  if (!file?.path) return null;
+  return {
+    kind: "edit",
+    text: zhLabel(`已编辑 ${displayFileNameOnly(file.path)}`, `Edited ${displayFileNameOnly(file.path)}`),
+    detail: "",
+    state: "done",
+    filePath: file.path,
+    added: Number(file.added || 0) || 0,
+    removed: Number(file.removed || 0) || 0,
+    operationKey: `edit:${file.path}`,
+    dedupeKey: `moment:edit:${file.path}:${Number(file.added || 0)}:${Number(file.removed || 0)}`,
+  };
+}
+
+function normalizedOperationMoment(moment, source = null) {
+  if (!moment) return null;
+  const kind = String(moment.kind || "tool").toLowerCase();
+  const state = String(moment.state || "done").toLowerCase();
+  const filePath = cleanDisplayText(moment.filePath || source?.path || source?.file_path || "", "");
+  if (kind === "edit" && filePath) {
+    const created = Number(moment.added || source?.added || 0) > 0
+      && Number(moment.removed || source?.removed || 0) === 0
+      && !String(source?.before_content || "").trim();
+    return {
+      ...moment,
+      text: created
+        ? zhLabel("\u6587\u4ef6\u521b\u5efa", "Created file")
+        : state === "run"
+          ? zhLabel("\u6b63\u5728\u7f16\u8f91", "Editing")
+          : zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done"),
+      detail: "",
+      filePath,
+      dedupeKey: `${moment.dedupeKey || `moment:edit:${filePath}`}:${created ? "created" : state}`,
+    };
+  }
+  if (kind === "command") {
+    return {
+      ...moment,
+      text: state === "run"
+        ? zhLabel("\u6267\u884c\u547d\u4ee4", "Running command")
+        : state === "fail"
+          ? zhLabel("\u547d\u4ee4\u6267\u884c\u5931\u8d25", "Command failed")
+          : zhLabel("\u547d\u4ee4\u5b8c\u6210", "Command complete"),
+    };
+  }
+  if (kind === "tool") {
+    return {
+      ...moment,
+      text: state === "run"
+        ? zhLabel("\u6b63\u5728\u6267\u884c", "Running tool")
+        : state === "fail"
+          ? zhLabel("\u5de5\u5177\u5931\u8d25", "Tool failed")
+          : zhLabel("\u5de5\u5177\u5b8c\u6210", "Tool complete"),
+    };
+  }
+  return moment;
+}
+
+function corroborateAssistantOperationalMoment(moment, turn) {
+  if (!moment) return null;
+  if (String(moment.kind || "").toLowerCase() !== "edit") return moment;
+  const tools = Array.isArray(turn?.tools) ? turn.tools : [];
+  const hasRealEditTool = tools.some((tool) => {
+    const name = String(tool?.name || "").toLowerCase();
+    return ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name);
+  });
+  if (hasRealEditTool || (Array.isArray(turn?.diffs) && turn.diffs.length > 0)) return moment;
+  return {
+    ...moment,
+    kind: "activity",
+    text: zhLabel("\u51c6\u5907\u7f16\u8f91", "Preparing to edit"),
+    filePath: "",
+    added: 0,
+    removed: 0,
+    dedupeKey: `moment:assistant-edit-intent:${normalizeText(moment.detail || moment.text || "")}`,
   };
 }
 
@@ -8452,27 +9010,85 @@ function setSettingsTab(tab) {
 
 function renderPendingFiles() {
   if (!composerAttachments) return;
+  const composerShell = composerAttachments.closest(".composer-shell");
   if (!pendingFiles.length) {
     composerAttachments.hidden = true;
     composerAttachments.innerHTML = "";
+    composerShell?.classList.remove("has-attachments");
     return;
   }
 
   composerAttachments.hidden = false;
+  composerShell?.classList.add("has-attachments");
   composerAttachments.innerHTML = "";
   pendingFiles.forEach((file, index) => {
     const chip = document.createElement("div");
-    chip.className = "attachment-chip";
+    chip.className = `attachment-chip${file.isImage ? " is-image" : " is-file"}`;
+    const previewMarkup = file.isImage && file.previewUrl
+      ? `<img class="attachment-preview" src="${escapeHtml(file.previewUrl)}" alt="" />`
+      : `<span class="attachment-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h6.8L18 7.7v12.8H7z"></path><path d="M13.5 3.5v4.4H18"></path></svg><span>${escapeHtml(file.extension || "FILE")}</span></span>`;
     chip.innerHTML = `
-      <span>${escapeHtml(file.path || file.name || `file-${index + 1}`)}</span>
+      ${previewMarkup}
+      <span class="attachment-meta">
+        <strong>${escapeHtml(file.name || `file-${index + 1}`)}</strong>
+        <small>${escapeHtml(file.isImage ? "Image" : (file.extension || "FILE"))}</small>
+      </span>
       <button class="attachment-remove" type="button" aria-label="Remove">x</button>
     `;
     chip.querySelector(".attachment-remove")?.addEventListener("click", () => {
+      const removed = pendingFiles[index];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       pendingFiles = pendingFiles.filter((_item, fileIndex) => fileIndex !== index);
       renderPendingFiles();
     });
     composerAttachments.appendChild(chip);
   });
+}
+
+function attachmentExtension(name) {
+  const match = String(name || "").match(/\.([^.]+)$/);
+  return match ? match[1].slice(0, 8).toUpperCase() : "FILE";
+}
+
+function isImageAttachment(file) {
+  return String(file?.type || "").toLowerCase().startsWith("image/");
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("file read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function addPendingFiles(files) {
+  Array.from(files || []).filter((file) => file instanceof File).forEach((file) => {
+    const duplicate = pendingFiles.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
+    if (duplicate) return;
+    const isImage = isImageAttachment(file);
+    pendingFiles.push({
+      file,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      lastModified: file.lastModified,
+      extension: attachmentExtension(file.name),
+      isImage,
+      previewUrl: isImage ? URL.createObjectURL(file) : "",
+    });
+  });
+  renderPendingFiles();
+}
+
+async function serializePendingAttachments() {
+  return Promise.all(pendingFiles.map(async (item) => ({
+    name: item.name,
+    mime_type: item.type || "application/octet-stream",
+    size: item.size || 0,
+    data_url: await readFileAsDataUrl(item.file),
+  })));
 }
 
 function sanitizeMessageContent(text) {
@@ -8486,6 +9102,12 @@ function sanitizeMessageContent(text) {
     "闁挎繃绮ｇ紞鎿燬ML闁挎繃绮ｇ紞",
     "<DSML",
     "</DSML",
+    "<tool_call",
+    "</tool_call",
+    "<function=",
+    "<function ",
+    "<function_",
+    "</function>",
   ];
   let cutIndex = -1;
   for (const marker of dsmlStarts) {
@@ -8503,6 +9125,10 @@ function sanitizeMessageContent(text) {
     "\r\nResult summary",
     "\n{\"operation\"",
     "\r\n{\"operation\"",
+    "\n<tool_call",
+    "\r\n<tool_call",
+    "\n<function=",
+    "\r\n<function=",
   ];
   for (const marker of toolNarrationMarkers) {
     const index = raw.indexOf(marker);
@@ -8510,7 +9136,7 @@ function sanitizeMessageContent(text) {
       cutIndex = index;
     }
   }
-  for (const marker of ["Tool", "Arguments", "Result summary", "{\"operation\""]) {
+  for (const marker of ["Tool", "Arguments", "Result summary", "{\"operation\"", "<tool_call", "<function="]) {
     if (raw.startsWith(marker)) {
       cutIndex = cutIndex === -1 ? 0 : Math.min(cutIndex, 0);
     }
@@ -8525,11 +9151,16 @@ function sanitizeMessageContent(text) {
 function createEmptyAssistantTurn() {
   return {
     text: "",
+    streamingAnchorText: "",
+    suppressedInlineContent: false,
+    isThinkingPhase: false,
     runtimeNarration: "",
     progressNarration: "",
     assistantChoices: null,
     auto_skills: [],
     thinking: [],
+    textSegments: [],
+    streamMoments: [],
     process: [],
     worklog: [],
     processDelegates: [],
@@ -8543,6 +9174,8 @@ function createEmptyAssistantTurn() {
     permission: null,
     activity: "",
     startedAt: Date.now(),
+    textUpdatedAt: 0,
+    lastStreamEventKind: "",
     receivedDelta: false,
   };
 }
@@ -8551,11 +9184,16 @@ function cloneAssistantTurnState(turn) {
   if (!turn) return null;
   return {
     ...turn,
+    streamingAnchorText: String(turn.streamingAnchorText || ""),
+    suppressedInlineContent: Boolean(turn.suppressedInlineContent),
+    isThinkingPhase: Boolean(turn.isThinkingPhase),
     runtimeNarration: String(turn.runtimeNarration || ""),
     progressNarration: String(turn.progressNarration || ""),
     assistantChoices: turn.assistantChoices ? { ...turn.assistantChoices, options: Array.isArray(turn.assistantChoices.options) ? turn.assistantChoices.options.slice() : [] } : null,
     auto_skills: Array.isArray(turn.auto_skills) ? turn.auto_skills.map((item) => ({ ...item })) : [],
     thinking: Array.isArray(turn.thinking) ? turn.thinking.map((item) => ({ ...item })) : [],
+    textSegments: Array.isArray(turn.textSegments) ? turn.textSegments.map((item) => ({ ...item })) : [],
+    streamMoments: Array.isArray(turn.streamMoments) ? turn.streamMoments.map((item) => ({ ...item })) : [],
     process: Array.isArray(turn.process) ? turn.process.map((item) => ({ ...item })) : [],
     worklog: Array.isArray(turn.worklog) ? turn.worklog.map((item) => ({ ...item })) : [],
     processDelegates: Array.isArray(turn.processDelegates)
@@ -8587,6 +9225,8 @@ function cloneAssistantTurnState(turn) {
     tools: Array.isArray(turn.tools) ? turn.tools.map((item) => ({ ...item })) : [],
     diffs: Array.isArray(turn.diffs) ? turn.diffs.map((item) => ({ ...item })) : [],
     permission: turn.permission ? { ...turn.permission } : null,
+    textUpdatedAt: Number(turn.textUpdatedAt || 0) || 0,
+    lastStreamEventKind: String(turn.lastStreamEventKind || ""),
   };
 }
 
@@ -8627,12 +9267,15 @@ function mergeAssistantTurnData(baseTurn, liveTurn, options = {}) {
   if (!live) return base;
   return {
     ...base,
+    suppressedInlineContent: Boolean(base.suppressedInlineContent || live.suppressedInlineContent),
     runtimeNarration: mergeAssistantText(base.runtimeNarration, live.runtimeNarration, options),
     progressNarration: mergeAssistantText(base.progressNarration, live.progressNarration, options),
     assistantChoices: live.assistantChoices || base.assistantChoices || null,
-    auto_skills: richerAssistantCollection(base.auto_skills, live.auto_skills),
+    auto_skills: [],
     text: mergeAssistantText(base.text, live.text, options),
     thinking: richerAssistantCollection(base.thinking, live.thinking),
+    textSegments: richerAssistantCollection(base.textSegments, live.textSegments),
+    streamMoments: richerAssistantCollection(base.streamMoments, live.streamMoments),
     process: richerAssistantCollection(base.process, live.process),
     worklog: richerAssistantCollection(base.worklog, live.worklog),
     processDelegates: richerAssistantCollection(base.processDelegates, live.processDelegates),
@@ -8646,19 +9289,21 @@ function mergeAssistantTurnData(baseTurn, liveTurn, options = {}) {
     permission: live.permission || base.permission,
     activity: String(live.activity || base.activity || ""),
     startedAt: live.startedAt || base.startedAt || Date.now(),
+    textUpdatedAt: live.textUpdatedAt || base.textUpdatedAt || 0,
+    lastStreamEventKind: String(live.lastStreamEventKind || base.lastStreamEventKind || ""),
     receivedDelta: Boolean(base.receivedDelta || live.receivedDelta),
   };
 }
 
 function shouldSuppressInlineAssistantCode(text, diffs = []) {
   const content = String(text || "");
-  const isAgentLikeMode = currentWorkspaceMode === "research" || currentWorkspaceMode === "agent";
-  const looksCodeLike = /```|(?:^|\n)\s*(?:def |class |function |import |from |const |let |var |pub |fn |use |#include )/m.test(content);
+  if (isAssistantCompletionSummaryText(content)) return false;
+  const looksCodeLike = /```|(?:^|\n)\s*(?:def |class |function |async function |import |from |const |let |var |pub |fn |use |mod |impl |struct |enum |interface |type |#include |<\/?[a-z][^>]*>)/m.test(content);
   const codeFenceCount = (content.match(/```/g) || []).length;
   const codeyLineCount = content
     .split(/\r?\n/)
     .filter((line) =>
-      /^\s*(?:def |class |function |import |from |const |let |var |pub |fn |use |#include )/.test(line),
+      /^\s*(?:def |class |function |async function |import |from |const |let |var |pub |fn |use |mod |impl |struct |enum |interface |type |#include |<\/?[a-z][^>]*>)/.test(line),
     )
     .length;
   const longCodeLike = looksCodeLike && (
@@ -8666,13 +9311,45 @@ function shouldSuppressInlineAssistantCode(text, diffs = []) {
       || codeFenceCount >= 2
       || codeyLineCount >= 8
   );
+  const looksJsonLike = (
+    /^[\[{]/.test(content.trim())
+    && /"(?:path|content|children|kind|role|type|tool|tool_args|call_id|status|result|data|delta|diff|before_content|after_content|session_id|runtime_snapshots|edited_files|tool_events)"/.test(content)
+  ) || (
+    content.trim().length > 240
+    && /"(?:path|content|children|kind|role|type|tool|tool_args|call_id|status|result|data|delta|diff|before_content|after_content|session_id|runtime_snapshots|edited_files|tool_events)"/.test(content)
+    && /[:[{[]/.test(content)
+  );
+  const looksPayloadLike = looksLikeOperationalContentDump(content)
+    || looksLikeToolPayloadDump(content)
+    || looksLikeDirectoryTreeDump(content);
   const hasDiffs = Array.isArray(diffs) && diffs.length > 0;
   return Boolean(
-    (isAgentLikeMode || hasDiffs) && longCodeLike,
+    looksPayloadLike
+    || looksJsonLike
+    || (longCodeLike && (hasDiffs || content.trim().length > 420))
   );
 }
 
-function visibleAssistantWorkspaceNotice() {
+function turnHasRealWorkspaceChanges(turn) {
+  if (!turn) return false;
+  const diffs = Array.isArray(turn.diffs) ? turn.diffs : [];
+  if (diffs.some((diff) => cleanDisplayText(diff?.path || "", ""))) return true;
+  const tools = Array.isArray(turn.tools) ? turn.tools : [];
+  return tools.some((tool) => {
+    const name = String(tool?.name || "").toLowerCase();
+    const status = String(tool?.status || "").toLowerCase();
+    return ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name)
+      && ["complete", "completed", "success", "succeeded"].includes(status)
+      && Boolean(cleanDisplayText(tool?.file_path || tool?.params?.file_path || tool?.params?.path || tool?.params?.target_file || "", ""));
+  });
+}
+
+function visibleAssistantWorkspaceNotice(turn = activeAssistantTurn) {
+  if (!turnHasRealWorkspaceChanges(turn)) {
+    return currentLanguage === "zh"
+      ? "\u5df2\u7701\u7565\u4e0d\u9002\u5408\u4f5c\u4e3a\u804a\u5929\u6b63\u6587\u5c55\u793a\u7684\u4ee3\u7801\u6216\u5de5\u5177\u8f7d\u8377\u3002"
+      : "Code or tool payload unsuitable for the chat body was omitted.";
+  }
   return currentLanguage === "zh"
     ? "本轮结果已直接写入工作区文件，聊天区域不再展开完整源码。"
     : "This turn was written directly into workspace files. Full source is not expanded in chat.";
@@ -9016,9 +9693,7 @@ function hydrateVisibleRuntimeSnapshot() {
   activeAssistantTurn.subagents = Array.isArray(snapshot.subagents)
     ? dedupeSubagentEntries(snapshot.subagents)
     : [];
-  activeAssistantTurn.auto_skills = Array.isArray(snapshot.auto_skills)
-    ? snapshot.auto_skills.map((item) => ({ ...item }))
-    : [];
+  activeAssistantTurn.auto_skills = [];
   activeAssistantTurn.verifierReport = snapshot.verifier ? { ...snapshot.verifier } : null;
   activeAssistantTurn.runtimeCheckpoints = Array.isArray(snapshot.checkpoints)
     ? snapshot.checkpoints.slice()
@@ -9058,8 +9733,7 @@ function hydrateVisibleRuntimeSnapshot() {
   const hasStreamingRenderableContent = Boolean(
     String(activeAssistantTurn.text || "").trim() ||
     String(activeAssistantTurn.runtimeNarration || "").trim() ||
-    activeAssistantTurn.worklog.length ||
-    activeAssistantTurn.auto_skills.length
+    activeAssistantTurn.worklog.length
   );
   if (
     getSessionRunState(currentSessionId)?.running &&
@@ -9095,9 +9769,7 @@ function syncActiveTurnRuntime(runtime) {
   activeAssistantTurn.timeline = Array.isArray(runtime.timeline)
     ? runtime.timeline.map((item) => ({ ...item }))
     : activeAssistantTurn.timeline;
-  activeAssistantTurn.auto_skills = Array.isArray(runtime.auto_skills)
-    ? runtime.auto_skills.map((item) => ({ ...item }))
-    : activeAssistantTurn.auto_skills;
+  activeAssistantTurn.auto_skills = [];
 }
 
 function captureMessageScrollPosition() {
@@ -9185,6 +9857,16 @@ function persistConversationMessages(messages, { sessionId = null } = {}) {
 
 function commitStreamFailure(error) {
   const nextMessages = [...visibleConversationMessages(bootstrapData?.messages || [])];
+  const lastPersistedAssistant = [...nextMessages]
+    .reverse()
+    .find((message) => message?.kind === "message" && message?.role === "assistant");
+  if (
+    /(?:\u672c\u8f6e|\u8fd9\u8f6e).*(?:\u4e2d\u65ad|\u5931\u8d25|\u505c\u6b62|\u6682\u505c)|(?:interrupted|stopped early|internal execution component failed)/i
+      .test(String(lastPersistedAssistant?.content || ""))
+  ) {
+    persistConversationMessages(nextMessages, { sessionId: currentStreamingSessionId });
+    return;
+  }
   const partialText = String(activeAssistantTurn?.text || "").trim();
   if (partialText) {
     const lastMessage = nextMessages[nextMessages.length - 1] || null;
@@ -9199,7 +9881,7 @@ function commitStreamFailure(error) {
 
   const classified = classifyAppError(error, "send");
   const failureText = currentLanguage === "zh"
-    ? `本轮提前中断：${classified.message || "发送失败。"}`
+    ? `\u672c\u8f6e\u63d0\u524d\u4e2d\u65ad\uff1a${classified.message || "\u53d1\u9001\u5931\u8d25\u3002"}`
     : `This turn stopped early: ${classified.message || "Send failed."}`;
   nextMessages.push({
     kind: "message",
@@ -9311,15 +9993,149 @@ function pendingAssistantPlaceholderText() {
 }
 
 function bindPendingAssistantNodes(scope = pendingAssistantBubble) {
-  pendingAssistantRuntimeNode = scope?.querySelector("[data-streaming-runtime]") || null;
-  pendingAssistantTextNode = scope?.querySelector("[data-streaming-markdown]") || null;
-  pendingAssistantStableNode = scope?.querySelector("[data-streaming-markdown-stable]") || null;
-  pendingAssistantTailNode = scope?.querySelector("[data-streaming-markdown-tail]") || null;
+  pendingAssistantRuntimeNode = scope?.querySelector("[data-pending-runtime-panel]") || scope?.querySelector("[data-streaming-runtime]") || null;
+  pendingAssistantRuntimeStatusesNode = scope?.querySelector("[data-runtime-statuses]") || null;
+  pendingAssistantStoryNode = scope?.querySelector("[data-turn-storyline]") || null;
+  pendingAssistantOperationsNode = scope?.querySelector("[data-turn-operations]") || null;
+  pendingAssistantThinkingHost = scope?.querySelector("[data-thinking-host]") || null;
+  const markdownNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown]")] : [];
+  const stableNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown-stable]")] : [];
+  const tailNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown-tail]")] : [];
+  pendingAssistantTextNode = markdownNodes.length ? markdownNodes[markdownNodes.length - 1] : null;
+  pendingAssistantStableNode = stableNodes.length ? stableNodes[stableNodes.length - 1] : null;
+  pendingAssistantTailNode = tailNodes.length ? tailNodes[tailNodes.length - 1] : null;
+  pendingAssistantThinkingNode = scope?.querySelector(".codex-thinking-block .thinking-content") || null;
   pendingAssistantStatusTextNode = scope?.querySelector("[data-turn-activity]") || null;
   pendingAssistantStatusTimeNode = scope?.querySelector("[data-turn-elapsed]") || null;
   pendingAssistantRenderedRuntimeText = null;
   pendingAssistantRenderedStableText = null;
   pendingAssistantRenderedTailText = null;
+  pendingAssistantRenderedOperationsHtml = null;
+}
+
+function bindPendingAssistantStoryNodes(scope = pendingAssistantStoryNode) {
+  const markdownNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown]")] : [];
+  const stableNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown-stable]")] : [];
+  const tailNodes = scope ? [...scope.querySelectorAll("[data-streaming-markdown-tail]")] : [];
+  pendingAssistantTextNode = markdownNodes.length ? markdownNodes[markdownNodes.length - 1] : null;
+  pendingAssistantStableNode = stableNodes.length ? stableNodes[stableNodes.length - 1] : null;
+  pendingAssistantTailNode = tailNodes.length ? tailNodes[tailNodes.length - 1] : null;
+  pendingAssistantRenderedStableText = null;
+  pendingAssistantRenderedTailText = null;
+}
+
+function syncPendingAssistantRuntimePanel() {
+  if (!pendingAssistantRuntimeNode || !activeAssistantTurn) return;
+  if (!autoOpenActivityPanel) {
+    if (pendingAssistantRuntimeNode.firstChild) {
+      pendingAssistantRuntimeNode.replaceChildren();
+    }
+    return;
+  }
+  const runtimeSummaryParts = summarizeTurnRuntime(activeAssistantTurn);
+  const operationDetailPanels = buildOperationDetailPanels(activeAssistantTurn, { isStreaming: true });
+  const permissionMarkup = activeAssistantTurn.permission
+    ? `
+      <div class="codex-approval-card codex-tool-step codex-approval-step">
+        <div class="codex-step-rail" aria-hidden="true">
+          <span class="codex-step-dot"></span>
+        </div>
+        <div class="codex-approval-copy">
+          <div class="codex-approval-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
+          <div class="codex-approval-meta">${escapeHtml(activeAssistantTurn.permission.name || "")}${activeAssistantTurn.permission.risk ? ` / ${escapeHtml(activeAssistantTurn.permission.risk || "")}` : ""}</div>
+        </div>
+        <div class="codex-approval-actions">
+          <button class="codex-approval-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
+          <button class="codex-approval-button is-primary" type="button" data-permission-action="approve">${escapeHtml(currentLanguage === "zh" ? "批准" : "Approve")}</button>
+        </div>
+      </div>
+    `
+    : "";
+  const runtimePanelContent = [
+    permissionMarkup,
+    operationDetailPanels ? `<div class="codex-operation-detail-stack">${operationDetailPanels}</div>` : "",
+  ].filter(Boolean).join("");
+  const shouldShowRuntimePanel = Boolean(runtimePanelContent);
+  const nextHtml = shouldShowRuntimePanel
+    ? renderAssistantRuntimePanel(runtimePanelContent, {
+        title: currentLanguage === "zh" ? "操作" : "Activity",
+        meta: runtimeSummaryParts.join(" / "),
+        open: true,
+        tone: "running",
+      })
+    : "";
+  if (pendingAssistantRuntimeNode.innerHTML !== nextHtml) {
+    pendingAssistantRuntimeNode.innerHTML = nextHtml;
+    bindTurnInteractionHandlers(pendingAssistantBubble);
+  }
+}
+
+function ensurePendingThinkingExpanded() {
+  if (!pendingAssistantBubble) return;
+  pendingAssistantBubble.querySelectorAll(".codex-thinking-block").forEach((details) => {
+    const shell = details;
+    if (shell instanceof HTMLDetailsElement) {
+      shell.open = true;
+    }
+  });
+}
+
+function renderStreamingThinkingIndicator() {
+  return `
+    <section class="thinking-block codex-thinking-block is-thinking" data-thinking-streaming>
+      <div class="codex-thinking-summary" role="status" aria-live="polite">${renderThinkingSummaryLabel(0, true)}</div>
+    </section>
+  `;
+}
+
+function hasPendingAssistantShell(scope = pendingAssistantBubble) {
+  return Boolean(scope?.querySelector?.("[data-pending-assistant-shell]"));
+}
+
+function renderPendingAssistantShell() {
+  return `<div class="codex-stream-phase"${streamAnimationStyle()}>
+    <article class="message-row assistant-row assistant-message-row codex-turn-row" data-pending-assistant-shell>
+      <div class="codex-turn-shell">
+        <div data-thinking-host></div>
+        <div class="codex-answer codex-answer-streaming codex-answer-empty">
+          <div data-turn-storyline></div>
+          <div class="codex-runtime-statuses" data-runtime-statuses hidden></div>
+        </div>
+        <div class="codex-turn-operations" data-turn-operations hidden></div>
+        <div data-pending-runtime-panel></div>
+      </div>
+    </article>
+  </div>`;
+}
+
+function ensurePendingAssistantShellBound() {
+  if (!pendingAssistantBubble) return false;
+  if (!hasPendingAssistantShell()) {
+    pendingAssistantBubble.innerHTML = renderPendingAssistantShell();
+    bindTurnInteractionHandlers(pendingAssistantBubble);
+  }
+  if (!pendingAssistantThinkingHost || !pendingAssistantStoryNode || !pendingAssistantOperationsNode || !pendingAssistantRuntimeStatusesNode) {
+    bindPendingAssistantNodes(pendingAssistantBubble);
+  }
+  return true;
+}
+
+function syncPendingThinkingIndicator() {
+  if (!pendingAssistantThinkingHost || !activeAssistantTurn) return;
+  const shouldShow = Boolean(activeAssistantTurn.isThinkingPhase);
+  const existing = pendingAssistantThinkingHost.querySelector("[data-thinking-streaming]");
+  if (shouldShow && !existing) {
+    pendingAssistantThinkingHost.insertAdjacentHTML("beforeend", renderStreamingThinkingIndicator());
+  } else if (!shouldShow && existing) {
+    existing.remove();
+  }
+}
+
+function syncPendingAssistantOperations() {
+  if (!pendingAssistantOperationsNode) return;
+  if (pendingAssistantOperationsNode.firstChild) pendingAssistantOperationsNode.replaceChildren();
+  pendingAssistantRenderedOperationsHtml = "";
+  pendingAssistantOperationsNode.hidden = true;
 }
 
 function isStreamingBlockLine(line) {
@@ -9427,14 +10243,23 @@ function renderStreamingAssistantContent(content, options = {}) {
 
 function resetPendingAssistantRenderState() {
   pendingAssistantRuntimeNode = null;
+  pendingAssistantRuntimeStatusesNode = null;
+  pendingAssistantStoryNode = null;
+  pendingAssistantOperationsNode = null;
+  pendingAssistantThinkingHost = null;
   pendingAssistantTextNode = null;
   pendingAssistantStableNode = null;
   pendingAssistantTailNode = null;
+  pendingAssistantThinkingNode = null;
   pendingAssistantStatusTextNode = null;
   pendingAssistantStatusTimeNode = null;
   pendingAssistantRenderedRuntimeText = null;
   pendingAssistantRenderedStableText = null;
   pendingAssistantRenderedTailText = null;
+  pendingAssistantRenderedOperationsHtml = null;
+  pendingAssistantStoryDirty = false;
+  pendingAssistantOperationsDirty = false;
+  pendingAssistantThinkingDirty = false;
 }
 
 function syncPendingAssistantStatus() {
@@ -9550,17 +10375,47 @@ function inlineStreamingNarrationText(turn, explicitContent = "") {
 
 function composeStreamingAssistantVisibleContent(turn) {
   if (!turn) return "";
+  const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments : [];
+  if (textSegments.length) {
+    const combined = textSegments
+      .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
+      .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
+      .join("\n\n")
+      .trim();
+    if (combined) return combined;
+  }
+  const anchored = sanitizeMessageContent(String(turn?.streamingAnchorText || "")).trim();
+  if (
+    anchored
+    && !looksLikeOperationalContentDump(anchored)
+    && !assistantTextLooksLikeProcessNarration(anchored)
+    && !shouldSuppressInlineAssistantCode(anchored, turn?.diffs || [])
+  ) {
+    return anchored;
+  }
   const explicitContent = String(turn.text || "");
   const cleaned = cleanDisplayText(explicitContent, "").trim();
   if (!cleaned) return "";
+  if (looksLikeOperationalContentDump(cleaned)) return "";
   if (assistantTextLooksLikeProcessNarration(cleaned)) return "";
+  if (shouldSuppressInlineAssistantCode(cleaned, turn?.diffs || [])) return "";
   return explicitContent;
 }
 
 function completionFallbackAssistantContent(turn) {
+  const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments : [];
+  if (textSegments.length) {
+    return textSegments
+      .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
+      .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
+      .join("\n\n")
+      .trim();
+  }
   const assistantText = sanitizeMessageContent(String(turn?.text || "")).trim();
   if (!assistantText) return "";
+  if (looksLikeOperationalContentDump(assistantText)) return "";
   if (assistantTextLooksLikeProcessNarration(assistantText)) return "";
+  if (shouldSuppressInlineAssistantCode(assistantText, turn?.diffs || [])) return "";
   return assistantText;
 }
 
@@ -9598,7 +10453,7 @@ function shouldPreferPersistedAssistantTurn(messages, fallbackTurn = activeAssis
   const fallbackText = cleanDisplayText(completionFallbackAssistantContent(fallbackTurn), "");
   const fallbackCore = cleanDisplayText(assistantPrimaryReplyCore(fallbackText), "");
   const persistedTurn = latestVisibleAssistantTurn(messages);
-  const persistedText = cleanDisplayText(String(persistedTurn?.text || "").trim(), "");
+  const persistedText = cleanDisplayText(completionFallbackAssistantContent(persistedTurn), "");
   const persistedCore = cleanDisplayText(assistantPrimaryReplyCore(persistedText), "");
   if (!turnHasRenderableAssistantContent(persistedTurn)) return false;
   if (!persistedText) {
@@ -9714,16 +10569,36 @@ function visibleStreamingRuntimeNarration(turn) {
 }
 
 function syncPendingAssistantText() {
-  if (!pendingAssistantTextNode) return;
+  if (!pendingAssistantBubble || !activeAssistantTurn) return;
+  if (!ensurePendingAssistantShellBound()) return;
   const content = composeStreamingAssistantVisibleContent(activeAssistantTurn);
-  const runtimeNarration = visibleStreamingRuntimeNarration(activeAssistantTurn);
   const shouldSuppressInlineCode = shouldSuppressInlineAssistantCode(
     content,
     activeAssistantTurn?.diffs || [],
   );
-  const visibleContent = shouldSuppressInlineCode
-    ? visibleAssistantWorkspaceNotice()
+  if (shouldSuppressInlineCode) {
+    activeAssistantTurn.suppressedInlineContent = true;
+  }
+  const visibleContent = shouldSuppressInlineCode || (!content && activeAssistantTurn.suppressedInlineContent)
+    ? visibleAssistantWorkspaceNotice(activeAssistantTurn)
     : content;
+  if (pendingAssistantStoryNode) {
+    const streamingParts = renderStreamingAssistantContent(visibleContent, {
+      placeholder: pendingAssistantPlaceholderText(),
+      streaming: true,
+    });
+    const newStoryHtml = renderTurnStoryline(activeAssistantTurn, {
+      streaming: true,
+      streamingParts,
+      fallbackText: visibleContent,
+      overrideText: shouldSuppressInlineCode ? visibleContent : "",
+    });
+    if (pendingAssistantStoryNode.innerHTML !== newStoryHtml) {
+      pendingAssistantStoryNode.innerHTML = newStoryHtml;
+      bindPendingAssistantStoryNodes(pendingAssistantStoryNode);
+    }
+  }
+  if (!pendingAssistantTextNode) return;
   const parts = renderStreamingAssistantContent(visibleContent, {
     placeholder: pendingAssistantPlaceholderText(),
     streaming: true,
@@ -9742,17 +10617,17 @@ function syncPendingAssistantText() {
     pendingAssistantTextNode.innerHTML = parts.html;
     pendingAssistantRenderedStableText = parts.html;
   }
-  if (pendingAssistantRuntimeNode) {
-    const runtimeParts = runtimeNarration
-      ? renderStreamingAssistantContent(runtimeNarration, { placeholder: "", streaming: true })
-      : { html: "", isEmpty: true };
-    if (pendingAssistantRenderedRuntimeText !== runtimeParts.html) {
-      pendingAssistantRuntimeNode.innerHTML = runtimeParts.html;
-      pendingAssistantRenderedRuntimeText = runtimeParts.html;
+  if (pendingAssistantRuntimeStatusesNode) {
+    const newHtml = "";
+    if (pendingAssistantRenderedRuntimeText !== newHtml) {
+      pendingAssistantRuntimeStatusesNode.innerHTML = newHtml;
+      pendingAssistantRenderedRuntimeText = newHtml;
     }
-    pendingAssistantRuntimeNode.hidden = runtimeParts.isEmpty;
+    pendingAssistantRuntimeStatusesNode.hidden = !newHtml;
   }
-  pendingAssistantTextNode.parentElement?.classList.toggle("codex-answer-empty", parts.isEmpty);
+  syncPendingAssistantOperations();
+  syncPendingAssistantRuntimePanel();
+  pendingAssistantBubble?.querySelector(".codex-answer")?.classList.toggle("codex-answer-empty", parts.isEmpty);
 }
 
 function schedulePendingAssistantTextSync({ keepBottom = false } = {}) {
@@ -9760,6 +10635,7 @@ function schedulePendingAssistantTextSync({ keepBottom = false } = {}) {
   pendingAssistantTextFrame = window.requestAnimationFrame(() => {
     pendingAssistantTextFrame = null;
     syncPendingAssistantText();
+    syncPendingThinkingIndicator();
     syncPendingAssistantStatus();
     if (keepBottom) {
       scrollMessageStreamToBottom(true);
@@ -9778,10 +10654,50 @@ function schedulePendingAssistantStatusSync() {
 
 function refreshPendingAssistantBubble() {
   if (!pendingAssistantBubble || !activeAssistantTurn) return;
+  if (!ensurePendingAssistantShellBound()) return;
+
+  // If only thinking changed, update thinking content in-place — avoid full re-render
+  if (pendingAssistantThinkingDirty) {
+    pendingAssistantThinkingDirty = false;
+    syncPendingThinkingIndicator();
+  }
+
+  if (pendingAssistantOperationsDirty) {
+    pendingAssistantOperationsDirty = false;
+    syncPendingAssistantOperations();
+    syncPendingAssistantRuntimePanel();
+  }
+
+  if (pendingAssistantStoryDirty) {
+    pendingAssistantStoryDirty = false;
+    if (pendingAssistantStoryNode) {
+      const keepBottom = isNearMessageStreamBottom();
+      syncPendingAssistantText();
+      syncPendingThinkingIndicator();
+      syncPendingAssistantStatus();
+      ensurePendingThinkingExpanded();
+      if (keepBottom) {
+        scrollMessageStreamToBottom(true);
+      }
+      return;
+    }
+    pendingAssistantTextNode = null;
+    pendingAssistantStableNode = null;
+    pendingAssistantTailNode = null;
+    pendingAssistantRuntimeStatusesNode = null;
+    pendingAssistantOperationsNode = null;
+    pendingAssistantRenderedRuntimeText = null;
+    pendingAssistantRenderedStableText = null;
+    pendingAssistantRenderedTailText = null;
+    pendingAssistantRenderedOperationsHtml = null;
+  }
+
   if (pendingAssistantTextNode) {
     const keepBottom = isNearMessageStreamBottom();
     syncPendingAssistantText();
+    syncPendingThinkingIndicator();
     syncPendingAssistantStatus();
+    ensurePendingThinkingExpanded();
     if (keepBottom) {
       scrollMessageStreamToBottom(true);
     }
@@ -9792,11 +10708,11 @@ function refreshPendingAssistantBubble() {
     pendingAssistantBubbleFrame = null;
     if (!pendingAssistantBubble || !activeAssistantTurn) return;
     const keepBottom = isNearMessageStreamBottom();
-    pendingAssistantBubble.innerHTML = renderAssistantTurn(activeAssistantTurn, { streaming: true });
-    bindTurnInteractionHandlers(pendingAssistantBubble);
-    bindPendingAssistantNodes(pendingAssistantBubble);
+    if (!ensurePendingAssistantShellBound()) return;
     syncPendingAssistantText();
+    syncPendingThinkingIndicator();
     syncPendingAssistantStatus();
+    ensurePendingThinkingExpanded();
     if (keepBottom) {
       scrollMessageStreamToBottom(true);
     }
@@ -9893,6 +10809,324 @@ function toolStatusVerb(status) {
   return labels[key] || (currentLanguage === "zh" ? "工具调用" : "Tool call");
 }
 
+function buildRuntimeContextDetailForSync(turn) {
+  if (!turn) return "";
+  const tools = Array.isArray(turn.tools) ? turn.tools : [];
+  const latest = tools[tools.length - 1];
+  if (!latest?.name) return "";
+  const fileParam = (latest.params?.file_path || latest.params?.path || latest.params?.target_file || "").trim();
+  if (fileParam) {
+    const parts = fileParam.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1];
+  }
+  return "";
+}
+
+function renderWorklogRuntimeStatuses(turn, isStreaming) {
+  if (!turn) return "";
+  if (!autoOpenActivityPanel) return "";
+  const tools = Array.isArray(turn.tools) ? turn.tools : [];
+  const diffs = Array.isArray(turn.diffs) ? turn.diffs : [];
+
+  const scanToolNames = new Set(["list_dir", "find_files", "read_file", "read_file_range", "tree_dir", "search_files"]);
+
+  function isScanTool(tool) {
+    return scanToolNames.has(String(tool.name || "").toLowerCase());
+  }
+
+  function toolStatusClass(tool) {
+    const status = String(tool.status || "").toLowerCase();
+    if (isStreaming && ["pending", "approved", "executing"].includes(status)) return "run";
+    if (status === "failed" || status === "error") return "fail";
+    return "done";
+  }
+
+  function classFor(state) {
+    if (state === "run") return "codex-streaming-runtime--active";
+    if (state === "fail") return "codex-streaming-runtime--failed";
+    return "codex-streaming-runtime--done";
+  }
+
+  const statusEntries = [];
+
+  // Meaningful (non-scan) tools → individual divs
+  const meaningfulTools = tools.filter((t) => !isScanTool(t) && summarizeRuntimeToolNarration(t));
+  for (const tool of meaningfulTools) {
+    const narration = summarizeRuntimeToolNarration(tool);
+    const state = toolStatusClass(tool);
+    const fileParam = (tool.params?.file_path || tool.params?.path || tool.params?.target_file || tool.file_path || "").trim();
+    const detail = fileParam ? displayFileNameOnly(fileParam) : "";
+    statusEntries.push({ narration, state, detail, callId: tool.call_id || `tool:${tool.name}` });
+  }
+
+  // Scan tools → collapse into at most one active entry + one summary
+  const scanTools = tools.filter((t) => isScanTool(t) && summarizeRuntimeToolNarration(t));
+  if (scanTools.length) {
+    const activeScan = scanTools.find((t) => ["pending", "approved", "executing"].includes(String(t.status || "").toLowerCase()));
+    const hasCompleted = scanTools.some((t) => {
+      const s = String(t.status || "").toLowerCase();
+      return s !== "pending" && s !== "approved" && s !== "executing" && s !== "failed";
+    });
+    if (activeScan) {
+      const fileParam = (activeScan.params?.file_path || activeScan.params?.path || activeScan.params?.target_file || activeScan.file_path || "").trim();
+      const detail = fileParam ? displayFileNameOnly(fileParam) : "";
+      statusEntries.push({ narration: "正在查看...", state: "run", detail, callId: "scan:active" });
+    } else if (hasCompleted) {
+      statusEntries.push({ narration: currentLanguage === "zh" ? "已完成查看" : "Inspection done", state: "done", detail: "", callId: "scan:done" });
+    }
+  }
+
+  // Diffs
+  for (const diff of diffs) {
+    const narration = summarizeRuntimeDiffNarration(diff);
+    if (!narration) continue;
+    statusEntries.push({ narration, state: "done", detail: "", callId: `diff:${diff.path}:${Number(diff.added || 0)}:${Number(diff.removed || 0)}` });
+  }
+
+  if (!statusEntries.length) return "";
+
+  // Deduplicate by callId
+  const seen = new Set();
+  const unique = [];
+  for (let i = statusEntries.length - 1; i >= 0; i--) {
+    if (!seen.has(statusEntries[i].callId)) {
+      seen.add(statusEntries[i].callId);
+      unique.unshift(statusEntries[i]);
+    }
+  }
+  if (!unique.length) return "";
+
+  const lastIndex = unique.length - 1;
+  return unique
+    .map((entry, index) => {
+      const isLatest = index === lastIndex;
+      const dataAttr = isLatest ? ' data-streaming-runtime="latest"' : "";
+      return `<div class="codex-streaming-runtime ${classFor(entry.state)}"${dataAttr}>${runtimeStatusLabelHtml(entry.narration, entry.detail)}</div>`;
+    })
+    .join("");
+}
+
+function runtimeStatusLabelHtml(narration, detail) {
+  return `<span class="codex-runtime-label">${escapeHtml(narration)}</span>${detail ? `<span class="codex-runtime-detail">${escapeHtml(detail)}</span>` : ""}`;
+}
+
+function renderStreamMoment(moment) {
+  if (!moment) return "";
+  const text = cleanDisplayText(moment.text || "", "");
+  if (!text) return "";
+  const state = String(moment.state || "").trim().toLowerCase();
+  const kind = String(moment.kind || "note").trim().toLowerCase();
+  const detail = cleanDisplayText(moment.detail || "", "");
+  const filePath = cleanDisplayText(moment.filePath || "", "");
+  const fileName = filePath ? displayFileNameOnly(filePath) : "";
+  const added = Number(moment.added || 0) || 0;
+  const removed = Number(moment.removed || 0) || 0;
+  const isEditing = kind === "edit";
+  const isCommand = kind === "command";
+  const isRunning = state === "run";
+  const prefix = isEditing
+    ? zhLabel("已编辑", "Edited")
+    : isCommand
+      ? zhLabel("已运行", "Ran")
+      : "";
+  if (isEditing && fileName) {
+    const animationOffset = "";
+    const editPrefix = isRunning
+      ? zhLabel("\u6b63\u5728\u7f16\u8f91", "Editing")
+      : text || zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done");
+    return `
+      <div class="codex-inline-moment codex-inline-moment-edit${isRunning ? " is-running" : ""}">
+        <span class="codex-inline-moment-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+            <path d="M4 20l3.6-.7L18.3 8.6a1.8 1.8 0 0 0 0-2.6l-.3-.3a1.8 1.8 0 0 0-2.6 0L4.7 16.4 4 20z"></path>
+            <path d="M13.8 7.3l2.9 2.9"></path>
+          </svg>
+        </span>
+        <span class="codex-inline-moment-prefix${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(zhLabel("正在编辑", "Editing"))}"${isRunning ? animationOffset : ""}>${escapeHtml(zhLabel("正在编辑", "Editing"))}</span>
+        <span class="codex-inline-moment-file">${escapeHtml(fileName)}</span>
+        <span class="codex-inline-moment-stats">
+          <span class="is-added">+${escapeHtml(String(added))}</span>
+          <span class="is-removed">-${escapeHtml(String(removed))}</span>
+        </span>
+      </div>
+    `;
+  }
+  return `
+    <div class="codex-inline-moment codex-inline-moment-status codex-inline-moment-${escapeHtml(state || "done")} codex-inline-moment-${escapeHtml(kind)}">
+      <span class="codex-inline-moment-icon" aria-hidden="true">↳</span>
+      <span class="codex-inline-moment-text${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(text)}">${escapeHtml(text)}</span>
+      ${detail ? `<span class="codex-inline-moment-detail">${escapeHtml(detail)}</span>` : ""}
+      ${!detail && prefix ? `<span class="codex-inline-moment-prefix-static">${escapeHtml(prefix)}</span>` : ""}
+    </div>
+  `;
+}
+
+function buildTurnStoryEntries(turn, options = {}) {
+  const fallbackText = sanitizeMessageContent(String(options.fallbackText || "")).trim();
+  const overrideText = sanitizeMessageContent(String(options.overrideText || "")).trim();
+  const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments.slice(-10) : [];
+  const entries = [];
+
+  if (overrideText) {
+    const overrideMoment = extractAssistantOperationalMoment(overrideText, {
+      timestamp: Number(turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+    });
+    if (overrideMoment) {
+      entries.push({
+        kind: "moment",
+        id: "override-text-moment",
+        moment: overrideMoment,
+        timestamp: Number(overrideMoment.timestamp || turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+        order: 0,
+      });
+    } else {
+      entries.push({
+        kind: "text",
+        id: "override-text",
+        text: overrideText,
+        timestamp: Number(turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+        order: 0,
+        isLatest: true,
+      });
+    }
+  } else {
+    textSegments.forEach((segment, index) => {
+      const text = sanitizeMessageContent(String(segment?.text || "")).trim();
+      if (!text || looksLikeOperationalContentDump(text)) return;
+      const derivedMoment = extractAssistantOperationalMoment(text, {
+        timestamp: Number(segment?.timestamp || 0) || 0,
+      });
+      if (derivedMoment) {
+        entries.push({
+          kind: "moment",
+          id: `${segment?.id || `text-${index}`}-moment`,
+          moment: derivedMoment,
+          timestamp: Number(derivedMoment.timestamp || segment?.timestamp || 0) || 0,
+          order: index,
+        });
+        return;
+      }
+      entries.push({
+        kind: "text",
+        id: segment?.id || `text-${index}`,
+        text,
+        timestamp: Number(segment?.timestamp || 0) || 0,
+        order: index,
+        isLatest: index === textSegments.length - 1,
+      });
+    });
+
+    if (!entries.length && fallbackText && !looksLikeOperationalContentDump(fallbackText)) {
+      const fallbackMoment = extractAssistantOperationalMoment(fallbackText, {
+        timestamp: Number(turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+      });
+      if (fallbackMoment) {
+        entries.push({
+          kind: "moment",
+          id: "fallback-text-moment",
+          moment: fallbackMoment,
+          timestamp: Number(fallbackMoment.timestamp || turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+          order: 0,
+        });
+      } else {
+        entries.push({
+          kind: "text",
+          id: "fallback-text",
+          text: fallbackText,
+          timestamp: Number(turn?.textUpdatedAt || turn?.startedAt || Date.now()) || Date.now(),
+          order: 0,
+          isLatest: true,
+        });
+      }
+    }
+
+    const streamMoments = Array.isArray(turn?.streamMoments) ? turn.streamMoments.slice(-12) : [];
+    streamMoments.forEach((moment, index) => {
+      if (!cleanDisplayText(moment?.text || "", "") || looksLikeOperationalContentDump(moment?.text || "")) return;
+      entries.push({
+        kind: "moment",
+        id: moment?.id || `moment-${index}`,
+        moment,
+        timestamp: Number(moment?.timestamp || 0) || Number(turn?.startedAt || Date.now()),
+        order: textSegments.length + index,
+      });
+    });
+  }
+
+  return entries.sort((left, right) => {
+    const leftTime = Number(left.timestamp || 0) || 0;
+    const rightTime = Number(right.timestamp || 0) || 0;
+    if (leftTime !== rightTime) return leftTime - rightTime;
+    if (left.kind !== right.kind) return left.kind === "text" ? -1 : 1;
+    return Number(left.order || 0) - Number(right.order || 0);
+  });
+}
+
+function renderTurnStoryTextEntry(entry, options = {}) {
+  if (!entry?.text) return "";
+  if (options.streaming && entry.isLatest && options.streamingParts) {
+    return `
+      <div class="codex-stream-story-text codex-stream-story-text-live">
+        <div class="codex-streaming-text markdown-body" data-streaming-markdown>
+          <div data-streaming-markdown-stable>${options.streamingParts?.stableHtml || ""}</div>
+          <pre class="codex-streaming-tail"${options.streamingParts?.tailText ? "" : " hidden"} data-streaming-markdown-tail>${escapeHtml(options.streamingParts?.tailText || "")}</pre>
+        </div>
+      </div>
+    `;
+  }
+  return `<div class="codex-stream-story-text markdown-body">${renderMarkdown(structureAssistantDisplayText(entry.text || ""))}</div>`;
+}
+
+function renderTurnStoryline(turn, options = {}) {
+  const streaming = Boolean(options.streaming);
+  const entries = buildTurnStoryEntries(turn, {
+    fallbackText: options.fallbackText || "",
+    overrideText: options.overrideText || "",
+  });
+  if (!entries.length && streaming && options.streamingParts) {
+    return `
+      <div class="codex-stream-story" data-turn-storyline>
+        ${renderTurnStoryTextEntry(
+          { text: options.fallbackText || "", isLatest: true },
+          { streaming: true, streamingParts: options.streamingParts },
+        )}
+      </div>
+    `;
+  }
+  if (!entries.length) return "";
+  return `
+    <div class="codex-stream-story" data-turn-storyline>
+      ${entries.map((entry) => entry.kind === "moment"
+        ? renderStreamMoment(entry.moment)
+        : renderTurnStoryTextEntry(entry, {
+            streaming,
+            streamingParts: streaming && entry.isLatest ? options.streamingParts : null,
+          })).filter(Boolean).join("")}
+    </div>
+  `;
+}
+
+function renderTurnOperations(turn) {
+  const sourceMoments = Array.isArray(turn?.streamMoments)
+    ? turn.streamMoments.filter((moment) => cleanDisplayText(moment?.text || "", "") && !looksLikeOperationalContentDump(moment?.text || ""))
+    : [];
+  const groupedKinds = new Set(["inspection", "edit", "command", "check", "tool"]);
+  const latestByKind = new Map();
+  const passthrough = [];
+  sourceMoments.forEach((moment) => {
+    const kind = String(moment?.kind || "").toLowerCase();
+    if (groupedKinds.has(kind)) {
+      latestByKind.set(kind, moment);
+    } else {
+      passthrough.push(moment);
+    }
+  });
+  const moments = [...passthrough, ...latestByKind.values()]
+    .sort((left, right) => (Number(left?.timestamp || 0) || 0) - (Number(right?.timestamp || 0) || 0))
+    .slice(-12);
+  return moments.map((moment) => renderStreamMoment(moment)).filter(Boolean).join("");
+}
+
 function summarizeRuntimeToolNarration(tool) {
   if (!tool) return "";
   const name = cleanDisplayText(tool?.name || "", "");
@@ -9919,38 +11153,38 @@ function summarizeRuntimeToolNarration(tool) {
   const isEdit = editTools.has(name);
   if (currentLanguage === "zh") {
     if (status === "failed") {
-      if (isWorkspaceScan) return "查看工作区文件失败。";
-      if (isEdit) return "编辑文件失败。";
-      if (gitLike) return "检查 Git 状态失败。";
-      return "工具执行失败。";
+      if (isWorkspaceScan) return "查看失败";
+      if (isEdit) return "编辑失败";
+      if (gitLike) return "检查失败";
+      return "执行失败";
     }
     if (["pending", "approved", "executing"].includes(status)) {
-      if (isWorkspaceScan) return "正在查看工作区文件。";
-      if (isEdit) return "正在编辑文件。";
-      if (gitLike) return "正在检查 Git 状态。";
-      return "正在执行工具。";
+      if (isWorkspaceScan) return "正在查看...";
+      if (isEdit) return "正在编辑...";
+      if (gitLike) return "正在检查...";
+      return "正在执行...";
     }
-    if (isWorkspaceScan) return "已完成工作区查看。";
-    if (isEdit) return "已完成文件编辑。";
-    if (gitLike) return "已完成 Git 状态检查。";
-    return "工具执行完成。";
+    if (isWorkspaceScan) return "已完成查看";
+    if (isEdit) return "已完成编辑";
+    if (gitLike) return "已完成检查";
+    return "已完成";
   }
   if (status === "failed") {
-    if (isWorkspaceScan) return "Workspace inspection failed.";
-    if (isEdit) return "File editing failed.";
-    if (gitLike) return "Git inspection failed.";
-    return "Tool execution failed.";
+    if (isWorkspaceScan) return "Inspect failed";
+    if (isEdit) return "Edit failed";
+    if (gitLike) return "Check failed";
+    return "Failed";
   }
   if (["pending", "approved", "executing"].includes(status)) {
-    if (isWorkspaceScan) return "Inspecting workspace files.";
-    if (isEdit) return "Editing files.";
-    if (gitLike) return "Checking Git state.";
-    return "Running tools.";
+    if (isWorkspaceScan) return "Inspecting...";
+    if (isEdit) return "Editing...";
+    if (gitLike) return "Checking...";
+    return "Running...";
   }
-  if (isWorkspaceScan) return "Workspace inspection finished.";
-  if (isEdit) return "File editing finished.";
-  if (gitLike) return "Git inspection finished.";
-  return "Tool execution finished.";
+  if (isWorkspaceScan) return "Inspection done";
+  if (isEdit) return "Edit done";
+  if (gitLike) return "Check done";
+  return "Done";
 }
 
 function summarizeRuntimeDiffNarration(diff) {
@@ -9959,9 +11193,43 @@ function summarizeRuntimeDiffNarration(diff) {
   const added = Number(diff.added || 0);
   const removed = Number(diff.removed || 0);
   if (currentLanguage === "zh") {
-    return `已更新 ${path} (+${added} / -${removed})。`;
+    return `已更新 ${path} (+${added} / -${removed})`;
   }
-  return `Updated ${path} (+${added} / -${removed}).`;
+  return `Updated ${path} (+${added} / -${removed})`;
+}
+
+function summarizeCompletedTurnResult(turn) {
+  if (!turn) return { narration: "", hasFailure: false };
+  const tools = Array.isArray(turn.tools) ? turn.tools : [];
+  const diffs = Array.isArray(turn.diffs) ? turn.diffs : [];
+
+  const completedTools = tools.filter((t) => {
+    const status = String(t?.status || "").toLowerCase();
+    return status === "completed" || status === "success" || status === "ok" || status === "";
+  });
+  const failedTools = tools.filter((t) => {
+    const status = String(t?.status || "").toLowerCase();
+    return status === "failed" || status === "error";
+  });
+
+  if (failedTools.length > 0) {
+    return { narration: currentLanguage === "zh" ? "部分执行失败" : "Partial failure", hasFailure: true };
+  }
+
+  if (completedTools.length > 0 || diffs.length > 0) {
+    const narratives = completedTools.map(summarizeRuntimeToolNarration).filter(Boolean);
+    const diffNarratives = diffs.map(summarizeRuntimeDiffNarration).filter(Boolean);
+    const allNarratives = [...new Set([...narratives, ...diffNarratives])];
+    if (allNarratives.length) {
+      return { narration: allNarratives.slice(-2).join(" · "), hasFailure: false };
+    }
+  }
+
+  if (tools.length > 0) {
+    return { narration: currentLanguage === "zh" ? "已完成" : "Done", hasFailure: false };
+  }
+
+  return { narration: currentLanguage === "zh" ? "已完成" : "Done", hasFailure: false };
 }
 
 function isCommandLikeTool(name) {
@@ -10019,7 +11287,6 @@ function renderAssistantTurn(turn, options = {}) {
   const runtimeCheckpoints = Array.isArray(turn?.runtimeCheckpoints) ? turn.runtimeCheckpoints : [];
   const branchNotes = Array.isArray(turn?.branchNotes) ? turn.branchNotes : [];
   const timeline = Array.isArray(turn?.timeline) ? turn.timeline : [];
-  const autoSkills = Array.isArray(turn?.auto_skills) ? turn.auto_skills : [];
   const tools = Array.isArray(turn?.tools) ? turn.tools : [];
   const diffs = Array.isArray(turn?.diffs) ? turn.diffs : [];
   const thinking = Array.isArray(turn?.thinking) ? turn.thinking : [];
@@ -10027,9 +11294,13 @@ function renderAssistantTurn(turn, options = {}) {
   const text = turn?.text || "";
   const cleanedText = displayMarkdownText(text);
   const isStreaming = Boolean(options.streaming);
+  const showStreamingThinking = Boolean(
+    isStreaming
+    && turn?.isThinkingPhase,
+  );
   const decisionPresentation = !isStreaming
     ? (
-      turn?.assistantChoices && Array.isArray(turn.assistantChoices.options) && turn.assistantChoices.options.length
+      shouldRenderAssistantDecisionCard(turn, cleanedText)
         ? {
             body: cleanedText,
             card: {
@@ -10070,7 +11341,7 @@ function renderAssistantTurn(turn, options = {}) {
     : (decisionPresentation.body || cleanedText.trim());
   const shouldSuppressInlineCode = shouldSuppressInlineAssistantCode(displayedText, diffs);
   const visibleText = shouldSuppressInlineCode
-    ? visibleAssistantWorkspaceNotice()
+    ? visibleAssistantWorkspaceNotice(turn)
     : structureAssistantDisplayText(displayedText);
 
   const runtimeHead = showRuntimeHead
@@ -10149,28 +11420,6 @@ function renderAssistantTurn(turn, options = {}) {
     `
     : "";
 
-  const autoSkillsMarkup = autoSkills.length
-    ? `
-      <section class="auto-skills-card" aria-label="${escapeHtml(t("autoSkillsTitle"))}">
-        <div class="auto-skills-head">
-          <div class="auto-skills-title">${escapeHtml(t("autoSkillsTitle"))}</div>
-        </div>
-        <div class="auto-skills-list">
-          ${autoSkills
-            .map((skill) => `
-              <article class="auto-skills-item">
-                <div class="auto-skills-item-top">
-                  <strong>${escapeHtml(cleanDisplayText(skill?.name || "", "skill"))}</strong>
-                  <span class="auto-skills-kind">${escapeHtml(autoSkillKindLabel(skill?.kind || ""))}</span>
-                </div>
-                ${skill?.description ? `<div class="auto-skills-desc">${escapeHtml(cleanDisplayText(skill.description || ""))}</div>` : ""}
-              </article>
-            `)
-            .join("")}
-        </div>
-      </section>
-    `
-    : "";
   const subagentMarkup = renderRuntimeSectionCard(
     currentLanguage === "zh" ? "子代理" : "Subagents",
     String(subagents.length || ""),
@@ -10375,28 +11624,30 @@ function renderAssistantTurn(turn, options = {}) {
   const diffMarkup = !isStreaming && visibleDiffs.length
     ? renderAssistantDiffMarkup(visibleDiffs, { inline: true })
     : "";
-  const operationTimelineMarkup = buildOperationTimeline(turn, { isStreaming });
   const operationDetailPanels = buildOperationDetailPanels(turn, { isStreaming });
   const operationBodyMarkup = [
-    operationTimelineMarkup ? `<div class="codex-operation-timeline">${operationTimelineMarkup}</div>` : "",
     permissionMarkup,
     (operationDetailPanels || checkpointMarkup || diffMarkup)
       ? `<div class="codex-operation-detail-stack">${operationDetailPanels}${checkpointMarkup}${diffMarkup}</div>`
       : "",
   ].filter(Boolean).join("");
 
-  const thinkingMarkup = thinking.length
-    ? thinking
-        .map(
-          (block, index) => `
-            <details class="thinking-block codex-thinking-block"${block.collapsed ? "" : " open"}>
-              <summary>${escapeHtml(currentLanguage === "zh" ? `Thinking ${index + 1}` : `Thinking ${index + 1}`)}</summary>
-              <div class="thinking-content markdown-body">${renderMarkdown(block.content || "")}</div>
-            </details>
-          `,
-        )
-        .join("")
-    : "";
+  const thinkingMarkup = isStreaming
+    ? ""
+    : (
+      thinking.length
+        ? thinking
+            .map(
+              (block, index) => `
+                <details class="thinking-block codex-thinking-block">
+                  <summary>${renderThinkingSummaryLabel(index, false)}</summary>
+                  <div class="thinking-content markdown-body">${renderMarkdown(block.content || "")}</div>
+                </details>
+              `,
+            )
+            .join("")
+        : ""
+    );
 
   const streamingParts = isStreaming
     ? renderStreamingAssistantContent(visibleText, {
@@ -10404,49 +11655,53 @@ function renderAssistantTurn(turn, options = {}) {
         streaming: true,
       })
     : null;
-  const runtimeNarration = isStreaming ? visibleStreamingRuntimeNarration(turn) : "";
-  const runtimeNarrationParts = runtimeNarration
-    ? renderStreamingAssistantContent(runtimeNarration, { placeholder: "", streaming: true })
-    : null;
-  const showStreamingRuntimePanel = Boolean(runtimeNarrationParts && !streamingParts?.stableHtml && !streamingParts?.tailText);
+
+  const worklogStatusesHtml = "";
 
   const textMarkup = isStreaming
     ? `
       <div class="codex-answer codex-answer-streaming${streamingParts?.isEmpty ? " codex-answer-empty" : ""}">
-        <div class="codex-streaming-runtime markdown-body"${showStreamingRuntimePanel ? "" : " hidden"} data-streaming-runtime>${runtimeNarrationParts?.html || ""}</div>
-        <div class="codex-streaming-text markdown-body" data-streaming-markdown>
-          <div data-streaming-markdown-stable>${streamingParts?.stableHtml || ""}</div>
-          <pre class="codex-streaming-tail"${streamingParts?.tailText ? "" : " hidden"} data-streaming-markdown-tail>${escapeHtml(streamingParts?.tailText || "")}</pre>
-        </div>
+        ${renderTurnStoryline(turn, {
+          streaming: true,
+          streamingParts,
+          fallbackText: visibleText,
+          overrideText: shouldSuppressInlineCode ? visibleText : "",
+        })}
+        ${worklogStatusesHtml ? `<div class="codex-runtime-statuses" data-runtime-statuses>${worklogStatusesHtml}</div>` : ""}
       </div>
     `
-    : visibleText
-      ? `<div class="codex-answer markdown-body">${renderMarkdown(visibleText)}</div>`
-      : "";
+    : (turn?.textSegments?.length || turn?.streamMoments?.length)
+      ? `<div class="codex-answer">${renderTurnStoryline(turn, { fallbackText: visibleText, overrideText: shouldSuppressInlineCode ? visibleText : "" })}</div>${worklogStatusesHtml ? `<div class="codex-runtime-statuses">${worklogStatusesHtml}</div>` : ""}`
+      : visibleText
+        ? `<div class="codex-answer markdown-body">${renderMarkdown(visibleText)}</div>${worklogStatusesHtml ? `<div class="codex-runtime-statuses">${worklogStatusesHtml}</div>` : ""}`
+        : worklogStatusesHtml ? `<div class="codex-runtime-statuses">${worklogStatusesHtml}</div>` : "";
   const decisionCardMarkup = !isStreaming ? renderAssistantDecisionCard(decisionPresentation.card) : "";
 
   const runtimePanelContent = [
     operationBodyMarkup,
   ].filter(Boolean).join("");
-  const runtimePanelMarkup = runtimePanelContent
+  const shouldShowRuntimePanel = runtimePanelContent && autoOpenActivityPanel;
+  const runtimePanelMarkup = shouldShowRuntimePanel
     ? renderAssistantRuntimePanel(runtimePanelContent, {
         title: currentLanguage === "zh" ? "操作" : "Activity",
         meta: runtimeSummaryParts.join(" / "),
-        open: isStreaming,
+        open: isStreaming && autoOpenActivityPanel,
         tone: isStreaming ? "running" : "",
       })
     : "";
   return `
-    <article class="message-row assistant-row assistant-message-row codex-turn-row">
-      <div class="codex-turn-shell">
-        ${runtimeHead}
-        ${thinkingMarkup}
-        ${autoSkillsMarkup}
-        ${textMarkup}
-        ${runtimePanelMarkup}
-        ${decisionCardMarkup}
-      </div>
-    </article>
+    <div class="codex-stream-phase"${isStreaming ? streamAnimationStyle(turn) : ""}>
+      <article class="message-row assistant-row assistant-message-row codex-turn-row">
+        <div class="codex-turn-shell">
+          ${runtimeHead}
+          <div data-thinking-host>${showStreamingThinking ? renderStreamingThinkingIndicator() : ""}</div>
+          ${thinkingMarkup}
+          ${textMarkup}
+          ${runtimePanelMarkup}
+          ${decisionCardMarkup}
+        </div>
+      </article>
+    </div>
   `;
 }
 
@@ -10466,6 +11721,23 @@ function appendUserBubble(content) {
   return row;
 }
 
+function appendThinkingContent(delta) {
+  if (!activeAssistantTurn) return;
+  activeAssistantTurn.isThinkingPhase = true;
+  const thinking = Array.isArray(activeAssistantTurn.thinking) ? activeAssistantTurn.thinking : [];
+  let currentBlock;
+  if (thinking.length === 0) {
+    currentBlock = { content: "", collapsed: false };
+    thinking.push(currentBlock);
+  } else {
+    currentBlock = thinking[thinking.length - 1];
+  }
+  currentBlock.content = (currentBlock.content || "") + delta;
+  activeAssistantTurn.thinking = thinking;
+  preservedThinking = thinking.map((item) => ({ ...item }));
+  pendingAssistantThinkingDirty = true;
+}
+
 function appendAssistantBubble(content) {
   if (!messageStream) return null;
   messageStream.classList.remove("is-empty");
@@ -10473,9 +11745,14 @@ function appendAssistantBubble(content) {
   const row = document.createElement("article");
   row.className = "codex-turn-anchor";
   if (!activeAssistantTurn) resetActiveAssistantTurn();
-  activeAssistantTurn.text = content || "";
+  if (content) {
+    activeAssistantTurn.text = content || "";
+  }
   messageStream.appendChild(row);
   pendingAssistantBubble = row;
+  pendingAssistantBubble.innerHTML = renderPendingAssistantShell();
+  bindTurnInteractionHandlers(pendingAssistantBubble);
+  bindPendingAssistantNodes(pendingAssistantBubble);
   refreshPendingAssistantBubble();
   scrollMessageStreamToBottom(true);
   return row;
@@ -10488,19 +11765,52 @@ function updateAssistantBubble(content) {
   if (!activeAssistantTurn) resetActiveAssistantTurn();
   const keepBottom = isNearMessageStreamBottom();
   const deltaContent = sanitizeMessageContent(String(content || ""));
-  const currentContent = String(activeAssistantTurn.text || "");
   activeAssistantTurn.receivedDelta = true;
+  if (deltaContent.trim()) {
+    activeAssistantTurn.isThinkingPhase = false;
+  }
   if (deltaContent.trim()) {
     activeAssistantTurn.runtimeNarration = "";
   }
-  activeAssistantTurn.text = mergeStreamingTextDelta(currentContent, deltaContent);
+  const derivedMoment = corroborateAssistantOperationalMoment(
+    extractAssistantOperationalMoment(deltaContent),
+    activeAssistantTurn,
+  );
+  const suppressInlineDump = !derivedMoment && shouldSuppressInlineAssistantCode(deltaContent, activeAssistantTurn?.diffs || []);
+  let createdNewSegment = false;
+  if (derivedMoment) {
+    pushAssistantStreamMoment(derivedMoment);
+  } else if (suppressInlineDump) {
+    activeAssistantTurn.streamingAnchorText = "";
+    activeAssistantTurn.suppressedInlineContent = true;
+    pendingAssistantStoryDirty = true;
+  } else {
+    activeAssistantTurn.streamingAnchorText = mergeStreamingTextDelta(
+      String(activeAssistantTurn.streamingAnchorText || ""),
+      deltaContent,
+    );
+    createdNewSegment = pushTurnTextSegment(activeAssistantTurn, deltaContent, {
+      forceNew: activeAssistantTurn.lastStreamEventKind !== "text",
+    });
+    if (createdNewSegment) {
+      pendingAssistantStoryDirty = true;
+    }
+  }
   captureAssistantOperationNarration(deltaContent);
-  if (activeAssistantTurn && assistantTextLooksLikeProcessNarration(deltaContent)) {
+  if (activeAssistantTurn && assistantTextLooksLikeProcessNarration(deltaContent) && !derivedMoment) {
     pushAssistantWorklog({
       kind: "progress",
       text: deltaContent,
       dedupeKey: `delta-progress:${normalizeText(deltaContent)}`,
     });
+  }
+  ensurePendingAssistantBubbleForRuntime();
+  if (createdNewSegment) {
+    refreshPendingAssistantBubble();
+    if (keepBottom) {
+      scrollMessageStreamToBottom(true);
+    }
+    return;
   }
   schedulePendingAssistantTextSync({ keepBottom });
 }
@@ -10519,10 +11829,10 @@ function createThinkingBlock(message) {
   const row = document.createElement("article");
   row.className = "message-row assistant-row assistant-message-row";
   const details = document.createElement("details");
-  details.className = "thinking-block";
-  details.open = !message.collapsed;
+  details.className = "thinking-block codex-thinking-block";
+  details.open = false;
   details.innerHTML = `
-    <summary>Thinking</summary>
+    <summary>${renderThinkingSummaryLabel(0, false)}</summary>
     <div class="thinking-content markdown-body">${renderMarkdown(message.content || "")}</div>
   `;
   row.appendChild(details);
@@ -10536,12 +11846,24 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
   if (!finalAssistantTurn?.data) return false;
   const finalData = runtimeTurn
       ? (() => {
-        const persistedText = cleanDisplayText(String(finalAssistantTurn.data?.text || ""), "");
-        const runtimeText = cleanDisplayText(String(runtimeTurn?.text || ""), "");
+        const persistedText = cleanDisplayText(completionFallbackAssistantContent(finalAssistantTurn.data), "");
+        const runtimeText = cleanDisplayText(completionFallbackAssistantContent(runtimeTurn), "");
         const merged = mergeAssistantTurnData(finalAssistantTurn.data, runtimeTurn, {
           preferLiveText: !persistedText,
         });
-        const selectedText = String(persistedText || merged?.text || runtimeText || "");
+        const mergedRenderableText = cleanDisplayText(completionFallbackAssistantContent(merged), "");
+        const selectedText = String(persistedText || mergedRenderableText || runtimeText || "");
+        // Force thinking from global cache — the single source of truth
+        if (preservedThinking.length) {
+          merged.thinking = preservedThinking.map((item) => ({ ...item }));
+        } else {
+          const liveThinking = Array.isArray(runtimeTurn?.thinking) ? runtimeTurn.thinking : [];
+          const persistedThinking = Array.isArray(finalAssistantTurn?.data?.thinking)
+            ? finalAssistantTurn.data.thinking : [];
+          merged.thinking = liveThinking.length >= persistedThinking.length
+            ? liveThinking.map((item) => ({ ...item }))
+            : persistedThinking.map((item) => ({ ...item }));
+        }
         return {
           ...merged,
           text: selectedText,
@@ -10554,6 +11876,12 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
   bindTurnInteractionHandlers(pendingAssistantBubble);
   pendingAssistantBubble.querySelectorAll(".codex-runtime-panel-shell[open]").forEach((details) => {
     animateDetailsToggle(details, false);
+  });
+  pendingAssistantBubble.querySelectorAll(".codex-thinking-block").forEach((details) => {
+    const shell = details;
+    if (shell instanceof HTMLDetailsElement) {
+      shell.open = false;
+    }
   });
   resetPendingAssistantRenderState();
   pendingAssistantBubble = null;
@@ -10583,7 +11911,7 @@ function ensureVisibleAssistantCompletionMessage(messages, fallbackTurn = active
 
   const turns = groupMessagesIntoTurns(visibleConversationMessages(nextMessages));
   const lastAssistantTurn = [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data);
-  const lastAssistantText = cleanDisplayText(String(lastAssistantTurn?.data?.text || "").trim());
+  const lastAssistantText = cleanDisplayText(completionFallbackAssistantContent(lastAssistantTurn?.data), "");
   const lastAssistantCore = cleanDisplayText(assistantPrimaryReplyCore(lastAssistantText), "");
   const lastAssistantHasChoices = Boolean(
     lastAssistantTurn?.data?.assistantChoices
@@ -10675,9 +12003,6 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "message" && (message.role === "assistant" || message.role === "system" || message.role === "error")) {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
       if (message.assistant_choices && Array.isArray(message.assistant_choices.options) && message.assistant_choices.options.length) {
         currentAssistant.assistantChoices = {
           title: cleanDisplayText(message.assistant_choices.title || "", zhLabel("选择下一步", "Choose next step")),
@@ -10685,6 +12010,18 @@ function groupMessagesIntoTurns(messages) {
         };
       }
       const nextContent = displayMarkdownText(message.content || "");
+      const nextRenderableText = sanitizeMessageContent(String(nextContent || "")).trim();
+      const operationalMoment = extractAssistantOperationalMoment(nextRenderableText);
+      const shouldKeepAsVisibleText = Boolean(
+        nextRenderableText
+        && !looksLikeOperationalContentDump(nextRenderableText),
+      ) && !operationalMoment;
+      if (operationalMoment) {
+        pushTurnStreamMoment(currentAssistant, {
+          ...operationalMoment,
+          timestamp: Date.now(),
+        });
+      }
       const nextLooksOperational = !isAssistantPrimaryReplyText(nextContent)
         && !isAssistantFailureSummaryText(nextContent)
         && !isAssistantVerificationAppendixText(nextContent);
@@ -10716,6 +12053,9 @@ function groupMessagesIntoTurns(messages) {
             currentAssistant.text || "",
             lastStructuredToolResultContent,
           );
+          replaceTurnTextSegments(currentAssistant, currentAssistant.text, {
+            timestamp: Date.now(),
+          });
           lastStructuredToolResultContent = "";
           return;
         }
@@ -10724,14 +12064,17 @@ function groupMessagesIntoTurns(messages) {
         currentAssistant.text || "",
         nextContent,
       );
+      if (shouldKeepAsVisibleText) {
+        pushTurnTextSegment(currentAssistant, nextContent, {
+          forceNew: currentAssistant.lastStreamEventKind !== "text",
+          timestamp: Date.now(),
+        });
+      }
       lastStructuredToolResultContent = "";
       return;
     }
 
     if (message.kind === "thinking") {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
       currentAssistant.thinking.push({
         content: message.content || "",
         collapsed: Boolean(message.collapsed),
@@ -10740,10 +12083,8 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "tool") {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
-      const callId = message.call_id || `${Date.now()}`;
+      const callId = String(message.call_id || "").trim()
+        || `legacy-tool:${currentAssistant.tools.length}:${message.tool_name || "tool"}:${message.file_path || ""}`;
       const existingTool = currentAssistant.tools.find((item) => item.call_id === callId);
       if (existingTool) {
         existingTool.name = message.tool_name || existingTool.name || "tool";
@@ -10762,18 +12103,27 @@ function groupMessagesIntoTurns(messages) {
           success: null,
         });
       }
+      pushTurnStreamMoment(currentAssistant, describeToolMoment({
+        call_id: callId,
+        name: message.tool_name || "tool",
+        status: message.status || "pending",
+        file_path: message.file_path || "",
+        params: message.tool_args || null,
+      }));
       return;
     }
 
     if (message.kind === "tool_result") {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
-      const tool = currentAssistant.tools.find((item) => item.call_id === message.call_id);
+      const resultCallId = String(message.call_id || "").trim();
+      const tool = currentAssistant.tools.find((item) => item.call_id === resultCallId)
+        || (!resultCallId
+          ? [...currentAssistant.tools].reverse().find((item) => ["pending", "approved", "executing", "running"].includes(String(item.status || "").toLowerCase()))
+          : null);
       if (tool) {
         tool.result = message.content || "";
         tool.success = message.success ?? null;
         tool.status = message.status || tool.status || "complete";
+        pushTurnStreamMoment(currentAssistant, describeToolMoment(tool));
       }
       const structuredToolResult = extractStructuredToolResultContent(message.content || "");
       if (structuredToolResult) {
@@ -10783,9 +12133,6 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "diff") {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
       const diffPath = message.file_path || "";
       if (!diffPath) return;
       const existingDiff = currentAssistant.diffs.find((item) => item.path === diffPath);
@@ -10801,13 +12148,15 @@ function groupMessagesIntoTurns(messages) {
           before_content: String(message.before_content || ""),
         });
       }
+      pushTurnStreamMoment(currentAssistant, describeEditedFileMoment({
+        path: diffPath,
+        added: message.added || 0,
+        removed: message.removed || 0,
+      }));
       return;
     }
 
     if (message.kind === "subagent" && message.subagent) {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
       const id = String(message.subagent?.id || message.subagent?.name || "").trim() || `${Date.now()}`;
       const existing = currentAssistant.subagents.find((item) => String(item.id || "") === id);
       if (existing) {
@@ -10819,9 +12168,6 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "verification" && message.verifier) {
-      if ((!currentAssistant.auto_skills || !currentAssistant.auto_skills.length) && Array.isArray(message.auto_skills) && message.auto_skills.length) {
-        currentAssistant.auto_skills = message.auto_skills.map((item) => ({ ...item }));
-      }
       currentAssistant.verifierReport = { ...message.verifier };
     }
   });
@@ -11142,6 +12488,16 @@ function renderMessages(messages, options = {}) {
   }
 
   const turns = mergeActiveRuntimeIntoTurns(groupMessagesIntoTurns(visibleMessages));
+  // Inject preservedThinking into the last assistant turn so it survives any re-render
+  if (preservedThinking.length) {
+    const lastAssistantIdx = turns.map((t) => t?.kind).lastIndexOf("assistant_turn");
+    if (lastAssistantIdx >= 0 && turns[lastAssistantIdx]?.data) {
+      turns[lastAssistantIdx].data = {
+        ...turns[lastAssistantIdx].data,
+        thinking: preservedThinking.map((item) => ({ ...item })),
+      };
+    }
+  }
   turns.forEach((turn) => {
     if (turn.kind === "user") {
       const row = createMessageRow(turn.data);
@@ -13743,8 +15099,8 @@ function collectSettingsPayload() {
   });
   return {
     model: String(primaryModel?.value || config.model || "").trim(),
-    api_url: String(primaryApiUrl?.value || config.api_url || "").trim(),
-    deep_think: false,
+    api_url: "https://llm-fnab949h4etu47rc.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+    deep_think: Boolean(deepThinkToggle?.checked ?? true),
     reasoning_effort: currentEffort,
     competition_mode: Boolean(competitionMode?.checked),
     privacy_mode: Boolean(privacyMode?.checked),
@@ -13760,7 +15116,6 @@ function collectSettingsPayload() {
 
 function syncSettingsFromConfig(config) {
   if (!config) return;
-  if (primaryApiUrl) primaryApiUrl.value = config.api_url || "";
   if (primaryModel) primaryModel.value = config.model || "";
   if (competitionMode) competitionMode.checked = Boolean(config.competition_mode);
   if (privacyMode) privacyMode.checked = Boolean(config.privacy_mode);
@@ -13786,6 +15141,8 @@ function syncSettingsFromConfig(config) {
     )
   );
   if (runtimeWorkspaceRoot) runtimeWorkspaceRoot.value = config.workspace_root || "";
+  if (deepThinkToggle) deepThinkToggle.checked = Boolean(config.deep_think ?? true);
+  if (autoOpenActivityPanelToggle) autoOpenActivityPanelToggle.checked = autoOpenActivityPanel;
   if (runtimeApiKey) runtimeApiKey.value = config.api_key || "";
   runtimeToolchainInputs.forEach((input) => {
     const key = input.getAttribute("data-toolchain-key") || "";
@@ -15055,11 +16412,28 @@ function handleStreamEvent(event, expectedSessionId = null) {
     renderResearch(event.research);
   }
 
+  if (event.type === "thinking_delta") {
+    if (!isVisibleSession) return;
+    if (!activeAssistantTurn) {
+      resetActiveAssistantTurn();
+    }
+    activeAssistantTurn.isThinkingPhase = true;
+    const delta = event.thinking_delta || "";
+    if (!delta.trim()) return;
+    appendThinkingContent(delta);
+    if (!pendingAssistantBubble) {
+      pendingAssistantBubble = appendAssistantBubble("");
+    }
+    refreshPendingAssistantBubble();
+    return;
+  }
+
   if (event.type === "assistant_delta") {
     if (!isVisibleSession) return;
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    activeAssistantTurn.isThinkingPhase = false;
     activeAssistantTurn.activity = "";
     updateAssistantBubble(event.delta || "");
     return;
@@ -15158,7 +16532,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
       current_session_id: event.session_id || bootstrapData?.current_session_id || null,
     };
     if (pendingAssistantBubble && shouldPreferPersistedAssistantTurn(visibleMessages)) {
-      const finalizedInPlace = finalizeVisibleAssistantBubble(visibleMessages);
+      const finalizedInPlace = finalizeVisibleAssistantBubble(visibleMessages, activeAssistantTurn);
       if (!finalizedInPlace) {
         renderMessages(visibleMessages, { preserveScroll: true });
       }
@@ -15184,9 +16558,6 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!isVisibleSession) return;
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
-    }
-    if (Array.isArray(event.auto_skills) && event.auto_skills.length) {
-      activeAssistantTurn.auto_skills = event.auto_skills.map((item) => ({ ...item }));
     }
     const label = event.activity?.label || "";
     const detail = event.activity?.detail || "";
@@ -15275,6 +16646,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     }
     upsertToolEntry(tool);
     pushAssistantWorklog(describeToolWorklog(tool));
+    pushAssistantStreamMoment(normalizedOperationMoment(describeToolMoment(tool), tool));
     updateRuntimeNarration(summarizeRuntimeToolNarration(tool));
     liveToolEvents = [...liveToolEvents.filter((item) => item.call_id !== tool.call_id), tool].slice(-6);
     refreshPendingAssistantBubble();
@@ -15299,6 +16671,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     files.forEach((file) => upsertDiffEntry(file));
     files.forEach((file) => {
       pushAssistantWorklog(describeEditedFileWorklog(file));
+      pushAssistantStreamMoment(normalizedOperationMoment(describeEditedFileMoment(file), file));
       updateRuntimeNarration(summarizeRuntimeDiffNarration(file));
     });
     liveEditedFiles = [...liveEditedFiles, ...files].slice(-6);
@@ -15397,13 +16770,8 @@ async function sendMessage() {
       throw new Error("empty outbound content");
     }
     const userText = sanitizeMessageContent(parsedInput.display);
-    const fileLines = pendingFiles.length
-      ? `\n\n[ATTACHED_FILES]\n${pendingFiles
-          .map((file) => file.path || file.name)
-          .filter(Boolean)
-          .join("\n")}`
-      : "";
-    const outbound = `${parsedInput.outbound}${fileLines}`.trim();
+    const outbound = parsedInput.outbound.trim();
+    const attachments = await serializePendingAttachments();
     const mode = parsedInput.mode;
     pendingResearchStart = parsedInput.forceResearch || mode === "research" || currentWorkspaceMode === "research";
 
@@ -15414,11 +16782,14 @@ async function sendMessage() {
     resetPendingAssistantRenderState();
     clearPendingAssistantFrames();
     resetActiveAssistantTurn();
+    preservedThinking = [];
     activeAssistantTurn.startedAt = Date.now();
+    activeAssistantTurn.isThinkingPhase = true;
     activeAssistantTurn.activity = mode === "research"
       ? (currentLanguage === "zh" ? "研究中" : "Researching")
       : t("activityReviewing");
     pendingAssistantBubble = appendAssistantBubble("");
+    await waitForNextBrowserPaint();
     bootstrapData = {
       ...(bootstrapData || {}),
       messages: [
@@ -15432,11 +16803,12 @@ async function sendMessage() {
     const streamGeneration = beginSessionRun(targetSessionId);
     activeStreamGeneration = streamGeneration || activeStreamGeneration + 1;
     currentStreamingSessionId = targetSessionId;
-    const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage });
+    const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage, attachments });
 
     if (messageInput) {
       messageInput.value = "";
     }
+    pendingFiles.forEach((file) => file.previewUrl && URL.revokeObjectURL(file.previewUrl));
     pendingFiles = [];
     if (fileInput) {
       fileInput.value = "";
@@ -15535,6 +16907,25 @@ segmentedControls.forEach((group) => {
 
 autoApproveTools?.addEventListener("change", () => {
   syncAutoApproveUI();
+});
+
+autoOpenActivityPanelToggle?.addEventListener("change", () => {
+  autoOpenActivityPanel = Boolean(autoOpenActivityPanelToggle.checked);
+  try {
+    localStorage.setItem("tokitai-auto-open-activity-panel", autoOpenActivityPanel ? "true" : "false");
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+  if (pendingAssistantRuntimeNode) {
+    syncPendingAssistantRuntimePanel();
+  }
+  if (!autoOpenActivityPanel) {
+    document.querySelectorAll("[data-runtime-panel]").forEach((panel) => {
+      panel.closest(".codex-runtime-panel")?.remove();
+    });
+  } else if (!isVisibleSessionRunning()) {
+    renderMessages(visibleConversationMessages(bootstrapData?.messages || []), { preserveScroll: true });
+  }
 });
 
 researchFloatingHead?.addEventListener("pointerdown", startResearchFloatingDrag);
@@ -15798,11 +17189,34 @@ workspaceCodeRunButton?.addEventListener("click", async () => {
 });
 
 fileInput?.addEventListener("change", () => {
-  pendingFiles = Array.from(fileInput.files || []).map((file) => ({
-    name: file.name,
-    path: file.name,
-  }));
-  renderPendingFiles();
+  addPendingFiles(fileInput.files);
+  fileInput.value = "";
+});
+
+const composerDropTarget = document.querySelector(".composer-shell");
+let composerDragDepth = 0;
+composerDropTarget?.addEventListener("dragenter", (event) => {
+  if (!event.dataTransfer?.types?.includes("Files")) return;
+  event.preventDefault();
+  composerDragDepth += 1;
+  composerDropTarget.classList.add("is-file-dragging");
+});
+composerDropTarget?.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer?.types?.includes("Files")) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+composerDropTarget?.addEventListener("dragleave", (event) => {
+  if (!event.dataTransfer?.types?.includes("Files")) return;
+  composerDragDepth = Math.max(0, composerDragDepth - 1);
+  if (!composerDragDepth) composerDropTarget.classList.remove("is-file-dragging");
+});
+composerDropTarget?.addEventListener("drop", (event) => {
+  if (!event.dataTransfer?.files?.length) return;
+  event.preventDefault();
+  composerDragDepth = 0;
+  composerDropTarget.classList.remove("is-file-dragging");
+  addPendingFiles(event.dataTransfer.files);
 });
 
 newSessionButton?.addEventListener("click", async () => {

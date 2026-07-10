@@ -73,7 +73,7 @@ pub use dependency_analyzer::{
     ToolRecommendation,
 };
 #[allow(unused_imports)]
-pub use dispatcher::{DefaultToolExecutor, ToolDispatcher, ToolExecutor};
+pub use dispatcher::{DefaultToolExecutor, SyncFnExecutor, ToolDispatcher, ToolExecutor};
 #[allow(unused_imports)]
 pub use metadata_enhancer::MetadataEnhancer;
 #[allow(unused_imports)]

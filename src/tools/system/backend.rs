@@ -787,6 +787,56 @@ pub struct WindowsBackend;
 
 #[cfg(windows)]
 impl ProcessBackend for WindowsBackend {
+    fn list_processes(&self, limit: usize) -> Result<Vec<ProcessInfo>, ProcessError> {
+        let script = format!(
+            "@(Get-Process | Sort-Object CPU -Descending | Select-Object -First {} | ForEach-Object {{ [pscustomobject]@{{ pid = $_.Id; name = $_.ProcessName; cpu = if ($null -eq $_.CPU) {{ 0 }} else {{ $_.CPU }}; memory = $_.WorkingSet64; path = if ($null -eq $_.Path) {{ '' }} else {{ $_.Path }} }} }}) | ConvertTo-Json -Compress",
+            limit
+        );
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .map_err(|e| ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e)))?;
+        if !output.status.success() {
+            return Err(ProcessError::CommandFailed(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
+        parse_windows_process_json(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    fn get_process_info(&self, pid: u32) -> Result<ProcessInfo, ProcessError> {
+        let script = format!(
+            "@(Get-Process -Id {} -ErrorAction SilentlyContinue | ForEach-Object {{ [pscustomobject]@{{ pid = $_.Id; name = $_.ProcessName; cpu = if ($null -eq $_.CPU) {{ 0 }} else {{ $_.CPU }}; memory = $_.WorkingSet64; path = if ($null -eq $_.Path) {{ '' }} else {{ $_.Path }} }} }}) | ConvertTo-Json -Compress",
+            pid
+        );
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .map_err(|e| ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e)))?;
+        if !output.status.success() {
+            return Err(ProcessError::CommandFailed(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
+        parse_windows_process_json(&String::from_utf8_lossy(&output.stdout))?
+            .into_iter()
+            .next()
+            .ok_or(ProcessError::NotFound(pid))
+    }
+
+    fn search_processes(&self, name: &str, limit: usize) -> Result<Vec<ProcessInfo>, ProcessError> {
+        let needle = name.to_ascii_lowercase();
+        Ok(self
+            .list_processes(1000)?
+            .into_iter()
+            .filter(|process| {
+                process.comm().to_ascii_lowercase().contains(&needle)
+                    || process.args().to_ascii_lowercase().contains(&needle)
+            })
+            .take(limit)
+            .collect())
+    }
+
     fn get_process_files(&self, pid: u32, limit: usize) -> Result<Vec<String>, ProcessError> {
         // Use wmic or handle.exe on Windows
         let output = Command::new("wmic")
@@ -846,6 +896,48 @@ impl ProcessBackend for WindowsBackend {
     fn check_process_ownership(&self, _pid: u32) -> Result<(), ProcessError> {
         Ok(()) // Windows: skip UID check
     }
+}
+
+#[cfg(windows)]
+fn parse_windows_process_json(input: &str) -> Result<Vec<ProcessInfo>, ProcessError> {
+    let value: serde_json::Value = serde_json::from_str(input.trim()).map_err(|error| {
+        ProcessError::ParseFailed(format!("invalid PowerShell process output: {}", error))
+    })?;
+    let entries = match value {
+        serde_json::Value::Array(entries) => entries,
+        serde_json::Value::Object(_) => vec![value],
+        serde_json::Value::Null => Vec::new(),
+        _ => {
+            return Err(ProcessError::ParseFailed(
+                "unexpected PowerShell process output".to_string(),
+            ))
+        }
+    };
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| {
+            let pid = entry.get("pid")?.as_u64()? as u32;
+            let name = entry.get("name").and_then(|value| value.as_str()).unwrap_or_default();
+            let cpu = entry.get("cpu").and_then(|value| value.as_f64()).unwrap_or_default() as f32;
+            let memory = entry.get("memory").and_then(|value| value.as_u64()).unwrap_or_default();
+            let path = entry.get("path").and_then(|value| value.as_str()).unwrap_or_default();
+            Some(ProcessInfo::new(
+                pid,
+                0,
+                String::new(),
+                cpu,
+                0.0,
+                0,
+                memory / 1024,
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                name.to_string(),
+                path.to_string(),
+            ))
+        })
+        .collect())
 }
 
 /// 根据当前平台创建后端实例
