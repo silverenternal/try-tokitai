@@ -1308,6 +1308,9 @@ const activityStrip = document.getElementById("activity-strip");
 const agentRuntimeStrip = document.getElementById("agent-runtime-strip");
 const agentProcessStrip = document.getElementById("agent-process-strip");
 const permissionStrip = document.getElementById("permission-strip");
+const contextUsage = document.getElementById("context-usage");
+const contextUsageRing = document.getElementById("context-usage-ring");
+const contextUsageLabel = document.getElementById("context-usage-label");
 const settingsPanels = document.querySelectorAll(".settings-popover");
 const newSessionButton = document.getElementById("new-session-button");
 const settingsToggle = document.getElementById("settings-toggle");
@@ -6913,6 +6916,14 @@ function pushAssistantStreamMoment(moment) {
   ensurePendingAssistantBubbleForRuntime();
 }
 
+function completeContextCompactionMoment() {
+  if (!activeAssistantTurn?.streamMoments?.length) return;
+  const moment = [...activeAssistantTurn.streamMoments].reverse().find((item) => item?.kind === "compaction" && item?.state === "run");
+  if (!moment) return;
+  moment.state = "done";
+  pendingAssistantStoryDirty = true;
+}
+
 function pushTurnTextSegment(turn, text, options = {}) {
   if (!turn) return;
   const cleanText = sanitizeMessageContent(String(text || ""));
@@ -10924,6 +10935,15 @@ function renderStreamMoment(moment) {
   const isEditing = kind === "edit";
   const isCommand = kind === "command";
   const isRunning = state === "run";
+  if (kind === "compaction") {
+    return `
+      <div class="codex-context-compaction${isRunning ? " is-streaming" : ""}">
+        <span class="codex-context-compaction-line" aria-hidden="true"></span>
+        <span class="codex-context-compaction-text">${escapeHtml(text)}</span>
+        <span class="codex-context-compaction-line" aria-hidden="true"></span>
+      </div>
+    `;
+  }
   const prefix = isEditing
     ? zhLabel("已编辑", "Edited")
     : isCommand
@@ -16418,6 +16438,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
       resetActiveAssistantTurn();
     }
     activeAssistantTurn.isThinkingPhase = true;
+    completeContextCompactionMoment();
     const delta = event.thinking_delta || "";
     if (!delta.trim()) return;
     appendThinkingContent(delta);
@@ -16434,6 +16455,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
       resetActiveAssistantTurn();
     }
     activeAssistantTurn.isThinkingPhase = false;
+    completeContextCompactionMoment();
     activeAssistantTurn.activity = "";
     updateAssistantBubble(event.delta || "");
     return;
@@ -16565,6 +16587,21 @@ function handleStreamEvent(event, expectedSessionId = null) {
     const status = event.activity?.status || "";
     const meta = event.activity?.meta || "";
     const agent = event.activity?.agent || "";
+    if (label === "context_usage") {
+      updateContextUsage(Number(detail || 0), Number(meta || 0));
+      return;
+    }
+    if (label === "context_compaction") {
+      pushAssistantStreamMoment({
+        kind: "compaction",
+        text: detail || (currentLanguage === "zh" ? "??????" : "Auto-compacting context"),
+        state: status === "complete" ? "done" : "run",
+        dedupeKey: "context-compaction",
+        timestamp: Date.now(),
+      });
+      refreshPendingAssistantBubble();
+      return;
+    }
     addProcessEvent(
       label || "activity",
       label,
@@ -16644,6 +16681,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    completeContextCompactionMoment();
     upsertToolEntry(tool);
     pushAssistantWorklog(describeToolWorklog(tool));
     pushAssistantStreamMoment(normalizedOperationMoment(describeToolMoment(tool), tool));
@@ -16723,6 +16761,18 @@ function handleStreamEvent(event, expectedSessionId = null) {
     }
     throw new Error(event.error || "stream failed");
   }
+}
+
+function updateContextUsage(usedTokens, contextWindow) {
+  if (!contextUsage || !contextUsageRing || !contextUsageLabel) return;
+  const used = Math.max(0, Number(usedTokens || 0));
+  const limit = Math.max(1, Number(contextWindow || 128000));
+  const percent = Math.min(100, Math.max(0, (used / limit) * 100));
+  contextUsage.style.setProperty("--context-usage", `${percent * 3.6}deg`);
+  contextUsageLabel.textContent = `${Math.round(percent)}%`;
+  contextUsage.title = `${used.toLocaleString()} / ${limit.toLocaleString()} tokens`;
+  contextUsage.classList.toggle("is-warning", percent >= 70 && percent < 90);
+  contextUsage.classList.toggle("is-critical", percent >= 90);
 }
 
 async function sendMessageFallback(content) {

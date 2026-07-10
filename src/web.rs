@@ -6338,8 +6338,36 @@ async fn run_chat_request_stream(
     let max_protocol_repair_attempts = if structured_workflow { 12usize } else { 6usize };
     let max_workspace_recovery_attempts = if structured_workflow { 16usize } else { 8usize };
     let mut multimodal_sent = false;
+    let mut context_compaction_announced = false;
     for _ in 0..max_turn_rounds {
         let turn_start = persisted_blocks.len();
+        if should_compress_context(&persisted_blocks) && !context_compaction_announced {
+            context_compaction_announced = true;
+            let estimated = estimate_message_blocks_tokens(&persisted_blocks);
+            let _ = tx.send(StreamEnvelope {
+                r#type: "activity".to_string(),
+                session_id: Some(session_id.clone()),
+                messages: None,
+                delta: None,
+                thinking_delta: None,
+                error: None,
+                activity: Some(workflow_activity_event(
+                    "context_compaction",
+                    Some(localized_text(turn_language, "??????", "Auto-compacting context")),
+                    Some("context".to_string()),
+                    Some("running".to_string()),
+                    Some(format!("{}", estimated)),
+                    Some("main".to_string()),
+                )),
+                tool: None,
+                permission: None,
+                edited_files: None,
+                research: None,
+                subagents: None,
+                verifier: None,
+                auto_skills: None,
+            });
+        }
         let mut request = build_stream_chat_request_with_prompt(
             &persisted_blocks,
             &runtime,
@@ -8323,14 +8351,9 @@ fn compress_messages_for_request(
     messages: &[MessageBlock],
     language: TurnLanguage,
 ) -> Vec<MessageBlock> {
-    const CONTEXT_TOKEN_TRIGGER: usize = 18_000;
-    const MAX_BLOCKS_BEFORE_COMPRESSION: usize = 96;
     const RECENT_TURNS_TO_KEEP: usize = 3;
 
-    let estimated_tokens = estimate_message_blocks_tokens(messages);
-    if messages.len() <= MAX_BLOCKS_BEFORE_COMPRESSION
-        && estimated_tokens <= CONTEXT_TOKEN_TRIGGER
-    {
+    if !should_compress_context(messages) {
         return messages.to_vec();
     }
 
@@ -8372,6 +8395,28 @@ fn compress_messages_for_request(
     });
     compressed.extend(compacted_recent);
     compressed
+}
+
+fn should_compress_context(messages: &[MessageBlock]) -> bool {
+    const CONTEXT_TOKEN_TRIGGER: usize = 18_000;
+    const MAX_BLOCKS_BEFORE_COMPRESSION: usize = 96;
+    messages.len() > MAX_BLOCKS_BEFORE_COMPRESSION
+        || estimate_message_blocks_tokens(messages) > CONTEXT_TOKEN_TRIGGER
+}
+
+fn model_context_window(model: &str) -> usize {
+    let normalized = model.trim().to_ascii_lowercase();
+    if normalized.contains("qwen3.7") || normalized.contains("qwen3.5") {
+        128_000
+    } else if normalized.contains("gpt-4.1") || normalized.contains("gpt-4o") {
+        128_000
+    } else if normalized.contains("claude") {
+        200_000
+    } else if normalized.contains("deepseek") {
+        64_000
+    } else {
+        128_000
+    }
 }
 
 fn estimate_text_tokens(content: &str) -> usize {
@@ -13900,6 +13945,7 @@ async fn stream_provider_turn(
     suppress_thinking: bool,
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<StreamTurnResult> {
+    let request_model = request.model.clone();
     let mut stream = provider.chat_stream(request).await?;
     let mut raw_text = String::new();
     let mut text = String::new();
@@ -13913,6 +13959,32 @@ async fn stream_provider_turn(
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
+        if let Some(usage) = chunk.usage.as_ref() {
+            let context_window = model_context_window(&request_model);
+            let _ = tx.send(StreamEnvelope {
+                r#type: "activity".to_string(),
+                session_id: Some(session_id.to_string()),
+                messages: None,
+                delta: None,
+                thinking_delta: None,
+                error: None,
+                activity: Some(workflow_activity_event(
+                    "context_usage",
+                    Some(format!("{}", usage.prompt_tokens)),
+                    Some("context".to_string()),
+                    Some("complete".to_string()),
+                    Some(format!("{}", context_window)),
+                    Some("main".to_string()),
+                )),
+                tool: None,
+                permission: None,
+                edited_files: None,
+                research: None,
+                subagents: None,
+                verifier: None,
+                auto_skills: None,
+            });
+        }
         if let Some(next_tool_calls) = chunk.tool_calls.clone() {
             for call in &next_tool_calls {
                 let name = call

@@ -107,6 +107,7 @@ impl LLMProvider for OpenAIProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            stream_options: None,
             tools: request.tools,
             thinking: None,
             enable_thinking: request.thinking_mode.as_ref().map(|mode| mode == "enabled"),
@@ -167,6 +168,7 @@ impl LLMProvider for OpenAIProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(true),
+            stream_options: Some(serde_json::json!({ "include_usage": true })),
             tools: request.tools,
             thinking: None,
             enable_thinking: request.thinking_mode.as_ref().map(|mode| mode == "enabled"),
@@ -202,6 +204,19 @@ impl LLMProvider for OpenAIProvider {
                             break;
                         }
                         if let Ok(response) = serde_json::from_str::<OpenAIStreamResponse>(&message.data) {
+                            if let Some(usage) = response.usage.as_ref() {
+                                yield Ok(StreamChunk {
+                                    content: String::new(),
+                                    finish_reason: None,
+                                    thinking: None,
+                                    tool_calls: None,
+                                    usage: Some(Usage {
+                                        prompt_tokens: usage.prompt_tokens,
+                                        completion_tokens: usage.completion_tokens,
+                                        total_tokens: usage.total_tokens,
+                                    }),
+                                });
+                            }
                             if let Some(choice) = response.choices.first() {
                                 // Accumulate tool call deltas
                                 if let Some(delta_tool_calls) = &choice.delta.tool_calls {
@@ -562,6 +577,7 @@ impl LLMProvider for ZhipuProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            stream_options: None,
             tools: request.tools,
             thinking: None,
             enable_thinking: None,
@@ -653,6 +669,7 @@ impl LLMProvider for MoonshotProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(false),
+            stream_options: None,
             tools: request.tools,
             thinking: None,
             enable_thinking: None,
@@ -721,6 +738,8 @@ struct OpenAIRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
@@ -777,7 +796,10 @@ struct OpenAIUsage {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamResponse {
+    #[serde(default)]
     choices: Vec<OpenAIStreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
 }
 
 #[derive(Debug, Deserialize)]
