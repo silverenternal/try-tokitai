@@ -472,14 +472,11 @@ fn onnx_model_search(limit: usize, query: &str) -> Result<Value, String> {
         .collect::<Vec<_>>();
 
     ranked.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| {
-                let left_title = left.1.get("title").and_then(Value::as_str).unwrap_or("");
-                let right_title = right.1.get("title").and_then(Value::as_str).unwrap_or("");
-                left_title.cmp(right_title)
-            })
+        right.0.cmp(&left.0).then_with(|| {
+            let left_title = left.1.get("title").and_then(Value::as_str).unwrap_or("");
+            let right_title = right.1.get("title").and_then(Value::as_str).unwrap_or("");
+            left_title.cmp(right_title)
+        })
     });
 
     let results = ranked

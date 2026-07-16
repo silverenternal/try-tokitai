@@ -7,7 +7,10 @@ use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-fn openai_messages(messages: Vec<Message>, multimodal_content: Option<serde_json::Value>) -> Vec<serde_json::Value> {
+fn openai_messages(
+    messages: Vec<Message>,
+    multimodal_content: Option<serde_json::Value>,
+) -> Vec<serde_json::Value> {
     let latest_user = messages.iter().rposition(|message| message.role == "user");
     messages
         .into_iter()
@@ -160,6 +163,10 @@ impl LLMProvider for OpenAIProvider {
         use futures::stream::StreamExt;
         use std::collections::BTreeMap;
 
+        let stream_options = (self.api_url.contains("openai.com")
+            || self.api_url.contains("dashscope")
+            || self.api_url.contains("aliyuncs.com"))
+        .then(|| serde_json::json!({ "include_usage": true }));
         let payload = OpenAIRequest {
             model: request.model,
             messages: openai_messages(request.messages, request.multimodal_content),
@@ -168,7 +175,7 @@ impl LLMProvider for OpenAIProvider {
             top_p: request.top_p,
             stop: request.stop,
             stream: Some(true),
-            stream_options: Some(serde_json::json!({ "include_usage": true })),
+            stream_options,
             tools: request.tools,
             thinking: None,
             enable_thinking: request.thinking_mode.as_ref().map(|mode| mode == "enabled"),

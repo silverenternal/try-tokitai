@@ -3,6 +3,7 @@
 //! Unified detection, execution, scoring, and reporting for CS verification tools
 //! and paper/research platforms.
 
+use crate::process_window::CommandWindowExt;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -225,8 +226,8 @@ fn push_tracking_directory_record(
 fn search_codesota_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingRecord> {
     let mut out = Vec::new();
     let q = query.trim();
-    let matches = q.is_empty()
-        || text_matches_query("codesota sota benchmark leaderboard paperswithcode", q);
+    let matches =
+        q.is_empty() || text_matches_query("codesota sota benchmark leaderboard paperswithcode", q);
     if matches {
         push_tracking_directory_record(
             &mut out,
@@ -252,8 +253,8 @@ fn search_codesota_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingRe
 fn search_wandb_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingRecord> {
     let mut out = Vec::new();
     let q = query.trim();
-    let matches = q.is_empty()
-        || text_matches_query("wandb weights biases experiment tracking reports", q);
+    let matches =
+        q.is_empty() || text_matches_query("wandb weights biases experiment tracking reports", q);
     if matches {
         push_tracking_directory_record(
             &mut out,
@@ -305,8 +306,8 @@ fn search_mlflow_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingReco
 fn search_dvc_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingRecord> {
     let mut out = Vec::new();
     let q = query.trim();
-    let matches = q.is_empty()
-        || text_matches_query("dvc data version control experiment pipeline doc", q);
+    let matches =
+        q.is_empty() || text_matches_query("dvc data version control experiment pipeline doc", q);
     if matches {
         push_tracking_directory_record(
             &mut out,
@@ -329,7 +330,10 @@ fn search_dvc_tracking(query: &str, limit: usize) -> Vec<ResearchTrackingRecord>
     out
 }
 
-fn search_mlperf_benchmarks(query: &str, limit: usize) -> Result<Vec<BenchmarkTrackingRecord>, String> {
+fn search_mlperf_benchmarks(
+    query: &str,
+    limit: usize,
+) -> Result<Vec<BenchmarkTrackingRecord>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -391,7 +395,10 @@ fn search_mlperf_benchmarks(query: &str, limit: usize) -> Result<Vec<BenchmarkTr
         } else {
             "benchmark"
         };
-        if out.iter().any(|item: &BenchmarkTrackingRecord| item.url == resolved_url) {
+        if out
+            .iter()
+            .any(|item: &BenchmarkTrackingRecord| item.url == resolved_url)
+        {
             continue;
         }
         out.push(BenchmarkTrackingRecord {
@@ -424,7 +431,7 @@ fn search_mlperf_benchmarks(query: &str, limit: usize) -> Result<Vec<BenchmarkTr
 
 impl VerificationCenterTools {
     fn probe_command(name: &str, command: &str, args: &[&str], kind: &str) -> ProbeResult {
-        let output = Command::new(command).args(args).output();
+        let output = Command::new(command).hide_window().args(args).output();
         match output {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();

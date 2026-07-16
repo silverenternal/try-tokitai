@@ -795,7 +795,9 @@ impl ProcessBackend for WindowsBackend {
         let output = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
-            .map_err(|e| ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e)))?;
+            .map_err(|e| {
+                ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e))
+            })?;
         if !output.status.success() {
             return Err(ProcessError::CommandFailed(
                 String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -812,7 +814,9 @@ impl ProcessBackend for WindowsBackend {
         let output = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
-            .map_err(|e| ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e)))?;
+            .map_err(|e| {
+                ProcessError::CommandFailed(format!("PowerShell process query failed: {}", e))
+            })?;
         if !output.status.success() {
             return Err(ProcessError::CommandFailed(
                 String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -917,10 +921,22 @@ fn parse_windows_process_json(input: &str) -> Result<Vec<ProcessInfo>, ProcessEr
         .into_iter()
         .filter_map(|entry| {
             let pid = entry.get("pid")?.as_u64()? as u32;
-            let name = entry.get("name").and_then(|value| value.as_str()).unwrap_or_default();
-            let cpu = entry.get("cpu").and_then(|value| value.as_f64()).unwrap_or_default() as f32;
-            let memory = entry.get("memory").and_then(|value| value.as_u64()).unwrap_or_default();
-            let path = entry.get("path").and_then(|value| value.as_str()).unwrap_or_default();
+            let name = entry
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let cpu = entry
+                .get("cpu")
+                .and_then(|value| value.as_f64())
+                .unwrap_or_default() as f32;
+            let memory = entry
+                .get("memory")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default();
+            let path = entry
+                .get("path")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
             Some(ProcessInfo::new(
                 pid,
                 0,

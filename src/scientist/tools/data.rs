@@ -291,8 +291,7 @@ fn classify_dataset_provider(url: &str, provider: Option<&str>) -> String {
         || lowered_provider.contains("google dataset search")
     {
         "google_dataset_search".to_string()
-    } else if lowered_url.contains("pytorch.org/vision")
-        || lowered_provider.contains("torchvision")
+    } else if lowered_url.contains("pytorch.org/vision") || lowered_provider.contains("torchvision")
     {
         "torchvision_datasets".to_string()
     } else if lowered_url.contains("kaggle.com") || lowered_provider.contains("kaggle") {
@@ -731,7 +730,19 @@ fn search_google_dataset_search(query: &str, limit: usize) -> Vec<PublicDatasetR
 
 fn search_torchvision_datasets(query: &str, limit: usize) -> Vec<PublicDatasetRecord> {
     let lower = query.to_ascii_lowercase();
-    if !contains_any(&lower, &["image", "vision", "cnn", "resnet", "classification", "detection", "segmentation", "torchvision"]) {
+    if !contains_any(
+        &lower,
+        &[
+            "image",
+            "vision",
+            "cnn",
+            "resnet",
+            "classification",
+            "detection",
+            "segmentation",
+            "torchvision",
+        ],
+    ) {
         return Vec::new();
     }
     vec![PublicDatasetRecord {
@@ -739,7 +750,8 @@ fn search_torchvision_datasets(query: &str, limit: usize) -> Vec<PublicDatasetRe
         title: "torchvision Datasets".to_string(),
         url: "https://pytorch.org/vision/stable/datasets.html".to_string(),
         provider: "torchvision_datasets".to_string(),
-        snippet: "Official torchvision dataset registry for image and vision benchmarks.".to_string(),
+        snippet: "Official torchvision dataset registry for image and vision benchmarks."
+            .to_string(),
         source_kind: "official_provider_dataset_page".to_string(),
         official_source: true,
         source_tier: "official_provider_page".to_string(),

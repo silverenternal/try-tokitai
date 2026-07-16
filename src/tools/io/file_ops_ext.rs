@@ -266,7 +266,10 @@ impl FileOperations {
 }
 
 fn apply_unified_patch_like(content: &str, patch: &str) -> Result<String, String> {
-    let mut lines = content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+    let mut lines = content
+        .lines()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
     let mut offset: isize = 0;
     let mut has_hunk = false;
 

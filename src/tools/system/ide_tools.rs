@@ -1,3 +1,4 @@
+use crate::process_window::CommandWindowExt;
 use crate::text_encoding::read_text_file;
 use crate::tools::io::security::SecurePathResolver;
 use crate::tools::io::utils::{ensure_file_exists, ensure_is_file, validate_single_path};
@@ -66,7 +67,13 @@ impl IdeTools {
     }
 
     fn language_from_path(path: &Path) -> &'static str {
-        match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "rs" => "rust",
             "py" => "python",
             "js" | "jsx" => "javascript",
@@ -83,8 +90,7 @@ impl IdeTools {
                 .unwrap_or("")
                 .to_ascii_lowercase()
                 .as_str(),
-            "rs"
-                | "py"
+            "rs" | "py"
                 | "js"
                 | "jsx"
                 | "ts"
@@ -159,8 +165,14 @@ impl IdeTools {
 
         match lang {
             "rust" => {
-                push("function", r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)");
-                push("struct", r"^\s*(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)");
+                push(
+                    "function",
+                    r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
+                push(
+                    "struct",
+                    r"^\s*(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
                 push("enum", r"^\s*(?:pub\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)");
                 push("trait", r"^\s*(?:pub\s+)?trait\s+([A-Za-z_][A-Za-z0-9_]*)");
                 push("type", r"^\s*(?:pub\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)");
@@ -171,25 +183,43 @@ impl IdeTools {
                 push("class", r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)");
             }
             "javascript" | "typescript" => {
-                push("function", r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)");
+                push(
+                    "function",
+                    r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
                 push(
                     "function",
                     r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?(?:\(|function\b)",
                 );
-                push("class", r"^\s*(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)");
-                push("interface", r"^\s*(?:export\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)");
+                push(
+                    "class",
+                    r"^\s*(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
+                push(
+                    "interface",
+                    r"^\s*(?:export\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
                 push("type", r"^\s*(?:export\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)");
             }
             "java" => {
-                push("class", r"^\s*(?:public\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)");
-                push("interface", r"^\s*(?:public\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)");
+                push(
+                    "class",
+                    r"^\s*(?:public\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
+                push(
+                    "interface",
+                    r"^\s*(?:public\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)",
+                );
                 push(
                     "method",
                     r"^\s*(?:public|private|protected)?\s*(?:static\s+)?[A-Za-z0-9_<>\[\], ?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
                 );
             }
             "go" | "c" | "cpp" => {
-                push("function", r"^\s*(?:func|[A-Za-z_][A-Za-z0-9_<>\[\],\s\*]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(");
+                push(
+                    "function",
+                    r"^\s*(?:func|[A-Za-z_][A-Za-z0-9_<>\[\],\s\*]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                );
                 push("struct", r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b");
             }
             _ => {}
@@ -278,7 +308,8 @@ impl IdeTools {
                     break;
                 }
                 let name = symbol_def["name"].as_str().unwrap_or("");
-                if name.eq_ignore_ascii_case(symbol) || name.to_lowercase().contains(&symbol_lower) {
+                if name.eq_ignore_ascii_case(symbol) || name.to_lowercase().contains(&symbol_lower)
+                {
                     results.push(json!({
                         "file": file.to_string_lossy().to_string(),
                         "name": name,
@@ -318,7 +349,20 @@ impl IdeTools {
             {
                 function_count += 1;
             }
-            for keyword in [" if ", " else if ", " for ", " while ", " case ", " catch ", " match ", " and ", " or ", "&&", "||", "?"] {
+            for keyword in [
+                " if ",
+                " else if ",
+                " for ",
+                " while ",
+                " case ",
+                " catch ",
+                " match ",
+                " and ",
+                " or ",
+                "&&",
+                "||",
+                "?",
+            ] {
                 if trimmed.contains(keyword) {
                     cyclomatic += 1;
                 }
@@ -438,10 +482,7 @@ impl IdeTools {
         for symbol in symbols {
             let name = symbol["name"].as_str().unwrap_or("").to_string();
             let line = symbol["line"].as_u64().unwrap_or(1) as usize;
-            let occurrences = content
-                .lines()
-                .filter(|l| l.contains(&name))
-                .count();
+            let occurrences = content.lines().filter(|l| l.contains(&name)).count();
             let kind = symbol["kind"].as_str().unwrap_or("symbol");
             lenses.push(json!({
                 "line": line,
@@ -516,6 +557,7 @@ impl IdeTools {
             "rust" => {
                 let root = Self::workspace_root_for(path_obj);
                 let cargo = Command::new("cargo")
+                    .hide_window()
                     .args(["check", "--message-format", "short"])
                     .current_dir(root)
                     .output();
@@ -539,6 +581,7 @@ impl IdeTools {
             }
             "python" => {
                 let result = Command::new("python")
+                    .hide_window()
                     .args(["-m", "py_compile", &canonical])
                     .output();
                 match result {
@@ -560,6 +603,7 @@ impl IdeTools {
             }
             "javascript" | "typescript" => {
                 let node = Command::new("node")
+                    .hide_window()
                     .args(["--check", &canonical])
                     .output();
                 match node {
@@ -588,7 +632,9 @@ impl IdeTools {
             }
         }
 
-        let has_errors = checks.iter().any(|check| !check["success"].as_bool().unwrap_or(false));
+        let has_errors = checks
+            .iter()
+            .any(|check| !check["success"].as_bool().unwrap_or(false));
         Ok(json!({
             "status": "success",
             "operation": "diagnostics",
@@ -617,7 +663,9 @@ impl IdeTools {
         let walker = if path_obj.is_dir() {
             WalkDir::new(path_obj).into_iter()
         } else {
-            WalkDir::new(path_obj.parent().unwrap_or(path_obj)).max_depth(1).into_iter()
+            WalkDir::new(path_obj.parent().unwrap_or(path_obj))
+                .max_depth(1)
+                .into_iter()
         };
 
         for entry in walker.filter_map(Result::ok) {
@@ -667,8 +715,8 @@ impl IdeTools {
         let canonical = validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
         let path_obj = Path::new(&canonical);
         let max_results = max_results.unwrap_or(100).clamp(1, 1000);
-        let symbol_re = Regex::new(&regex::escape(&symbol))
-            .map_err(|e| tool_error(e.to_string()))?;
+        let symbol_re =
+            Regex::new(&regex::escape(&symbol)).map_err(|e| tool_error(e.to_string()))?;
         let mut results = Vec::new();
         let root = if path_obj.is_dir() {
             path_obj.to_path_buf()
@@ -722,10 +770,23 @@ impl IdeTools {
 
         let lang = Self::language_from_path(path_obj);
         let status = match lang {
-            "rust" => Command::new("rustfmt").arg(&canonical).status(),
-            "python" => Command::new("python").args(["-m", "black", &canonical]).status(),
-            "javascript" | "typescript" => Command::new("prettier").args(["--write", &canonical]).status(),
-            _ => return Err(tool_error("no formatter available for this file type".to_string())),
+            "rust" => Command::new("rustfmt")
+                .hide_window()
+                .arg(&canonical)
+                .status(),
+            "python" => Command::new("python")
+                .hide_window()
+                .args(["-m", "black", &canonical])
+                .status(),
+            "javascript" | "typescript" => Command::new("prettier")
+                .hide_window()
+                .args(["--write", &canonical])
+                .status(),
+            _ => {
+                return Err(tool_error(
+                    "no formatter available for this file type".to_string(),
+                ))
+            }
         };
 
         match status {
@@ -748,7 +809,10 @@ impl IdeTools {
         let path_obj = Path::new(&canonical);
         let root = Self::workspace_root_for(path_obj);
         let mut cmd = Command::new("cargo");
-        cmd.current_dir(root).arg("test").arg("--quiet");
+        cmd.hide_window()
+            .current_dir(root)
+            .arg("test")
+            .arg("--quiet");
 
         if let Some(filter) = filter {
             if !filter.trim().is_empty() {
@@ -760,7 +824,9 @@ impl IdeTools {
             }
         }
 
-        let output = cmd.output().map_err(|e| tool_error(format!("failed to run cargo test: {}", e)))?;
+        let output = cmd
+            .output()
+            .map_err(|e| tool_error(format!("failed to run cargo test: {}", e)))?;
 
         Ok(json!({
             "status": if output.status.success() { "success" } else { "error" },
@@ -862,7 +928,8 @@ impl IdeTools {
         let path_obj = Path::new(&canonical);
         let root = Self::workspace_root(path_obj);
         let max_results = max_results.unwrap_or(50).clamp(1, 200);
-        let symbol_re = Regex::new(&regex::escape(&symbol)).map_err(|e| tool_error(e.to_string()))?;
+        let symbol_re =
+            Regex::new(&regex::escape(&symbol)).map_err(|e| tool_error(e.to_string()))?;
         let mut results = Vec::new();
 
         for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
@@ -929,12 +996,7 @@ impl IdeTools {
         }))
     }
 
-    pub fn hover(
-        &self,
-        path: String,
-        line: usize,
-        column: Option<usize>,
-    ) -> Result<Value, Value> {
+    pub fn hover(&self, path: String, line: usize, column: Option<usize>) -> Result<Value, Value> {
         let canonical = validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
         let path_obj = Path::new(&canonical);
         ensure_file_exists(path_obj).map_err(|e| e.to_value())?;
@@ -947,7 +1009,9 @@ impl IdeTools {
         let token = column.and_then(|col| Self::extract_identifier_at(line_text, col));
         let definitions = token
             .as_ref()
-            .map(|symbol| Self::search_definition_candidates(&Self::workspace_root(path_obj), symbol, 5))
+            .map(|symbol| {
+                Self::search_definition_candidates(&Self::workspace_root(path_obj), symbol, 5)
+            })
             .unwrap_or_default();
 
         Ok(json!({
@@ -983,7 +1047,9 @@ impl IdeTools {
         let token = column.and_then(|col| Self::extract_identifier_at(line_text, col));
         let mut signatures = token
             .as_ref()
-            .map(|symbol| Self::search_definition_candidates(&Self::workspace_root(path_obj), symbol, 10))
+            .map(|symbol| {
+                Self::search_definition_candidates(&Self::workspace_root(path_obj), symbol, 10)
+            })
             .unwrap_or_default();
         signatures.sort_by(|a, b| {
             let symbol = token.as_deref().unwrap_or("");
@@ -1080,7 +1146,8 @@ impl IdeTools {
         ensure_file_exists(path_obj).map_err(|e| e.to_value())?;
         ensure_is_file(path_obj).map_err(|e| e.to_value())?;
         let content = read_text_file(path_obj).map_err(|e| tool_error(e.to_string()))?;
-        let (total_lines, code_lines, function_count, cyclomatic) = Self::count_lines_and_complexity(&content);
+        let (total_lines, code_lines, function_count, cyclomatic) =
+            Self::count_lines_and_complexity(&content);
 
         Ok(json!({
             "status": "success",
@@ -1410,11 +1477,7 @@ impl IdeTools {
         }))
     }
 
-    pub fn code_lens(
-        &self,
-        path: String,
-        max_results: Option<usize>,
-    ) -> Result<Value, Value> {
+    pub fn code_lens(&self, path: String, max_results: Option<usize>) -> Result<Value, Value> {
         let canonical = validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
         let path_obj = Path::new(&canonical);
         ensure_file_exists(path_obj).map_err(|e| e.to_value())?;
@@ -1499,8 +1562,13 @@ impl IdeTools {
                 Ok(content) => content,
                 Err(_) => continue,
             };
-            let (_, code_lines, function_count, cyclomatic) = Self::count_lines_and_complexity(&content);
-            let score = imports.len() * 3 + symbols.len() * 2 + function_count + cyclomatic + code_lines / 20;
+            let (_, code_lines, function_count, cyclomatic) =
+                Self::count_lines_and_complexity(&content);
+            let score = imports.len() * 3
+                + symbols.len() * 2
+                + function_count
+                + cyclomatic
+                + code_lines / 20;
 
             hotspots.push(json!({
                 "file": file.to_string_lossy().to_string(),
@@ -1514,7 +1582,10 @@ impl IdeTools {
         }
 
         hotspots.sort_by(|a, b| {
-            b["score"].as_u64().unwrap_or(0).cmp(&a["score"].as_u64().unwrap_or(0))
+            b["score"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["score"].as_u64().unwrap_or(0))
         });
         hotspots.truncate(max_results);
 
@@ -1536,7 +1607,8 @@ impl IdeTools {
         max_results: Option<usize>,
     ) -> Result<Value, Value> {
         let canonical = validate_single_path(&self.resolver, &path).map_err(|e| e.to_value())?;
-        let changed = validate_single_path(&self.resolver, &changed_path).map_err(|e| e.to_value())?;
+        let changed =
+            validate_single_path(&self.resolver, &changed_path).map_err(|e| e.to_value())?;
         let root = Self::workspace_root(Path::new(&canonical));
         let max_results = max_results.unwrap_or(50).clamp(1, 500);
         let changed_name = Path::new(&changed)
@@ -1588,7 +1660,10 @@ impl IdeTools {
         }
 
         impacts.sort_by(|a, b| {
-            b["relevance"].as_u64().unwrap_or(0).cmp(&a["relevance"].as_u64().unwrap_or(0))
+            b["relevance"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["relevance"].as_u64().unwrap_or(0))
         });
         impacts.truncate(max_results);
 
@@ -1614,7 +1689,8 @@ impl IdeTools {
             validate_single_path(&self.resolver, &snapshot_path).map_err(|e| e.to_value())?;
         let root = Self::workspace_root(Path::new(&canonical));
         let snapshot = self.snapshot_payload(&root);
-        let snapshot_string = serde_json::to_string_pretty(&snapshot).map_err(|e| tool_error(e.to_string()))?;
+        let snapshot_string =
+            serde_json::to_string_pretty(&snapshot).map_err(|e| tool_error(e.to_string()))?;
         fs::write(&snapshot_canonical, snapshot_string).map_err(|e| tool_error(e.to_string()))?;
 
         Ok(json!({
@@ -1633,12 +1709,15 @@ impl IdeTools {
         before_path: String,
         after_path: String,
     ) -> Result<Value, Value> {
-        let before = validate_single_path(&self.resolver, &before_path).map_err(|e| e.to_value())?;
+        let before =
+            validate_single_path(&self.resolver, &before_path).map_err(|e| e.to_value())?;
         let after = validate_single_path(&self.resolver, &after_path).map_err(|e| e.to_value())?;
         let before_text = fs::read_to_string(&before).map_err(|e| tool_error(e.to_string()))?;
         let after_text = fs::read_to_string(&after).map_err(|e| tool_error(e.to_string()))?;
-        let before_json: Value = serde_json::from_str(&before_text).map_err(|e| tool_error(e.to_string()))?;
-        let after_json: Value = serde_json::from_str(&after_text).map_err(|e| tool_error(e.to_string()))?;
+        let before_json: Value =
+            serde_json::from_str(&before_text).map_err(|e| tool_error(e.to_string()))?;
+        let after_json: Value =
+            serde_json::from_str(&after_text).map_err(|e| tool_error(e.to_string()))?;
 
         let before_files = before_json["files"].as_array().cloned().unwrap_or_default();
         let after_files = after_json["files"].as_array().cloned().unwrap_or_default();
@@ -1714,7 +1793,8 @@ impl IdeTools {
             .take(max_results)
             .map(|file| {
                 let content = read_text_file(&file).unwrap_or_default();
-                let (_t, code_lines, function_count, cyclomatic) = Self::count_lines_and_complexity(&content);
+                let (_t, code_lines, function_count, cyclomatic) =
+                    Self::count_lines_and_complexity(&content);
                 json!({
                     "file": file.to_string_lossy().to_string(),
                     "language": Self::language_from_path(&file),
@@ -1748,25 +1828,33 @@ impl IdeTools {
         let max_results = max_results.unwrap_or(50).clamp(1, 500);
         let mut items = Vec::new();
         let git = crate::tools::vcs::GitOperations::default();
-        let diff = git.git_diff(Some(root.to_string_lossy().to_string())).unwrap_or_else(|e| {
-            json!({
-                "status": "error",
-                "message": e
-            })
-        });
-        let log = git.git_log(Some(root.to_string_lossy().to_string()), Some(max_results)).unwrap_or_else(|e| {
-            json!({
-                "status": "error",
-                "message": e
-            })
-        });
+        let diff = git
+            .git_diff(Some(root.to_string_lossy().to_string()))
+            .unwrap_or_else(|e| {
+                json!({
+                    "status": "error",
+                    "message": e
+                })
+            });
+        let log = git
+            .git_log(Some(root.to_string_lossy().to_string()), Some(max_results))
+            .unwrap_or_else(|e| {
+                json!({
+                    "status": "error",
+                    "message": e
+                })
+            });
 
-        for file in Self::collect_workspace_files(&root).into_iter().take(max_results) {
+        for file in Self::collect_workspace_files(&root)
+            .into_iter()
+            .take(max_results)
+        {
             let content = match read_text_file(&file) {
                 Ok(content) => content,
                 Err(_) => continue,
             };
-            let (total_lines, code_lines, function_count, cyclomatic) = Self::count_lines_and_complexity(&content);
+            let (total_lines, code_lines, function_count, cyclomatic) =
+                Self::count_lines_and_complexity(&content);
             let score = code_lines + function_count + cyclomatic;
             items.push(json!({
                 "file": file.to_string_lossy().to_string(),
@@ -1778,7 +1866,12 @@ impl IdeTools {
             }));
         }
 
-        items.sort_by(|a, b| b["score"].as_u64().unwrap_or(0).cmp(&a["score"].as_u64().unwrap_or(0)));
+        items.sort_by(|a, b| {
+            b["score"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["score"].as_u64().unwrap_or(0))
+        });
 
         Ok(json!({
             "status": "success",

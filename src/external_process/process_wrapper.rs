@@ -19,6 +19,7 @@ use crate::external_process::metadata::{
     ExternalToolMetadata, ExternalToolType, ProcessConfig, RiskLevel, ToolExecutionResult,
 };
 use crate::external_process::wrapper::{validation, ExternalTool};
+use crate::process_window::CommandWindowExt;
 use crate::text_encoding::decode_bytes;
 use crate::tool_matrix::matrix::ToolDefinition;
 use anyhow::{bail, Context, Result};
@@ -180,6 +181,7 @@ impl ProcessWrapper {
     fn build_command(&self, input: &serde_json::Map<String, Value>) -> Result<Command> {
         let config = self.config();
         let mut cmd = Command::new(&config.executable);
+        cmd.hide_window();
 
         // Substitute and add arguments
         for arg_template in &config.args_template {

@@ -372,6 +372,37 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Record the model that most recently handled this session without
+    /// changing its conversation history. A running turn captures its model
+    /// before this value is updated, so model changes apply on turn boundaries.
+    pub fn update_model_for(&mut self, id: &str, model: &str) -> Result<()> {
+        let id = id.trim();
+        let model = model.trim();
+        if id.is_empty() || model.is_empty() {
+            return Ok(());
+        }
+
+        let Some(entry) = self.index.iter_mut().find(|meta| meta.id == id) else {
+            return Ok(());
+        };
+        if entry.model == model {
+            return Ok(());
+        }
+
+        entry.model = model.to_string();
+        let path = self.sessions_dir.join(format!("{}.json", id));
+        if path.exists() {
+            let json = read_text_file(&path)
+                .with_context(|| format!("Failed to read session file: {}", id))?;
+            let mut file: SessionFile = serde_json::from_str(&json)
+                .with_context(|| format!("Failed to parse session file: {}", id))?;
+            file.meta.model = model.to_string();
+            std::fs::write(&path, serde_json::to_string_pretty(&file)?)?;
+        }
+        self.save_index()?;
+        Ok(())
+    }
+
     pub fn refresh_summaries(&mut self) -> Result<bool> {
         let mut changed = false;
 
@@ -637,14 +668,14 @@ fn auto_title(messages: &[MessageBlock]) -> Option<String> {
 
 /// Extract a short rolling summary from the latest visible conversation message.
 fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
-        let preferred = messages.iter().rev().find_map(|message| match message {
-            MessageBlock::Assistant { content }
-            | MessageBlock::AssistantChoices { title: content, .. }
-            | MessageBlock::AssistantStreaming { content }
-            | MessageBlock::Error { content }
-            | MessageBlock::System { content } => {
-                if is_low_value_summary_text(content) {
-                    None
+    let preferred = messages.iter().rev().find_map(|message| match message {
+        MessageBlock::Assistant { content }
+        | MessageBlock::AssistantChoices { title: content, .. }
+        | MessageBlock::AssistantStreaming { content }
+        | MessageBlock::Error { content }
+        | MessageBlock::System { content } => {
+            if is_low_value_summary_text(content) {
+                None
             } else {
                 compact_message_text(content, 42)
             }

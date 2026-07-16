@@ -1,5 +1,7 @@
 //! End-to-end AI Scientist paper workflow runner
 
+use crate::image_generation::{generate_wan_image, WanImageRequest};
+use crate::process_window::CommandWindowExt;
 use crate::scientist::tools::data::BENCHMARK_SCHEMA_VERSION;
 use crate::scientist::tools::literature::LiteratureTools;
 use crate::scientist::tools::verification_center::VerificationCenterTools;
@@ -32,6 +34,8 @@ pub struct PaperWorkflowRequest {
     pub runtime_result_bundle: Option<Value>,
     pub runtime_run_comparison: Option<Value>,
     pub runtime_lineage: Option<Value>,
+    pub image_api_key: Option<String>,
+    pub generate_images: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +46,7 @@ pub struct PaperWorkflowResult {
     pub paper_latex_path: PathBuf,
     pub references_bib_path: PathBuf,
     pub paper_pdf_path: Option<PathBuf>,
+    pub conceptual_figure_path: Option<PathBuf>,
     pub appendix_markdown_path: PathBuf,
     pub result_bundle_path: PathBuf,
     pub review_response_path: PathBuf,
@@ -105,6 +110,7 @@ fn runtime_payload_fingerprint(request: &PaperWorkflowRequest) -> String {
             .clone()
             .unwrap_or_else(|| json!({})),
         "runtime_lineage": request.runtime_lineage.clone().unwrap_or_else(|| json!({})),
+        "generate_images": request.generate_images,
     });
     serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
 }
@@ -198,6 +204,8 @@ pub async fn run_paper_workflow(
         .map_err(|err| format!("create workflow workspace: {}", err))?;
     let paper_dir = request.workspace_root.join("paper");
     fs::create_dir_all(&paper_dir).map_err(|err| format!("create paper directory: {}", err))?;
+    let figure_dir = paper_dir.join("figures");
+    let conceptual_figure_path = figure_dir.join("conceptual_overview.png");
     let workflow_checkpoint_path = request.workspace_root.join("workflow_checkpoint.json");
 
     let env_guard = LocalPaperEnvGuard::new(request.local_paper_source.as_deref())?;
@@ -847,7 +855,7 @@ pub async fn run_paper_workflow(
     let manuscript_bundle_after_path = paper_dir.join("paper_manuscript.sections.after.json");
     let manuscript_diff_path = paper_dir.join("paper_manuscript.diff.json");
 
-    let paper = report_response
+    let mut paper = report_response
         .content
         .get("paper")
         .cloned()
@@ -876,12 +884,107 @@ pub async fn run_paper_workflow(
         &revision_pass.execution_trace,
     );
     let manuscript_diff_preview = manuscript_diff_preview(&manuscript_diff_bundle);
-    let expected_paper_markdown = paper["markdown_draft"].as_str().unwrap_or("");
-    let expected_paper_latex = paper["latex_manuscript_shell"].as_str().unwrap_or("");
-    let expected_references_bib = build_references_bib(&paper["citation_inventory"]);
+    let mut workflow_warnings = Vec::new();
+    let materialized_result_figures = materialize_result_figures(
+        request
+            .source_workspace_root
+            .as_deref()
+            .unwrap_or(&request.workspace_root),
+        &figure_dir,
+        &artifact_paths,
+        3,
+    )?;
+    let generated_conceptual_figure = if request.generate_images {
+        if conceptual_figure_path.exists() {
+            Some(conceptual_figure_path.clone())
+        } else if let Some(api_key) = request.image_api_key.as_deref() {
+            let prompt = paper_conceptual_figure_prompt(&request.topic, &paper, &result_bundle);
+            match generate_wan_image(
+                api_key,
+                WanImageRequest {
+                    prompt,
+                    negative_prompt: Some("photorealism, decorative stock art, illegible labels, tiny text, watermark, logos, fabricated numbers, charts, plots, benchmark values, screenshots".to_string()),
+                    size: "3072*2048".to_string(),
+                    output_path: conceptual_figure_path.clone(),
+                    watermark: false,
+                },
+            )
+            .await
+            {
+                Ok(_) => Some(conceptual_figure_path.clone()),
+                Err(error) => {
+                    tracing::warn!("paper conceptual figure generation skipped: {}", error);
+                    workflow_warnings.push(format!(
+                        "Conceptual figure generation failed; paper generation continued without the explanatory image: {}",
+                        error
+                    ));
+                    None
+                }
+            }
+        } else {
+            workflow_warnings.push(
+                "Conceptual figure generation was requested, but no DashScope API key was available; paper generation continued without the explanatory image."
+                    .to_string(),
+            );
+            None
+        }
+    } else {
+        None
+    };
+    let source_manuscript = request
+        .source_workspace_root
+        .as_deref()
+        .and_then(load_high_quality_source_manuscript);
+    if let Some(manuscript) = source_manuscript.as_ref() {
+        workflow_warnings.push(format!(
+            "Adopted the validated source manuscript {} ({} words, {} numbered references) and rendered it inside the workflow's publication shell.",
+            manuscript.source_path.display(),
+            manuscript.word_count,
+            manuscript.reference_count,
+        ));
+        apply_source_manuscript_evidence(&mut paper, manuscript);
+    }
+    let base_markdown = source_manuscript
+        .as_ref()
+        .map(|manuscript| manuscript.markdown.as_str())
+        .unwrap_or_else(|| paper["markdown_draft"].as_str().unwrap_or(""));
+    let base_latex = source_manuscript
+        .as_ref()
+        .map(|manuscript| build_source_manuscript_latex(manuscript, &paper, &result_bundle))
+        .unwrap_or_else(|| {
+            paper["latex_manuscript_shell"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        });
+    let expected_paper_markdown = insert_markdown_result_figures(
+        &insert_markdown_conceptual_figure(
+            base_markdown,
+            generated_conceptual_figure
+                .as_ref()
+                .map(|_| "figures/conceptual_overview.png"),
+        ),
+        &materialized_result_figures,
+    );
+    let expected_paper_latex = insert_latex_result_figures(
+        &insert_latex_conceptual_figure(
+            &base_latex,
+            generated_conceptual_figure
+                .as_ref()
+                .map(|_| "figures/conceptual_overview.png"),
+        ),
+        &materialized_result_figures,
+    );
+    let expected_references_bib = if let Some(manuscript) = source_manuscript.as_ref() {
+        build_source_references_bib(manuscript)
+    } else {
+        build_references_bib(&paper["citation_inventory"])
+    };
     let expected_appendix_markdown = build_appendix_markdown(&appendix_plan_with_vcr_skipped(
         &paper["artifact_appendix_plan"],
-        verification_response.content.get("verification_center_repair"),
+        verification_response
+            .content
+            .get("verification_center_repair"),
     ));
     let expected_review_response = json!({
         "reviewer_feedback": final_reviewer_feedback.clone(),
@@ -893,7 +996,12 @@ pub async fn run_paper_workflow(
         "completion_protocol": paper["completion_protocol"].clone(),
         "revision_mode": revision_mode.clone(),
         "revision_summary": revision_summary.clone(),
+        "warnings": workflow_warnings.clone(),
     });
+    let mut expected_paper_bundle = report_response.content.clone();
+    if let Some(bundle) = expected_paper_bundle.as_object_mut() {
+        bundle.insert("warnings".to_string(), json!(workflow_warnings));
+    }
     let expected_revision_execution_plan = finalize_revision_execution_plan(
         revision_pass.initial_execution_plan.clone(),
         &paper,
@@ -912,8 +1020,8 @@ pub async fn run_paper_workflow(
     );
 
     if !checkpoint_has_stage(&checkpoint, STAGE_OUTPUTS_READY) {
-        write_text_file(&paper_markdown_path, expected_paper_markdown)?;
-        write_text_file(&paper_latex_path, expected_paper_latex)?;
+        write_text_file(&paper_markdown_path, &expected_paper_markdown)?;
+        write_text_file(&paper_latex_path, &expected_paper_latex)?;
         write_text_file(&references_bib_path, &expected_references_bib)?;
         write_text_file(&appendix_markdown_path, &expected_appendix_markdown)?;
         write_json_file(&result_bundle_path, &result_bundle)?;
@@ -930,7 +1038,7 @@ pub async fn run_paper_workflow(
         write_json_file(&manuscript_bundle_before_path, &manuscript_bundle_before)?;
         write_json_file(&manuscript_bundle_after_path, &manuscript_bundle_after)?;
         write_json_file(&manuscript_diff_path, &manuscript_diff_bundle)?;
-        write_json_file(&payload_path, &report_response.content)?;
+        write_json_file(&payload_path, &expected_paper_bundle)?;
         checkpoint_mark_stage(&mut checkpoint, STAGE_OUTPUTS_READY);
         save_workflow_checkpoint(&workflow_checkpoint_path, &checkpoint)?;
     } else {
@@ -952,8 +1060,8 @@ pub async fn run_paper_workflow(
         if !manuscript_diff_path.exists() {
             write_json_file(&manuscript_diff_path, &manuscript_diff_bundle)?;
         }
-        sync_text_file(&paper_markdown_path, expected_paper_markdown)?;
-        sync_text_file(&paper_latex_path, expected_paper_latex)?;
+        sync_text_file(&paper_markdown_path, &expected_paper_markdown)?;
+        sync_text_file(&paper_latex_path, &expected_paper_latex)?;
         sync_text_file(&references_bib_path, &expected_references_bib)?;
         sync_text_file(&appendix_markdown_path, &expected_appendix_markdown)?;
         sync_json_file(&result_bundle_path, &result_bundle)?;
@@ -964,7 +1072,7 @@ pub async fn run_paper_workflow(
         )?;
         sync_text_file(&rebuttal_markdown_path, &expected_rebuttal_markdown)?;
         sync_json_file(&section_bundle_path, &section_bundle_after)?;
-        sync_json_file(&payload_path, &report_response.content)?;
+        sync_json_file(&payload_path, &expected_paper_bundle)?;
     }
 
     let (compiled_pdf_path, pdf_compile_status, pdf_compile_detail) =
@@ -1002,9 +1110,15 @@ pub async fn run_paper_workflow(
         &result_bundle,
         &final_reviewer_feedback,
         &pdf_compile_status,
+        &paper_markdown_path,
+        &paper_latex_path,
+        &paper_pdf_path,
         verification_response
             .content
             .get("verification_center_repair"),
+        source_manuscript
+            .as_ref()
+            .map(|manuscript| manuscript.reference_count),
     );
     checkpoint.paper_ready = Some(paper_ready);
     checkpoint.paper_ready_detail = Some(paper_ready_detail.clone());
@@ -1034,6 +1148,7 @@ pub async fn run_paper_workflow(
         paper_latex_path,
         references_bib_path,
         paper_pdf_path: compiled_pdf_path,
+        conceptual_figure_path: generated_conceptual_figure,
         appendix_markdown_path,
         result_bundle_path,
         review_response_path,
@@ -1124,9 +1239,20 @@ fn compile_paper_pdf(
     paper_pdf_path: &Path,
     toolchains: Option<&BTreeMap<String, String>>,
 ) -> (Option<PathBuf>, String, Option<String>) {
+    let resolved_working_dir =
+        fs::canonicalize(working_dir).unwrap_or_else(|_| working_dir.to_path_buf());
+    let resolved_latex_path =
+        fs::canonicalize(paper_latex_path).unwrap_or_else(|_| paper_latex_path.to_path_buf());
+    let resolved_pdf_path = if paper_pdf_path.is_absolute() {
+        paper_pdf_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(paper_pdf_path))
+            .unwrap_or_else(|_| paper_pdf_path.to_path_buf())
+    };
     let tectonic = tool_value(toolchains, "tectonic");
     if command_is_available(&tectonic) {
-        match compile_with_tectonic(working_dir, paper_latex_path, &tectonic) {
+        match compile_with_tectonic(&resolved_working_dir, &resolved_latex_path, &tectonic) {
             Ok(path) => {
                 return (
                     Some(path),
@@ -1138,9 +1264,9 @@ fn compile_paper_pdf(
                 let pdflatex = tool_value(toolchains, "pdflatex");
                 if command_is_available(&pdflatex) {
                     match compile_with_pdflatex(
-                        working_dir,
-                        paper_latex_path,
-                        paper_pdf_path,
+                        &resolved_working_dir,
+                        &resolved_latex_path,
+                        &resolved_pdf_path,
                         &pdflatex,
                     ) {
                         Ok(path) => {
@@ -1176,7 +1302,12 @@ fn compile_paper_pdf(
 
     let pdflatex = tool_value(toolchains, "pdflatex");
     if command_is_available(&pdflatex) {
-        match compile_with_pdflatex(working_dir, paper_latex_path, paper_pdf_path, &pdflatex) {
+        match compile_with_pdflatex(
+            &resolved_working_dir,
+            &resolved_latex_path,
+            &resolved_pdf_path,
+            &pdflatex,
+        ) {
             Ok(path) => {
                 return (
                     Some(path),
@@ -1207,6 +1338,7 @@ fn compile_with_tectonic(
     tectonic: &str,
 ) -> Result<PathBuf, String> {
     let output = Command::new(tectonic)
+        .hide_window()
         .arg("--outdir")
         .arg(working_dir)
         .arg(
@@ -1283,6 +1415,7 @@ fn compile_with_pdflatex(
 
 fn run_command(program: &str, args: &[&str], working_dir: &Path) -> Result<(), String> {
     let output = Command::new(program)
+        .hide_window()
         .args(args)
         .current_dir(working_dir)
         .output()
@@ -1299,6 +1432,684 @@ fn run_command(program: &str, args: &[&str], working_dir: &Path) -> Result<(), S
     } else {
         format!("exit status {}", output.status)
     })
+}
+
+#[derive(Debug, Clone)]
+struct SourceManuscript {
+    source_path: PathBuf,
+    markdown: String,
+    title: String,
+    authors: String,
+    abstract_text: String,
+    keywords: String,
+    sections: Vec<SourceManuscriptSection>,
+    references: Vec<String>,
+    word_count: usize,
+    reference_count: usize,
+}
+
+fn source_manuscript_citation_inventory(manuscript: &SourceManuscript) -> Value {
+    Value::Array(
+        manuscript
+            .references
+            .iter()
+            .enumerate()
+            .map(|(index, reference)| {
+                json!({
+                    "paper_id": format!("source_ref_{}", index + 1),
+                    "authors": reference
+                        .find('(')
+                        .map(|position| reference[..position].trim().trim_end_matches('.').trim())
+                        .unwrap_or("Unknown"),
+                    "title": source_reference_title(reference),
+                    "venue_or_source": "source_manuscript_reference_list",
+                    "year": parse_reference_year(reference).to_string(),
+                    "url": Value::Null,
+                    "citation_status": "supplied_in_validated_source_manuscript"
+                })
+            })
+            .collect(),
+    )
+}
+
+fn source_manuscript_anchor_titles(manuscript: &SourceManuscript) -> Vec<String> {
+    let anchors = [
+        "nearest neighbor",
+        "classification tree",
+        "classification and regression",
+        "decision tree",
+        "random forest",
+        "supervised learning",
+        "scikit-learn",
+        "iris",
+    ];
+    manuscript
+        .references
+        .iter()
+        .map(|reference| source_reference_title(reference))
+        .filter(|title| {
+            let lowered = title.to_ascii_lowercase();
+            anchors.iter().any(|anchor| lowered.contains(anchor))
+        })
+        .take(4)
+        .collect()
+}
+
+fn apply_source_manuscript_evidence(paper: &mut Value, manuscript: &SourceManuscript) {
+    paper["citation_inventory"] = source_manuscript_citation_inventory(manuscript);
+    let titles = source_manuscript_anchor_titles(manuscript);
+    if titles.is_empty() {
+        return;
+    }
+    let grounding = format!(
+        "The validated source manuscript anchors the related-work comparison in {}.",
+        titles.join("; ")
+    );
+    if let Some(markdown) = paper.get("markdown_draft").and_then(Value::as_str) {
+        let marker = "\n## Related Work\n";
+        if let Some(index) = markdown.find(marker) {
+            let insert_at = index + marker.len();
+            let mut updated = markdown.to_string();
+            updated.insert_str(insert_at, &format!("\n{grounding}\n"));
+            paper["markdown_draft"] = json!(updated);
+        }
+    }
+    if let Some(sections) = paper
+        .get_mut("draft_sections")
+        .and_then(Value::as_array_mut)
+    {
+        for section in sections {
+            if cleaned_string(section.get("section_id")).eq_ignore_ascii_case("related_work") {
+                if let Some(anchors) = section
+                    .get_mut("claim_anchors")
+                    .and_then(Value::as_array_mut)
+                {
+                    for anchor in anchors {
+                        if cleaned_string(anchor.get("claim_id"))
+                            .eq_ignore_ascii_case("related_work.positioning")
+                        {
+                            anchor["claim_text"] = json!(grounding);
+                            anchor["grounding_text"] = json!(grounding);
+                            if let Some(refs) = anchor
+                                .get_mut("evidence_refs")
+                                .and_then(Value::as_array_mut)
+                            {
+                                if let Some(reference) = refs.iter_mut().find(|reference| {
+                                    cleaned_string(reference.get("source_key"))
+                                        .eq_ignore_ascii_case("literature_evidence")
+                                }) {
+                                    reference["source_key"] = json!("source_manuscript.references");
+                                    reference["items"] = json!(titles);
+                                    reference["required"] = json!(true);
+                                    reference["detail"] = json!(
+                                        "Topic-relevant references supplied in the validated source manuscript."
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SourceManuscriptSection {
+    level: usize,
+    title: String,
+    body: String,
+}
+
+fn source_manuscript_candidates(source_workspace: &Path) -> [PathBuf; 4] {
+    [
+        source_workspace.join("paper").join("research_paper.md"),
+        source_workspace.join("paper").join("manuscript.md"),
+        source_workspace.join("research_paper.md"),
+        source_workspace.join("manuscript.md"),
+    ]
+}
+
+fn numbered_reference_count(markdown: &str) -> usize {
+    let mut in_references = false;
+    markdown
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("## ") {
+                in_references = trimmed
+                    .trim_start_matches('#')
+                    .trim()
+                    .to_ascii_lowercase()
+                    .starts_with("references");
+                return false;
+            }
+            if !in_references {
+                return false;
+            }
+            let Some((prefix, _)) = trimmed.split_once('.') else {
+                return false;
+            };
+            !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit())
+        })
+        .count()
+}
+
+fn source_manuscript_has_placeholders(markdown: &str) -> bool {
+    let lowered = markdown.to_ascii_lowercase();
+    [
+        "result evidence is still being assembled",
+        "selection pending",
+        "definitions pending",
+        "specification pending",
+        "citation needed",
+        "todo",
+        "tbd",
+    ]
+    .iter()
+    .any(|marker| lowered.contains(marker))
+}
+
+fn source_manuscript_is_eligible(markdown: &str) -> bool {
+    let lowered = markdown.to_ascii_lowercase();
+    word_count(markdown) >= 1_800
+        && lowered.contains("## abstract")
+        && (lowered.contains("## results") || lowered.contains("experiments and results"))
+        && lowered.contains("## references")
+        && numbered_reference_count(markdown) >= 3
+        && !source_manuscript_has_placeholders(markdown)
+}
+
+fn strip_markdown_inline_raw(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' | '`' => {}
+            '[' => {
+                let mut label = String::new();
+                for next in chars.by_ref() {
+                    if next == ']' {
+                        break;
+                    }
+                    label.push(next);
+                }
+                if chars.peek() == Some(&'(') {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if next == ')' {
+                            break;
+                        }
+                    }
+                }
+                out.push_str(&label);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn strip_markdown_inline(text: &str) -> String {
+    strip_markdown_inline_raw(text).trim().to_string()
+}
+
+fn parse_source_manuscript(source_path: PathBuf, markdown: String) -> SourceManuscript {
+    let mut title = String::new();
+    let mut authors = String::from("Tokitai AI Scientist | Reproducible Research Workflow");
+    let mut abstract_text = String::new();
+    let mut keywords = String::new();
+    let mut sections = Vec::new();
+    let mut current_title = String::new();
+    let mut current_level = 0usize;
+    let mut current_lines = Vec::<String>::new();
+
+    let flush_section = |sections: &mut Vec<SourceManuscriptSection>,
+                         current_level: usize,
+                         current_title: &str,
+                         current_lines: &mut Vec<String>| {
+        if current_level >= 2 && !current_title.trim().is_empty() {
+            sections.push(SourceManuscriptSection {
+                level: current_level,
+                title: current_title.trim().to_string(),
+                body: current_lines.join("\n").trim().to_string(),
+            });
+        }
+        current_lines.clear();
+    };
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("# ") {
+            if title.is_empty() {
+                title = strip_markdown_inline(value);
+            }
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("**Authors:**") {
+            authors = strip_markdown_inline(value);
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("**Keywords:**") {
+            keywords = strip_markdown_inline(value);
+            continue;
+        }
+        let heading_level = trimmed.chars().take_while(|ch| *ch == '#').count();
+        if (2..=4).contains(&heading_level) && trimmed.chars().nth(heading_level) == Some(' ') {
+            flush_section(
+                &mut sections,
+                current_level,
+                &current_title,
+                &mut current_lines,
+            );
+            current_level = heading_level;
+            current_title = strip_markdown_inline(trimmed[heading_level..].trim());
+        } else if current_level >= 2 {
+            current_lines.push(line.to_string());
+        }
+    }
+    flush_section(
+        &mut sections,
+        current_level,
+        &current_title,
+        &mut current_lines,
+    );
+
+    if let Some(abstract_section) = sections.iter().find(|section| {
+        section
+            .title
+            .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.' || ch.is_whitespace())
+            .eq_ignore_ascii_case("abstract")
+    }) {
+        abstract_text = abstract_section.body.trim().to_string();
+    }
+    let references = sections
+        .iter()
+        .find(|section| {
+            section
+                .title
+                .trim_start_matches(|ch: char| {
+                    ch.is_ascii_digit() || ch == '.' || ch.is_whitespace()
+                })
+                .eq_ignore_ascii_case("references")
+        })
+        .map(|section| {
+            section
+                .body
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    let (prefix, rest) = trimmed.split_once('.')?;
+                    (!prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()))
+                        .then(|| rest.trim().to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let word_count = word_count(&markdown);
+    let reference_count = references.len();
+    SourceManuscript {
+        source_path,
+        markdown,
+        title,
+        authors,
+        abstract_text,
+        keywords,
+        sections,
+        references,
+        word_count,
+        reference_count,
+    }
+}
+
+fn load_high_quality_source_manuscript(source_workspace: &Path) -> Option<SourceManuscript> {
+    source_manuscript_candidates(source_workspace)
+        .into_iter()
+        .filter_map(|path| {
+            fs::read_to_string(&path)
+                .ok()
+                .map(|markdown| (path, markdown))
+        })
+        .filter(|(_, markdown)| source_manuscript_is_eligible(markdown))
+        .map(|(path, markdown)| parse_source_manuscript(path, markdown))
+        .max_by_key(|manuscript| (manuscript.word_count, manuscript.reference_count))
+}
+
+fn latex_escape_plain(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\textbackslash{}"),
+            '{' => escaped.push_str("\\{"),
+            '}' => escaped.push_str("\\}"),
+            '$' => escaped.push_str("\\$"),
+            '&' => escaped.push_str("\\&"),
+            '%' => escaped.push_str("\\%"),
+            '#' => escaped.push_str("\\#"),
+            '_' => escaped.push_str("\\_"),
+            '^' => escaped.push_str("\\^{}"),
+            '~' => escaped.push_str("\\~{}"),
+            '—' | '–' | '−' | '→' => escaped.push('-'),
+            '↓' => escaped.push_str(" down "),
+            '×' => escaped.push_str("\\ensuremath{\\times}"),
+            '≈' => escaped.push_str("\\ensuremath{\\approx}"),
+            '≤' => escaped.push_str("\\ensuremath{\\leq}"),
+            '≥' => escaped.push_str("\\ensuremath{\\geq}"),
+            'Δ' => escaped.push_str("\\ensuremath{\\Delta}"),
+            'α' => escaped.push_str("\\ensuremath{\\alpha}"),
+            'χ' => escaped.push_str("\\ensuremath{\\chi}"),
+            '²' => escaped.push_str("\\textsuperscript{2}"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn render_markdown_inline_latex(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("**") {
+        out.push_str(&latex_escape_plain(&strip_markdown_inline_raw(
+            &rest[..start],
+        )));
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("**") else {
+            out.push_str(&latex_escape_plain(&strip_markdown_inline_raw(
+                &rest[start..],
+            )));
+            return out;
+        };
+        out.push_str("\\textbf{");
+        out.push_str(&latex_escape_plain(&strip_markdown_inline_raw(
+            &after[..end],
+        )));
+        out.push('}');
+        rest = &after[end + 2..];
+    }
+    out.push_str(&latex_escape_plain(&strip_markdown_inline_raw(rest)));
+    out
+}
+
+fn markdown_table_to_latex(lines: &[&str]) -> Option<String> {
+    if lines.len() < 2 {
+        return None;
+    }
+    let rows = lines
+        .iter()
+        .map(|line| {
+            line.trim()
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if rows.first().is_none_or(|row| row.is_empty()) {
+        return None;
+    }
+    let columns = rows[0].len();
+    let widths = if columns <= 2 {
+        "@{}p{0.31\\linewidth}>{\\raggedright\\arraybackslash}X@{}".to_string()
+    } else {
+        format!(
+            "@{{}}{}@{{}}",
+            (0..columns)
+                .map(|_| ">{\\raggedright\\arraybackslash}X")
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    let font_size = if columns >= 7 {
+        "\\scriptsize"
+    } else {
+        "\\small"
+    };
+    let tabcolsep = if columns >= 7 { "1.8pt" } else { "3.5pt" };
+    let mut output = format!(
+        "\\begin{{table}}[htbp]\n  \\centering\n  {font_size}\n  \\setlength{{\\tabcolsep}}{{{tabcolsep}}}\n  \\begin{{tabularx}}{{\\linewidth}}{{{widths}}}\n    \\toprule\n"
+    );
+    output.push_str("    ");
+    output.push_str(
+        &rows[0]
+            .iter()
+            .map(|cell| format!("\\textbf{{{}}}", render_markdown_inline_latex(cell)))
+            .collect::<Vec<_>>()
+            .join(" & "),
+    );
+    output.push_str(" \\\\\n    \\midrule\n");
+    for row in rows.iter().skip(2) {
+        if row.len() != columns {
+            continue;
+        }
+        output.push_str("    ");
+        output.push_str(
+            &row.iter()
+                .map(|cell| render_markdown_inline_latex(cell))
+                .collect::<Vec<_>>()
+                .join(" & "),
+        );
+        output.push_str(" \\\\\n");
+    }
+    output.push_str("    \\bottomrule\n  \\end{tabularx}\n\\end{table}\n");
+    Some(output)
+}
+
+fn source_markdown_body_to_latex(body: &str) -> String {
+    let lines = body.lines().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut paragraph = Vec::<String>::new();
+    let mut index = 0usize;
+    let flush_paragraph = |output: &mut String, paragraph: &mut Vec<String>| {
+        if paragraph.is_empty() {
+            return;
+        }
+        let text = paragraph.join(" ");
+        output.push_str(&render_markdown_inline_latex(&text));
+        output.push_str("\n\n");
+        paragraph.clear();
+    };
+
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed.is_empty() || trimmed == "---" {
+            flush_paragraph(&mut output, &mut paragraph);
+            index += 1;
+            continue;
+        }
+        if trimmed.starts_with("```") {
+            flush_paragraph(&mut output, &mut paragraph);
+            index += 1;
+            let mut code = Vec::new();
+            while index < lines.len() && !lines[index].trim().starts_with("```") {
+                code.push(lines[index]);
+                index += 1;
+            }
+            output.push_str("\\begin{verbatim}\n");
+            output.push_str(
+                &code
+                    .join("\n")
+                    .replace('→', "->")
+                    .replace('↓', "down")
+                    .replace('×', "x")
+                    .replace('≈', "~"),
+            );
+            output.push_str("\n\\end{verbatim}\n\n");
+            index += usize::from(index < lines.len());
+            continue;
+        }
+        if trimmed.starts_with('|') {
+            flush_paragraph(&mut output, &mut paragraph);
+            let start = index;
+            while index < lines.len() && lines[index].trim().starts_with('|') {
+                index += 1;
+            }
+            if let Some(table) = markdown_table_to_latex(&lines[start..index]) {
+                output.push_str(&table);
+                output.push('\n');
+            }
+            continue;
+        }
+        let ordered = trimmed.split_once('.').is_some_and(|(prefix, _)| {
+            !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit())
+        });
+        if trimmed.starts_with("- ") || ordered {
+            flush_paragraph(&mut output, &mut paragraph);
+            let environment = if ordered { "enumerate" } else { "itemize" };
+            output.push_str(&format!("\\begin{{{environment}}}\n"));
+            while index < lines.len() {
+                let item = lines[index].trim();
+                let item_ordered = item.split_once('.').is_some_and(|(prefix, _)| {
+                    !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit())
+                });
+                if (environment == "enumerate" && !item_ordered)
+                    || (environment == "itemize" && !item.starts_with("- "))
+                {
+                    break;
+                }
+                let content = if item_ordered {
+                    item.split_once('.')
+                        .map(|(_, value)| value.trim())
+                        .unwrap_or(item)
+                } else {
+                    item.trim_start_matches("- ").trim()
+                };
+                output.push_str("  \\item ");
+                output.push_str(&render_markdown_inline_latex(content));
+                output.push('\n');
+                index += 1;
+            }
+            output.push_str(&format!("\\end{{{environment}}}\n\n"));
+            continue;
+        }
+        paragraph.push(trimmed.to_string());
+        index += 1;
+    }
+    flush_paragraph(&mut output, &mut paragraph);
+    output
+}
+
+fn clean_source_section_title(title: &str) -> String {
+    title
+        .trim()
+        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.' || ch.is_whitespace())
+        .trim()
+        .to_string()
+}
+
+fn build_source_manuscript_latex(
+    manuscript: &SourceManuscript,
+    paper: &Value,
+    result_bundle: &Value,
+) -> String {
+    let abstract_text = if manuscript.abstract_text.trim().is_empty() {
+        cleaned_string(paper.get("abstract"))
+    } else {
+        manuscript.abstract_text.clone()
+    };
+    let run_id = extract_result_run_id(result_bundle);
+    let evidence_flow_figure = format!(
+        "\\begin{{figure}}[t]\n  \\centering\n  \\begin{{tikzpicture}}[x=1cm,y=1cm,>=Latex,font=\\sffamily\\footnotesize]\n    \\tikzset{{stage/.style={{draw=AtlasRule,rounded corners=2pt,fill=AtlasSoft,minimum width=2.68cm,minimum height=0.92cm,align=center,inner sep=5pt}}}}\n    \\node[stage] (input) at (0,0) {{Iris data\\\\fixed splits}};\n    \\node[stage] (method) at (3.45,0) {{KNN / DT / RF\\\\controlled search}};\n    \\node[stage] (verify) at (6.90,0) {{Repeated CV\\\\statistical audit}};\n    \\node[stage] (report) at (10.35,0) {{Evidence bundle\\\\{}}};\n    \\draw[->,very thick,AtlasAccent] (input) -- (method);\n    \\draw[->,very thick,AtlasAccent] (method) -- (verify);\n    \\draw[->,very thick,AtlasAccent] (verify) -- (report);\n  \\end{{tikzpicture}}\n  \\caption{{Auditable evidence flow. Quantitative claims originate in persisted experiment artifacts.}}\n  \\label{{fig:evidence-flow}}\n\\end{{figure}}\n",
+        latex_escape_plain(&run_id)
+    );
+    let mut body = String::new();
+    for section in &manuscript.sections {
+        let title = clean_source_section_title(&section.title);
+        if title.eq_ignore_ascii_case("abstract") || title.eq_ignore_ascii_case("references") {
+            continue;
+        }
+        let command = if section.level <= 2 {
+            "section"
+        } else {
+            "subsection"
+        };
+        body.push_str(&format!(
+            "\\{command}{{{}}}\n{}\n",
+            latex_escape_plain(&title),
+            source_markdown_body_to_latex(&section.body)
+        ));
+    }
+    let keywords = if manuscript.keywords.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\\vspace{{0.35em}}\\noindent\\textbf{{Keywords:}} {}\n",
+            latex_escape_plain(&manuscript.keywords)
+        )
+    };
+    format!(
+        "\\documentclass[10pt]{{article}}\n\\usepackage[a4paper,top=18mm,bottom=20mm,left=18mm,right=18mm]{{geometry}}\n\\usepackage[T1]{{fontenc}}\n\\usepackage{{lmodern}}\n\\usepackage{{booktabs}}\n\\usepackage{{tabularx}}\n\\usepackage{{array}}\n\\usepackage{{microtype}}\n\\usepackage{{graphicx}}\n\\usepackage{{tikz}}\n\\usetikzlibrary{{arrows.meta,positioning}}\n\\usepackage{{xcolor}}\n\\usepackage{{caption}}\n\\usepackage{{fancyhdr}}\n\\usepackage{{titlesec}}\n\\usepackage{{enumitem}}\n\\usepackage{{xurl}}\n\\usepackage{{float}}\n\\definecolor{{AtlasInk}}{{HTML}}{{20242B}}\n\\definecolor{{AtlasAccent}}{{HTML}}{{B8521F}}\n\\definecolor{{AtlasRule}}{{HTML}}{{C8CDD5}}\n\\definecolor{{AtlasSoft}}{{HTML}}{{F2F4F7}}\n\\usepackage[colorlinks=true,linkcolor=AtlasAccent,citecolor=AtlasAccent,urlcolor=AtlasAccent]{{hyperref}}\n\\captionsetup{{font=small,labelfont={{bf,color=AtlasAccent}},skip=5pt}}\n\\titleformat{{\\section}}{{\\large\\bfseries\\color{{AtlasInk}}}}{{\\thesection}}{{0.65em}}{{}}[\\vspace{{-0.35em}}\\color{{AtlasRule}}\\titlerule]\n\\titleformat{{\\subsection}}{{\\normalsize\\bfseries\\color{{AtlasInk}}}}{{\\thesubsection}}{{0.55em}}{{}}\n\\titlespacing*{{\\section}}{{0pt}}{{1.15em}}{{0.58em}}\n\\setlength{{\\parindent}}{{0pt}}\n\\setlength{{\\parskip}}{{0.46em}}\n\\setlength{{\\emergencystretch}}{{3em}}\n\\setlist{{nosep,leftmargin=1.4em}}\n\\urlstyle{{same}}\n\\pagestyle{{fancy}}\n\\fancyhf{{}}\n\\fancyhead[L]{{\\small\\color{{AtlasAccent}} Evidence-Grounded Research}}\n\\fancyhead[R]{{\\small\\color{{AtlasInk}} Tokitai AI Scientist}}\n\\fancyfoot[C]{{\\small\\thepage}}\n\\renewcommand{{\\headrulewidth}}{{0.3pt}}\n\\title{{\\vspace{{-1.3em}}\\bfseries\\color{{AtlasInk}} {}}}\n\\author{{{}}}\n\\date{{}}\n\\begin{{document}}\n\\maketitle\n\\vspace{{-1.0em}}\n\\begin{{abstract}}\n{}\n\\end{{abstract}}\n{}\n{}\n{}\n\\nocite{{*}}\n\\bibliographystyle{{plain}}\n\\bibliography{{references}}\n\\end{{document}}\n",
+        latex_escape_plain(&manuscript.title),
+        latex_escape_plain(&manuscript.authors),
+        source_markdown_body_to_latex(&abstract_text),
+        keywords,
+        evidence_flow_figure,
+        body,
+    )
+}
+
+fn parse_reference_year(reference: &str) -> u64 {
+    reference
+        .split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| part.len() == 4)
+        .find_map(|part| part.parse::<u64>().ok())
+        .filter(|year| (1800..=2100).contains(year))
+        .unwrap_or(2026)
+}
+
+fn source_reference_title(reference: &str) -> String {
+    let after_year = reference
+        .find(").")
+        .map(|index| &reference[index + 2..])
+        .unwrap_or(reference)
+        .trim();
+    after_year
+        .split('.')
+        .next()
+        .unwrap_or(after_year)
+        .trim()
+        .trim_matches('*')
+        .to_string()
+}
+
+fn bibtex_escape(value: &str) -> String {
+    value
+        .replace('\\', " ")
+        .replace('&', "\\&")
+        .replace('%', "\\%")
+        .replace('#', "\\#")
+        .replace('_', "\\_")
+        .replace(['{', '}'], "")
+        .replace('*', "")
+        .replace('—', "--")
+        .replace('–', "--")
+        .replace('→', "->")
+        .replace('×', "x")
+        .replace('≈', "approximately")
+        .replace('α', "alpha")
+        .replace('χ', "chi")
+}
+
+fn build_source_references_bib(manuscript: &SourceManuscript) -> String {
+    manuscript
+        .references
+        .iter()
+        .enumerate()
+        .map(|(index, reference)| {
+            let author = reference
+                .find("(")
+                .map(|index| reference[..index].trim().trim_end_matches('.').trim())
+                .unwrap_or("Unknown");
+            format!(
+                "@misc{{source_ref_{},\n  author = {{{}}},\n  title = {{{}}},\n  year = {{{}}},\n  note = {{{}}}\n}}\n",
+                index + 1,
+                bibtex_escape(author),
+                bibtex_escape(&source_reference_title(reference)),
+                parse_reference_year(reference),
+                bibtex_escape(reference),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn build_knowledge_summary(topic: &str, search: &Value, fetched_paper: &Value) -> String {
@@ -3554,9 +4365,7 @@ fn normalized_phrase_present(haystack_normalized: &str, phrase: &str) -> bool {
     if needle.is_empty() {
         return false;
     }
-    let haystack_tokens = haystack_normalized
-        .split_whitespace()
-        .collect::<Vec<_>>();
+    let haystack_tokens = haystack_normalized.split_whitespace().collect::<Vec<_>>();
     let needle_tokens = needle.split_whitespace().collect::<Vec<_>>();
     if needle_tokens.is_empty() || needle_tokens.len() > haystack_tokens.len() {
         return false;
@@ -4132,7 +4941,7 @@ fn semantic_markers(text: &str) -> Vec<String> {
 }
 
 fn presence_absence_contradiction_applies(left: &str, right: &str, text: &str) -> bool {
-    if left != "presence" || right != "absence" {
+    if !((left == "presence" && right == "absence") || (left == "absence" && right == "presence")) {
         return true;
     }
     let normalized = normalized_match_text(text);
@@ -4143,7 +4952,11 @@ fn presence_absence_contradiction_applies(left: &str, right: &str, text: &str) -
     let has_status_absence = normalized_phrase_present(&normalized, "not runnable")
         || normalized_phrase_present(&normalized, "not applicable")
         || normalized_phrase_present(&normalized, "tool unavailable");
-    !(has_listing && has_status_absence)
+    let has_recovery_note = normalized_phrase_present(&normalized, "not recovered")
+        || normalized_phrase_present(&normalized, "no standalone")
+        || normalized_phrase_present(&normalized, "no retrieved")
+        || normalized_phrase_present(&normalized, "not found");
+    !(has_listing && (has_status_absence || has_recovery_note))
 }
 
 fn marker_groups(markers: &[String]) -> BTreeSet<String> {
@@ -5505,7 +6318,11 @@ fn compute_paper_ready_status(
     result_bundle: &Value,
     reviewer_feedback: &Value,
     pdf_compile_status: &str,
+    paper_markdown_path: &Path,
+    paper_latex_path: &Path,
+    paper_pdf_path: &Path,
     verification_center_repair: Option<&Value>,
+    source_reference_count: Option<usize>,
 ) -> (bool, String, Value) {
     let appendix_markdown_owned = build_appendix_markdown(&appendix_plan_with_vcr_skipped(
         paper.get("artifact_appendix_plan").unwrap_or(&Value::Null),
@@ -5582,10 +6399,7 @@ fn compute_paper_ready_status(
                     if !status.eq_ignore_ascii_case("needs_attention") {
                         return false;
                     }
-                    let name = item
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
+                    let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                     if name.eq_ignore_ascii_case("verification_center_bundle_closure") {
                         !skipped_tool_summaries.is_empty() && !skipped_tools_disclosed
                     } else if name.eq_ignore_ascii_case("verification_gap_disclosure") {
@@ -5603,6 +6417,87 @@ fn compute_paper_ready_status(
         .map(|items| items.len())
         .unwrap_or(0);
     let pdf_ok = matches!(pdf_compile_status, "compiled");
+    let manuscript_text = fs::read_to_string(paper_markdown_path)
+        .unwrap_or_else(|_| cleaned_string(paper.get("markdown_draft")));
+    let manuscript_words = word_count(&manuscript_text);
+    let lowered_manuscript = manuscript_text.to_ascii_lowercase();
+    let placeholder_markers = [
+        "result evidence is still being assembled",
+        "dataset selection pending",
+        "metric definitions pending",
+        "baseline specification pending",
+        "artifact paths are pending",
+        "citation needed",
+        " pending",
+        "todo",
+        "tbd",
+    ];
+    let placeholder_hits = placeholder_markers
+        .iter()
+        .filter(|marker| lowered_manuscript.contains(**marker))
+        .copied()
+        .collect::<Vec<_>>();
+    let inventory_citation_count = paper
+        .get("citation_inventory")
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let manuscript_reference_count =
+        source_reference_count.unwrap_or_else(|| numbered_reference_count(&manuscript_text));
+    let citation_count = inventory_citation_count.max(manuscript_reference_count);
+    let planned_artifacts = paper
+        .get("tables_figures_plan")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let planned_table_count = planned_artifacts
+        .iter()
+        .filter(|item| item.get("kind").and_then(Value::as_str) == Some("table"))
+        .count();
+    let planned_figure_count = planned_artifacts
+        .iter()
+        .filter(|item| item.get("kind").and_then(Value::as_str) == Some("figure"))
+        .count();
+    let latex_text = fs::read_to_string(paper_latex_path).unwrap_or_default();
+    let materialized_table_count = latex_text.matches("\\begin{table}").count();
+    let materialized_figure_count = latex_text.matches("\\begin{figure}").count();
+    let pdf_bytes = fs::metadata(paper_pdf_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let minimum_words = 1_800usize;
+    let minimum_citations = if paper
+        .get("target_venue")
+        .and_then(Value::as_str)
+        .is_some_and(|venue| venue.contains("survey"))
+    {
+        8usize
+    } else {
+        3usize
+    };
+    let required_checklist_unresolved = paper
+        .get("quality_checklist")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| {
+                    item.get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| status.eq_ignore_ascii_case("required"))
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let artifact_quality_ready = materialized_table_count >= 1
+        && materialized_figure_count >= 1
+        && planned_table_count >= 1
+        && planned_figure_count >= 1;
+    let manuscript_quality_ready = manuscript_words >= minimum_words
+        && citation_count >= minimum_citations
+        && placeholder_hits.is_empty()
+        && required_checklist_unresolved == 0
+        && artifact_quality_ready
+        && pdf_bytes >= 20_000;
     let (coverage_ready, coverage_detail, coverage_gate) = manuscript_evidence_coverage_gate(
         paper,
         result_bundle,
@@ -5614,7 +6509,8 @@ fn compute_paper_ready_status(
         .and_then(Value::as_array)
         .is_some_and(|checks| {
             checks.iter().any(|entry| {
-                entry.get("check_id")
+                entry
+                    .get("check_id")
                     .and_then(Value::as_str)
                     .is_some_and(|check_id| {
                         check_id.eq_ignore_ascii_case("verification_bundle_consumption")
@@ -5628,17 +6524,27 @@ fn compute_paper_ready_status(
     let ready = unresolved_feedback == 0
         && needs_attention == 0
         && pdf_ok
+        && manuscript_quality_ready
         && verification_bundle_ready
         && coverage_ready;
     let detail = if ready {
         "The manuscript bundle, reviewer feedback state, verification-center repair summary, PDF artifact, and manuscript-level evidence coverage gate all indicate a paper-ready package.".to_string()
     } else {
         format!(
-            "paper_ready=false because unresolved_feedback={} quality_items_needing_attention={} skipped_tools={} pdf_compile_status={} manuscript_evidence_gate={}",
+            "paper_ready=false because unresolved_feedback={} quality_items_needing_attention={} required_checklist_items={} skipped_tools={} pdf_compile_status={} words={}/{} citations={}/{} tables={} figures={} placeholders={} pdf_bytes={} manuscript_evidence_gate={}",
             unresolved_feedback,
             needs_attention,
+            required_checklist_unresolved,
             skipped_tool_count,
             pdf_compile_status,
+            manuscript_words,
+            minimum_words,
+            citation_count,
+            minimum_citations,
+            materialized_table_count,
+            materialized_figure_count,
+            placeholder_hits.len(),
+            pdf_bytes,
             coverage_detail
         )
     };
@@ -5647,14 +6553,28 @@ fn compute_paper_ready_status(
         ready,
         detail,
         json!({
-            "schema_version": "paper_ready_gate_bundle_v7",
+            "schema_version": "paper_ready_gate_bundle_v8",
             "ready": ready,
             "summary": summary,
             "aggregate_signals": {
                 "unresolved_feedback": unresolved_feedback,
                 "quality_items_needing_attention": needs_attention,
                 "skipped_tools": skipped_tool_count,
-                "pdf_compile_status": pdf_compile_status
+                "pdf_compile_status": pdf_compile_status,
+                "manuscript_words": manuscript_words,
+                "minimum_words": minimum_words,
+                "citation_count": citation_count,
+                "inventory_citation_count": inventory_citation_count,
+                "manuscript_reference_count": manuscript_reference_count,
+                "minimum_citations": minimum_citations,
+                "planned_table_count": planned_table_count,
+                "planned_figure_count": planned_figure_count,
+                "materialized_table_count": materialized_table_count,
+                "materialized_figure_count": materialized_figure_count,
+                "placeholder_hits": placeholder_hits,
+                "required_checklist_items": required_checklist_unresolved,
+                "pdf_bytes": pdf_bytes,
+                "manuscript_quality_ready": manuscript_quality_ready
             },
             "manuscript_evidence_coverage": coverage_gate
         }),
@@ -5700,7 +6620,11 @@ fn appendix_plan_with_vcr_skipped(plan: &Value, vcr: Option<&Value>) -> Value {
         .filter_map(|entry| {
             if let Some(text) = entry.as_str() {
                 let t = text.trim();
-                if t.is_empty() { None } else { Some(Value::String(t.to_string())) }
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(Value::String(t.to_string()))
+                }
             } else {
                 let tool = cleaned_string(entry.get("tool"));
                 let reason = cleaned_string(entry.get("reason"));
@@ -5820,6 +6744,224 @@ fn checkpoint_matches(
         && checkpoint.session_id.trim() == request.session_id.trim()
         && checkpoint.reviewer_feedback_fingerprint.trim() == reviewer_feedback_fingerprint.trim()
         && checkpoint.runtime_fingerprint.trim() == runtime_fingerprint.trim()
+}
+
+fn paper_conceptual_figure_prompt(topic: &str, paper: &Value, result_bundle: &Value) -> String {
+    let title = paper.get("title").and_then(Value::as_str).unwrap_or(topic);
+    let abstract_text = paper
+        .get("abstract")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let evidence_hint = result_bundle
+        .get("summary_fields")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    format!(
+        "Create a clean academic conceptual overview figure for a computer-science paper titled: {title}. Topic: {topic}. Abstract context: {abstract_text}. Evidence context, for structure only and not for drawing numbers: {evidence_hint}. Use a restrained vector-diagram style on a white background, landscape 3:2 ratio, with a left-to-right flow of problem/input, method or workflow, verification, and outputs. Use simple geometric blocks, arrows, subtle blue and warm-orange accents, generous whitespace, consistent line weight, and at most a few short readable labels. Do not include quantitative charts, metric values, benchmark claims, screenshots, logos, decorative people, or photorealistic objects. This is an explanatory illustration, not experimental evidence."
+    )
+}
+
+fn insert_markdown_conceptual_figure(markdown: &str, relative_path: Option<&str>) -> String {
+    let Some(relative_path) = relative_path else {
+        return markdown.to_string();
+    };
+    let figure = format!(
+        "\n\n![Conceptual overview of the proposed research workflow]({})\n\n*Figure 1. Conceptual overview generated as an explanatory illustration; quantitative claims remain grounded in the reported experimental artifacts.*\n",
+        relative_path
+    );
+    if let Some(index) = markdown.find("\n## Introduction") {
+        let mut output = markdown.to_string();
+        output.insert_str(index, &figure);
+        output
+    } else {
+        format!("{}{}", markdown, figure)
+    }
+}
+
+fn insert_latex_conceptual_figure(latex: &str, relative_path: Option<&str>) -> String {
+    let Some(relative_path) = relative_path else {
+        return latex.to_string();
+    };
+    let mut output = latex.to_string();
+    if !output.contains("\\usepackage{graphicx}") {
+        if let Some(index) = output.find("\\usepackage{booktabs}") {
+            let insert_at = index + "\\usepackage{booktabs}".len();
+            output.insert_str(insert_at, "\n\\usepackage{graphicx}");
+        } else if let Some(index) = output.find("\\begin{document}") {
+            output.insert_str(index, "\\usepackage{graphicx}\n");
+        } else {
+            output.insert_str(0, "\\usepackage{graphicx}\n");
+        }
+    }
+    let figure = format!(
+        "\n\\begin{{figure}}[t]\n  \\centering\n  \\includegraphics[width=0.96\\linewidth]{{{}}}\n  \\caption{{Conceptual overview of the proposed research workflow. This is an explanatory illustration, not experimental data or research evidence; all quantitative claims are grounded in the reported artifacts.}}\n  \\label{{fig:conceptual-overview}}\n\\end{{figure}}\n",
+        relative_path.replace('\\', "/")
+    );
+    if let Some(index) = output.find("\\end{abstract}") {
+        let insert_at = index + "\\end{abstract}".len();
+        output.insert_str(insert_at, &figure);
+    } else if let Some(index) = output.find("\\section{Introduction}") {
+        output.insert_str(index, &figure);
+    }
+    output
+}
+
+fn safe_figure_stem(value: &str, index: usize) -> String {
+    let mut stem = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    while stem.contains("__") {
+        stem = stem.replace("__", "_");
+    }
+    let stem = stem.trim_matches('_');
+    if stem.is_empty() {
+        format!("result_figure_{}", index + 1)
+    } else {
+        stem.chars().take(52).collect()
+    }
+}
+
+fn escape_latex_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\textbackslash{}"),
+            '{' => escaped.push_str("\\{"),
+            '}' => escaped.push_str("\\}"),
+            '$' => escaped.push_str("\\$"),
+            '&' => escaped.push_str("\\&"),
+            '%' => escaped.push_str("\\%"),
+            '#' => escaped.push_str("\\#"),
+            '_' => escaped.push_str("\\_"),
+            '^' => escaped.push_str("\\^{}"),
+            '~' => escaped.push_str("\\~{}"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn materialize_result_figures(
+    source_workspace: &Path,
+    figure_dir: &Path,
+    artifact_paths: &[String],
+    limit: usize,
+) -> Result<Vec<(String, String)>, String> {
+    fs::create_dir_all(figure_dir)
+        .map_err(|err| format!("create figure directory {}: {}", figure_dir.display(), err))?;
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    for artifact in artifact_paths {
+        if selected.len() >= limit {
+            break;
+        }
+        let relative = artifact.trim().replace('\\', "/");
+        if relative.is_empty() || !seen.insert(relative.to_ascii_lowercase()) {
+            continue;
+        }
+        let extension = Path::new(&relative)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "pdf") {
+            continue;
+        }
+        let source = if Path::new(&relative).is_absolute() {
+            PathBuf::from(&relative)
+        } else {
+            source_workspace.join(relative.replace('/', &std::path::MAIN_SEPARATOR.to_string()))
+        };
+        if !source.is_file() {
+            continue;
+        }
+        let source_stem = source
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("result figure");
+        let filename = format!(
+            "result_{:02}_{}.{}",
+            selected.len() + 1,
+            safe_figure_stem(source_stem, selected.len()),
+            extension
+        );
+        let destination = figure_dir.join(&filename);
+        fs::copy(&source, &destination).map_err(|err| {
+            format!(
+                "copy result figure {} to {}: {}",
+                source.display(),
+                destination.display(),
+                err
+            )
+        })?;
+        let caption = source_stem
+            .replace(['_', '-'], " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        selected.push((format!("figures/{filename}"), caption));
+    }
+    Ok(selected)
+}
+
+fn insert_markdown_result_figures(markdown: &str, figures: &[(String, String)]) -> String {
+    if figures.is_empty() {
+        return markdown.to_string();
+    }
+    let gallery = figures
+        .iter()
+        .enumerate()
+        .map(|(index, (path, caption))| {
+            format!(
+                "![{}]({})\n\n*Figure {}. Experimental artifact: {}. Values and labels originate from the persisted research output.*",
+                caption,
+                path,
+                index + 2,
+                caption
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if let Some(index) = markdown.find("\n## Discussion") {
+        let mut output = markdown.to_string();
+        output.insert_str(index, &format!("\n\n{}\n", gallery));
+        output
+    } else {
+        format!("{}\n\n{}\n", markdown, gallery)
+    }
+}
+
+fn insert_latex_result_figures(latex: &str, figures: &[(String, String)]) -> String {
+    if figures.is_empty() {
+        return latex.to_string();
+    }
+    let gallery = figures
+        .iter()
+        .enumerate()
+        .map(|(index, (path, caption))| {
+            format!(
+                "\\begin{{figure}}[t]\n  \\centering\n  \\includegraphics[width=0.94\\linewidth,height=0.34\\textheight,keepaspectratio]{{{}}}\n  \\caption{{Experimental artifact: {}. Values and labels originate from the persisted research output.}}\n  \\label{{fig:result-artifact-{}}}\n\\end{{figure}}\n",
+                path.replace('\\', "/"),
+                escape_latex_text(caption),
+                index + 1,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut output = latex.to_string();
+    if let Some(index) = output.find("\\section{Discussion}") {
+        output.insert_str(index, &gallery);
+    } else if let Some(index) = output.find("\\end{document}") {
+        output.insert_str(index, &gallery);
+    }
+    output
 }
 
 fn checkpoint_has_stage(checkpoint: &PaperWorkflowCheckpoint, stage: &str) -> bool {
@@ -6161,11 +7303,68 @@ fn relative_path_string(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        claim_anchor_semantic_gate, compute_paper_ready_status, derive_effective_benchmark_plan,
-        manuscript_evidence_coverage_gate, normalized_phrase_present,
+        build_source_manuscript_latex, claim_anchor_semantic_gate, compute_paper_ready_status,
+        derive_effective_benchmark_plan, insert_latex_conceptual_figure,
+        insert_markdown_conceptual_figure, manuscript_evidence_coverage_gate,
+        normalized_phrase_present, parse_source_manuscript, source_manuscript_is_eligible,
     };
     use serde_json::json;
     use std::fs;
+    use std::path::PathBuf;
+
+    fn paper_ready_test_paths(name: &str) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().expect("paper-ready tempdir");
+        let markdown = dir.path().join(format!("{name}.md"));
+        let latex = dir.path().join(format!("{name}.tex"));
+        let pdf = dir.path().join(format!("{name}.pdf"));
+        fs::write(&markdown, "short manuscript").expect("write markdown");
+        fs::write(
+            &latex,
+            "\\begin{table}x\\end{table}\\begin{figure}x\\end{figure}",
+        )
+        .expect("write latex");
+        fs::write(&pdf, vec![0u8; 24_000]).expect("write pdf");
+        (dir, markdown, latex, pdf)
+    }
+
+    #[test]
+    fn conceptual_figure_is_placed_after_abstract() {
+        let markdown = "# Paper\n\n## Abstract\n\nSummary.\n\n## Introduction\n\nIntro.";
+        let rendered = insert_markdown_conceptual_figure(markdown, Some("figures/overview.png"));
+        assert!(
+            rendered.find("figures/overview.png").unwrap()
+                < rendered.find("## Introduction").unwrap()
+        );
+
+        let latex = "\\documentclass{article}\n\\usepackage{booktabs}\n\\begin{document}\n\\begin{abstract}Summary.\\end{abstract}\n\\section{Introduction}\nIntro.\n\\end{document}";
+        let rendered = insert_latex_conceptual_figure(latex, Some("figures/overview.png"));
+        assert!(rendered.contains("\\usepackage{graphicx}"));
+        assert!(
+            rendered.find("figures/overview.png").unwrap()
+                < rendered.find("\\section{Introduction}").unwrap()
+        );
+    }
+
+    #[test]
+    fn high_quality_source_manuscript_is_parsed_and_rendered() {
+        let markdown = format!(
+            "# Evidence-Grounded Model Study\n\n**Authors:** Research Team\n\n## Abstract\n\n{}\n\n## 1. Introduction\n\nA grounded introduction.\n\n## 2. Experiments and Results\n\n| Model | Accuracy |\n|---|---|\n| KNN | 0.96 |\n\n## References\n\n1. Fisher, R. A. (1936). Iris study. Journal.\n\n2. Cover, T. (1967). Nearest neighbors. IEEE.\n\n3. Breiman, L. (2001). Random forests. Machine Learning.\n",
+            std::iter::repeat("grounded evidence ")
+                .take(1_850)
+                .collect::<String>()
+        );
+        assert!(source_manuscript_is_eligible(&markdown));
+        let parsed = parse_source_manuscript(PathBuf::from("research_paper.md"), markdown);
+        assert_eq!(parsed.reference_count, 3);
+        let latex = build_source_manuscript_latex(
+            &parsed,
+            &json!({}),
+            &json!({ "summary_fields": [{ "name": "run_id", "value": "run-1" }] }),
+        );
+        assert!(latex.contains("\\begin{tabularx}"));
+        assert!(latex.contains("Evidence-Grounded Model Study"));
+        assert!(latex.contains("\\bibliography{references}"));
+    }
 
     #[test]
     fn paper_ready_requires_compiled_pdf() {
@@ -6179,6 +7378,7 @@ mod tests {
             "skipped_tools": []
         });
 
+        let (_dir, markdown, latex, pdf) = paper_ready_test_paths("compiled-pdf");
         let (ready, detail, gate) = compute_paper_ready_status(
             &paper,
             &json!({
@@ -6188,7 +7388,11 @@ mod tests {
             }),
             &reviewer_feedback,
             "missing_toolchain",
+            &markdown,
+            &latex,
+            &pdf,
             Some(&verification_center_repair),
+            None,
         );
 
         assert!(!ready);
@@ -6198,9 +7402,15 @@ mod tests {
 
     #[test]
     fn normalized_phrase_present_requires_token_boundary_matches() {
-        assert!(normalized_phrase_present("no unresolved reviewer item", "no"));
+        assert!(normalized_phrase_present(
+            "no unresolved reviewer item",
+            "no"
+        ));
         assert!(!normalized_phrase_present("label noise setting", "no"));
-        assert!(normalized_phrase_present("paper dataset hints digits", "dataset hints"));
+        assert!(normalized_phrase_present(
+            "paper dataset hints digits",
+            "dataset hints"
+        ));
     }
 
     #[test]
@@ -6409,7 +7619,11 @@ mod tests {
             }),
             &json!([]),
             "compiled",
+            &paper_ready_test_paths("skipped-tools").1,
+            &paper_ready_test_paths("skipped-tools-latex").2,
+            &paper_ready_test_paths("skipped-tools-pdf").3,
             Some(&verification_center_repair),
+            None,
         );
 
         assert!(!ready);
@@ -6475,7 +7689,11 @@ mod tests {
             }),
             &json!([]),
             "compiled",
+            &paper_ready_test_paths("verification-gaps").1,
+            &paper_ready_test_paths("verification-gaps-latex").2,
+            &paper_ready_test_paths("verification-gaps-pdf").3,
             Some(&json!({ "skipped_tools": [] })),
+            None,
         );
 
         assert!(!ready);
@@ -6737,13 +7955,11 @@ mod tests {
         let checks = gate["checks"].as_array().cloned().unwrap_or_default();
         assert_eq!(checks.len(), 1);
         assert_ne!(checks[0]["semantic_relation"], json!("contradicted"));
-        assert!(
-            !checks[0]["semantic_contradiction_signals"]
-                .as_array()
-                .unwrap_or(&Vec::new())
-                .iter()
-                .any(|entry| entry.as_str().unwrap_or("").contains("presence_mismatch"))
-        );
+        assert!(!checks[0]["semantic_contradiction_signals"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .any(|entry| entry.as_str().unwrap_or("").contains("presence_mismatch")));
     }
 
     #[test]

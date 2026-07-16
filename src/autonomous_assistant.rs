@@ -442,7 +442,12 @@ impl AutonomousAssistant {
             }
         }
 
-        let directory_tools = ["find_files", "count_file_types", "find_large_files", "tree_dir"];
+        let directory_tools = [
+            "find_files",
+            "count_file_types",
+            "find_large_files",
+            "tree_dir",
+        ];
         if directory_tools.contains(&name) {
             if let Some(directory) = args.get("directory").and_then(|v| v.as_str()) {
                 let validation = resolver.resolve(directory);

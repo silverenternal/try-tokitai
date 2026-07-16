@@ -433,6 +433,14 @@ const translations = {
   },
 };
 
+const atlasLaunch = document.getElementById("atlas-launch");
+atlasLaunch?.addEventListener("animationend", (event) => {
+  if (event.animationName === "atlas-launch-exit") {
+    atlasLaunch.classList.add("is-finished");
+  }
+});
+window.setTimeout(() => atlasLaunch?.classList.add("is-finished"), 2400);
+
 function normalizeHostMeta(meta) {
   const input = meta || {};
   return {
@@ -443,6 +451,7 @@ function normalizeHostMeta(meta) {
     supportsTerminal: input.supportsTerminal !== false,
     supportsTerminalPty: input.supportsTerminalPty === true,
     supportsNativeMenu: input.supportsNativeMenu === true,
+    supportsNativeBrowser: input.supportsNativeBrowser === true,
     bridgeProtocol: typeof input.bridgeProtocol === "string" ? input.bridgeProtocol : "",
   };
 }
@@ -461,6 +470,14 @@ const BRIDGE_COMMANDS = {
   workspaceUndoFile: "workspace.file.undo",
   workspaceCompleteFile: "workspace.file.complete",
   workspaceReviewFile: "workspace.review.file",
+  workspaceIndexState: "workspace.index.state",
+  workspaceIndexUpdate: "workspace.index.update",
+  workspaceIndexSearch: "workspace.index.search",
+  tasksState: "tasks.state",
+  tasksEnqueue: "tasks.enqueue",
+  tasksStart: "tasks.start",
+  tasksCancel: "tasks.cancel",
+  tasksLog: "tasks.log",
   reviewerFeedbackState: "reviewer_feedback.state",
   reviewerFeedbackAdd: "reviewer_feedback.add",
   reviewerFeedbackResolve: "reviewer_feedback.resolve",
@@ -477,13 +494,13 @@ const BRIDGE_COMMANDS = {
   searchDatasetManifest: "search.dataset_manifest",
   browserOpen: "browser.open",
   chatSend: "chat.send",
+  promptOptimize: "prompt.optimize",
   chatStream: "chat.stream",
   chatStop: "chat.stop",
   toolApprove: "tool.approval.approve",
   toolDeny: "tool.approval.deny",
   gitState: "git.state",
   gitAction: "git.action",
-  extensionsList: "extensions.list",
   runDebugState: "run_debug.state",
   runDebugAction: "run_debug.action",
   terminalsState: "terminals.state",
@@ -608,6 +625,23 @@ function createHostClient(meta) {
         const normalized = String(path || "").trim();
         return normalized ? `/api/workspace/file/raw?path=${encodeURIComponent(normalized)}` : "";
       },
+      saveGeneratedImage(imageId, path, sessionId, callId) {
+        return request("/api/images/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_id: imageId, path, session_id: sessionId, call_id: callId }),
+        });
+      },
+      indexState() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexState : "/api/workspace/index"); },
+      indexUpdate() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexUpdate : "/api/workspace/index/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); },
+      indexSearch(query, limit = 20, kind = null) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexSearch : "/api/workspace/index/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, limit, kind }) }); },
+    },
+    tasks: {
+      state() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksState : "/api/tasks"); },
+      enqueue(payload) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksEnqueue : "/api/tasks/enqueue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); },
+      start(taskId) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksStart : "/api/tasks/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId }) }); },
+      cancel(taskId) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksCancel : "/api/tasks/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId }) }); },
+      log(taskId) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksLog : "/api/tasks/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId }) }); },
     },
     reviewerFeedback: {
       state() {
@@ -729,12 +763,8 @@ function createHostClient(meta) {
         });
       },
       stream(payload) {
-        if (resolved.mode === "desktop" && resolved.transport === "bridge") {
-          if (!desktopBridge || typeof desktopBridge.openStream !== "function") {
-            throw new Error("desktop stream bridge is unavailable");
-          }
-          return desktopBridge.openStream(BRIDGE_COMMANDS.chatStream, payload);
-        }
+        // The desktop shell is served from its own loopback HTTP origin. Keep high-frequency
+        // token streaming on fetch instead of injecting every chunk through WebView2 scripts.
         return fetch(apiUrl("/api/send-stream"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -742,10 +772,17 @@ function createHostClient(meta) {
         });
       },
       stop(sessionId) {
-        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.chatStop : "/api/send-stop", {
+        return fetch(apiUrl("/api/send-stop"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: sessionId }),
+        });
+      },
+      optimize(content, language = currentLanguage) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.promptOptimize : "/api/prompt/optimize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, language }),
         });
       },
     },
@@ -790,11 +827,6 @@ function createHostClient(meta) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, ...extra }),
         });
-      },
-    },
-    extensions: {
-      list() {
-        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.extensionsList : "/api/extensions");
       },
     },
     runDebug: {
@@ -883,15 +915,16 @@ let currentLanguage = "zh";
 let currentEffort = "medium";
 let effortPersistTimer = null;
 let effortPersistRequestId = 0;
-let agentPreludeHideTimer = null;
 let bootstrapData = null;
 let activeSettingsPanel = null;
 let activeSettingsTab = "model";
 let activeSessionMenuId = null;
 let activeSessionMenuAnchor = null;
 let toastTimer = null;
+let atlasDialogResolve = null;
 let pendingFiles = [];
 let isSending = false;
+let composerSendSessionId = null;
 const sessionRunState = new Map();
 let pendingUserBubble = null;
 let pendingAssistantBubble = null;
@@ -908,12 +941,12 @@ const diffReviewState = new Map();
 let undoSnapshotSequence = 0;
 let currentWorkspaceMode = "chat";
 let currentMainView = "chat";
+let visualizationReturnView = "chat";
 let currentGitView = "overview";
 let gitDataLoadState = { diff: false, graph: false };
 let gitLoadPromise = null;
 let activeActivityPanel = null;
 let preferredLeftActivityPanel = "nav";
-let extensionCatalog = [];
 let searchMode = "web";
 let searchState = {
   loading: false,
@@ -960,12 +993,24 @@ function syncBrowserStateFromFrame(options = {}) {
         browserState.historyIndex = browserState.history.length - 1;
       }
       if (browserToolbarAddress) {
-        browserToolbarAddress.textContent = nextTitle ? `${nextTitle} - ${nextUrl}` : nextUrl;
+        browserToolbarAddress.value = nextUrl;
       }
     }
   } catch (error) {
     console.warn("failed to sync browser frame state", error);
   }
+}
+
+function nativeBrowserBounds() {
+  const shell = browserFrame?.getBoundingClientRect();
+  if (!shell) return null;
+  return { x: shell.left, y: shell.top, width: shell.width, height: shell.height };
+}
+
+function syncNativeBrowser(action, url = "") {
+  if (!currentHostMeta.supportsNativeBrowser || !window.__TOKITAI_NATIVE_BROWSER__) return false;
+  window.__TOKITAI_NATIVE_BROWSER__.send({ action, url, bounds: nativeBrowserBounds() });
+  return true;
 }
 
 function closeInAppBrowser() {
@@ -981,38 +1026,51 @@ function closeInAppBrowser() {
     delete browserFrame.dataset.viewUrl;
     browserFrame.src = "about:blank";
   }
+  syncNativeBrowser("close");
   if (browserToolbarAddress) {
-    browserToolbarAddress.textContent = "No page loaded";
+    browserToolbarAddress.value = "";
   }
   setMainView("chat");
   applyDockLayout();
   syncLayoutCornerControls();
 }
 
+function showInAppBrowserHome() {
+  browserState.currentUrl = "";
+  browserState.currentTitle = "";
+  browserState.currentViewUrl = "";
+  browserState.blankReloadAttempts = 0;
+  browserState.renderRequestId += 1;
+  if (browserFrame) {
+    browserFrame.removeAttribute("src");
+    browserFrame.srcdoc = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{height:100%;margin:0;background:#fff}</style></head><body></body></html>";
+  }
+  syncNativeBrowser("hide");
+  if (browserToolbarAddress) browserToolbarAddress.value = "";
+  rightSidebarCollapsed = false;
+  setActivityPanel(null, { preserveMainView: true });
+  setMainView("browser");
+  browserToolbarAddress?.focus();
+}
+
 async function loadInAppBrowserDocument(data, fallbackHref) {
   if (!browserFrame) return;
+  if (syncNativeBrowser("open", fallbackHref || browserState.currentUrl)) {
+    browserFrame.src = "about:blank";
+    return;
+  }
   browserState.blankReloadAttempts = 0;
   const viewUrl = cleanDisplayText(
     data?.view_url || browserState.currentViewUrl || `/api/browser/view?url=${encodeURIComponent(fallbackHref || browserState.currentUrl || "")}`,
   );
   browserState.currentViewUrl = viewUrl;
-  const requestId = ++browserState.renderRequestId;
-  const response = await fetch(viewUrl, { cache: "no-store" });
-  const html = await response.text();
-  if (requestId !== browserState.renderRequestId) return;
-  const frameDocument = browserFrame.contentDocument || browserFrame.contentWindow?.document;
-  if (!frameDocument) {
-    browserFrame.src = viewUrl;
-    return;
-  }
+  ++browserState.renderRequestId;
   browserFrame.dataset.viewUrl = viewUrl;
-  frameDocument.open();
-  frameDocument.write(html);
-  frameDocument.close();
+  browserFrame.removeAttribute("srcdoc");
+  browserFrame.src = viewUrl;
   window.setTimeout(() => {
-    if (requestId !== browserState.renderRequestId) return;
     syncBrowserStateFromFrame({ pushHistory: false });
-  }, 30);
+  }, 100);
 }
 
 function scheduleBrowserBlankCheck(expectedUrl) {
@@ -1053,6 +1111,12 @@ let researchFloatingDrag = null;
 let researchFloatingReopenDrag = null;
 let researchFloatingReopenSuppressClick = false;
 let researchFloatingBoardPosition = null;
+let visualizationConversationSplit = false;
+let visualizationActiveKind = "";
+let visualizationChatDrag = null;
+let visualizationChatResize = null;
+let visualizationChatPosition = null;
+let visualizationChatSize = null;
 let preservedMessageScrollState = null;
 let workspaceTreeData = [];
 let activeWorkspaceFilePath = null;
@@ -1177,11 +1241,7 @@ async function refreshLatexRendering() {
   return true;
 }
 let currentWorkspaceRoot = "";
-let activeDockDrag = null;
 let activeResizerDrag = null;
-let gripHoldTimer = null;
-let suppressNextGripClick = false;
-let lastGripPointerDownAt = 0;
 let currentStreamingSessionId = null;
 let activeStreamGeneration = 0;
 let pendingPermissionRequest = null;
@@ -1217,6 +1277,8 @@ let messageStreamFollowTarget = 0;
 let pendingBootstrapRefreshPromise = null;
 let suppressVisibleStreamBootstrap = false;
 let lastVisibleCompletionSignature = "";
+const streamPresentationQueues = new Map();
+let lastContextUsage = { used: 0, limit: 128000, estimated: true, sessionId: "", model: "" };
 let autoOpenActivityPanel = false;
 const MAX_LIVE_PROCESS_EVENTS = 4;
 let researchDetailOpen = false;
@@ -1252,12 +1314,12 @@ const currentSessionList = document.getElementById("current-session-list");
 const branchList = document.querySelector(".branch-list");
 const messageStream = document.querySelector(".message-stream");
 const reviewStrip = document.getElementById("review-strip");
-const agentPreludeBackground = document.getElementById("agent-prelude-background");
-const agentPreludeUnicorn = document.getElementById("agent-prelude-unicorn");
-const agentPreludeSplineFrame = document.getElementById("agent-prelude-spline-frame");
 const appShell = document.querySelector(".app-shell");
+const shellTopbar = document.querySelector(".shell-topbar");
+const desktopWindowControls = document.getElementById("desktop-window-controls");
 const messageInput = document.getElementById("message-input");
 const attachButton = document.getElementById("attach-button");
+const promptOptimizeButton = document.getElementById("prompt-optimize-button");
 const fileInput = document.getElementById("file-input");
 const composerAttachments = document.getElementById("composer-attachments");
 const langToggle = document.getElementById("lang-toggle");
@@ -1286,8 +1348,6 @@ const activityFlyout = document.getElementById("activity-flyout");
 const activityFlyoutResizer = document.getElementById("activity-flyout-resizer");
 const activityRailButtons = document.querySelectorAll("[data-activity-panel]");
 const activityPanels = document.querySelectorAll("[data-activity-panel-id]");
-const extensionSearchInput = document.getElementById("extension-search-input");
-const extensionList = document.getElementById("extension-list");
 const searchModeSwitch = document.getElementById("search-mode-switch");
 const searchQueryInput = document.getElementById("search-query-input");
 const searchRunButton = document.getElementById("search-run-button");
@@ -1295,8 +1355,25 @@ const searchResults = document.getElementById("search-results");
 const searchHealthStrip = document.getElementById("search-health-strip");
 const searchPreviewPanel = document.getElementById("search-preview-panel");
 const runDebugList = document.getElementById("run-debug-list");
+const projectIndexUpdate = document.getElementById("project-index-update");
+const projectWindowOpen = document.getElementById("project-window-open");
+const projectIndexQuery = document.getElementById("project-index-query");
+const projectIndexState = document.getElementById("project-index-state");
+const projectIndexResults = document.getElementById("project-index-results");
+const projectTaskAdd = document.getElementById("project-task-add");
+const projectTaskList = document.getElementById("project-task-list");
 const runDebugSession = document.getElementById("run-debug-session");
 const terminalRailButton = document.getElementById("terminal-rail-button");
+const browserRailButton = document.getElementById("browser-rail-button");
+const visualizationRailButton = document.getElementById("visualization-rail-button");
+const visualizationWorkspace = document.getElementById("visualization-workspace");
+const researchDomainWorkspace = document.getElementById("research-domain-workspace");
+const visualizationChatToggle = document.getElementById("visualization-chat-toggle");
+const visualizationFloatingChatHead = document.getElementById("visualization-floating-chat-head");
+const visualizationFloatingChatTitle = document.getElementById("visualization-floating-chat-title");
+const visualizationFloatingChatResize = document.getElementById("visualization-floating-chat-resize");
+const workspaceBody = document.getElementById("workspace-body");
+const workspaceChat = document.querySelector(".workspace-chat");
 const terminalDrawer = document.getElementById("terminal-drawer");
 const terminalScreen = document.getElementById("terminal-screen");
 const terminalTabList = document.getElementById("terminal-tab-list");
@@ -1310,6 +1387,7 @@ const agentProcessStrip = document.getElementById("agent-process-strip");
 const permissionStrip = document.getElementById("permission-strip");
 const contextUsage = document.getElementById("context-usage");
 const contextUsageRing = document.getElementById("context-usage-ring");
+const contextUsageModel = document.getElementById("context-usage-model");
 const contextUsageLabel = document.getElementById("context-usage-label");
 const settingsPanels = document.querySelectorAll(".settings-popover");
 const newSessionButton = document.getElementById("new-session-button");
@@ -1319,6 +1397,11 @@ const settingsClose = document.getElementById("settings-close");
 const settingsTabs = document.querySelectorAll("[data-settings-tab]");
 const settingsTabPanels = document.querySelectorAll("[data-settings-tab-panel]");
 const settingsSaveButton = document.getElementById("settings-save");
+const themePicker = document.getElementById("theme-picker");
+const sandboxWelcome = document.getElementById("sandbox-welcome");
+const sandboxWelcomePath = document.getElementById("sandbox-welcome-path");
+const sandboxUseDefault = document.getElementById("sandbox-use-default");
+const sandboxChooseWorkspace = document.getElementById("sandbox-choose-workspace");
 const effortDisclosure = document.getElementById("effort-disclosure");
 const effortSlider = document.getElementById("effort-slider");
 const effortTriggerValue = document.getElementById("effort-trigger-value");
@@ -1328,6 +1411,12 @@ const effortButtons = document.querySelectorAll("[data-effort]");
 const sessionMenu = document.getElementById("session-menu");
 const sessionMenuRename = document.getElementById("session-menu-rename");
 const sessionMenuDelete = document.getElementById("session-menu-delete");
+const atlasDialog = document.getElementById("atlas-dialog");
+const atlasDialogTitle = document.getElementById("atlas-dialog-title");
+const atlasDialogMessage = document.getElementById("atlas-dialog-message");
+const atlasDialogInput = document.getElementById("atlas-dialog-input");
+const atlasDialogCancel = document.getElementById("atlas-dialog-cancel");
+const atlasDialogConfirm = document.getElementById("atlas-dialog-confirm");
 const researchPanel = document.getElementById("research-panel");
 const researchSection = document.querySelector(".sidebar-section-research");
 const researchFloatingBoard = document.getElementById("research-floating-board");
@@ -1353,11 +1442,9 @@ const workspaceCodeReplaceButton = document.getElementById("workspace-code-repla
 const workspaceCodeLineButton = document.getElementById("workspace-code-line");
 const workspaceCodeSymbolsButton = document.getElementById("workspace-code-symbols");
 const workspaceCodeReferencesButton = document.getElementById("workspace-code-references");
-const workspaceCodeRenameButton = document.getElementById("workspace-code-rename");
 const workspaceLauncher = document.getElementById("workspace-launcher");
 const dockWorkspace = document.getElementById("dock-workspace");
 const panelMenu = document.getElementById("panel-menu");
-const panelGrips = document.querySelectorAll("[data-panel-grip]");
 const panelResizers = document.querySelectorAll("[data-resizer-after]");
 const activityCollapseButtons = document.querySelectorAll("[data-collapse-activity]");
 const leftSidebarToggleButton = document.getElementById("left-sidebar-toggle");
@@ -1368,10 +1455,13 @@ const browserSplitResizer = document.getElementById("browser-split-resizer");
 const browserWorkspace = document.getElementById("browser-workspace");
 const browserFrame = document.getElementById("browser-frame");
 const browserBackButton = document.getElementById("browser-back-button");
+const browserForwardButton = document.getElementById("browser-forward-button");
 const browserRefreshButton = document.getElementById("browser-refresh-button");
+const browserHomeButton = document.getElementById("browser-home-button");
 const browserExternalButton = document.getElementById("browser-external-button");
 const browserCloseButton = document.getElementById("browser-close-button");
 const browserToolbarAddress = document.getElementById("browser-toolbar-address");
+const browserAddressForm = document.getElementById("browser-address-form");
 const gitStatusBanner = document.getElementById("git-status-banner");
 const gitOverviewView = document.getElementById("git-view-overview");
 const gitChangesView = document.getElementById("git-view-changes");
@@ -1390,13 +1480,14 @@ const composerStop = document.getElementById("composer-stop");
 const DOCK_LAYOUT_KEY = "tokitai-dock-layout-v1";
 const RESEARCH_STARTED_KEY = "tokitai-research-started-v1";
 const SANDBOX_NOTICE_KEY = "tokitai-sandbox-notice-v1";
+const THEME_KEY = "atlas-color-theme-v1";
 const PANEL_IDS = ["sidebar", "chat", "research", "code", "tree"];
-const LEFT_ACTIVITY_ORDER = ["nav", "extensions", "search", "git", "run"];
+const LEFT_ACTIVITY_ORDER = ["nav", "search", "git", "run"];
 const RIGHT_DOCK_PANEL_IDS = ["tree", "code", "research"];
 const DEFAULT_DOCK_LAYOUT = {
-  order: ["sidebar", "chat", "research", "code", "tree"],
+  order: ["sidebar", "chat", "code", "tree", "research"],
   hidden: { sidebar: true, chat: false, research: true, tree: true, code: true },
-  widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 520 },
+  widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 760 },
 };
 const MIN_ACTIVITY_FLYOUT_WIDTH = 248;
 const MAX_ACTIVITY_FLYOUT_WIDTH = 820;
@@ -1454,8 +1545,11 @@ function syncShellLayoutVars() {
   );
   const effectiveFlyoutWidth = isSearchGitHubPreviewActive()
     ? resolveSearchGitHubFlyoutWidth(flyoutWidth)
-    : flyoutWidth;
-  const browserWidth = clamp(Number(dockLayout?.widths?.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 360, 760);
+    : activeActivityPanel === "git"
+      ? Math.max(flyoutWidth, Math.min(480, Math.max(360, (window?.innerWidth || 1280) - 760)))
+      : flyoutWidth;
+  const browserMaxWidth = Math.max(760, Math.min(1400, Math.round((window?.innerWidth || 1280) * 0.82)));
+  const browserWidth = clamp(Number(dockLayout?.widths?.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 420, browserMaxWidth);
   if (dockLayout?.widths) {
     dockLayout.widths.flyout = flyoutWidth;
     dockLayout.widths.browser = browserWidth;
@@ -1480,7 +1574,7 @@ function readDockLayout() {
       MIN_ACTIVITY_FLYOUT_WIDTH,
       MAX_ACTIVITY_FLYOUT_WIDTH,
     );
-    widths.browser = clamp(Number(widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 360, 760);
+    widths.browser = clamp(Number(widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 420, 1400);
     return {
       order: Array.isArray(parsed.order)
         ? PANEL_IDS.filter((id) => parsed.order.includes(id)).concat(PANEL_IDS.filter((id) => !parsed.order.includes(id)))
@@ -1618,6 +1712,9 @@ function visiblePanelIds() {
 }
 
 function renderedPanelIds() {
+  if (currentMainView === "visualization" || currentMainView === "domain") {
+    return ["chat"];
+  }
   return visiblePanelIds();
 }
 
@@ -1645,8 +1742,12 @@ function applyHostMeta(meta) {
     supportsTerminal: meta?.supports_terminal ?? meta?.supportsTerminal ?? currentHostMeta.supportsTerminal,
     supportsTerminalPty: meta?.supports_terminal_pty ?? meta?.supportsTerminalPty ?? currentHostMeta.supportsTerminalPty,
     supportsNativeMenu: meta?.supports_native_menu ?? meta?.supportsNativeMenu ?? currentHostMeta.supportsNativeMenu,
+    supportsNativeBrowser: meta?.supports_native_browser ?? meta?.supportsNativeBrowser ?? currentHostMeta.supportsNativeBrowser,
     bridgeProtocol: meta?.bridge_protocol ?? meta?.bridgeProtocol ?? currentHostMeta.bridgeProtocol,
   });
+  const isNativeDesktop = currentHostMeta.mode === "desktop" && currentHostMeta.transport === "bridge";
+  appShell?.classList.toggle("is-desktop-shell", isNativeDesktop);
+  if (desktopWindowControls) desktopWindowControls.hidden = !isNativeDesktop;
 }
 
 function workspaceFileMetaText(file) {
@@ -1910,7 +2011,6 @@ function syncWorkspaceCodeToolbar() {
     workspaceCodeLineButton,
     workspaceCodeSymbolsButton,
     workspaceCodeReferencesButton,
-    workspaceCodeRenameButton,
   ].forEach((button) => {
     if (!button) return;
     button.disabled = !enabled;
@@ -2755,7 +2855,7 @@ async function runWorkspaceRenameSymbol() {
     showToast(currentLanguage === "zh" ? "请先将光标放在符号上" : "Place the cursor on a symbol first");
     return;
   }
-  const nextName = window.prompt(
+  const nextName = await atlasPrompt(
     currentLanguage === "zh" ? `重命名符号 ${word.word}` : `Rename symbol ${word.word}`,
     word.word,
   );
@@ -3192,17 +3292,23 @@ function panelMaxWidth(panelId) {
 }
 
 function normalizeDockLayout() {
-  dockLayout.order = ["sidebar", "chat", "tree", "code", "research"];
+  dockLayout.order = ["sidebar", "chat", "code", "tree", "research"];
   dockLayout.hidden.chat = false;
   dockLayout.hidden.sidebar = true;
   RIGHT_DOCK_PANEL_IDS.forEach((panelId) => {
     dockLayout.hidden[panelId] = true;
   });
   if (currentMainView !== "browser" && !rightSidebarCollapsed) {
-    const targetPanelId = resolvePreferredRightDockPanelId();
-    if (RIGHT_DOCK_PANEL_IDS.includes(targetPanelId)) {
-      dockLayout.hidden[targetPanelId] = false;
-      preferredDockRightSidebarPanelId = targetPanelId;
+    if (isWorkspaceCodeOpen || currentWorkspaceFile) {
+      dockLayout.hidden.tree = false;
+      dockLayout.hidden.code = false;
+      preferredDockRightSidebarPanelId = "code";
+    } else {
+      const targetPanelId = resolvePreferredRightDockPanelId();
+      if (RIGHT_DOCK_PANEL_IDS.includes(targetPanelId)) {
+        dockLayout.hidden[targetPanelId] = false;
+        preferredDockRightSidebarPanelId = targetPanelId;
+      }
     }
   }
   if (currentWorkspaceMode !== "research" || !hasResearchStartedForCurrentSession()) {
@@ -3251,7 +3357,9 @@ function applyDockLayout() {
   PANEL_IDS.forEach((panelId) => {
     const panel = panelElement(panelId);
     if (!panel) return;
-    const isHidden = Boolean(dockLayout.hidden[panelId]) && panelId !== "chat";
+    const isHidden =
+      panelId !== "chat" &&
+      ((currentMainView === "visualization" || currentMainView === "domain") || Boolean(dockLayout.hidden[panelId]));
     panel.hidden = isHidden;
     panel.classList.toggle("is-hidden", isHidden);
     if (panelId === "chat") {
@@ -3309,6 +3417,9 @@ function applyDockLayout() {
   if (!sameOrder) {
     nextOrder.forEach((node) => dockWorkspace.appendChild(node));
   }
+  nextOrder.forEach((node, index) => {
+    node.style.order = String(index);
+  });
   syncLayoutCornerControls();
   syncWorkspaceLauncherVisibility();
   scheduleWorkspaceMonacoLayout();
@@ -3412,29 +3523,6 @@ function toggleRightSidebarVisibility() {
   showRightSidebarMode(resolvePreferredRightDockPanelId());
 }
 
-function reorderPanels(sourceId, targetId) {
-  if (!sourceId || !targetId || sourceId === targetId) return;
-  const next = dockLayout.order.filter((id) => id !== sourceId);
-  const targetIndex = next.indexOf(targetId);
-  if (targetIndex < 0) return;
-  next.splice(targetIndex, 0, sourceId);
-  dockLayout.order = next;
-  saveDockLayout();
-  applyDockLayout();
-}
-
-function stopDockDrag() {
-  if (!activeDockDrag) return;
-  document.querySelectorAll(".dock-panel").forEach((panel) => panel.classList.remove("is-drag-target"));
-  activeDockDrag.handle?.classList.remove("is-dragging");
-  activeDockDrag.panel?.classList.remove("is-floating");
-  activeDockDrag.panel?.style.removeProperty("--floating-x");
-  activeDockDrag.panel?.style.removeProperty("--floating-y");
-  document.body.style.cursor = "";
-  document.body.style.userSelect = "";
-  activeDockDrag = null;
-}
-
 function stopResizerDrag() {
   if (!activeResizerDrag) return;
   const { handle, pointerId } = activeResizerDrag;
@@ -3451,91 +3539,6 @@ function stopResizerDrag() {
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
   activeResizerDrag = null;
-}
-
-function dockPanelFromPoint(x, y) {
-  const element = document.elementFromPoint(x, y);
-  return element?.closest?.("[data-panel-id]")?.getAttribute?.("data-panel-id") || null;
-}
-
-function startDockDrag(panelId, handle, pointerId) {
-  if (!panelId || !handle) return;
-  stopDockDrag();
-  const panel = panelElement(panelId);
-  activeDockDrag = {
-    panelId,
-    panel,
-    handle,
-    pointerId,
-    startX: 0,
-    startY: 0,
-    originX: 0,
-    originY: 0,
-    dragMode: null,
-    moved: false,
-    holdReady: false,
-    lastInsertIndex: -1,
-    currentX: 0,
-    currentY: 0,
-  };
-}
-
-function activateDockReorder(panelId) {
-  if (!activeDockDrag || activeDockDrag.panelId !== panelId || activeDockDrag.holdReady) return;
-  activeDockDrag.dragMode = "reorder";
-  activeDockDrag.holdReady = true;
-  suppressNextGripClick = true;
-  activeDockDrag.panel?.classList.add("is-floating");
-  activeDockDrag.handle?.classList.add("is-dragging");
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "grabbing";
-}
-
-function dockInsertIndexForX(panelId, clientX) {
-  const visible = renderedPanelIds().filter((id) => id !== panelId);
-  let insertIndex = visible.length;
-  for (let index = 0; index < visible.length; index += 1) {
-    const panel = panelElement(visible[index]);
-    if (!panel) continue;
-    const rect = panel.getBoundingClientRect();
-    if (clientX < rect.left + rect.width / 2) {
-      insertIndex = index;
-      break;
-    }
-  }
-  return { visible, insertIndex };
-}
-
-function applyDockReorderForX(panelId, clientX) {
-  if (!panelId) return;
-  const { visible, insertIndex } = dockInsertIndexForX(panelId, clientX);
-  if (activeDockDrag && insertIndex === activeDockDrag.lastInsertIndex) return;
-  const next = dockLayout.order.filter((id) => id !== panelId);
-  const anchorId = visible[insertIndex] || "";
-  if (anchorId) {
-    const anchorIndex = next.indexOf(anchorId);
-    next.splice(anchorIndex, 0, panelId);
-  } else {
-    next.push(panelId);
-  }
-  dockLayout.order = next;
-  if (activeDockDrag) {
-    activeDockDrag.lastInsertIndex = insertIndex;
-  }
-  saveDockLayout();
-  applyDockLayout();
-  if (activeDockDrag) {
-    activeDockDrag.panel = panelElement(activeDockDrag.panelId);
-  }
-}
-
-function highlightDockTarget(clientX) {
-  document.querySelectorAll(".dock-panel").forEach((panel) => panel.classList.remove("is-drag-target"));
-  if (!activeDockDrag) return;
-  const { visible, insertIndex } = dockInsertIndexForX(activeDockDrag.panelId, clientX);
-  const targetId = visible[insertIndex] || visible[visible.length - 1] || "";
-  if (!targetId) return;
-  panelElement(targetId)?.classList.add("is-drag-target");
 }
 
 function ensureCodePanelVisible() {
@@ -3564,98 +3567,8 @@ function hideCodePanel() {
   closePanelMenu();
 }
 
-function handleGripPointerDown(event, panelId, handle) {
-  if (event.type === "mousedown" && Date.now() - lastGripPointerDownAt < 400) {
-    return;
-  }
-  if (event.button !== 0) return;
-  if (event.type === "pointerdown") {
-    lastGripPointerDownAt = Date.now();
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  stopResizerDrag();
-  closePanelMenu();
-  startDockDrag(panelId, handle, event.pointerId);
-  if (activeDockDrag) {
-    activeDockDrag.currentX = event.clientX;
-    activeDockDrag.currentY = event.clientY;
-    activeDockDrag.startX = event.clientX;
-    activeDockDrag.startY = event.clientY;
-    const rect = activeDockDrag.panel?.getBoundingClientRect();
-    activeDockDrag.originX = rect?.x || 0;
-    activeDockDrag.originY = rect?.y || 0;
-    if (event.type === "pointerdown" && handle.setPointerCapture) {
-      try {
-        handle.setPointerCapture(event.pointerId);
-      } catch (_error) {
-        // Ignore unsupported capture failures.
-      }
-    }
-    window.clearTimeout(gripHoldTimer);
-    gripHoldTimer = window.setTimeout(() => {
-      if (!activeDockDrag || activeDockDrag.panelId !== panelId) return;
-      activateDockReorder(panelId);
-    }, 160);
-  }
-}
-
-function onDockPointerMove(event) {
-  if (!activeDockDrag) return;
-  const deltaX = event.clientX - activeDockDrag.startX;
-  const deltaY = event.clientY - activeDockDrag.startY;
-  activeDockDrag.currentX = event.clientX;
-  activeDockDrag.currentY = event.clientY;
-  if (!activeDockDrag.holdReady) {
-    if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) {
-      window.clearTimeout(gripHoldTimer);
-      activeDockDrag.moved = true;
-      activateDockReorder(activeDockDrag.panelId);
-    }
-    if (!activeDockDrag.holdReady) {
-      return;
-    }
-  }
-
-  activeDockDrag.moved = true;
-  activeDockDrag.panel?.style.setProperty("--floating-x", `${deltaX}px`);
-  activeDockDrag.panel?.style.setProperty("--floating-y", `${deltaY}px`);
-  applyDockReorderForX(activeDockDrag.panelId, event.clientX);
-  highlightDockTarget(event.clientX);
-  activeDockDrag.panel?.classList.add("is-floating");
-  activeDockDrag.panel?.style.setProperty("--floating-x", `${deltaX}px`);
-  activeDockDrag.panel?.style.setProperty("--floating-y", `${deltaY}px`);
-}
-
-function onDockPointerUp(event) {
-  if (!activeDockDrag) return;
-  window.clearTimeout(gripHoldTimer);
-  const holdReady = activeDockDrag.holdReady;
-  const moved = activeDockDrag.moved;
-  const panelId = activeDockDrag.panelId;
-  const handle = activeDockDrag.handle;
-  const finalX = event?.clientX ?? activeDockDrag.currentX;
-  if ((holdReady || moved) && Number.isFinite(finalX)) {
-    applyDockReorderForX(panelId, finalX);
-  }
-  if (handle?.releasePointerCapture && activeDockDrag.pointerId != null) {
-    try {
-      handle.releasePointerCapture(activeDockDrag.pointerId);
-    } catch (_error) {
-      // Ignore unsupported capture failures.
-    }
-  }
-  stopDockDrag();
-  if (holdReady || moved) {
-    window.setTimeout(() => {
-      suppressNextGripClick = false;
-    }, 0);
-  }
-}
-
 function handleResizerPointerDown(event, handle) {
   if (event.button !== 0) return;
-  stopDockDrag();
   const kind = handle?.dataset?.layoutResizerKind || "dock";
   if (kind === "flyout") {
     if (!activeActivityPanel || !activityFlyout) return;
@@ -3723,12 +3636,14 @@ function onResizerPointerMove(event) {
     );
     syncShellLayoutVars();
   } else if (activeResizerDrag.kind === "browser") {
+    const browserMaxWidth = Math.max(760, Math.min(1400, Math.round((window?.innerWidth || 1280) * 0.82)));
     dockLayout.widths.browser = clamp(
       Number(dockLayout.widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser) - deltaX,
-      360,
-      760,
+      420,
+      browserMaxWidth,
     );
     syncShellLayoutVars();
+    syncNativeBrowser("layout");
   } else {
     const { leftPanelId, rightPanelId } = activeResizerDrag;
     if (leftPanelId !== "chat") {
@@ -3777,11 +3692,13 @@ function applyWorkspaceMode(mode) {
     button.setAttribute("aria-selected", active ? "true" : "false");
   });
   if (messageInput) {
+    messageInput.placeholder = "";
+    /* Placeholder copy intentionally removed.
     messageInput.placeholder = currentWorkspaceMode === "research"
       ? (currentLanguage === "zh"
           ? "Agent 默认走轻量实现。输入 /spec 可强制进入研究流程。按 Enter 发送。"
           : "Agent defaults to lightweight implementation. Start with /spec to force a research workflow. Press Enter to send.")
-      : t("composerPlaceholder");
+      : t("composerPlaceholder"); */
   }
   if (composerStop) {
     composerStop.textContent = currentWorkspaceMode === "research"
@@ -4561,7 +4478,7 @@ async function openUrlInAppBrowser(rawHref, options = {}) {
   }
   browserState.loading = true;
   if (browserToolbarAddress) {
-    browserToolbarAddress.textContent = href;
+    browserToolbarAddress.value = href;
   }
   rightSidebarCollapsed = false;
   setMainView("browser");
@@ -4581,10 +4498,9 @@ async function openUrlInAppBrowser(rawHref, options = {}) {
       }
       await loadInAppBrowserDocument(data, href);
       scheduleBrowserBlankCheck(browserState.currentUrl);
+      browserState.loading = false;
       if (browserToolbarAddress) {
-        browserToolbarAddress.textContent = browserState.currentTitle
-          ? `${browserState.currentTitle} - ${browserState.currentUrl}`
-          : browserState.currentUrl;
+        browserToolbarAddress.value = browserState.currentUrl;
       }
       return;
     }
@@ -5580,7 +5496,9 @@ function renderAssistantRuntimePanel(content, options = {}) {
     <section class="codex-runtime-panel${toneClass}">
       <details class="codex-runtime-panel-shell" data-runtime-panel${open ? " open" : ""}>
         <summary class="codex-runtime-panel-summary" data-runtime-toggle>
-          <span class="codex-runtime-panel-title${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(title)}">${escapeHtml(title)}</span>
+          <span class="codex-runtime-panel-title">
+            <span class="codex-runtime-panel-title-text${isRunning ? " codex-live-shimmer" : ""}">${escapeHtml(title)}</span>
+          </span>
           ${meta ? `<span class="codex-runtime-panel-meta">${escapeHtml(meta)}</span>` : ""}
         </summary>
         <div class="codex-runtime-panel-body">
@@ -5592,10 +5510,10 @@ function renderAssistantRuntimePanel(content, options = {}) {
 }
 
 function renderThinkingSummaryLabel(index, isStreaming) {
-  const label = currentLanguage === "zh" ? "Thinking..." : "Thinking...";
+  const label = "Thinking";
   return `
     <span class="codex-thinking-summary-shell">
-      <span class="codex-thinking-summary-label${isStreaming ? " is-streaming" : ""}">${escapeHtml(label)}</span>
+      <span class="codex-thinking-summary-label${isStreaming ? " is-streaming codex-live-shimmer" : ""}">${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -5603,7 +5521,7 @@ function renderThinkingSummaryLabel(index, isStreaming) {
 function streamAnimationStyle(turn = activeAssistantTurn) {
   const startedAt = Number(turn?.startedAt || 0);
   if (!startedAt) return "";
-  const phaseSeconds = ((Date.now() - startedAt) % 2350) / 1000;
+  const phaseSeconds = ((Date.now() - startedAt) % 2200) / 1000;
   return ` style="--codex-stream-phase:-${phaseSeconds.toFixed(3)}s;"`;
 }
 
@@ -5682,9 +5600,7 @@ function extractAssistantDecisionCard(text) {
 function shouldRenderAssistantDecisionCard(turn, cleanedText) {
   const options = Array.isArray(turn?.assistantChoices?.options) ? turn.assistantChoices.options : [];
   if (!options.length) return false;
-  const source = cleanDisplayText(String(cleanedText || turn?.text || ""), "");
-  if (!source) return false;
-  return /\b(?:please confirm|which direction do you prefer|which direction you prefer|if you agree|choose next step|pick one|select one|which option|confirm your choice)\b/i.test(source);
+  return String(turn?.assistantChoices?.title || "").trim() === "explicit_decision";
 }
 
 function renderAssistantDecisionCard(card) {
@@ -5750,7 +5666,7 @@ function operationEditArtifactMarkup(turn, label) {
           <path d="M13.8 7.3l2.9 2.9"></path>
         </svg>
       </span>
-      <span class="codex-op-edit-prefix${latestToolRunning ? " is-streaming" : ""}" data-text="${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}"${latestToolRunning ? animationOffset : ""}>${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}</span>
+      <span class="codex-op-edit-prefix${latestToolRunning ? " is-streaming codex-live-shimmer" : ""}" data-text="${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}"${latestToolRunning ? animationOffset : ""}>${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}</span>
       <span class="codex-op-edit-file">${escapeHtml(fileName)}</span>
       <span class="codex-op-edit-stats">
         <span class="is-added">+${escapeHtml(String(added))}</span>
@@ -5812,7 +5728,7 @@ function operationArtifactMarkup(turn, label) {
           <path d="M13.8 7.3l2.9 2.9"></path>
         </svg>
       </span>
-      <span class="codex-op-edit-prefix${showStreaming ? " is-streaming" : ""}" data-text="${escapeHtml(prefixText)}"${showStreaming ? animationOffset : ""}>${escapeHtml(prefixText)}</span>
+      <span class="codex-op-edit-prefix${showStreaming ? " is-streaming codex-live-shimmer" : ""}" data-text="${escapeHtml(prefixText)}"${showStreaming ? animationOffset : ""}>${escapeHtml(prefixText)}</span>
       <span class="codex-op-edit-file">${escapeHtml(fileName)}</span>
       <span class="codex-op-edit-stats">
         <span class="is-added">+${escapeHtml(String(added))}</span>
@@ -6008,6 +5924,52 @@ function showToast(message) {
   }, 2200);
 }
 
+function closeAtlasDialog(value = null) {
+  if (!atlasDialog || atlasDialog.hidden) return;
+  atlasDialog.hidden = true;
+  const resolve = atlasDialogResolve;
+  atlasDialogResolve = null;
+  if (resolve) resolve(value);
+}
+
+function openAtlasDialog(options = {}) {
+  if (!atlasDialog) return Promise.resolve(null);
+  if (atlasDialogResolve) closeAtlasDialog(null);
+  const mode = options.mode === "prompt" ? "prompt" : "confirm";
+  atlasDialogTitle.textContent = String(options.title || (currentLanguage === "zh" ? "Atlas" : "Atlas"));
+  atlasDialogMessage.textContent = String(options.message || "");
+  atlasDialogMessage.hidden = !atlasDialogMessage.textContent;
+  atlasDialogInput.hidden = mode !== "prompt";
+  atlasDialogInput.value = mode === "prompt" ? String(options.value || "") : "";
+  atlasDialogInput.placeholder = String(options.placeholder || "");
+  atlasDialogCancel.textContent = String(options.cancelLabel || (currentLanguage === "zh" ? "取消" : "Cancel"));
+  atlasDialogConfirm.textContent = String(options.confirmLabel || (currentLanguage === "zh" ? "确定" : "Confirm"));
+  atlasDialogConfirm.classList.toggle("is-danger", Boolean(options.danger));
+  atlasDialog.hidden = false;
+  window.requestAnimationFrame(() => {
+    if (mode === "prompt") {
+      atlasDialogInput.focus();
+      atlasDialogInput.select();
+    } else {
+      atlasDialogConfirm.focus();
+    }
+  });
+  return new Promise((resolve) => {
+    atlasDialogResolve = (confirmed) => {
+      if (!confirmed) return resolve(null);
+      resolve(mode === "prompt" ? atlasDialogInput.value : true);
+    };
+  });
+}
+
+function atlasConfirm(message, options = {}) {
+  return openAtlasDialog({ ...options, mode: "confirm", message });
+}
+
+function atlasPrompt(title, value = "", options = {}) {
+  return openAtlasDialog({ ...options, mode: "prompt", title, value });
+}
+
 
 function classifyAppError(error, context = "generic") {
   const raw = String(error?.message || error || "").trim();
@@ -6127,6 +6089,43 @@ function markSandboxNoticeShown(sandbox) {
   } catch (_error) {
     // ignore storage failures
   }
+}
+
+function applyColorTheme(theme) {
+  const resolved = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = resolved;
+  themePicker?.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    const active = button.dataset.themeChoice === resolved;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  try {
+    localStorage.setItem(THEME_KEY, resolved);
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
+function restoreColorTheme() {
+  let saved = "dark";
+  try {
+    saved = localStorage.getItem(THEME_KEY) || "dark";
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+  applyColorTheme(saved);
+}
+
+function showSandboxWelcome(sandbox) {
+  if (!sandboxWelcome) return;
+  if (sandboxWelcomePath) sandboxWelcomePath.textContent = String(sandbox?.sandbox_root || "");
+  sandboxWelcome.hidden = false;
+}
+
+function dismissSandboxWelcome() {
+  if (!sandboxWelcome) return;
+  sandboxWelcome.hidden = true;
+  markSandboxNoticeShown(bootstrapData?.sandbox);
 }
 
 function formatRunDependencyMessage(config) {
@@ -6604,79 +6603,8 @@ function addProcessEvent(type, label, detail = "", meta = "", extra = {}) {
 
 function renderAgentProcessStrip() {
   if (!agentProcessStrip) return;
-  if (pendingPermissionRequest) {
-    agentProcessStrip.hidden = true;
-    agentProcessStrip.innerHTML = "";
-    syncPendingAssistantStatus();
-    return;
-  }
-  const events = Array.isArray(liveProcessEvents) ? liveProcessEvents : [];
-  if (!events.length) {
-    agentProcessStrip.hidden = true;
-    agentProcessStrip.innerHTML = "";
-    syncPendingAssistantStatus();
-    return;
-  }
-  const event = events[events.length - 1] || null;
-  const firstPersonActivity = describeActivityWorklog({
-    label: event?.label || "",
-    detail: event?.detail || "",
-    meta: event?.meta || "",
-    phase: event?.phase || "",
-    status: event?.status || "",
-    agent: event?.agent || "",
-  });
-  const rawLabel = String(event?.label || event?.detail || "Running").trim();
-  const labelMapZh = {
-    starting: "准备中",
-    planning: "规划中",
-    execution: "执行中",
-    delegation: "委派中",
-    review: "审查中",
-    verifier: "验证中",
-    subagent: "子代理执行中",
-    permission_required: "等待授权",
-    editing: "编辑中",
-    tool_complete: "工具已完成",
-  };
-  const labelMapEn = {
-    starting: "Preparing",
-    planning: "Planning",
-    execution: "Executing",
-    delegation: "Delegating",
-    review: "Reviewing",
-    verifier: "Verifying",
-    subagent: "Subagent running",
-    permission_required: "Permission required",
-    editing: "Editing",
-    tool_complete: "Tool complete",
-  };
-  const detailMapZh = {
-    "Main agent is executing the current step": "主代理正在执行当前步骤",
-    "Dispatching tool work": "正在分派工具任务",
-    "Reviewer subagent is checking the turn": "审查子代理正在检查当前轮次",
-  };
-  const label = currentLanguage === "zh"
-    ? (labelMapZh[rawLabel] || rawLabel)
-    : (labelMapEn[rawLabel] || rawLabel);
-  const detail = normalizeActivityDetail(firstPersonActivity?.text || "");
-  const meta = [
-    renderAgentName(event?.agent),
-    renderActivityPhase(event?.phase),
-    renderDelegateStatus(event?.status),
-    cleanDisplayText(event?.meta || ""),
-  ].filter(Boolean).join(" · ");
-  const type = String(event?.type || "activity");
-  agentProcessStrip.hidden = false;
-  agentProcessStrip.innerHTML = `
-    <div class="agent-process-inline">
-      <div class="agent-process-inline-item agent-process-inline-${escapeHtml(type)}">
-        <div class="agent-process-inline-label">${escapeHtml(label)}</div>
-        ${detail ? `<div class="agent-process-inline-detail">${escapeHtml(detail)}</div>` : ""}
-        ${meta ? `<div class="agent-process-inline-meta">${escapeHtml(meta)}</div>` : ""}
-      </div>
-    </div>
-  `;
+  agentProcessStrip.hidden = true;
+  if (agentProcessStrip.firstChild) agentProcessStrip.replaceChildren();
   syncPendingAssistantStatus();
 }
 
@@ -6804,7 +6732,15 @@ function dedupeSubagentEntries(items) {
   const deduped = new Map();
   source.forEach((item, index) => {
     const key = String(item?.id || item?.name || "").trim() || `subagent-${index}`;
-    deduped.set(key, { ...item, id: key });
+    const existing = deduped.get(key) || {};
+    const existingEvents = Array.isArray(existing.events) ? existing.events : [];
+    const nextEvents = Array.isArray(item?.events) ? item.events : [];
+    const eventsByKey = new Map();
+    [...existingEvents, ...nextEvents].forEach((event) => {
+      const eventKey = `${event?.kind || "activity"}:${event?.label || ""}`;
+      eventsByKey.set(eventKey, { ...event });
+    });
+    deduped.set(key, { ...existing, ...item, id: key, events: [...eventsByKey.values()] });
   });
   return [...deduped.values()];
 }
@@ -6872,7 +6808,72 @@ function pushTurnStreamMoment(turn, moment) {
   const dedupeKey = String(moment.dedupeKey || `${kind}:${text}`).trim();
   const operationKey = String(moment.operationKey || "").trim();
   const nextTimestamp = Number(moment.timestamp) || Date.now();
-  const items = Array.isArray(turn.streamMoments) ? turn.streamMoments.slice() : [];
+  let items = Array.isArray(turn.streamMoments) ? turn.streamMoments.slice() : [];
+  const normalizeMomentFilePath = (value) => cleanDisplayText(value || "", "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/\/{2,}/g, "/")
+    .toLowerCase();
+  const sameMomentFile = (left, right) => {
+    const a = normalizeMomentFilePath(left);
+    const b = normalizeMomentFilePath(right);
+    if (!a || !b) return false;
+    return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+  };
+  const semanticFilePath = normalizeMomentFilePath(moment.filePath);
+  const operationKinds = new Set(["activity", "stage", "inspection", "edit", "check", "command", "tool"]);
+  const isOperationMoment = operationKinds.has(kind);
+  const incomingState = String(moment.state || "").trim().toLowerCase();
+
+  // The conversation surface has one stable operation slot. A tool lifecycle
+  // updates this object in place instead of appending run/done/fail pills. Keep
+  // the source key separately so a late completion from an older parallel tool
+  // cannot replace the operation the user is currently watching.
+  if (isOperationMoment) {
+    const sourceOperationKey = operationKey || dedupeKey;
+    const current = [...items].reverse().find((item) => (
+      item?.operationSlot === "current-operation"
+      || operationKinds.has(String(item?.kind || "").trim().toLowerCase())
+    )) || null;
+    const currentSourceKey = String(current?.sourceOperationKey || current?.operationKey || current?.dedupeKey || "").trim();
+    const sameSource = Boolean(sourceOperationKey && currentSourceKey && sourceOperationKey === currentSourceKey);
+    const sameFile = Boolean(
+      semanticFilePath
+      && current?.filePath
+      && sameMomentFile(current.filePath, semanticFilePath),
+    );
+    const sameSemanticEdit = sameFile
+      && kind === "edit"
+      && String(current?.kind || "").trim().toLowerCase() === "edit";
+    if (current && incomingState !== "run" && !sameSource && !sameSemanticEdit) {
+      return;
+    }
+
+    const stable = current || {
+      id: "current-operation",
+      operationSlot: "current-operation",
+    };
+    stable.timestamp = nextTimestamp;
+    stable.text = text;
+    stable.kind = kind;
+    stable.detail = cleanDisplayText(moment.detail || stable.detail || "", "");
+    stable.dedupeKey = dedupeKey;
+    stable.operationKey = "current-operation";
+    stable.sourceOperationKey = sourceOperationKey;
+    stable.state = String(moment.state || stable.state || "").trim();
+    stable.filePath = cleanDisplayText(moment.filePath || stable.filePath || "", "");
+    stable.added = Number(moment.added ?? stable.added ?? 0) || 0;
+    stable.removed = Number(moment.removed ?? stable.removed ?? 0) || 0;
+    items = items.filter((item) => (
+      item === current
+      || !operationKinds.has(String(item?.kind || "").trim().toLowerCase())
+    ));
+    if (!current) items.push(stable);
+    turn.streamMoments = items.slice(-12);
+    turn.lastStreamEventKind = kind;
+    return;
+  }
   const existing = operationKey
     ? [...items].reverse().find((item) => item.operationKey === operationKey)
     : items[items.length - 1]?.dedupeKey === dedupeKey
@@ -6913,7 +6914,128 @@ function pushAssistantStreamMoment(moment) {
   if (!activeAssistantTurn) return;
   pushTurnStreamMoment(activeAssistantTurn, moment);
   pendingAssistantOperationsDirty = true;
+  pendingAssistantStoryDirty = true;
   ensurePendingAssistantBubbleForRuntime();
+}
+
+function markAssistantOperationStarted() {
+  if (!activeAssistantTurn) return;
+  // Keep the single Thinking label mounted for the whole live turn. Runtime
+  // operations appear below it; toggling this flag on every tool boundary
+  // unmounted/remounted the same glyph layer and visibly restarted its sweep.
+  activeAssistantTurn.isThinkingPhase = true;
+  pendingAssistantThinkingDirty = true;
+  pendingAssistantStoryDirty = true;
+}
+
+function completeRunningStreamMoments(turn = activeAssistantTurn, exceptOperationKey = "") {
+  if (!turn || !Array.isArray(turn.streamMoments)) return;
+  let changed = false;
+  turn.streamMoments.forEach((moment) => {
+    if (String(moment?.state || "").toLowerCase() !== "run") return;
+    if (
+      exceptOperationKey
+      && [moment?.operationKey, moment?.sourceOperationKey].some((key) => String(key || "") === exceptOperationKey)
+    ) return;
+    moment.state = "done";
+    const completedLabels = {
+      activity: zhLabel("执行完成", "Complete"),
+      inspection: zhLabel("查看完成", "Inspection done"),
+      edit: zhLabel("编辑完成", "Edit done"),
+      check: zhLabel("检查完成", "Check done"),
+      command: zhLabel("命令完成", "Command complete"),
+      tool: zhLabel("工具完成", "Tool complete"),
+    };
+    moment.text = completedLabels[String(moment?.kind || "").toLowerCase()] || moment.text;
+    changed = true;
+  });
+  if (changed) {
+    pendingAssistantOperationsDirty = true;
+    pendingAssistantStoryDirty = true;
+  }
+}
+
+function appendAssistantThinkingPhaseMoment() {
+  if (!activeAssistantTurn) return;
+  const last = Array.isArray(activeAssistantTurn.streamMoments)
+    ? activeAssistantTurn.streamMoments[activeAssistantTurn.streamMoments.length - 1]
+    : null;
+  if (last?.kind === "thinking" && last?.state === "run") return;
+  completeRunningStreamMoments(activeAssistantTurn);
+  pushAssistantStreamMoment({
+    kind: "thinking",
+    text: "Thinking",
+    detail: "",
+    state: "run",
+    operationKey: "thinking",
+    dedupeKey: "thinking",
+    timestamp: Date.now(),
+  });
+}
+
+function resumeAssistantThinkingPhase() {
+  if (!activeAssistantTurn) return;
+  activeAssistantTurn.isThinkingPhase = true;
+  const existing = [...(activeAssistantTurn.streamMoments || [])]
+    .reverse()
+    .find((moment) => String(moment?.operationKey || "") === "thinking");
+  if (existing) {
+    existing.state = "run";
+    existing.text = "Thinking";
+    existing.timestamp = Date.now();
+    activeAssistantTurn.lastStreamEventKind = "thinking";
+    pendingAssistantStoryDirty = true;
+    pendingAssistantThinkingDirty = true;
+    return;
+  }
+  appendAssistantThinkingPhaseMoment();
+}
+
+function activityStageMoment(event) {
+  const label = String(event?.label || "").trim().toLowerCase();
+  if (!label || ["context_usage", "permission_required"].includes(label)) return null;
+  const status = String(event?.status || "").trim().toLowerCase();
+  const failed = /fail|error|denied/.test(status);
+  const done = /complete|completed|done|pass|success|ready/.test(status);
+  const phase = String(event?.phase || "").trim().toLowerCase();
+  const stageKey = label === "complete" || label === "starting"
+    ? label
+    : (["plan", "delegate", "execute", "review", "verify", "repair", "finalize"].includes(phase) ? phase : label);
+  if (stageKey === "finalize" && status === "running" && (activeAssistantTurn?.streamMoments || []).some((moment) => (
+    String(moment?.operationKey || "") === "stage:finalize" && String(moment?.state || "") === "run"
+  ))) {
+    return null;
+  }
+  const labels = {
+    starting: [zhLabel("正在准备", "Preparing"), zhLabel("准备完成", "Preparation complete"), zhLabel("准备失败", "Preparation failed")],
+    planning: [zhLabel("正在规划", "Planning"), zhLabel("规划完成", "Plan ready"), zhLabel("规划失败", "Planning failed")],
+    plan: [zhLabel("正在规划", "Planning"), zhLabel("规划完成", "Plan ready"), zhLabel("规划失败", "Planning failed")],
+    delegation: [zhLabel("正在分派任务", "Delegating"), zhLabel("任务已分派", "Delegation ready"), zhLabel("任务分派失败", "Delegation failed")],
+    delegate: [zhLabel("正在分派任务", "Delegating"), zhLabel("任务已分派", "Delegation ready"), zhLabel("任务分派失败", "Delegation failed")],
+    execution: [zhLabel("正在执行", "Executing"), zhLabel("执行完成", "Execution complete"), zhLabel("执行失败", "Execution failed")],
+    execute: [zhLabel("正在执行", "Executing"), zhLabel("执行完成", "Execution complete"), zhLabel("执行失败", "Execution failed")],
+    review: [zhLabel("正在审查", "Reviewing"), zhLabel("审查完成", "Review complete"), zhLabel("审查失败", "Review failed")],
+    verifier: [zhLabel("正在验证", "Verifying"), zhLabel("验证完成", "Verification complete"), zhLabel("验证失败", "Verification failed")],
+    verify: [zhLabel("正在验证", "Verifying"), zhLabel("验证完成", "Verification complete"), zhLabel("验证失败", "Verification failed")],
+    repair: [zhLabel("正在修复", "Repairing"), zhLabel("修复完成", "Repair complete"), zhLabel("修复失败", "Repair failed")],
+    finalize: [zhLabel("正在收尾", "Finalizing"), zhLabel("收尾完成", "Finalized"), zhLabel("收尾失败", "Finalization failed")],
+    complete: [zhLabel("任务已完成", "Task complete"), zhLabel("任务已完成", "Task complete"), zhLabel("任务未完成", "Task incomplete")],
+  };
+  const variants = labels[stageKey];
+  const text = variants?.[failed ? 2 : done ? 1 : 0] || cleanDisplayText(event?.detail || event?.label || "", "");
+  if (!text) return null;
+  const operationKey = `stage:${stageKey}`;
+  const rawDetail = cleanDisplayText(event?.detail || "", "");
+  const detail = rawDetail === text ? "" : (rawDetail.length > 180 ? `${rawDetail.slice(0, 177)}...` : rawDetail);
+  return {
+    kind: "stage",
+    text,
+    detail,
+    state: failed ? "fail" : done ? "done" : "run",
+    operationKey,
+    dedupeKey: operationKey,
+    timestamp: Date.now(),
+  };
 }
 
 function completeContextCompactionMoment() {
@@ -7005,6 +7127,7 @@ function pushAssistantProgressWorklogText(text) {
     text: cleanText,
     detail: "",
     state: "run",
+    operationKey: `progress:${normalizeText(cleanText)}`,
     dedupeKey: `moment:progress:${normalizeText(cleanText)}`,
   };
   pushAssistantStreamMoment(derivedMoment);
@@ -7121,7 +7244,8 @@ function describeToolMoment(tool) {
   const isEditing = ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(normalizedName);
   const isChecking = normalizedName.startsWith("git_") || /(?:test|check|lint|build|verify)/.test(normalizedName);
   const kind = isCommand ? "command" : isEditing ? "edit" : isInspection ? "inspection" : isChecking ? "check" : "tool";
-  const operationKey = `tool-category:${kind}`;
+  const filePath = cleanDisplayText(tool.file_path || tool.params?.file_path || tool.params?.path || tool.params?.target_file || "", "");
+  const operationKey = `tool:${tool.call_id || normalizedName || kind}`;
   const running = ["pending", "approved", "executing", "running"].includes(status);
   const failed = status === "failed" || status === "error" || status === "denied";
   const labels = {
@@ -7136,9 +7260,9 @@ function describeToolMoment(tool) {
     text: labels[kind],
     detail: fileName || "",
     state: failed ? "fail" : running ? "run" : "done",
-    filePath: cleanDisplayText(tool.file_path || "", ""),
+    filePath,
     operationKey,
-    dedupeKey: `${operationKey}:${failed ? "fail" : running ? "run" : "done"}`,
+    dedupeKey: operationKey,
   };
 }
 
@@ -7156,6 +7280,7 @@ function describeEditedFileWorklog(file) {
 
 function describeEditedFileMoment(file) {
   if (!file?.path) return null;
+  if (Number(file.added || 0) === 0 && Number(file.removed || 0) === 0) return null;
   return {
     kind: "edit",
     text: zhLabel(`已编辑 ${displayFileNameOnly(file.path)}`, `Edited ${displayFileNameOnly(file.path)}`),
@@ -7184,7 +7309,9 @@ function normalizedOperationMoment(moment, source = null) {
         ? zhLabel("\u6587\u4ef6\u521b\u5efa", "Created file")
         : state === "run"
           ? zhLabel("\u6b63\u5728\u7f16\u8f91", "Editing")
-          : zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done"),
+          : state === "fail"
+            ? zhLabel("\u7f16\u8f91\u5931\u8d25", "Edit failed")
+            : zhLabel("\u7f16\u8f91\u5b8c\u6210", "Edit done"),
       detail: "",
       filePath,
       dedupeKey: `${moment.dedupeKey || `moment:edit:${filePath}`}:${created ? "created" : state}`,
@@ -7295,55 +7422,8 @@ function describeCompletionWorklog(event) {
 
 function renderAgentRuntimeStrip() {
   if (!agentRuntimeStrip) return;
-  const currentSessionId = String(currentStreamingSessionId || bootstrapData?.current_session_id || "").trim();
-  const isRunning = Boolean(getSessionRunState(currentSessionId)?.running);
-  const recentFiles = Array.isArray(liveEditedFiles) ? liveEditedFiles.filter((item) => item?.path) : [];
-  const fallbackFiles = Array.isArray(activeAssistantTurn?.diffs)
-    ? activeAssistantTurn.diffs
-        .filter((item) => item?.path)
-        .map((item) => ({
-          path: item.path,
-          added: Number(item.added || 0),
-          removed: Number(item.removed || 0),
-        }))
-    : [];
-  const sourceFiles = recentFiles.length ? recentFiles : fallbackFiles;
-  const file = sourceFiles.length
-    ? sourceFiles[sourceFiles.length - 1]
-    : null;
-
-  if (!isRunning || !file) {
-    agentRuntimeStrip.hidden = true;
-    agentRuntimeStrip.innerHTML = "";
-    return;
-  }
-
-  if (activeAssistantTurn && file) {
-    upsertDiffEntry(file);
-  }
-
-  const orderedFiles = sourceFiles.slice(-3).reverse();
-  agentRuntimeStrip.hidden = false;
-  agentRuntimeStrip.innerHTML = `
-    <div class="agent-runtime-chip-wrap">
-      ${orderedFiles.map((item, index) => `
-        <button
-          class="agent-runtime-chip agent-runtime-chip-action${index === 0 ? " is-active" : ""}"
-          type="button"
-          data-open-workspace-file="${escapeHtml(item.path || "")}"
-          data-open-workspace-line="1"
-          data-open-workspace-column="1"
-        >
-          <span class="agent-runtime-label">${escapeHtml(currentLanguage === "zh" ? "正在编辑" : "Editing")}</span>
-          <div class="agent-runtime-value">
-            <span class="agent-runtime-path">${escapeHtml(displayFileNameOnly(item.path || ""))}</span>
-            <span class="agent-runtime-stats">+${escapeHtml(String(item.added || 0))} / -${escapeHtml(String(item.removed || 0))}</span>
-          </div>
-        </button>
-      `).join("")}
-    </div>
-  `;
-  bindTurnInteractionHandlers(agentRuntimeStrip);
+  agentRuntimeStrip.hidden = true;
+  if (agentRuntimeStrip.firstChild) agentRuntimeStrip.replaceChildren();
 }
 
 function renderPermissionStrip() {
@@ -7445,9 +7525,24 @@ function renderTerminalDrawer() {
 
 function openSettingsPanel(panelId) {
   activeSettingsPanel = panelId;
+  if (settingsPanel && settingsPanel.parentElement !== document.body) {
+    document.body.appendChild(settingsPanel);
+  }
   settingsPanels.forEach((panel) => {
     panel.hidden = panel.id !== panelId;
   });
+  if (panelId === "settings-panel") positionSettingsPanel();
+}
+
+function positionSettingsPanel() {
+  if (!settingsPanel || !settingsToggle || settingsPanel.hidden) return;
+  const anchor = settingsToggle.getBoundingClientRect();
+  const gap = 10;
+  const width = Math.min(520, Math.max(320, window.innerWidth - 28));
+  const left = Math.max(14, Math.min(window.innerWidth - width - 14, anchor.right + gap));
+  const bottom = Math.max(14, window.innerHeight - anchor.bottom);
+  settingsPanel.style.setProperty("--settings-left", `${left}px`);
+  settingsPanel.style.setProperty("--settings-bottom", `${bottom}px`);
 }
 
 function closeSettingsPanels() {
@@ -7458,6 +7553,7 @@ function closeSettingsPanels() {
 }
 
 function setActivityPanel(panelId, { preserveMainView = false } = {}) {
+  captureMessageScrollPosition();
   const nextPanel = panelId || null;
   activeActivityPanel = nextPanel;
   if (nextPanel) {
@@ -7479,16 +7575,18 @@ function setActivityPanel(panelId, { preserveMainView = false } = {}) {
   appShell?.classList.toggle("has-search-github-preview", isSearchGitHubPreviewActive());
 
   if (!preserveMainView) {
-    if (nextPanel === "git") {
-      setMainView("git");
+    if (currentMainView === "browser" && nextPanel) {
+      setMainView("chat");
     } else if (currentMainView === "git" && nextPanel !== "git") {
       setMainView("chat");
     }
   }
   syncShellLayoutVars();
   syncLayoutCornerControls();
+  requestAnimationFrame(() => restoreMessageScrollPosition());
 }
 
+/* Marketplace UI removed: the previous catalog had no plugin lifecycle.
 function renderExtensionList(query = "") {
   if (!extensionList) return;
   const keyword = String(query || "").trim().toLowerCase();
@@ -7513,6 +7611,7 @@ function renderExtensionList(query = "") {
         .join("")
     : `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "\u6ca1\u6709\u5339\u914d\u7684\u6269\u5c55\u3002" : "No matching extensions.")}</div>`;
 }
+*/
 
 function searchPlaceholderForMode(mode = searchMode) {
   if (mode === "papers") return t("searchPlaceholderPapers");
@@ -9154,6 +9253,7 @@ function sanitizeMessageContent(text) {
   }
   const visible = cutIndex >= 0 ? raw.slice(0, cutIndex) : raw;
   return visible
+    .replace(/<\/?think\s*>/gi, "")
     .replace(/^\s*\[AGENT\]\s*/i, "")
     .replace(/^[\r\n]+/, "")
     .trimStart();
@@ -9641,6 +9741,26 @@ function syncActiveSessionsFromBootstrap(data, options = {}) {
   });
 }
 
+function clearStaleVisibleRuntime() {
+  const currentSessionId = String(bootstrapData?.current_session_id || "").trim();
+  if (!currentSessionId || bootstrapHasLiveSession(bootstrapData, currentSessionId)) return;
+  const state = getSessionRunState(currentSessionId);
+  if (state) {
+    state.running = false;
+    state.waitingApproval = false;
+  }
+  if (currentStreamingSessionId === currentSessionId) currentStreamingSessionId = null;
+  stopActivity();
+  setStopButtonVisible(false);
+  if (pendingAssistantBubble && !isSending) {
+    pendingAssistantBubble.remove();
+    pendingAssistantBubble = null;
+    resetPendingAssistantRenderState();
+    clearPendingAssistantFrames();
+    resetActiveAssistantTurn();
+  }
+}
+
 function hydrateVisibleRuntimeSnapshot() {
   const currentSessionId = String(bootstrapData?.current_session_id || "").trim();
   if (!currentSessionId) return;
@@ -9661,6 +9781,24 @@ function hydrateVisibleRuntimeSnapshot() {
     activeAssistantTurn.text = snapshotText;
   } else if (!currentText && !activeAssistantTurn.receivedDelta) {
     activeAssistantTurn.text = snapshotText;
+  }
+  const snapshotThinking = String(snapshot.partial_thinking || "").trim();
+  activeAssistantTurn.thinking = snapshotThinking
+    ? [{ content: snapshotThinking, duration_seconds: null }]
+    : [];
+  // An early runtime snapshot often arrives before the provider's first
+  // reasoning token. Preserve the already-mounted Thinking indicator instead
+  // of briefly hiding it and mounting it again on thinking_delta.
+  activeAssistantTurn.isThinkingPhase = Boolean(
+    snapshotThinking || activeAssistantTurn.isThinkingPhase || runState?.running,
+  );
+  if (Number(snapshot.context_window || 0) > 0) {
+    applyContextUsageSnapshot({
+      used_tokens: snapshot.context_used_tokens,
+      context_window: snapshot.context_window,
+      estimated: snapshot.context_usage_estimated,
+      model: snapshot.context_model,
+    });
   }
   activeAssistantTurn.process = snapshot.latest_activity
     ? [{
@@ -9716,6 +9854,16 @@ function hydrateVisibleRuntimeSnapshot() {
   activeAssistantTurn.tools = Array.isArray(snapshot.tool_events)
     ? snapshot.tool_events.map((tool) => ({ ...tool }))
     : [];
+  if (snapshotThinking) {
+    pushTurnStreamMoment(activeAssistantTurn, {
+      kind: "thinking",
+      text: "Thinking",
+      state: activeAssistantTurn.isThinkingPhase ? "run" : "done",
+      operationKey: "thinking",
+      dedupeKey: "thinking",
+      timestamp: Date.now() - 1,
+    });
+  }
   activeAssistantTurn.diffs = Array.isArray(snapshot.edited_files)
     ? snapshot.edited_files.map((file) => ({
         path: file.path,
@@ -9957,6 +10105,7 @@ function resetConversationRuntimeState({ preserveInputFocus = false } = {}) {
   activeStreamGeneration += 1;
   pendingResearchStart = false;
   isSending = false;
+  composerSendSessionId = null;
   suppressVisibleStreamBootstrap = false;
   if (currentStreamingSessionId) {
     const state = getSessionRunState(currentStreamingSessionId);
@@ -9996,6 +10145,36 @@ function resetConversationRuntimeState({ preserveInputFocus = false } = {}) {
     if (preserveInputFocus) {
       messageInput.focus();
     }
+  }
+}
+
+function detachVisibleConversationRuntime({ preserveInputFocus = false } = {}) {
+  const detachedSessionId = String(currentStreamingSessionId || bootstrapData?.current_session_id || "").trim();
+  if (detachedSessionId) cancelStreamPresentationQueue(detachedSessionId);
+  pendingResearchStart = false;
+  isSending = false;
+  composerSendSessionId = null;
+  suppressVisibleStreamBootstrap = false;
+  currentStreamingSessionId = null;
+  pendingPermissionRequest = null;
+  liveToolEvents = [];
+  liveEditedFiles = [];
+  liveProcessEvents = [];
+  pinnedEditedFiles = [];
+  lastVisibleCompletionSignature = "";
+  resetPendingAssistantRenderState();
+  clearPendingAssistantFrames();
+  pendingUserBubble = null;
+  pendingAssistantBubble = null;
+  resetActiveAssistantTurn();
+  renderAgentRuntimeStrip();
+  renderAgentProcessStrip();
+  renderPermissionStrip();
+  stopActivity();
+  setStopButtonVisible(false);
+  if (messageInput) {
+    messageInput.disabled = false;
+    if (preserveInputFocus) messageInput.focus();
   }
 }
 
@@ -10044,7 +10223,6 @@ function syncPendingAssistantRuntimePanel() {
     return;
   }
   const runtimeSummaryParts = summarizeTurnRuntime(activeAssistantTurn);
-  const operationDetailPanels = buildOperationDetailPanels(activeAssistantTurn, { isStreaming: true });
   const permissionMarkup = activeAssistantTurn.permission
     ? `
       <div class="codex-approval-card codex-tool-step codex-approval-step">
@@ -10064,7 +10242,6 @@ function syncPendingAssistantRuntimePanel() {
     : "";
   const runtimePanelContent = [
     permissionMarkup,
-    operationDetailPanels ? `<div class="codex-operation-detail-stack">${operationDetailPanels}</div>` : "",
   ].filter(Boolean).join("");
   const shouldShowRuntimePanel = Boolean(runtimePanelContent);
   const nextHtml = shouldShowRuntimePanel
@@ -10133,12 +10310,13 @@ function ensurePendingAssistantShellBound() {
 
 function syncPendingThinkingIndicator() {
   if (!pendingAssistantThinkingHost || !activeAssistantTurn) return;
-  const shouldShow = Boolean(activeAssistantTurn.isThinkingPhase);
   const existing = pendingAssistantThinkingHost.querySelector("[data-thinking-streaming]");
+  const shouldShow = Boolean(activeAssistantTurn.isThinkingPhase);
   if (shouldShow && !existing) {
-    pendingAssistantThinkingHost.insertAdjacentHTML("beforeend", renderStreamingThinkingIndicator());
+    pendingAssistantThinkingHost.insertAdjacentHTML("afterbegin", renderStreamingThinkingIndicator());
   } else if (!shouldShow && existing) {
     existing.remove();
+    pendingAssistantThinkingNode = null;
   }
 }
 
@@ -10754,8 +10932,54 @@ function upsertToolEntry(tool) {
   });
 }
 
+function generatedImageResult(tool) {
+  if (!tool || !["generate_image", "browser_computer"].includes(tool.name) || !tool.success) return null;
+  try {
+    const value = typeof tool.result === "string" ? JSON.parse(tool.result) : tool.result;
+    const isGeneratedImage = value?.operation === "generate_image";
+    const isBrowserScreenshot = value?.operation === "browser_computer" && value?.action === "screenshot";
+    if ((!isGeneratedImage && !isBrowserScreenshot) || !value.preview_url || !value.image_id) return null;
+    return value;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function renderGeneratedImagePreview(tool) {
+  const image = generatedImageResult(tool);
+  if (!image) return "";
+  const isBrowserScreenshot = image.operation === "browser_computer";
+  const savedPath = cleanDisplayText(image.path || "", "");
+  let toolArgs = tool?.args;
+  if (typeof toolArgs === "string") {
+    try { toolArgs = JSON.parse(toolArgs); } catch (_error) { toolArgs = null; }
+  }
+  const domainQuery = cleanDisplayText(toolArgs?.prompt || toolArgs?.description || "", "").slice(0, 1200);
+  const researchArtifactAttributes = savedPath && !isBrowserScreenshot
+    ? `data-open-research-artifact="${escapeHtml(savedPath)}" data-research-artifact-query="${escapeHtml(domainQuery)}"`
+    : `target="_blank" rel="noopener"`;
+  const saveLabel = currentLanguage === "zh" ? "保存到工作区" : "Save to workspace";
+  const savedLabel = currentLanguage === "zh" ? "已保存" : "Saved";
+  return `
+    <figure class="codex-image-preview">
+      <a href="${escapeHtml(savedPath && !isBrowserScreenshot ? "#" : image.preview_url)}" ${researchArtifactAttributes}>
+        <img src="${escapeHtml(image.preview_url)}" alt="${escapeHtml(currentLanguage === "zh" ? "生成图片预览" : "Generated image preview")}" loading="lazy" />
+      </a>
+      <figcaption>
+        ${isBrowserScreenshot
+          ? `<span class="codex-image-save is-saved">${escapeHtml(currentLanguage === "zh" ? "\u6d4f\u89c8\u5668\u622a\u56fe" : "Browser screenshot")}</span>`
+          : savedPath
+          ? `<button type="button" class="codex-image-save is-saved" data-open-workspace-file="${escapeHtml(savedPath)}">${escapeHtml(savedLabel)} · ${escapeHtml(savedPath)}</button>`
+          : `<button type="button" class="codex-image-save" data-save-generated-image="${escapeHtml(image.image_id)}" data-image-call-id="${escapeHtml(tool.call_id || "")}">${escapeHtml(saveLabel)}</button>`}
+      </figcaption>
+    </figure>
+  `;
+}
+
 function upsertDiffEntry(diff) {
   if (!activeAssistantTurn || !diff?.path) return;
+  if (Number(diff.added || 0) === 0 && Number(diff.removed || 0) === 0
+      && String(diff.before_content || "") === String(diff.after_content || "")) return;
   const existing = activeAssistantTurn.diffs.find((item) => item.path === diff.path);
   if (existing) {
     const changed =
@@ -10935,11 +11159,14 @@ function renderStreamMoment(moment) {
   const isEditing = kind === "edit";
   const isCommand = kind === "command";
   const isRunning = state === "run";
+  // Thinking is rendered once by the dedicated live indicator above the
+  // answer. Suppress its timeline copy (and its leading status circle).
+  if (kind === "thinking") return "";
   if (kind === "compaction") {
     return `
       <div class="codex-context-compaction${isRunning ? " is-streaming" : ""}">
         <span class="codex-context-compaction-line" aria-hidden="true"></span>
-        <span class="codex-context-compaction-text">${escapeHtml(text)}</span>
+        <span class="codex-context-compaction-text${isRunning ? " codex-live-shimmer" : ""}">${escapeHtml(text)}</span>
         <span class="codex-context-compaction-line" aria-hidden="true"></span>
       </div>
     `;
@@ -10962,7 +11189,7 @@ function renderStreamMoment(moment) {
             <path d="M13.8 7.3l2.9 2.9"></path>
           </svg>
         </span>
-        <span class="codex-inline-moment-prefix${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(zhLabel("正在编辑", "Editing"))}"${isRunning ? animationOffset : ""}>${escapeHtml(zhLabel("正在编辑", "Editing"))}</span>
+        <span class="codex-inline-moment-prefix${isRunning ? " is-streaming codex-live-shimmer" : ""}" data-text="${escapeHtml(editPrefix)}"${isRunning ? animationOffset : ""}>${escapeHtml(editPrefix)}</span>
         <span class="codex-inline-moment-file">${escapeHtml(fileName)}</span>
         <span class="codex-inline-moment-stats">
           <span class="is-added">+${escapeHtml(String(added))}</span>
@@ -10973,8 +11200,7 @@ function renderStreamMoment(moment) {
   }
   return `
     <div class="codex-inline-moment codex-inline-moment-status codex-inline-moment-${escapeHtml(state || "done")} codex-inline-moment-${escapeHtml(kind)}">
-      <span class="codex-inline-moment-icon" aria-hidden="true">↳</span>
-      <span class="codex-inline-moment-text${isRunning ? " is-streaming" : ""}" data-text="${escapeHtml(text)}">${escapeHtml(text)}</span>
+      <span class="codex-inline-moment-text${isRunning ? " is-streaming codex-live-shimmer" : ""}" data-text="${escapeHtml(text)}">${escapeHtml(text)}</span>
       ${detail ? `<span class="codex-inline-moment-detail">${escapeHtml(detail)}</span>` : ""}
       ${!detail && prefix ? `<span class="codex-inline-moment-prefix-static">${escapeHtml(prefix)}</span>` : ""}
     </div>
@@ -11073,12 +11299,55 @@ function buildTurnStoryEntries(turn, options = {}) {
     });
   }
 
-  return entries.sort((left, right) => {
+  const sorted = entries.sort((left, right) => {
     const leftTime = Number(left.timestamp || 0) || 0;
     const rightTime = Number(right.timestamp || 0) || 0;
     if (leftTime !== rightTime) return leftTime - rightTime;
     if (left.kind !== right.kind) return left.kind === "text" ? -1 : 1;
     return Number(left.order || 0) - Number(right.order || 0);
+  });
+  const latestByOperation = new Map();
+  sorted.forEach((entry, index) => {
+    const operationKey = entry.kind === "moment" ? String(entry.moment?.operationKey || "") : "";
+    if (operationKey) latestByOperation.set(operationKey, index);
+  });
+  const hasSpecificEditMoment = sorted.some((entry) => (
+    entry.kind === "moment"
+    && String(entry.moment?.kind || "").toLowerCase() === "edit"
+    && cleanDisplayText(entry.moment?.filePath || "", "")
+  ));
+  const operationKinds = new Set(["activity", "stage", "inspection", "edit", "check", "command", "tool"]);
+  let latestOperationIndex = -1;
+  sorted.forEach((entry, index) => {
+    if (
+      entry.kind === "moment"
+      && operationKinds.has(String(entry.moment?.kind || "").toLowerCase())
+    ) {
+      latestOperationIndex = index;
+    }
+  });
+  let keptRunningEdit = false;
+  return sorted.filter((entry, index) => {
+    if (
+      entry.kind === "moment"
+      && operationKinds.has(String(entry.moment?.kind || "").toLowerCase())
+      && index !== latestOperationIndex
+    ) return false;
+    const operationKey = entry.kind === "moment" ? String(entry.moment?.operationKey || "") : "";
+    if (operationKey && latestByOperation.get(operationKey) !== index) return false;
+    if (entry.kind !== "moment" || String(entry.moment?.kind || "").toLowerCase() !== "edit") return true;
+    const state = String(entry.moment?.state || "").toLowerCase();
+    const filePath = cleanDisplayText(entry.moment?.filePath || "", "");
+    if (hasSpecificEditMoment && !filePath) return false;
+    if (state !== "run") return true;
+    const hasLaterRunningEdit = sorted.slice(index + 1).some((candidate) => (
+      candidate.kind === "moment"
+      && String(candidate.moment?.kind || "").toLowerCase() === "edit"
+      && String(candidate.moment?.state || "").toLowerCase() === "run"
+    ));
+    if (hasLaterRunningEdit || keptRunningEdit) return false;
+    keptRunningEdit = true;
+    return true;
   });
 }
 
@@ -11412,40 +11681,53 @@ function renderAssistantTurn(turn, options = {}) {
 
   const subagentBodyMarkup = inlineResearchDelegateDetails && streamingInlineRuntime && subagents.length
     ? `
-      <div class="codex-delegate-list codex-steps-list codex-subagent-list">
-        ${subagents
-          .map((subagent, index) => {
-            const active = isStreaming && index === subagents.length - 1 && String(subagent.status || "").toLowerCase() === "running";
-            return `
-            <div class="codex-delegate-card codex-subagent-card${active ? " is-active" : ""}">
-              <div class="codex-delegate-summary">
-                <span class="codex-delegate-name">${escapeHtml(subagent.name || "subagent")}</span>
-                <span class="codex-delegate-pill">${escapeHtml(renderDelegateStatus(subagent.status || ""))}</span>
+      <div class="codex-subagent-list">
+        ${subagents.map((subagent) => {
+          const status = String(subagent.status || "").toLowerCase();
+          const active = status === "running";
+          const events = Array.isArray(subagent.events) ? subagent.events : [];
+          return `
+            <details class="codex-subagent-card${active ? " is-active" : ""}">
+              <summary class="codex-subagent-summary">
+                <span class="codex-subagent-title${active ? " is-streaming" : ""}">${escapeHtml(subagent.name || "subagent")}</span>
+                <span class="codex-subagent-status">${escapeHtml(renderDelegateStatus(subagent.status || ""))}</span>
+              </summary>
+              <div class="codex-subagent-body">
+                ${subagent.purpose ? `<div class="codex-subagent-purpose">${escapeHtml(subagent.purpose)}</div>` : ""}
+                ${events.length ? `
+                  <div class="codex-subagent-timeline">
+                    ${events.map((event) => {
+                      const eventStatus = String(event.status || "complete").toLowerCase();
+                      const eventRunning = eventStatus === "running";
+                      return `
+                        <div class="codex-subagent-event is-${escapeHtml(eventStatus)}">
+                          <span class="codex-subagent-event-dot" aria-hidden="true"></span>
+                          <div class="codex-subagent-event-content">
+                            <span class="codex-subagent-event-label${eventRunning ? " is-streaming" : ""}">${escapeHtml(event.label || event.kind || "Activity")}</span>
+                            ${event.detail ? `<span class="codex-subagent-event-detail">${escapeHtml(event.detail)}</span>` : ""}
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ""}
+                ${subagent.input ? `<div class="codex-subagent-section"><span>${escapeHtml(zhLabel("\u8f93\u5165", "Input"))}</span><p>${escapeHtml(subagent.input)}</p></div>` : ""}
+                ${subagent.output ? `<div class="codex-subagent-section"><span>${escapeHtml(zhLabel("\u7ed3\u679c", "Result"))}</span><p>${escapeHtml(subagent.output)}</p></div>` : ""}
+                ${Array.isArray(subagent.evidence) && subagent.evidence.length ? `<div class="codex-subagent-section"><span>${escapeHtml(zhLabel("\u8bc1\u636e", "Evidence"))}</span><p>${subagent.evidence.map((item) => escapeHtml(String(item || ""))).join("<br>")}</p></div>` : ""}
               </div>
-              <div class="codex-delegate-body">
-                ${subagent.purpose ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("目的", "Purpose"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.purpose)}</span></div>` : ""}
-                ${subagent.input ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输入", "Input"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.input)}</span></div>` : ""}
-                ${subagent.output ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(zhLabel("输出", "Output"))}</span><span class="codex-delegate-value">${escapeHtml(subagent.output)}</span></div>` : ""}
-                ${
-                  Array.isArray(subagent.evidence) && subagent.evidence.length
-                    ? `<div class="codex-delegate-line"><span class="codex-delegate-key">${escapeHtml(currentLanguage === "zh" ? "证据" : "Evidence")}</span><span class="codex-delegate-value">${subagent.evidence.map((item) => escapeHtml(String(item || ""))).join("<br>")}</span></div>`
-                    : ""
-                }
-              </div>
-            </div>
+            </details>
           `;
-          })
-          .join("")}
+        }).join("")}
       </div>
     `
     : "";
 
   const subagentMarkup = renderRuntimeSectionCard(
-    currentLanguage === "zh" ? "子代理" : "Subagents",
+    currentLanguage === "zh" ? "\u5b50\u4ee3\u7406" : "Subagents",
     String(subagents.length || ""),
     subagentBodyMarkup,
     {
-      open: subagents.some((item) => String(item?.status || "").toLowerCase() === "running"),
+      open: false,
       tone: subagents.some((item) => String(item?.status || "").toLowerCase() === "running") ? "running" : "",
       className: "codex-runtime-section codex-runtime-subagents",
     },
@@ -11524,13 +11806,17 @@ function renderAssistantTurn(turn, options = {}) {
     ? `
       <div class="research-runtime-subagents">
         ${subagents
-          .map((subagent) => `
-            <details class="research-runtime-card"${String(subagent.status || "").toLowerCase() === "running" ? " open" : ""}>
+          .map((subagent) => {
+            const running = String(subagent.status || "").toLowerCase() === "running";
+            const events = Array.isArray(subagent.events) ? subagent.events : [];
+            return `
+            <details class="research-runtime-card${running ? " is-active" : ""}">
               <summary class="research-runtime-summary">
-                <span class="research-runtime-name">${escapeHtml(subagent.name || "subagent")}</span>
+                <span class="research-runtime-name${running ? " is-streaming" : ""}">${escapeHtml(subagent.name || "subagent")}</span>
                 <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(subagent.status || ""))}</span>
               </summary>
               <div class="research-runtime-body">
+                ${renderSubagentEventTimeline(events)}
                 ${subagent.purpose ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("目的", "Purpose"))}</span><strong>${escapeHtml(subagent.purpose)}</strong></div>` : ""}
                 ${subagent.input ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输入", "Input"))}</span><strong>${escapeHtml(subagent.input)}</strong></div>` : ""}
                 ${subagent.output ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输出", "Output"))}</span><strong>${escapeHtml(subagent.output)}</strong></div>` : ""}
@@ -11541,7 +11827,8 @@ function renderAssistantTurn(turn, options = {}) {
                 }
               </div>
             </details>
-          `)
+          `;
+          })
           .join("")}
       </div>
     `
@@ -11696,6 +11983,13 @@ function renderAssistantTurn(turn, options = {}) {
         ? `<div class="codex-answer markdown-body">${renderMarkdown(visibleText)}</div>${worklogStatusesHtml ? `<div class="codex-runtime-statuses">${worklogStatusesHtml}</div>` : ""}`
         : worklogStatusesHtml ? `<div class="codex-runtime-statuses">${worklogStatusesHtml}</div>` : "";
   const decisionCardMarkup = !isStreaming ? renderAssistantDecisionCard(decisionPresentation.card) : "";
+  const generatedImageMarkup = tools
+    .map((tool) => renderGeneratedImagePreview(tool))
+    .filter(Boolean)
+    .join("");
+  const imageGalleryMarkup = generatedImageMarkup
+    ? `<div class="codex-image-gallery">${generatedImageMarkup}</div>`
+    : "";
 
   const runtimePanelContent = [
     operationBodyMarkup,
@@ -11717,6 +12011,7 @@ function renderAssistantTurn(turn, options = {}) {
           <div data-thinking-host>${showStreamingThinking ? renderStreamingThinkingIndicator() : ""}</div>
           ${thinkingMarkup}
           ${textMarkup}
+          ${imageGalleryMarkup}
           ${runtimePanelMarkup}
           ${decisionCardMarkup}
         </div>
@@ -11743,6 +12038,9 @@ function appendUserBubble(content) {
 
 function appendThinkingContent(delta) {
   if (!activeAssistantTurn) return;
+  if (!activeAssistantTurn.isThinkingPhase) {
+    resumeAssistantThinkingPhase();
+  }
   activeAssistantTurn.isThinkingPhase = true;
   const thinking = Array.isArray(activeAssistantTurn.thinking) ? activeAssistantTurn.thinking : [];
   let currentBlock;
@@ -11756,6 +12054,7 @@ function appendThinkingContent(delta) {
   activeAssistantTurn.thinking = thinking;
   preservedThinking = thinking.map((item) => ({ ...item }));
   pendingAssistantThinkingDirty = true;
+  refreshPendingAssistantBubble();
 }
 
 function appendAssistantBubble(content) {
@@ -11787,7 +12086,8 @@ function updateAssistantBubble(content) {
   const deltaContent = sanitizeMessageContent(String(content || ""));
   activeAssistantTurn.receivedDelta = true;
   if (deltaContent.trim()) {
-    activeAssistantTurn.isThinkingPhase = false;
+    completeRunningStreamMoments(activeAssistantTurn);
+    pendingAssistantStoryDirty = true;
   }
   if (deltaContent.trim()) {
     activeAssistantTurn.runtimeNarration = "";
@@ -11907,6 +12207,7 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
   pendingAssistantBubble = null;
   pendingUserBubble = null;
   lastVisibleCompletionSignature = visibleMessagesSignature(visibleConversationMessages(messages || []));
+  syncResearchDomainFinalOutputCard(messages || [], finalData);
   if (keepBottom) {
     scrollMessageStreamToBottom(true);
   }
@@ -12236,10 +12537,84 @@ function bindTurnInteractionHandlers(scope = document) {
       const column = Number(button.getAttribute("data-open-workspace-column") || 0) || null;
       if (!path) return;
       try {
+        const generatedImageCard = button.closest(".codex-image-preview");
+        if (generatedImageCard) {
+          const query = generatedImageCard.querySelector("[data-research-artifact-query]")?.getAttribute("data-research-artifact-query") || "";
+          const opened = await window.AtlasResearchDomains?.openArtifact?.(path, { query, highlight: true });
+          if (opened) return;
+        }
         await openWorkspaceFileAt(path, lineNumber, column);
       } catch (error) {
         console.error(error);
       showToast(appErrorMessage(error, "workspace", "toastSendFailed"));
+      }
+    });
+  });
+
+  scope.querySelectorAll("[data-open-research-artifact]").forEach((button) => {
+    if (button.dataset.boundResearchArtifact === "true") return;
+    button.dataset.boundResearchArtifact = "true";
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const path = button.getAttribute("data-open-research-artifact") || "";
+      const query = button.getAttribute("data-research-artifact-query") || "";
+      if (!path) return;
+      try {
+        const opened = await window.AtlasResearchDomains?.openArtifact?.(path, { query, highlight: true });
+        if (!opened) await openWorkspaceFileAt(path);
+      } catch (error) {
+        console.error(error);
+        showToast(appErrorMessage(error, "workspace", "toastSendFailed"));
+      }
+    });
+  });
+
+  scope.querySelectorAll("[data-save-generated-image]").forEach((button) => {
+    if (button.dataset.boundImageSave === "true") return;
+    button.dataset.boundImageSave = "true";
+    button.addEventListener("click", async () => {
+      const imageId = button.getAttribute("data-save-generated-image") || "";
+      const callId = button.getAttribute("data-image-call-id") || "";
+      if (!imageId) return;
+      const defaultPath = `generated-images/${imageId}`;
+      const requestedPath = await atlasPrompt(
+        currentLanguage === "zh" ? "保存到工作区路径" : "Workspace path",
+        defaultPath,
+      );
+      if (requestedPath == null || !requestedPath.trim()) return;
+      button.disabled = true;
+      try {
+        const sessionId = String(currentStreamingSessionId || bootstrapData?.current_session_id || "").trim();
+        const response = await hostClient.workspace.saveGeneratedImage(
+          imageId,
+          requestedPath.trim(),
+          sessionId,
+          callId,
+        );
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `image save failed: ${response.status}`);
+        }
+        const payload = await response.json();
+        const savedPath = cleanDisplayText(payload?.data?.path || "", requestedPath.trim());
+        const tool = activeAssistantTurn?.tools?.find((item) => item.call_id === callId);
+        const parsed = generatedImageResult(tool);
+        if (tool && parsed) {
+          parsed.path = savedPath;
+          parsed.saved_to_workspace = true;
+          tool.result = JSON.stringify(parsed);
+        }
+        button.removeAttribute("data-save-generated-image");
+        button.setAttribute("data-open-workspace-file", savedPath);
+        button.textContent = `${currentLanguage === "zh" ? "已保存" : "Saved"} · ${savedPath}`;
+        button.classList.add("is-saved");
+        button.disabled = false;
+        await loadBootstrap();
+        showToast(currentLanguage === "zh" ? "图片已保存到工作区" : "Image saved to workspace");
+      } catch (error) {
+        console.error(error);
+        button.disabled = false;
+        showToast(error?.message || t("toastSendFailed"));
       }
     });
   });
@@ -12418,6 +12793,8 @@ function animateDetailsToggle(details, open) {
 }
 
 function renderEmptyState() {
+  return "";
+  /* Removed empty-state markup.
   const researchText = currentLanguage === "zh" ? "今天想探索什么？" : "What would you like to explore today?";
   const chatText = currentLanguage === "zh" ? "告诉我你在想什么" : "Tell me what you're thinking";
   return `
@@ -12429,10 +12806,11 @@ function renderEmptyState() {
         </div>
       </div>
     </div>
-  `;
+  `; */
 }
 
 function shouldShowAgentPreludeBackground(messages = []) {
+  return false;
   const visibleMessages = (messages || []).filter(
     (message) =>
       message &&
@@ -12446,6 +12824,7 @@ function shouldShowAgentPreludeBackground(messages = []) {
 }
 
 async function ensureAgentPreludeBackground() {
+  return;
   if (!agentPreludeSplineFrame) return;
   const src = agentPreludeSplineFrame.getAttribute("src") || "";
   if (!src || agentPreludeSplineFrame.dataset.loaded === "true") return;
@@ -12453,6 +12832,7 @@ async function ensureAgentPreludeBackground() {
 }
 
 function syncAgentPreludeBackground(messages = []) {
+  return;
   if (!agentPreludeBackground) return;
   const visible = shouldShowAgentPreludeBackground(messages);
   window.clearTimeout(agentPreludeHideTimer);
@@ -12469,6 +12849,32 @@ function syncAgentPreludeBackground(messages = []) {
     }, 560);
   }
 }
+
+function syncResearchDomainFinalOutputCard(messages = [], turnOverride = null) {
+  if (!messageStream) return;
+  const turn = turnOverride || [...groupMessagesIntoTurns(visibleConversationMessages(messages || []))]
+    .reverse()
+    .find((entry) => entry?.kind === "assistant_turn" && entry?.data)?.data || null;
+  const options = {
+    host: messageStream,
+    turn,
+    sessionId: String(bootstrapData?.current_session_id || ""),
+    running: isVisibleSessionRunning(),
+  };
+  if (!window.AtlasResearchDomains?.syncPreview) return;
+  Promise.resolve(window.AtlasResearchDomains.syncPreview(options))
+    .catch((error) => {
+      console.debug("Research preview unavailable", error);
+    });
+}
+
+window.AtlasConversation = Object.freeze({
+  latestAssistantTurn() {
+    return [...groupMessagesIntoTurns(visibleConversationMessages(bootstrapData?.messages || []))]
+      .reverse()
+      .find((entry) => entry?.kind === "assistant_turn" && entry?.data)?.data || null;
+  },
+});
 
 function renderMessages(messages, options = {}) {
   if (!messageStream) return;
@@ -12552,6 +12958,7 @@ function renderMessages(messages, options = {}) {
     messageStream.appendChild(wrapper);
   }
   bindTurnInteractionHandlers(messageStream);
+  syncResearchDomainFinalOutputCard(visibleMessages, [...turns].reverse().find((turn) => turn?.kind === "assistant_turn")?.data || null);
   messageStream.querySelectorAll("[data-inline-link]").forEach((link) => {
     link.addEventListener("click", (event) => {
       const href = cleanDisplayText(link.getAttribute("data-inline-link") || "");
@@ -13092,7 +13499,13 @@ function renderCurrentSession(sessions, currentSessionId) {
   const current =
     (sessions || []).find((session) => session.id === currentSessionId) ||
     (sessions || [])[0];
-  if (!current) return;
+  if (!current) {
+    if (visualizationFloatingChatTitle) visualizationFloatingChatTitle.textContent = currentLanguage === "zh" ? "当前会话" : "Current conversation";
+    return;
+  }
+  if (visualizationFloatingChatTitle) {
+    visualizationFloatingChatTitle.textContent = clipDisplayText(current.title, 34) || (currentLanguage === "zh" ? "当前会话" : "Current conversation");
+  }
   currentSessionList.appendChild(createSessionEntry(current, { emphasis: true }));
 }
 
@@ -13314,6 +13727,28 @@ function renderResearchLegacy(research) {
   `;
 }
 
+function renderSubagentEventTimeline(events) {
+  const source = Array.isArray(events) ? events : [];
+  if (!source.length) return "";
+  return `
+    <div class="codex-subagent-timeline">
+      ${source.map((event) => {
+        const status = String(event?.status || "complete").toLowerCase();
+        const running = status === "running";
+        return `
+          <div class="codex-subagent-event is-${escapeHtml(status)}">
+            <span class="codex-subagent-event-dot" aria-hidden="true"></span>
+            <div class="codex-subagent-event-content">
+              <span class="codex-subagent-event-label${running ? " is-streaming" : ""}">${escapeHtml(event?.label || event?.kind || "Activity")}</span>
+              ${event?.detail ? `<span class="codex-subagent-event-detail">${escapeHtml(event.detail)}</span>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderResearchRuntimeSubagents(items, options = {}) {
   const subagents = Array.isArray(items) ? items : [];
   const limit = Number.isFinite(options.limit) ? options.limit : null;
@@ -13322,13 +13757,16 @@ function renderResearchRuntimeSubagents(items, options = {}) {
   return `
     <div class="research-runtime-subagents">
       ${visible
-        .map((item) => `
-          <details class="research-runtime-card"${String(item.status || "").toLowerCase() === "running" ? " open" : ""}>
+        .map((item) => {
+          const running = String(item.status || "").toLowerCase() === "running";
+          return `
+          <details class="research-runtime-card${running ? " is-active" : ""}">
             <summary class="research-runtime-summary">
-              <span class="research-runtime-name">${escapeHtml(cleanDisplayText(item.name || "subagent", currentLanguage === "zh" ? "子代理" : "subagent"))}</span>
+              <span class="research-runtime-name${running ? " is-streaming" : ""}">${escapeHtml(cleanDisplayText(item.name || "subagent", currentLanguage === "zh" ? "子代理" : "subagent"))}</span>
               <span class="research-runtime-pill">${escapeHtml(renderDelegateStatus(item.status || ""))}</span>
             </summary>
             <div class="research-runtime-body">
+              ${renderSubagentEventTimeline(item.events)}
               ${cleanDisplayText(item.purpose) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("目的", "Purpose"))}</span><strong>${escapeHtml(cleanDisplayText(item.purpose))}</strong></div>` : ""}
               ${cleanDisplayText(item.input) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输入", "Input"))}</span><strong>${escapeHtml(cleanDisplayText(item.input))}</strong></div>` : ""}
               ${cleanDisplayText(String(item.output || "").slice(0, options.outputLimit || 220)) ? `<div class="research-runtime-line"><span>${escapeHtml(zhLabel("输出", "Output"))}</span><strong>${escapeHtml(cleanDisplayText(String(item.output || "").slice(0, options.outputLimit || 220)))}</strong></div>` : ""}
@@ -13339,7 +13777,8 @@ function renderResearchRuntimeSubagents(items, options = {}) {
               }
             </div>
           </details>
-        `)
+        `;
+        })
         .join("")}
     </div>
   `;
@@ -14734,6 +15173,7 @@ async function runPaperWorkflow(options = {}) {
     const response = await hostClient.research.paperWorkflow({
       topic,
       session_id: sessionId,
+      generate_images: !autoTriggered,
     });
     if (!response.ok) {
       const errorText = await response.text();
@@ -15109,7 +15549,8 @@ function collectSettingsPayload() {
     const raw = String(getSegmentedValue(element, fallback)).trim().toLowerCase();
     if (raw === "unlimited") return 0;
     const numeric = Number(raw);
-    return Number.isFinite(numeric) ? numeric : Number(fallback);
+    const fallbackNumber = Number(fallback);
+    return Number.isFinite(numeric) ? numeric : (Number.isFinite(fallbackNumber) ? fallbackNumber : 0);
   };
   const toolchains = {};
   runtimeToolchainInputs.forEach((input) => {
@@ -15147,17 +15588,17 @@ function syncSettingsFromConfig(config) {
   setSegmentedValue(
     maxToolCalls,
     normalizeChoice(
-      config.max_tool_calls_per_minute === 0 ? "unlimited" : String(config.max_tool_calls_per_minute ?? 30),
-      ["10", "30", "unlimited"],
-      "unlimited",
+      String(config.max_tool_calls_per_minute ?? 0),
+      ["10", "30", "0"],
+      "0",
     )
   );
   setSegmentedValue(
     burstLimit,
     normalizeChoice(
-      config.burst_limit === 0 ? "unlimited" : String(config.burst_limit ?? 5),
-      ["1", "5", "unlimited"],
-      "unlimited",
+      String(config.burst_limit ?? 0),
+      ["1", "5", "0"],
+      "0",
     )
   );
   if (runtimeWorkspaceRoot) runtimeWorkspaceRoot.value = config.workspace_root || "";
@@ -15180,7 +15621,7 @@ function syncWorkspaceHeader(workspaceRoot) {
   if (workspaceRootLabel) workspaceRootLabel.textContent = root;
   if (workspaceTitle) workspaceTitle.textContent = currentLanguage === "zh" ? "工作区" : "Workspace";
   if (typeof document !== "undefined") {
-    document.title = `${name} / Agent Workspace`;
+    document.title = `${name} / Atlas IDE`;
   }
 }
 
@@ -15636,6 +16077,7 @@ function renderGitGraph(git) {
     return;
   }
     gitGraphView.innerHTML = `<div class="git-empty">${escapeHtml(currentLanguage === "zh" ? "正在加载图谱..." : "Loading graph...")}</div>`;
+  const graphRows = buildGitGraphRows(rows);
   gitGraphView.innerHTML = rows.length
     ? `
       <section class="git-panel git-graph-panel">
@@ -15710,7 +16152,11 @@ function renderGitWorkspace(git) {
     button.addEventListener("click", async () => {
       const branch = button.getAttribute("data-git-delete-branch") || "";
       if (!branch) return;
-      if (!window.confirm(template("gitDeleteBranchConfirm", { branch }))) return;
+      if (!await atlasConfirm(template("gitDeleteBranchConfirm", { branch }), {
+        title: currentLanguage === "zh" ? "删除分支" : "Delete branch",
+        confirmLabel: currentLanguage === "zh" ? "删除" : "Delete",
+        danger: true,
+      })) return;
       try {
         await runGitAction("delete_branch", { branch });
       } catch (error) {
@@ -15722,7 +16168,7 @@ function renderGitWorkspace(git) {
 
   gitBranchesView.querySelectorAll("[data-git-create-branch]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const branch = window.prompt(t("gitBranchPrompt"), "");
+      const branch = await atlasPrompt(t("gitBranchPrompt"), "");
       if (branch == null || !branch.trim()) return;
       try {
         await runGitAction("create_branch", { branch: branch.trim() });
@@ -15734,27 +16180,184 @@ function renderGitWorkspace(git) {
   });
 }
 
+function applyVisualizationChatPosition() {
+  if (!workspaceChat || !workspaceBody) return;
+  const floating = currentMainView === "visualization" && !visualizationConversationSplit;
+  if (!floating || !visualizationChatPosition) {
+    workspaceChat.style.removeProperty("left");
+    workspaceChat.style.removeProperty("top");
+    workspaceChat.style.removeProperty("right");
+    workspaceChat.style.removeProperty("bottom");
+    workspaceChat.style.removeProperty("width");
+    workspaceChat.style.removeProperty("height");
+    return;
+  }
+  if (visualizationChatSize) {
+    visualizationChatSize.width = Math.max(320, Math.min(workspaceBody.clientWidth - 16, visualizationChatSize.width));
+    visualizationChatSize.height = Math.max(300, Math.min(workspaceBody.clientHeight - 16, visualizationChatSize.height));
+    workspaceChat.style.width = `${visualizationChatSize.width}px`;
+    workspaceChat.style.height = `${visualizationChatSize.height}px`;
+  }
+  visualizationChatPosition.left = Math.max(8, Math.min(workspaceBody.clientWidth - workspaceChat.offsetWidth - 8, visualizationChatPosition.left));
+  visualizationChatPosition.top = Math.max(8, Math.min(workspaceBody.clientHeight - workspaceChat.offsetHeight - 8, visualizationChatPosition.top));
+  workspaceChat.style.left = `${visualizationChatPosition.left}px`;
+  workspaceChat.style.top = `${visualizationChatPosition.top}px`;
+  workspaceChat.style.right = "auto";
+  workspaceChat.style.bottom = "auto";
+}
+
+function syncVisualizationConversationLayout() {
+  const isVisualization = currentMainView === "visualization";
+  const isSystemPerformance = isVisualization && visualizationActiveKind === "system";
+  const isSplit = isVisualization && !isSystemPerformance && visualizationConversationSplit;
+  const isFloating = isVisualization && !isSystemPerformance && !isSplit;
+  workspaceBody?.classList.toggle("is-visualization-split", isSplit);
+  workspaceBody?.classList.toggle("is-visualization-full", isFloating);
+  workspaceBody?.classList.toggle("is-system-performance", isSystemPerformance);
+  workspaceChat?.classList.toggle("is-visualization-floating-chat", isFloating);
+  if (visualizationFloatingChatHead) visualizationFloatingChatHead.hidden = !isFloating;
+  if (visualizationFloatingChatResize) visualizationFloatingChatResize.hidden = !isFloating;
+  if (visualizationChatToggle) {
+    visualizationChatToggle.hidden = isSystemPerformance;
+    visualizationChatToggle.setAttribute("aria-pressed", isSplit ? "true" : "false");
+    const label = isSplit
+      ? (currentLanguage === "zh" ? "切换为浮动会话卡片" : "Use floating conversation card")
+      : (currentLanguage === "zh" ? "在右侧并排显示对话" : "Show conversation beside visualization");
+    visualizationChatToggle.setAttribute("aria-label", label);
+    visualizationChatToggle.setAttribute("title", label);
+    visualizationChatToggle.classList.toggle("is-active", isSplit);
+  }
+  applyVisualizationChatPosition();
+}
+
+function startVisualizationChatDrag(event) {
+  if (event.button !== 0 || !workspaceChat || !workspaceBody || visualizationConversationSplit || currentMainView !== "visualization") return;
+  const cardRect = workspaceChat.getBoundingClientRect();
+  const bodyRect = workspaceBody.getBoundingClientRect();
+  visualizationChatDrag = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - cardRect.left,
+    offsetY: event.clientY - cardRect.top,
+    bodyLeft: bodyRect.left,
+    bodyTop: bodyRect.top,
+  };
+  visualizationChatPosition = {
+    left: cardRect.left - bodyRect.left,
+    top: cardRect.top - bodyRect.top,
+  };
+  visualizationFloatingChatHead?.setPointerCapture?.(event.pointerId);
+  workspaceChat.classList.add("is-dragging");
+  event.preventDefault();
+}
+
+function moveVisualizationChatDrag(event) {
+  if (!visualizationChatDrag || !workspaceChat || !workspaceBody || event.pointerId !== visualizationChatDrag.pointerId) return;
+  const bodyRect = workspaceBody.getBoundingClientRect();
+  const cardRect = workspaceChat.getBoundingClientRect();
+  const left = Math.max(8, Math.min(bodyRect.width - cardRect.width - 8, event.clientX - bodyRect.left - visualizationChatDrag.offsetX));
+  const top = Math.max(8, Math.min(bodyRect.height - cardRect.height - 8, event.clientY - bodyRect.top - visualizationChatDrag.offsetY));
+  visualizationChatPosition = { left, top };
+  applyVisualizationChatPosition();
+}
+
+function endVisualizationChatDrag(event) {
+  if (!visualizationChatDrag) return;
+  if (visualizationFloatingChatHead?.releasePointerCapture && visualizationChatDrag.pointerId != null) {
+    try { visualizationFloatingChatHead.releasePointerCapture(visualizationChatDrag.pointerId); } catch (_error) {}
+  }
+  workspaceChat?.classList.remove("is-dragging");
+  visualizationChatDrag = null;
+}
+
+function startVisualizationChatResize(event) {
+  if (event.button !== 0 || !workspaceChat || !workspaceBody || visualizationConversationSplit || currentMainView !== "visualization") return;
+  const cardRect = workspaceChat.getBoundingClientRect();
+  const bodyRect = workspaceBody.getBoundingClientRect();
+  visualizationChatResize = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    width: cardRect.width,
+    height: cardRect.height,
+    anchorRight: cardRect.right - bodyRect.left,
+    anchorBottom: cardRect.bottom - bodyRect.top,
+  };
+  visualizationChatPosition = {
+    left: cardRect.left - bodyRect.left,
+    top: cardRect.top - bodyRect.top,
+  };
+  visualizationChatSize = { width: cardRect.width, height: cardRect.height };
+  visualizationFloatingChatResize?.setPointerCapture?.(event.pointerId);
+  workspaceChat.classList.add("is-resizing");
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function moveVisualizationChatResize(event) {
+  if (!visualizationChatResize || !workspaceBody || event.pointerId !== visualizationChatResize.pointerId) return;
+  const maxWidth = Math.max(320, workspaceBody.clientWidth - 16);
+  const maxHeight = Math.max(300, workspaceBody.clientHeight - 16);
+  const width = Math.max(320, Math.min(maxWidth, visualizationChatResize.width - (event.clientX - visualizationChatResize.startX)));
+  const height = Math.max(300, Math.min(maxHeight, visualizationChatResize.height - (event.clientY - visualizationChatResize.startY)));
+  const left = Math.max(8, visualizationChatResize.anchorRight - width);
+  const top = Math.max(8, visualizationChatResize.anchorBottom - height);
+  visualizationChatSize = { width, height };
+  visualizationChatPosition = { left, top };
+  applyVisualizationChatPosition();
+}
+
+function endVisualizationChatResize() {
+  if (!visualizationChatResize) return;
+  if (visualizationFloatingChatResize?.releasePointerCapture && visualizationChatResize.pointerId != null) {
+    try { visualizationFloatingChatResize.releasePointerCapture(visualizationChatResize.pointerId); } catch (_error) {}
+  }
+  workspaceChat?.classList.remove("is-resizing");
+  visualizationChatResize = null;
+}
+
 function setMainView(nextView) {
   captureMessageScrollPosition();
-  currentMainView = nextView === "git" ? "git" : nextView === "browser" ? "browser" : "chat";
-  const workspaceBody = document.getElementById("workspace-body");
-  const workspaceChat = document.querySelector(".workspace-chat");
+  currentMainView = nextView === "browser"
+    ? "browser"
+    : nextView === "visualization"
+      ? "visualization"
+      : nextView === "domain"
+        ? "domain"
+        : "chat";
   const conversationStage = document.querySelector(".conversation-stage");
   const composer = document.querySelector(".composer-shell");
+  const isVisualization = currentMainView === "visualization";
+  const isDomain = currentMainView === "domain";
 
-  if (workspaceChat) workspaceChat.hidden = currentMainView === "git";
-  if (gitWorkspace) gitWorkspace.hidden = currentMainView !== "git";
+  appShell?.classList.toggle("is-visualization-fullscreen", isVisualization);
+  appShell?.classList.toggle("is-research-domain-workspace", isDomain);
+
+  if (workspaceChat) workspaceChat.hidden = isVisualization && visualizationActiveKind === "system";
+  if (gitWorkspace) gitWorkspace.hidden = false;
   if (browserWorkspace) browserWorkspace.hidden = currentMainView !== "browser";
+  if (visualizationWorkspace) visualizationWorkspace.hidden = !isVisualization;
+  if (researchDomainWorkspace) researchDomainWorkspace.hidden = !isDomain;
+  if (currentHostMeta.supportsNativeBrowser) {
+    window.setTimeout(() => syncNativeBrowser(currentMainView === "browser" && browserState.currentUrl ? "show" : "hide"), 0);
+  }
   if (workspaceBody) {
     workspaceBody.classList.toggle("is-browser-split", currentMainView === "browser");
+    workspaceBody.classList.toggle("is-domain-split", isDomain);
   }
   if (conversationStage) conversationStage.hidden = false;
-  if (composer) composer.hidden = currentMainView === "git";
+  if (composer) composer.hidden = false;
   if (gitNav) {
-    gitNav.classList.toggle("is-active", currentMainView === "git");
+    gitNav.classList.toggle("is-active", activeActivityPanel === "git");
   }
+  browserRailButton?.classList.toggle("is-active", currentMainView === "browser");
+  visualizationRailButton?.classList.toggle("is-active", isVisualization);
+  syncVisualizationConversationLayout();
   applyDockLayout();
   syncLayoutCornerControls();
+  if (isVisualization) window.AtlasVisualization?.activate();
+  else window.AtlasVisualization?.deactivate();
+  if (isDomain) window.AtlasResearchDomains?.activate?.();
+  else window.AtlasResearchDomains?.deactivate?.();
   requestAnimationFrame(() => restoreMessageScrollPosition());
 }
 
@@ -15786,6 +16389,7 @@ function setGitView(nextView) {
 
 function renderFromState() {
   if (!bootstrapData) return;
+  applyContextUsageSnapshot(bootstrapData.context_usage);
   syncAcceptedDiffStatusesFromMessages(bootstrapData.messages || []);
   syncActiveSessionsFromBootstrap(bootstrapData, {
     preserveRunningSessionId: localStreamingSessionId(bootstrapData?.current_session_id || ""),
@@ -15813,7 +16417,6 @@ function renderFromState() {
   renderResearch(bootstrapData.research || null);
   renderGitWorkspace(bootstrapData.git || null);
   renderWorkspaceTree(bootstrapData.workspace_browser || null);
-  renderExtensionList(extensionSearchInput?.value || "");
   renderSearchPanel();
   renderTerminalDrawer();
 }
@@ -15899,10 +16502,7 @@ function applyBootstrap(data) {
     terminalRailButton.hidden = !currentHostMeta.supportsTerminal;
   }
   if (showSandboxNotice) {
-    markSandboxNoticeShown(data?.sandbox);
-    window.setTimeout(() => {
-      showToast(t("toastSandboxInitialized"));
-    }, 260);
+    window.setTimeout(() => showSandboxWelcome(data?.sandbox), 260);
   }
 }
 
@@ -15926,7 +16526,6 @@ function applyTranslations() {
   updateEffortUI();
   syncWorkspaceCodeRenderToggle();
   applyWorkspaceMode(currentWorkspaceMode);
-  renderExtensionList(extensionSearchInput?.value || "");
   renderSearchPanel();
   setActivityPanel(activeActivityPanel, { preserveMainView: true });
   setMainView(currentMainView);
@@ -15949,6 +16548,10 @@ function setLanguage(nextLanguage) {
 async function saveSettings() {
   const reopenSettings = activeSettingsPanel === "settings-panel";
   const reopenTab = activeSettingsTab;
+  const previousModel = cleanDisplayText(bootstrapData?.config?.model || "", "");
+  const requestedModel = cleanDisplayText(primaryModel?.value || previousModel, previousModel);
+  const currentSessionId = String(bootstrapData?.current_session_id || "").trim();
+  const currentRun = getSessionRunState(currentSessionId);
   const response = await hostClient.settings.update(collectSettingsPayload());
   if (!response.ok) {
     const errorText = await response.text();
@@ -15959,7 +16562,13 @@ async function saveSettings() {
     openSettingsPanel("settings-panel");
     setSettingsTab(reopenTab);
   }
-  showToast(t("toastSettingsSaved"));
+  if (currentRun?.running && requestedModel && requestedModel !== previousModel) {
+    showToast(currentLanguage === "zh"
+      ? `已切换到 ${requestedModel}；当前任务继续使用 ${lastContextUsage.model || previousModel}，下一轮生效`
+      : `Switched to ${requestedModel}; the active task stays on ${lastContextUsage.model || previousModel} and the change applies next turn`);
+  } else {
+    showToast(t("toastSettingsSaved"));
+  }
 }
 
 async function persistSettingsSilently() {
@@ -16019,15 +16628,17 @@ async function loadBootstrap() {
     throw new Error(`bootstrap failed: ${response.status}`);
   }
   const payload = await response.json();
-  setGitLoadState();
-  applyBootstrap(payload.data);
   syncActiveSessionsFromBootstrap(payload.data, {
     preserveRunningSessionId: localStreamingSessionId(payload?.data?.current_session_id || ""),
   });
+  setGitLoadState();
+  applyBootstrap(payload.data);
+  clearStaleVisibleRuntime();
   if (payload?.data?.git) {
     currentMainView = ["git", "browser"].includes(currentMainView) ? currentMainView : currentMainView;
     renderGitWorkspace(payload.data.git);
   }
+  loadProjectOperations().catch((error) => console.error("project operations", error));
 }
 
 async function refreshBackgroundSessionState() {
@@ -16076,6 +16687,7 @@ async function refreshBackgroundSessionState() {
         workspace_browser: nextData.workspace_browser || bootstrapData.workspace_browser || null,
         current_session_id: nextData.current_session_id || bootstrapData.current_session_id || null,
       };
+      applyContextUsageSnapshot(nextData.context_usage);
       syncActiveSessionsFromBootstrap(nextData, {
         preserveRunningSessionId: preservedRunningSessionId,
       });
@@ -16089,7 +16701,6 @@ async function refreshBackgroundSessionState() {
       renderResearch(bootstrapData.research || null);
       renderGitWorkspace(bootstrapData.git || null);
       renderWorkspaceTree(bootstrapData.workspace_browser || null);
-      renderExtensionList(extensionSearchInput?.value || "");
       renderTerminalDrawer();
       if (isVisibleSessionRunning()) {
         hydrateVisibleRuntimeSnapshot();
@@ -16097,11 +16708,12 @@ async function refreshBackgroundSessionState() {
       return;
     }
 
-    setGitLoadState();
-    applyBootstrap(nextData);
     syncActiveSessionsFromBootstrap(nextData, {
       preserveRunningSessionId: preservedRunningSessionId,
     });
+    setGitLoadState();
+    applyBootstrap(nextData);
+    clearStaleVisibleRuntime();
     if (nextData?.git) {
       currentMainView = ["git", "browser"].includes(currentMainView) ? currentMainView : currentMainView;
       renderGitWorkspace(nextData.git);
@@ -16176,17 +16788,6 @@ async function loadGitState(options = {}) {
   }
 }
 
-async function loadExtensions() {
-  const response = await hostClient.extensions.list();
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `extensions failed: ${response.status}`);
-  }
-  const payload = await response.json();
-  extensionCatalog = Array.isArray(payload?.data?.extensions?.items) ? payload.data.extensions.items : [];
-  renderExtensionList(extensionSearchInput?.value || "");
-}
-
 async function loadRunDebugState() {
   const response = await hostClient.runDebug.state();
   if (!response.ok) {
@@ -16197,6 +16798,25 @@ async function loadRunDebugState() {
   runDebugState = payload?.data?.run_debug || null;
   renderRunDebug(runDebugState);
 }
+
+async function loadProjectOperations() {
+  if (!projectIndexState || !projectTaskList) return;
+  try {
+    const [indexResponse, taskResponse] = await Promise.all([hostClient.workspace.indexState(), hostClient.tasks.state()]);
+    const indexPayload = await indexResponse.json(); const taskPayload = await taskResponse.json();
+    const index = indexPayload?.data || indexPayload || {};
+    projectIndexState.textContent = `${Number(index.files || 0)} files · ${Number(index.chunks || 0)} chunks${index.updated_at ? ` · ${new Date(index.updated_at * 1000).toLocaleString()}` : ""}`;
+    const tasks = taskPayload?.data?.tasks || taskPayload?.tasks || [];
+    projectTaskList.innerHTML = tasks.length ? tasks.map((task) => `<article class="project-operation-item"><strong>${escapeHtml(task.title || task.command)}</strong><span>${escapeHtml(task.kind || "batch")} · ${escapeHtml(task.status || "queued")}</span><div class="project-operation-actions">${task.status !== "running" ? `<button data-task-start="${escapeHtml(task.id)}">Resume</button>` : `<button data-task-cancel="${escapeHtml(task.id)}">Stop</button>`}<button data-task-log="${escapeHtml(task.id)}">Log</button></div></article>`).join("") : `<div class="project-index-state">No background tasks</div>`;
+  } catch (error) { projectIndexState.textContent = String(error?.message || error); }
+}
+
+projectIndexUpdate?.addEventListener("click", async () => { projectIndexUpdate.disabled = true; projectIndexState.textContent = "Indexing changed files…"; try { await hostClient.workspace.indexUpdate(); await loadProjectOperations(); } finally { projectIndexUpdate.disabled = false; } });
+projectIndexQuery?.addEventListener("keydown", async (event) => { if (event.key !== "Enter") return; const query = projectIndexQuery.value.trim(); if (!query) return; const response = await hostClient.workspace.indexSearch(query); const payload = await response.json(); const hits = payload?.data || payload || []; projectIndexResults.innerHTML = hits.length ? hits.map((hit) => `<button class="project-operation-item" data-index-path="${escapeHtml(hit.path)}"><strong>${escapeHtml(hit.path)}</strong><span>${escapeHtml(hit.location)} · ${escapeHtml(hit.snippet)}</span></button>`).join("") : `<div class="project-index-state">No matches</div>`; });
+projectIndexResults?.addEventListener("click", (event) => { const path = event.target.closest("[data-index-path]")?.dataset.indexPath; if (path) openWorkspaceFile(path); });
+projectTaskAdd?.addEventListener("click", async () => { const title = await atlasPrompt("Background task", "Long task", { message: "Name this experiment, training, or batch job.", confirmLabel: "Next" }); if (!title) return; const command = await atlasPrompt(title, "", { message: "Command to run inside this project", confirmLabel: "Queue" }); if (!command) return; await hostClient.tasks.enqueue({ title, kind: "batch", command, start: true }); await loadProjectOperations(); });
+projectTaskList?.addEventListener("click", async (event) => { const start = event.target.closest("[data-task-start]")?.dataset.taskStart; const cancel = event.target.closest("[data-task-cancel]")?.dataset.taskCancel; const log = event.target.closest("[data-task-log]")?.dataset.taskLog; if (start) await hostClient.tasks.start(start); if (cancel) await hostClient.tasks.cancel(cancel); if (log) { const response = await hostClient.tasks.log(log); const payload = await response.json(); await atlasConfirm(payload?.data?.log || payload?.log || "No output", { title: "Task log", confirmLabel: "Close" }); } await loadProjectOperations(); });
+projectWindowOpen?.addEventListener("click", () => sendNativeWindowAction("new_project_window", { workspace: "" }));
 
 async function loadTerminalState() {
   const response = await hostClient.terminals.state();
@@ -16287,7 +16907,8 @@ async function createSession() {
   if (!response.ok) {
     throw new Error(`create session failed: ${response.status}`);
   }
-  resetConversationRuntimeState({ preserveInputFocus: true });
+  // Creating another conversation is a view change; any previous agent run continues in its session.
+  detachVisibleConversationRuntime({ preserveInputFocus: true });
   await loadBootstrap();
   messageInput?.focus();
   showToast(t("toastSessionCreated"));
@@ -16298,7 +16919,8 @@ async function switchSession(sessionId) {
   if (!response.ok) {
     throw new Error(`switch session failed: ${response.status}`);
   }
-  resetConversationRuntimeState({ preserveInputFocus: true });
+  // Switching views must not cancel or invalidate the stream owned by the previous session.
+  detachVisibleConversationRuntime({ preserveInputFocus: true });
   await loadBootstrap();
   showToast(t("toastSessionSwitched"));
 }
@@ -16320,13 +16942,148 @@ async function deleteSession(sessionId) {
   paperWorkflowPendingSessions.delete(String(sessionId || "").trim());
   paperWorkflowAutoTriggeredSessions.delete(String(sessionId || "").trim());
   paperWorkflowPromptDismissedSessions.delete(String(sessionId || "").trim());
+  if (String(currentStreamingSessionId || "").trim() === String(sessionId || "").trim()) {
+    resetConversationRuntimeState();
+  }
   await loadBootstrap();
+}
+
+function visibleStreamSessionMatches(sessionId) {
+  return String(sessionId || "").trim() === String(bootstrapData?.current_session_id || "").trim();
+}
+
+function streamDeltaField(event) {
+  if (event?.type === "assistant_delta") return "delta";
+  if (event?.type === "thinking_delta") return "thinking_delta";
+  return "";
+}
+
+function scheduleStreamPresentationPump(queue) {
+  if (!queue || queue.timer != null || queue.pumping) return;
+  queue.timer = window.setTimeout(() => {
+    queue.timer = null;
+    pumpStreamPresentationQueue(queue);
+  }, 12);
+}
+
+function settleStreamPresentationQueue(queue) {
+  if (!queue || queue.items.length || queue.pumping || queue.timer != null) return;
+  const waiters = queue.waiters.splice(0);
+  if (queue.error) {
+    waiters.forEach(({ reject }) => reject(queue.error));
+  } else {
+    waiters.forEach(({ resolve }) => resolve());
+  }
+}
+
+function pumpStreamPresentationQueue(queue) {
+  if (!queue || queue.pumping) return;
+  queue.pumping = true;
+  try {
+    const item = queue.items[0];
+    if (!item) return;
+    const event = item.event;
+    const field = streamDeltaField(event);
+    if (field === "thinking_delta") {
+      queue.items.shift();
+      handleStreamEvent(event, queue.sessionId);
+    } else if (field === "delta") {
+      const source = String(event?.[field] || "");
+      const queuedChars = queue.items.reduce((total, queued) => (
+        total + (streamDeltaField(queued.event) === "delta" ? String(queued.event.delta || "").length : 0)
+      ), 0);
+      const budget = queuedChars > 4000 ? 120 : queuedChars > 1600 ? 72 : queuedChars > 480 ? 40 : 18;
+      let splitAt = Math.min(source.length, budget);
+      if (splitAt < source.length && /[\uD800-\uDBFF]/.test(source.charAt(splitAt - 1))) {
+        splitAt += 1;
+      }
+      const presented = source.slice(0, splitAt);
+      const remaining = source.slice(splitAt);
+      handleStreamEvent({ ...event, [field]: presented }, queue.sessionId);
+      if (remaining) {
+        item.event = { ...event, [field]: remaining };
+      } else {
+        queue.items.shift();
+      }
+    } else {
+      queue.items.shift();
+      handleStreamEvent(event, queue.sessionId);
+    }
+  } catch (error) {
+    queue.error = error;
+    queue.items.length = 0;
+  } finally {
+    queue.pumping = false;
+    if (queue.items.length && !queue.error) {
+      scheduleStreamPresentationPump(queue);
+    } else {
+      settleStreamPresentationQueue(queue);
+    }
+  }
+}
+
+function enqueueStreamPresentationEvent(event, sessionId) {
+  if (!event) return;
+  if (!visibleStreamSessionMatches(sessionId)) {
+    handleStreamEvent(event, sessionId);
+    return;
+  }
+  const key = String(sessionId || "").trim();
+  let queue = streamPresentationQueues.get(key);
+  if (!queue) {
+    queue = { sessionId: key, items: [], waiters: [], timer: null, pumping: false, error: null };
+    streamPresentationQueues.set(key, queue);
+  }
+  const field = streamDeltaField(event);
+  const last = queue.items[queue.items.length - 1];
+  if (field && streamDeltaField(last?.event) === field) {
+    last.event[field] = `${String(last.event[field] || "")}${String(event[field] || "")}`;
+  } else {
+    queue.items.push({ event: { ...event } });
+  }
+  scheduleStreamPresentationPump(queue);
+}
+
+function drainStreamPresentationQueue(sessionId) {
+  const key = String(sessionId || "").trim();
+  const queue = streamPresentationQueues.get(key);
+  if (!queue || (!queue.items.length && !queue.pumping && queue.timer == null)) {
+    streamPresentationQueues.delete(key);
+    if (queue?.error) return Promise.reject(queue.error);
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    queue.waiters.push({
+      resolve: () => {
+        streamPresentationQueues.delete(key);
+        resolve();
+      },
+      reject: (error) => {
+        streamPresentationQueues.delete(key);
+        reject(error);
+      },
+    });
+    scheduleStreamPresentationPump(queue);
+  });
+}
+
+function cancelStreamPresentationQueue(sessionId) {
+  const key = String(sessionId || "").trim();
+  const queue = streamPresentationQueues.get(key);
+  if (!queue) return;
+  if (queue.timer != null) window.clearTimeout(queue.timer);
+  queue.timer = null;
+  queue.items.length = 0;
+  queue.error = null;
+  queue.waiters.splice(0).forEach(({ resolve }) => resolve());
+  streamPresentationQueues.delete(key);
 }
 
 async function consumeStream(response, sessionId) {
   const runState = getSessionRunState(sessionId);
   const streamGeneration = runState?.generation ?? activeStreamGeneration;
-  if (currentHostMeta.mode === "desktop" && currentHostMeta.transport === "bridge") {
+  const bridgeAsyncStream = response && typeof response[Symbol.asyncIterator] === "function";
+  if (bridgeAsyncStream) {
     const stream = response;
     if (!stream || typeof stream[Symbol.asyncIterator] !== "function") {
       throw new Error("desktop stream transport is unavailable");
@@ -16335,6 +17092,7 @@ async function consumeStream(response, sessionId) {
     for await (const rawChunk of stream) {
       const currentState = getSessionRunState(sessionId);
       if (!currentState || streamGeneration !== currentState.generation) {
+        cancelStreamPresentationQueue(sessionId);
         if (typeof stream.return === "function") {
           try {
             await stream.return();
@@ -16346,8 +17104,9 @@ async function consumeStream(response, sessionId) {
       }
       if (!rawChunk) continue;
       const event = typeof rawChunk === "string" ? JSON.parse(rawChunk) : rawChunk;
-      handleStreamEvent(event);
+      enqueueStreamPresentationEvent(event, sessionId);
     }
+    await drainStreamPresentationQueue(sessionId);
     const finalState = getSessionRunState(sessionId);
     if (finalState?.running) {
       await refreshBackgroundSessionState().catch(() => {});
@@ -16371,6 +17130,7 @@ async function consumeStream(response, sessionId) {
     const { value, done } = await reader.read();
     const currentState = getSessionRunState(sessionId);
     if (!currentState || streamGeneration !== currentState.generation) {
+      cancelStreamPresentationQueue(sessionId);
       try {
         await reader.cancel();
       } catch (_error) {
@@ -16388,7 +17148,7 @@ async function consumeStream(response, sessionId) {
 
         if (line) {
           const event = JSON.parse(line);
-          handleStreamEvent(event, sessionId);
+          enqueueStreamPresentationEvent(event, sessionId);
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -16398,6 +17158,11 @@ async function consumeStream(response, sessionId) {
     if (done) break;
   }
 
+  const trailing = buffer.trim();
+  if (trailing) {
+    enqueueStreamPresentationEvent(JSON.parse(trailing), sessionId);
+  }
+  await drainStreamPresentationQueue(sessionId);
   const finalState = getSessionRunState(sessionId);
   if (finalState?.running) {
     await refreshBackgroundSessionState().catch(() => {});
@@ -16405,6 +17170,28 @@ async function consumeStream(response, sessionId) {
       materializePendingConversationMessages({ sessionId });
       endSessionRun(sessionId);
     }
+  }
+}
+
+async function reconcileSuccessfulStreamAfterError(sessionId) {
+  try {
+    const response = await hostClient.bootstrap();
+    if (!response.ok) return false;
+    const payload = await response.json();
+    const data = payload?.data || null;
+    if (!data || String(data.current_session_id || "") !== String(sessionId || "")) return false;
+    syncActiveSessionsFromBootstrap(data);
+    if (bootstrapHasLiveSession(data, sessionId)) return false;
+    const messages = visibleConversationMessages(data.messages || []);
+    const hasAssistantResponse = [...messages].reverse().some((message) =>
+      message?.kind === "message" && message?.role === "assistant" && String(message.content || "").trim(),
+    );
+    if (!hasAssistantResponse) return false;
+    applyBootstrap(data);
+    endSessionRun(sessionId);
+    return true;
+  } catch (_error) {
+    return false;
   }
 }
 
@@ -16437,7 +17224,6 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
-    activeAssistantTurn.isThinkingPhase = true;
     completeContextCompactionMoment();
     const delta = event.thinking_delta || "";
     if (!delta.trim()) return;
@@ -16454,7 +17240,6 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
-    activeAssistantTurn.isThinkingPhase = false;
     completeContextCompactionMoment();
     activeAssistantTurn.activity = "";
     updateAssistantBubble(event.delta || "");
@@ -16466,6 +17251,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    markAssistantOperationStarted();
     pushAssistantProgressWorklogText(event.delta || "");
     updateRuntimeNarration(event.delta || "");
     refreshPendingAssistantBubble();
@@ -16476,6 +17262,14 @@ function handleStreamEvent(event, expectedSessionId = null) {
   if (event.type === "messages" || event.type === "complete") {
     const rawVisibleMessages = visibleConversationMessages(event.messages || []);
     if (event.type === "complete") {
+      const completionMoment = activityStageMoment(event.activity || {
+        label: "complete",
+        status: "complete",
+        detail: "",
+      });
+      completeRunningStreamMoments(activeAssistantTurn, completionMoment?.operationKey || "");
+      if (completionMoment) pushAssistantStreamMoment(completionMoment);
+      if (activeAssistantTurn) activeAssistantTurn.isThinkingPhase = false;
       const finalizedRuntimeTurn = cloneAssistantTurnState(activeAssistantTurn);
       if (activeAssistantTurn) {
         pushAssistantWorklog(describeCompletionWorklog(event));
@@ -16553,7 +17347,11 @@ function handleStreamEvent(event, expectedSessionId = null) {
       messages: visibleMessages,
       current_session_id: event.session_id || bootstrapData?.current_session_id || null,
     };
-    if (pendingAssistantBubble && shouldPreferPersistedAssistantTurn(visibleMessages)) {
+    if (
+      pendingAssistantBubble
+      && !getSessionRunState(sessionId)?.running
+      && shouldPreferPersistedAssistantTurn(visibleMessages)
+    ) {
       const finalizedInPlace = finalizeVisibleAssistantBubble(visibleMessages, activeAssistantTurn);
       if (!finalizedInPlace) {
         renderMessages(visibleMessages, { preserveScroll: true });
@@ -16588,7 +17386,14 @@ function handleStreamEvent(event, expectedSessionId = null) {
     const meta = event.activity?.meta || "";
     const agent = event.activity?.agent || "";
     if (label === "context_usage") {
-      updateContextUsage(Number(detail || 0), Number(meta || 0));
+      const [contextWindow, contextModel = ""] = String(meta || "").split("|", 2);
+      lastContextUsage.estimated = status !== "complete";
+      lastContextUsage.sessionId = sessionId;
+      lastContextUsage.model = cleanDisplayText(contextModel, lastContextUsage.model || bootstrapData?.config?.model || "");
+      updateContextUsage(Number(detail || 0), Number(contextWindow || 0));
+      if (contextUsage) {
+        contextUsage.dataset.estimated = lastContextUsage.estimated ? "true" : "false";
+      }
       return;
     }
     if (label === "context_compaction") {
@@ -16601,6 +17406,12 @@ function handleStreamEvent(event, expectedSessionId = null) {
       });
       refreshPendingAssistantBubble();
       return;
+    }
+    markAssistantOperationStarted();
+    const stageMoment = activityStageMoment(event.activity || {});
+    if (stageMoment) {
+      completeRunningStreamMoments(activeAssistantTurn, stageMoment.operationKey);
+      pushAssistantStreamMoment(stageMoment);
     }
     addProcessEvent(
       label || "activity",
@@ -16638,6 +17449,9 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    markAssistantOperationStarted();
+    const stageMoment = activityStageMoment(event.activity || {});
+    if (stageMoment) pushAssistantStreamMoment(stageMoment);
     const items = Array.isArray(event.subagents) ? event.subagents : [];
     items.forEach((subagent) => {
       const id = String(subagent?.id || "").trim() || `${Date.now()}`;
@@ -16663,6 +17477,9 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    markAssistantOperationStarted();
+    const stageMoment = activityStageMoment(event.activity || {});
+    if (stageMoment) pushAssistantStreamMoment(stageMoment);
     activeAssistantTurn.verifierReport = event.verifier ? { ...event.verifier } : null;
     pushAssistantWorklog(describeVerifierWorklog(activeAssistantTurn.verifierReport));
     updateRuntimeNarration(activeAssistantTurn.verifierReport?.summary || "");
@@ -16681,6 +17498,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    markAssistantOperationStarted();
     completeContextCompactionMoment();
     upsertToolEntry(tool);
     pushAssistantWorklog(describeToolWorklog(tool));
@@ -16700,12 +17518,17 @@ function handleStreamEvent(event, expectedSessionId = null) {
   }
 
   if (event.type === "edited_files") {
-    const files = Array.isArray(event.edited_files) ? event.edited_files : [];
+    const files = (Array.isArray(event.edited_files) ? event.edited_files : []).filter((file) => (
+      Number(file?.added || 0) !== 0
+      || Number(file?.removed || 0) !== 0
+      || String(file?.before_content || "") !== String(file?.after_content || "")
+    ));
     if (!files.length) return;
     if (!isVisibleSession) return;
     if (!activeAssistantTurn) {
       resetActiveAssistantTurn();
     }
+    markAssistantOperationStarted();
     files.forEach((file) => upsertDiffEntry(file));
     files.forEach((file) => {
       pushAssistantWorklog(describeEditedFileWorklog(file));
@@ -16768,11 +17591,44 @@ function updateContextUsage(usedTokens, contextWindow) {
   const used = Math.max(0, Number(usedTokens || 0));
   const limit = Math.max(1, Number(contextWindow || 128000));
   const percent = Math.min(100, Math.max(0, (used / limit) * 100));
+  lastContextUsage = {
+    used,
+    limit,
+    estimated: lastContextUsage.estimated,
+    sessionId: lastContextUsage.sessionId,
+    model: lastContextUsage.model,
+  };
   contextUsage.style.setProperty("--context-usage", `${percent * 3.6}deg`);
-  contextUsageLabel.textContent = `${Math.round(percent)}%`;
-  contextUsage.title = `${used.toLocaleString()} / ${limit.toLocaleString()} tokens`;
+  const visiblePercent = percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
+  contextUsageLabel.textContent = visiblePercent;
+  contextUsage.dataset.usedTokens = String(used);
+  contextUsage.dataset.contextWindow = String(limit);
+  contextUsage.dataset.model = lastContextUsage.model || "";
+  if (contextUsageModel) contextUsageModel.textContent = lastContextUsage.model || "";
+  contextUsage.title = `${lastContextUsage.model ? `${lastContextUsage.model} · ` : ""}${used.toLocaleString()} / ${limit.toLocaleString()} tokens`;
   contextUsage.classList.toggle("is-warning", percent >= 70 && percent < 90);
   contextUsage.classList.toggle("is-critical", percent >= 90);
+}
+
+function applyContextUsageSnapshot(snapshot, sessionId = bootstrapData?.current_session_id || "") {
+  if (!snapshot) return;
+  const targetSessionId = String(sessionId || "").trim();
+  if (
+    snapshot.estimated !== false
+    && lastContextUsage.estimated === false
+    && targetSessionId
+    && targetSessionId === lastContextUsage.sessionId
+  ) {
+    return;
+  }
+  lastContextUsage.estimated = snapshot.estimated !== false;
+  lastContextUsage.sessionId = targetSessionId;
+  lastContextUsage.model = cleanDisplayText(snapshot.model || "", bootstrapData?.config?.model || lastContextUsage.model || "");
+  updateContextUsage(snapshot.used_tokens, snapshot.context_window);
+  if (contextUsage) {
+    contextUsage.dataset.estimated = lastContextUsage.estimated ? "true" : "false";
+    contextUsage.title = `${lastContextUsage.model ? `${lastContextUsage.model} · ` : ""}${Number(snapshot.used_tokens || 0).toLocaleString()} / ${Number(snapshot.context_window || 128000).toLocaleString()} tokens${lastContextUsage.estimated ? " (estimated)" : ""}`;
+  }
 }
 
 async function sendMessageFallback(content) {
@@ -16800,10 +17656,11 @@ async function sendMessage() {
   }
 
   isSending = true;
+  composerSendSessionId = targetSessionId;
   suppressVisibleStreamBootstrap = true;
   if (messageInput) messageInput.disabled = true;
   setStopButtonVisible(true);
-  startActivity(currentLanguage === "zh" ? "思考中" : "Thinking");
+  startActivity("Thinking");
   liveEditedFiles = [];
   liveProcessEvents = [];
   pinnedEditedFiles = [];
@@ -16821,7 +17678,6 @@ async function sendMessage() {
     }
     const userText = sanitizeMessageContent(parsedInput.display);
     const outbound = parsedInput.outbound.trim();
-    const attachments = await serializePendingAttachments();
     const mode = parsedInput.mode;
     pendingResearchStart = parsedInput.forceResearch || mode === "research" || currentWorkspaceMode === "research";
 
@@ -16835,11 +17691,17 @@ async function sendMessage() {
     preservedThinking = [];
     activeAssistantTurn.startedAt = Date.now();
     activeAssistantTurn.isThinkingPhase = true;
+    appendAssistantThinkingPhaseMoment();
     activeAssistantTurn.activity = mode === "research"
       ? (currentLanguage === "zh" ? "研究中" : "Researching")
       : t("activityReviewing");
     pendingAssistantBubble = appendAssistantBubble("");
     await waitForNextBrowserPaint();
+    if (pendingFiles.length) {
+      activeAssistantTurn.activity = currentLanguage === "zh" ? "\u6b63\u5728\u51c6\u5907\u9644\u4ef6" : "Preparing attachments";
+      refreshPendingAssistantBubble();
+    }
+    const attachments = await serializePendingAttachments();
     bootstrapData = {
       ...(bootstrapData || {}),
       messages: [
@@ -16855,7 +17717,7 @@ async function sendMessage() {
     currentStreamingSessionId = targetSessionId;
     const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage, attachments });
 
-    if (messageInput) {
+    if (messageInput && composerSendSessionId === targetSessionId) {
       messageInput.value = "";
     }
     pendingFiles.forEach((file) => file.previewUrl && URL.revokeObjectURL(file.previewUrl));
@@ -16880,9 +17742,12 @@ async function sendMessage() {
     console.error(error);
     pendingResearchStart = false;
     suppressVisibleStreamBootstrap = false;
+    const targetIsVisible = String(bootstrapData?.current_session_id || "").trim() === targetSessionId;
     if (error?.message === "empty outbound content") {
       // Input protocol validation already showed a toast.
-    } else {
+    } else if (targetIsVisible && await reconcileSuccessfulStreamAfterError(targetSessionId)) {
+      // A completed response was already persisted; ignore a late transport/render failure.
+    } else if (targetIsVisible) {
       const classified = classifyAppError(error, "send");
       commitStreamFailure(error);
       showToast(classified.message);
@@ -16890,6 +17755,7 @@ async function sendMessage() {
   } finally {
     pendingResearchStart = false;
     suppressVisibleStreamBootstrap = false;
+    const ownsVisibleComposer = composerSendSessionId === targetSessionId;
     const stillRunning = Boolean(targetSessionId && getSessionRunState(targetSessionId)?.running);
     if (targetSessionId) {
       const state = getSessionRunState(targetSessionId);
@@ -16897,25 +17763,61 @@ async function sendMessage() {
         state.waitingApproval = false;
       }
     }
-    renderAgentProcessStrip();
-    isSending = false;
-    if (stillRunning) {
-      currentStreamingSessionId = targetSessionId;
-      setStopButtonVisible(true);
-      renderActivity();
-    } else {
-      currentStreamingSessionId = null;
-      setStopButtonVisible(false);
-      pendingPermissionRequest = null;
-      stopActivity();
-    }
-    renderPermissionStrip();
-    if (messageInput) {
-      messageInput.disabled = false;
-      messageInput.focus();
+    if (ownsVisibleComposer) {
+      composerSendSessionId = null;
+      renderAgentProcessStrip();
+      isSending = false;
+      if (stillRunning) {
+        currentStreamingSessionId = targetSessionId;
+        setStopButtonVisible(true);
+        renderActivity();
+      } else {
+        currentStreamingSessionId = null;
+        setStopButtonVisible(false);
+        pendingPermissionRequest = null;
+        stopActivity();
+      }
+      renderPermissionStrip();
+      if (messageInput) {
+        messageInput.disabled = false;
+        messageInput.focus();
+      }
     }
   }
 }
+
+async function optimizePromptBeforeSend() {
+  const content = String(messageInput?.value || "").trim();
+  if (!content || isSending || promptOptimizeButton?.disabled) return;
+  const previous = messageInput.value;
+  promptOptimizeButton.disabled = true;
+  promptOptimizeButton.classList.add("is-running");
+  try {
+    const response = await hostClient.chat.optimize(content, currentLanguage);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `prompt optimization failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    const optimized = String(payload?.data?.optimized || payload?.optimized || "").trim();
+    if (!optimized) throw new Error("prompt optimizer returned empty content");
+    if (messageInput.value === previous) {
+      messageInput.value = optimized;
+      messageInput.dispatchEvent(new Event("input", { bubbles: true }));
+      messageInput.focus();
+      messageInput.setSelectionRange(optimized.length, optimized.length);
+      showToast(currentLanguage === "zh" ? "提示词已优化，请确认后发送" : "Prompt optimized. Review it before sending.");
+    }
+  } catch (error) {
+    console.error(error);
+    showToast(currentLanguage === "zh" ? "提示词优化失败，请稍后重试" : "Prompt optimization failed. Please try again.");
+  } finally {
+    promptOptimizeButton.disabled = false;
+    promptOptimizeButton.classList.remove("is-running");
+  }
+}
+
+promptOptimizeButton?.addEventListener("click", optimizePromptBeforeSend);
 
 settingsTabs.forEach((tab) => {
   tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
@@ -17107,7 +18009,6 @@ document.addEventListener("keydown", (event) => {
     closeSettingsPanels();
     closeSessionMenus();
     closePanelMenu();
-    stopDockDrag();
     stopResizerDrag();
   }
 });
@@ -17136,11 +18037,13 @@ document.addEventListener("submit", (event) => {
 });
 
 window.addEventListener("resize", () => {
+  positionSettingsPanel();
   captureMessageScrollPosition();
-  stopDockDrag();
   stopResizerDrag();
   syncShellLayoutVars();
   applyDockLayout();
+  applyVisualizationChatPosition();
+  if (currentMainView === "browser") syncNativeBrowser("layout");
   if (activeSessionMenuAnchor && !sessionMenu?.hidden) {
     positionSessionMenu(activeSessionMenuAnchor);
   }
@@ -17161,57 +18064,12 @@ document.addEventListener("visibilitychange", () => {
   scheduleTerminalPoll(document.hidden ? 3000 : 1500);
 });
 
-window.addEventListener("pointermove", onDockPointerMove);
-window.addEventListener("pointerup", onDockPointerUp);
-window.addEventListener("pointercancel", stopDockDrag);
-window.addEventListener("mousemove", onDockPointerMove);
-window.addEventListener("mouseup", onDockPointerUp);
 window.addEventListener("pointermove", onResizerPointerMove);
 window.addEventListener("pointerup", stopResizerDrag);
 window.addEventListener("pointercancel", stopResizerDrag);
 window.addEventListener("blur", stopResizerDrag);
 window.addEventListener("blur", endResearchFloatingDrag);
 window.addEventListener("blur", endResearchFloatingReopenDrag);
-
-panelGrips.forEach((grip) => {
-  const panelId = grip.getAttribute("data-panel-grip") || "";
-  grip.setAttribute("draggable", "true");
-  grip.addEventListener("pointerdown", (event) => handleGripPointerDown(event, panelId, grip));
-  grip.addEventListener("mousedown", (event) => handleGripPointerDown(event, panelId, grip));
-  grip.addEventListener("dragstart", (event) => {
-    startDockDrag(panelId, grip, null);
-    if (activeDockDrag) {
-      activateDockReorder(panelId);
-      activeDockDrag.moved = true;
-    }
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", panelId);
-    }
-  });
-  grip.addEventListener("dragend", () => {
-    stopDockDrag();
-    suppressNextGripClick = false;
-  });
-});
-
-document.querySelectorAll(".dock-panel").forEach((panel) => {
-  panel.addEventListener("dragover", (event) => {
-    if (!activeDockDrag) return;
-    event.preventDefault();
-    const clientX = event.clientX || panel.getBoundingClientRect().left + panel.getBoundingClientRect().width / 2;
-    applyDockReorderForX(activeDockDrag.panelId, clientX);
-    highlightDockTarget(clientX);
-  });
-  panel.addEventListener("drop", (event) => {
-    if (!activeDockDrag) return;
-    event.preventDefault();
-    const clientX = event.clientX || panel.getBoundingClientRect().left + panel.getBoundingClientRect().width / 2;
-    applyDockReorderForX(activeDockDrag.panelId, clientX);
-    stopDockDrag();
-    suppressNextGripClick = false;
-  });
-});
 
 panelResizers.forEach((resizer) => {
   resizer.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, resizer));
@@ -17287,6 +18145,23 @@ settingsToggle?.addEventListener("click", () => {
   setSettingsTab(activeSettingsTab);
 });
 
+themePicker?.addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-theme-choice]");
+  if (!choice) return;
+  applyColorTheme(choice.dataset.themeChoice || "dark");
+});
+
+sandboxUseDefault?.addEventListener("click", dismissSandboxWelcome);
+sandboxChooseWorkspace?.addEventListener("click", async () => {
+  try {
+    await pickWorkspace();
+    dismissSandboxWelcome();
+  } catch (error) {
+    console.error(error);
+    showToast(error?.message || t("toastSendFailed"));
+  }
+});
+
 activityRailButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const panel = button.dataset.activityPanel || "nav";
@@ -17301,14 +18176,6 @@ activityRailButtons.forEach((button) => {
       } catch (error) {
         console.error(error);
         showToast(error?.message || t("gitActionFailed"));
-      }
-    }
-    if (panel === "extensions") {
-      try {
-        await loadExtensions();
-      } catch (error) {
-        console.error(error);
-        showToast(error?.message || t("toastSendFailed"));
       }
     }
     if (panel === "search") {
@@ -17332,6 +18199,119 @@ activityRailButtons.forEach((button) => {
   });
 });
 
+visualizationRailButton?.addEventListener("click", () => {
+  visualizationReturnView = "chat";
+  setActivityPanel(null, { preserveMainView: true });
+  setMainView("visualization");
+});
+
+visualizationChatToggle?.addEventListener("click", () => {
+  visualizationConversationSplit = !visualizationConversationSplit;
+  syncVisualizationConversationLayout();
+  requestAnimationFrame(() => window.AtlasVisualization?.fit());
+});
+visualizationChatToggle?.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+visualizationFloatingChatHead?.addEventListener("pointerdown", startVisualizationChatDrag);
+visualizationFloatingChatResize?.addEventListener("pointerdown", startVisualizationChatResize);
+document.addEventListener("pointermove", moveVisualizationChatDrag);
+document.addEventListener("pointermove", moveVisualizationChatResize);
+document.addEventListener("pointerup", endVisualizationChatDrag);
+document.addEventListener("pointerup", endVisualizationChatResize);
+document.addEventListener("pointercancel", endVisualizationChatDrag);
+document.addEventListener("pointercancel", endVisualizationChatResize);
+
+window.addEventListener("atlas:visualization-open", (event) => {
+  const kind = String(event?.detail?.kind || "").trim();
+  const sourceId = String(event?.detail?.sourceId || "").trim();
+  if (!kind || !sourceId) return;
+  visualizationReturnView = "chat";
+  setActivityPanel(null, { preserveMainView: true });
+  setMainView("visualization");
+  window.setTimeout(() => {
+    window.AtlasVisualization?.open?.(kind, sourceId)?.catch((error) => {
+      console.error(error);
+      showToast(error?.message || t("toastSendFailed"));
+    });
+  }, 0);
+});
+
+window.addEventListener("atlas:research-domain-open", (event) => {
+  const domainId = String(event?.detail?.domainId || "").trim();
+  const assetId = String(event?.detail?.assetId || "").trim();
+  const tab = String(event?.detail?.tab || "").trim();
+  const highlight = event?.detail?.highlight !== false;
+  if (!domainId) return;
+  setActivityPanel(null, { preserveMainView: true });
+  setMainView("domain");
+  window.setTimeout(() => {
+    window.AtlasResearchDomains?.open?.(domainId, assetId, tab, { highlight })?.catch((error) => {
+      console.error(error);
+      showToast(error?.message || t("toastSendFailed"));
+    });
+  }, 0);
+});
+
+window.addEventListener("atlas:research-domain-close", () => {
+  setMainView("chat");
+});
+
+window.addEventListener("atlas:domain-open-asset", (event) => {
+  const path = String(event?.detail?.path || "").trim();
+  if (!path) return;
+  setMainView("chat");
+  openWorkspaceFileAt(path).catch((error) => {
+    console.error(error);
+    showToast(appErrorMessage(error, "workspace", "toastSendFailed"));
+  });
+});
+
+window.addEventListener("atlas:domain-agent-dispatch", (event) => {
+  const prompt = String(event?.detail?.prompt || "").trim();
+  if (!prompt || !messageInput || isSending) return;
+  const preserveWorkspace = Boolean(event?.detail?.preserveWorkspace) && currentMainView === "domain";
+  if (!preserveWorkspace) setMainView("chat");
+  messageInput.value = prompt;
+  messageInput.dispatchEvent(new Event("input", { bubbles: true }));
+  window.requestAnimationFrame(() => sendMessage());
+});
+
+window.addEventListener("atlas:visualization-document-open", (event) => {
+  const documentData = event?.detail?.document || null;
+  if (!documentData) return;
+  visualizationReturnView = "domain";
+  setActivityPanel(null, { preserveMainView: true });
+  setMainView("visualization");
+  window.setTimeout(() => {
+    Promise.resolve(window.AtlasVisualization?.openDocument?.(documentData, event.detail?.presentation || {})).catch((error) => {
+      console.error(error);
+      showToast(error?.message || t("toastSendFailed"));
+    });
+  }, 0);
+});
+
+window.addEventListener("atlas:visualization-kind-change", (event) => {
+  visualizationActiveKind = String(event?.detail?.kind || "").trim();
+  if (visualizationActiveKind === "system") {
+    visualizationConversationSplit = false;
+  }
+  if (currentMainView === "visualization") {
+    if (workspaceChat) workspaceChat.hidden = visualizationActiveKind === "system";
+    syncVisualizationConversationLayout();
+    if (visualizationActiveKind === "system") {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("atlas:visualization-performance-resize")));
+      });
+    }
+  }
+});
+
+window.addEventListener("atlas:visualization-close", () => {
+  const nextView = visualizationReturnView === "domain" ? "domain" : "chat";
+  visualizationReturnView = "chat";
+  setMainView(nextView);
+});
+
 activityCollapseButtons.forEach((button) => {
   button.addEventListener("click", () => {
     setActivityPanel(null, { preserveMainView: preserveMainViewDuringFlyout() });
@@ -17339,6 +18319,7 @@ activityCollapseButtons.forEach((button) => {
 });
 
 browserBackButton?.addEventListener("click", async () => {
+  if (syncNativeBrowser("back")) return;
   const nextIndex = browserState.historyIndex - 1;
   if (nextIndex < 0) return;
   browserState.historyIndex = nextIndex;
@@ -17352,7 +18333,23 @@ browserBackButton?.addEventListener("click", async () => {
   }
 });
 
+browserForwardButton?.addEventListener("click", async () => {
+  if (syncNativeBrowser("forward")) return;
+  const nextIndex = browserState.historyIndex + 1;
+  if (nextIndex >= browserState.history.length) return;
+  browserState.historyIndex = nextIndex;
+  const href = browserState.history[nextIndex] || "";
+  if (!href) return;
+  try {
+    await openUrlInAppBrowser(href, { pushHistory: false });
+  } catch (error) {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+  }
+});
+
 browserRefreshButton?.addEventListener("click", async () => {
+  if (syncNativeBrowser("refresh")) return;
   if (!browserState.currentUrl) return;
   try {
     await openUrlInAppBrowser(browserState.currentUrl, { pushHistory: false });
@@ -17360,6 +18357,29 @@ browserRefreshButton?.addEventListener("click", async () => {
     console.error(error);
     showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
   }
+});
+
+browserHomeButton?.addEventListener("click", () => {
+  showInAppBrowserHome();
+});
+
+browserRailButton?.addEventListener("click", () => {
+  if (currentMainView === "browser") {
+    closeInAppBrowser();
+  } else {
+    showInAppBrowserHome();
+  }
+});
+
+browserAddressForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  let href = String(browserToolbarAddress?.value || "").trim();
+  if (!href) return;
+  if (!/^https?:\/\//i.test(href)) href = `https://${href}`;
+  openUrlInAppBrowser(href).catch((error) => {
+    console.error(error);
+    showToast(cleanDisplayText(error?.message || "") || t("toastSendFailed"));
+  });
 });
 
 browserExternalButton?.addEventListener("click", () => {
@@ -17421,12 +18441,47 @@ rightSidebarToggleButton?.addEventListener("click", () => {
 });
 
 browserFrame?.addEventListener("load", () => {
+  browserState.loading = false;
   syncBrowserStateFromFrame({ pushHistory: true });
 });
 
+window.__TOKITAI_NATIVE_BROWSER_NAVIGATED__ = (url) => {
+  const href = sanitizeHref(url || "");
+  if (!/^https?:\/\//i.test(href)) return;
+  browserState.currentUrl = href;
+  browserState.loading = false;
+  if (browserToolbarAddress) browserToolbarAddress.value = href;
+  if (browserState.history[browserState.historyIndex] !== href) {
+    browserState.history = browserState.history.slice(0, browserState.historyIndex + 1);
+    browserState.history.push(href);
+    browserState.historyIndex = browserState.history.length - 1;
+  }
+};
+
 window.addEventListener("message", (event) => {
   const data = event?.data || null;
-  if (!data || data.type !== "tokitai-browser-navigate") return;
+  if (!data || event.source !== browserFrame?.contentWindow) return;
+  if (data.type === "tokitai-browser-ready") {
+    const finalUrl = sanitizeHref(data.url || "");
+    if (/^https?:\/\//i.test(finalUrl)) {
+      browserState.currentUrl = finalUrl;
+      browserState.currentTitle = cleanDisplayText(data.title || "");
+      browserState.currentViewUrl = `/api/browser/view?url=${encodeURIComponent(finalUrl)}`;
+      if (browserState.historyIndex >= 0) {
+        browserState.history[browserState.historyIndex] = finalUrl;
+      }
+      if (browserToolbarAddress) browserToolbarAddress.value = finalUrl;
+    }
+    browserState.loading = false;
+    return;
+  }
+  if (data.type === "tokitai-browser-error") {
+    browserState.loading = false;
+    const detail = cleanDisplayText(data.error || "");
+    showToast(detail || (currentLanguage === "zh" ? "此网页无法在内置代理中加载，请使用外部打开。" : "This page cannot load in the embedded proxy. Open it externally."));
+    return;
+  }
+  if (data.type !== "tokitai-browser-navigate") return;
   const href = sanitizeHref(data.url || "");
   if (!/^https?:\/\//i.test(href)) return;
   openUrlInAppBrowser(href).catch((error) => {
@@ -17469,13 +18524,13 @@ composerStop?.addEventListener("click", async () => {
     console.error(error);
   } finally {
     endSessionRun(sessionId);
-    materializePendingConversationMessages({ sessionId });
+    resetConversationRuntimeState({ preserveInputFocus: true });
     try {
-      await refreshBackgroundSessionState();
+      await loadBootstrap();
     } catch (refreshError) {
       console.error(refreshError);
+      showToast(currentLanguage === "zh" ? "已停止，但刷新中断内容失败" : "Stopped, but failed to refresh the interrupted turn");
     }
-    resetConversationRuntimeState({ preserveInputFocus: true });
   }
 });
 
@@ -17493,16 +18548,14 @@ terminalInput?.addEventListener("keydown", async (event) => {
   }
 });
 
-extensionSearchInput?.addEventListener("input", () => {
-  renderExtensionList(extensionSearchInput.value || "");
-});
+/* Marketplace search removed. */
 
 searchModeSwitch?.querySelectorAll(".segment").forEach((button) => {
   button.addEventListener("click", () => {
-    searchMode = normalizeChoice(button.dataset.value || "web", ["web", "papers", "models", "datasets", "github"], "web");
+    searchMode = normalizeChoice(button.dataset.value || "web", ["web", "papers", "tracking", "benchmarks", "models", "datasets", "github"], "web");
     searchState.error = "";
     renderSearchPanel();
-    if (searchMode === "datasets" || searchMode === "github" || searchMode === "models") {
+    if (["tracking", "benchmarks", "models", "datasets", "github"].includes(searchMode)) {
       loadSearchHealth().catch((error) => {
         console.error(error);
       });
@@ -17577,13 +18630,6 @@ workspaceCodeReferencesButton?.addEventListener("click", () => {
   });
 });
 
-workspaceCodeRenameButton?.addEventListener("click", () => {
-  runWorkspaceRenameSymbol().catch((error) => {
-    console.error(error);
-    showToast(error?.message || t("toastSendFailed"));
-  });
-});
-
 workspaceCodeSearchButton?.addEventListener("dblclick", () => {
   runWorkspaceEditorAction("actions.findWithSelection");
 });
@@ -17619,7 +18665,6 @@ modeButtons.forEach((button) => {
 gitNav?.querySelectorAll("[data-git-view]").forEach((button) => {
   button.addEventListener("click", async () => {
     setActivityPanel("git", { preserveMainView: true });
-    setMainView("git");
     setGitView(button.getAttribute("data-git-view") || "overview");
     if (!bootstrapData?.git) {
       try {
@@ -17687,7 +18732,7 @@ gitUnstageAllButton?.addEventListener("click", async () => {
 });
 
 gitCommitButton?.addEventListener("click", async () => {
-  const message = window.prompt(t("gitCommitPrompt"), "");
+  const message = await atlasPrompt(t("gitCommitPrompt"), "");
   if (message == null) return;
   if (!message.trim()) return;
   try {
@@ -17703,7 +18748,7 @@ sessionMenuRename?.addEventListener("click", async () => {
   if (!sessionId || !bootstrapData?.sessions) return;
   const session = bootstrapData.sessions.find((item) => item.id === sessionId);
   closeSessionMenus();
-  const nextTitle = window.prompt(t("renamePrompt"), session?.title || "");
+  const nextTitle = await atlasPrompt(t("renamePrompt"), session?.title || "");
   if (nextTitle == null) return;
   try {
     await renameSession(sessionId, nextTitle.trim() || t("sessionUntitled"));
@@ -17717,12 +18762,34 @@ sessionMenuDelete?.addEventListener("click", async () => {
   const sessionId = activeSessionMenuId;
   if (!sessionId || !bootstrapData?.sessions) return;
   closeSessionMenus();
-  if (!window.confirm(t("deleteConfirm"))) return;
+  if (!await atlasConfirm(t("deleteConfirm"), {
+    title: currentLanguage === "zh" ? "删除会话" : "Delete session",
+    confirmLabel: currentLanguage === "zh" ? "删除" : "Delete",
+    danger: true,
+  })) return;
   try {
     await deleteSession(sessionId);
   } catch (error) {
     console.error(error);
     showToast(t("toastSendFailed"));
+  }
+});
+
+atlasDialogCancel?.addEventListener("click", () => closeAtlasDialog(null));
+atlasDialogConfirm?.addEventListener("click", () => closeAtlasDialog(true));
+atlasDialog?.addEventListener("click", (event) => {
+  if (event.target === atlasDialog) closeAtlasDialog(null);
+});
+atlasDialogInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    closeAtlasDialog(true);
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && atlasDialog && !atlasDialog.hidden) {
+    event.preventDefault();
+    closeAtlasDialog(null);
   }
 });
 
@@ -17733,7 +18800,36 @@ messageInput?.addEventListener("keydown", (event) => {
   }
 });
 
+function sendNativeWindowAction(action, payload = {}) {
+  window.__ATLAS_NATIVE_WINDOW__?.send({ action, ...payload });
+}
+
+desktopWindowControls?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-window-action]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  sendNativeWindowAction(button.dataset.windowAction || "");
+});
+
+shellTopbar?.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || event.target.closest("button, input, textarea, select, a")) return;
+  event.preventDefault();
+  sendNativeWindowAction("drag");
+});
+
+shellTopbar?.addEventListener("dblclick", (event) => {
+  if (event.target.closest("button, input, textarea, select, a")) return;
+  event.preventDefault();
+  sendNativeWindowAction("toggle_maximize");
+});
+
+window.__ATLAS_WINDOW_STATE__ = (maximized) => {
+  appShell?.classList.toggle("is-window-maximized", Boolean(maximized));
+};
+
 applyTranslations();
+restoreColorTheme();
 updateEffortUI();
 setActivityPanel("nav", { preserveMainView: true });
 applyWorkspaceMode("chat");

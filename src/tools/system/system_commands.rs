@@ -116,10 +116,9 @@ impl SystemCommands {
         }
 
         // 执行命令（不使用 shell 解释器，直接执行）
-        let output = run_whitelisted_command(&parts)
-            .map_err(|e| {
-                CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
-            })?;
+        let output = run_whitelisted_command(&parts).map_err(|e| {
+            CommandError::ExecutionFailed(format!("执行命令失败：{}", e)).to_string()
+        })?;
 
         let mut stdout = decode_bytes(&output.stdout);
         let stderr = decode_bytes(&output.stderr);

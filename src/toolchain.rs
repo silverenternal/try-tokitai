@@ -140,13 +140,15 @@ fn bundled_tool_candidates(key: &str) -> Vec<PathBuf> {
     for root in roots {
         for plugin_key in bundled_plugin_keys_for_tool(key) {
             for executable_name in &executable_names {
-                candidates.push(
-                    root.join("openai-bundled")
-                        .join(plugin_key)
-                        .join("0.2.3")
-                        .join("bin")
-                        .join(executable_name),
-                );
+                for version in ["0.2.4", "0.2.3"] {
+                    candidates.push(
+                        root.join("openai-bundled")
+                            .join(plugin_key)
+                            .join(version)
+                            .join("bin")
+                            .join(executable_name),
+                    );
+                }
             }
         }
         if !root.exists() {

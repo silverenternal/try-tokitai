@@ -20,6 +20,7 @@ use crate::external_process::metadata::{
     ExternalToolMetadata, ExternalToolType, RiskLevel, ScriptConfig, ToolExecutionResult,
 };
 use crate::external_process::wrapper::{validation, ExternalTool};
+use crate::process_window::CommandWindowExt;
 use crate::tool_matrix::matrix::ToolDefinition;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -148,6 +149,7 @@ impl ScriptWrapper {
     pub fn interpreter_exists(interpreter: &str) -> bool {
         // Try to run interpreter with --version or help flag
         let result = std::process::Command::new(interpreter)
+            .hide_window()
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -159,6 +161,7 @@ impl ScriptWrapper {
 
         // Try with -version (some interpreters use this)
         let result = std::process::Command::new(interpreter)
+            .hide_window()
             .arg("-version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -234,6 +237,7 @@ impl ScriptWrapper {
 
         // Build command
         let mut cmd = Command::new(&interpreter);
+        cmd.hide_window();
 
         // Add script path as first argument
         cmd.arg(&config.script_path);

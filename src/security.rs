@@ -257,6 +257,7 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "rename_path",
             "download_file",
             "download_image",
+            "generate_image",
             "http_get",
             "http_post",
             "http_request",
@@ -283,6 +284,7 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "test_target",
             "terminal_run",
             "terminal_run_structured",
+            "browser_computer",
         ];
         for name in moderate_tools {
             map.insert(name.to_string(), RiskLevel::Moderate);

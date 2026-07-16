@@ -1,5 +1,9 @@
 /target
 /target*
+/dist/
+/.atlas/
+/tmp/
+targetserver.log
 .env
 sandbox/
 downloads/

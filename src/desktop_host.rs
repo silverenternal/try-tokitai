@@ -41,6 +41,7 @@ impl DesktopHostRuntime {
             "supportsTerminal": self.descriptor.capabilities.supports_terminal,
             "supportsTerminalPty": self.descriptor.capabilities.supports_terminal_pty,
             "supportsNativeMenu": self.descriptor.capabilities.supports_native_menu,
+            "supportsNativeBrowser": true,
             "bridgeProtocol": self.descriptor.bridge_protocol,
         })
     }

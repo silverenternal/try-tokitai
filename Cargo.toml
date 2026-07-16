@@ -2,7 +2,7 @@
 name = "ai-assistant"
 version = "0.1.0"
 edition = "2021"
-description = "A Tokitai-based AI assistant with dual-mode architecture (CLI + Autonomous Evolution)"
+description = "Atlas, an extensible desktop IDE for agentic software and research workflows"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/silverenternal/tokitai"
 keywords = ["ai", "tokitai", "assistant", "autonomous", "tool-selection"]
@@ -98,6 +98,7 @@ dirs = "6"
 walkdir = "2.4"
 notify = "6.1"
 lopdf = "0.34"
+zip = "2.2"
 memmap2 = "0.9"
 pathdiff = "0.2"
 tempfile = "3.0"
@@ -116,6 +117,7 @@ sha2 = "0.10"
 hex = "0.4"
 hmac = "0.12"
 base64 = "0.22"
+png = "0.17"
 
 # Index and search
 fst = "0.4"
@@ -134,10 +136,16 @@ tao = { version = "0.28", optional = true }
 # System utilities
 which = "6.0"
 libc = "0.2"
+sysinfo = "0.31"
 
 # UUID
 uuid = { version = "1.0", features = ["v4"] }
 
+[build-dependencies]
+winresource = "0.1"
+png = "0.17"
+
+[dev-dependencies]
 # Benchmark dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 
@@ -146,12 +154,27 @@ proptest = "1.4"
 mockall = "0.12"
 insta = { version = "1.34", features = ["json", "redactions"] }
 
+[dependencies.candle-core]
+version = "0.8"
+optional = true
+
+[dependencies.candle-nn]
+version = "0.8"
+optional = true
+
+[dependencies.safetensors]
+version = "0.7"
+optional = true
+
+[dependencies.half]
+version = "2.4"
+optional = true
+
+[dependencies.ndarray]
+version = "0.16"
+optional = true
+
 # Tensor computation (optional, feature-gated)
-candle-core = { version = "0.8", optional = true }
-candle-nn = { version = "0.8", optional = true }
-safetensors = { version = "0.7", optional = true }
-half = { version = "2.4", optional = true }
-ndarray = { version = "0.16", optional = true }
 
 # ============================================================================
 # cargo-machete 忽略列表（这些是 optional feature 或特定场景使用）
@@ -176,6 +199,9 @@ exclude = ["test_tensor"]
 
 [profile.release]
 incremental = false
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 
 [[bench]]

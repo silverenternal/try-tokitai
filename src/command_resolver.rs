@@ -10,6 +10,7 @@
 //! - 命令黑名单阻止
 //! - Shell 注入防护
 
+use crate::process_window::CommandWindowExt;
 use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -343,7 +344,11 @@ impl CommandResolver {
     #[allow(dead_code)]
     pub fn get_command_help(&self, command: &str) -> Option<String> {
         // 尝试 --help
-        let output = Command::new(command).arg("--help").output().ok()?;
+        let output = Command::new(command)
+            .hide_window()
+            .arg("--help")
+            .output()
+            .ok()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -352,7 +357,11 @@ impl CommandResolver {
         }
 
         // 尝试 -h
-        let output = Command::new(command).arg("-h").output().ok()?;
+        let output = Command::new(command)
+            .hide_window()
+            .arg("-h")
+            .output()
+            .ok()?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);

@@ -1,10 +1,10 @@
+use crate::text_encoding::read_text_file;
 use crate::tools::io::error::IoToolError;
 use crate::tools::io::security::SecurePathResolver;
 use crate::tools::io::utils::{
     ensure_file_exists, ensure_is_dir, ensure_is_file, ensure_parent_dir_exists,
     validate_single_path,
 };
-use crate::text_encoding::read_text_file;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
@@ -556,7 +556,9 @@ mod tests {
         let ops = FileOperations::new();
 
         let dir = base.join("nested");
-        let mkdir_result = ops.mkdir(dir.to_string_lossy().to_string(), Some(true)).unwrap();
+        let mkdir_result = ops
+            .mkdir(dir.to_string_lossy().to_string(), Some(true))
+            .unwrap();
         assert_eq!(mkdir_result["status"], "success");
         assert!(dir.exists());
 
@@ -564,7 +566,10 @@ mod tests {
         std::fs::write(&src, "hello").unwrap();
         let dst = dir.join("dst.txt");
         let rename_result = ops
-            .rename_path(src.to_string_lossy().to_string(), dst.to_string_lossy().to_string())
+            .rename_path(
+                src.to_string_lossy().to_string(),
+                dst.to_string_lossy().to_string(),
+            )
             .unwrap();
         assert_eq!(rename_result["status"], "success");
         assert!(dst.exists());
@@ -591,7 +596,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(result["status"], "success");
-        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "baz\nbar\nbaz");
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "baz\nbar\nbaz"
+        );
 
         let _ = std::fs::remove_file(&test_file);
     }
@@ -610,11 +618,16 @@ mod tests {
 -two
 +TWO
  three"
-        .to_string();
-        let result = ops.apply_patch(test_file.to_string_lossy().to_string(), patch).unwrap();
+            .to_string();
+        let result = ops
+            .apply_patch(test_file.to_string_lossy().to_string(), patch)
+            .unwrap();
 
         assert_eq!(result["status"], "success");
-        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "one\nTWO\nthree");
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "one\nTWO\nthree"
+        );
 
         let _ = std::fs::remove_file(&test_file);
     }

@@ -1,5 +1,6 @@
 //! Computation tools for lightweight, reproducible experiment execution.
 
+use crate::process_window::CommandWindowExt;
 use crate::text_encoding::decode_bytes;
 use crate::toolchain::{default_toolchain_command, detect_toolchain_executable};
 use serde_json::Value;
@@ -12,7 +13,8 @@ pub struct ComputationTools;
 
 fn run_command_with_timeout(program: &str, args: &[&str], input: &str, timeout_secs: u64) -> Value {
     let mut cmd = Command::new(program);
-    cmd.args(args)
+    cmd.hide_window()
+        .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -109,6 +111,7 @@ fn detect_runtime_command(key: &str) -> Option<String> {
     detect_toolchain_executable(key).or_else(|| {
         let fallback = default_toolchain_command(key);
         if Command::new(&fallback)
+            .hide_window()
             .arg("--version")
             .output()
             .map(|o| o.status.success())

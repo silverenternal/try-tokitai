@@ -191,7 +191,12 @@ impl ChatPanel {
             MessageBlock::AssistantChoices { title, options } => {
                 lines.push(Line::from(vec![
                     Span::styled("[choices] ", Style::default().fg(Color::Green)),
-                    Span::styled(title.clone(), Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD)),
+                    Span::styled(
+                        title.clone(),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
                 ]));
                 for item in options {
                     lines.push(Line::from(Span::styled(

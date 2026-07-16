@@ -158,7 +158,11 @@ impl AgentSkillCatalog {
             .filter(is_research_skill)
             .filter_map(|skill| {
                 let score = score_skill(&skill, user_text, &user_tokens, mode);
-                if score > 0 { Some((score, skill)) } else { None }
+                if score > 0 {
+                    Some((score, skill))
+                } else {
+                    None
+                }
             })
             .collect::<Vec<_>>();
 
@@ -199,6 +203,11 @@ impl AgentSkillCatalog {
     }
 
     pub fn auto_match_prompt(&self, user_text: &str, mode: Option<&str>) -> Option<String> {
+        if should_select_browser_computer_skill(user_text) {
+            if let Some(skill) = self.load_skill("browser-computer-workflow") {
+                return Some(render_skill_bundle_prompt(&[skill]));
+            }
+        }
         let skills = self.auto_match_research_skills(user_text, mode, 2);
         if skills.is_empty() {
             None
@@ -208,6 +217,15 @@ impl AgentSkillCatalog {
     }
 
     pub fn auto_match_metadata(&self, user_text: &str, mode: Option<&str>) -> Vec<AgentSkillMatch> {
+        if should_select_browser_computer_skill(user_text) {
+            if let Some(skill) = self.load_skill("browser-computer-workflow") {
+                return vec![AgentSkillMatch {
+                    name: skill.name,
+                    description: skill.description,
+                    kind: skill.kind,
+                }];
+            }
+        }
         self.auto_match_research_skills(user_text, mode, 2)
             .into_iter()
             .map(|skill| AgentSkillMatch {
@@ -225,6 +243,30 @@ impl AgentSkillCatalog {
         }
         files
     }
+}
+
+fn should_select_browser_computer_skill(user_text: &str) -> bool {
+    let lowered = user_text.to_ascii_lowercase();
+    let mentions_browser = [
+        "browser",
+        "webpage",
+        "website",
+        "web page",
+        "computer use",
+        "浏览器",
+        "网页",
+        "网站",
+        "页面",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle));
+    let requests_interaction = [
+        "open", "navigate", "click", "type", "scroll", "fill", "submit", "inspect", "打开", "访问",
+        "点击", "输入", "滚动", "填写", "提交", "操作", "检查",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle));
+    mentions_browser && requests_interaction
 }
 
 pub fn render_skill_bundle_prompt(skills: &[AgentSkillDef]) -> String {
@@ -462,7 +504,10 @@ fn infer_skill_kind(name: &str, path: &Path) -> SkillKind {
 
 fn should_consider_research_skills(user_text: &str, mode: Option<&str>) -> bool {
     if matches!(
-        mode.unwrap_or_default().trim().to_ascii_lowercase().as_str(),
+        mode.unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
         "research" | "spec"
     ) {
         return true;
@@ -508,7 +553,11 @@ fn should_consider_research_skills(user_text: &str, mode: Option<&str>) -> bool 
 }
 
 fn is_research_skill(skill: &AgentSkillDef) -> bool {
-    let lowered = skill.path.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+    let lowered = skill
+        .path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
     lowered.contains("skills/agents/research") || skill.name.contains("scientist")
 }
 
@@ -556,7 +605,10 @@ fn score_skill(
     }
 
     if skill.kind == SkillKind::Workflow
-        && matches!(mode.unwrap_or_default().to_ascii_lowercase().as_str(), "research" | "spec")
+        && matches!(
+            mode.unwrap_or_default().to_ascii_lowercase().as_str(),
+            "research" | "spec"
+        )
     {
         score += 1;
     }
@@ -581,27 +633,61 @@ mod tests {
 
     #[test]
     fn matches_paper_writing_workflow() {
-        let root = std::env::current_dir().unwrap().join("skills").join("agents");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("skills")
+            .join("agents");
         let catalog = AgentSkillCatalog::with_roots(vec![root]);
         let matches = catalog.auto_match_research_skills(
             "\u{8bf7}\u{6839}\u{636e}\u{5b9e}\u{9a8c}\u{7ed3}\u{679c}\u{548c}\u{5f15}\u{7528}\u{5199}\u{8bba}\u{6587}\u{ff0c}\u{5e76}\u{4fee}\u{590d} claim evidence \u{5bf9}\u{9f50}\u{95ee}\u{9898}",
             Some("research"),
             2,
         );
-        let names = matches.iter().map(|skill| skill.name.as_str()).collect::<Vec<_>>();
+        let names = matches
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
         assert!(names.contains(&"cs-paper-writing-workflow"));
     }
 
     #[test]
     fn matches_systems_research_subfield() {
-        let root = std::env::current_dir().unwrap().join("skills").join("agents");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("skills")
+            .join("agents");
         let catalog = AgentSkillCatalog::with_roots(vec![root]);
         let matches = catalog.auto_match_research_skills(
             "Design a database systems benchmark with throughput, tail latency, and scaling evaluation.",
             Some("research"),
             2,
         );
-        let names = matches.iter().map(|skill| skill.name.as_str()).collect::<Vec<_>>();
+        let names = matches
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
         assert!(names.contains(&"cs-systems-research"));
+    }
+
+    #[test]
+    fn selects_browser_computer_workflow_for_explicit_web_interaction() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("skills")
+            .join("agents");
+        let catalog = AgentSkillCatalog::with_roots(vec![root]);
+        let matches = catalog.auto_match_metadata(
+            "打开浏览器访问示例网站，然后点击页面中的链接",
+            Some("agent"),
+        );
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "browser-computer-workflow");
+    }
+
+    #[test]
+    fn does_not_select_browser_computer_for_plain_web_research() {
+        assert!(!should_select_browser_computer_skill(
+            "Search the web for recent database benchmark papers"
+        ));
     }
 }

@@ -466,7 +466,16 @@ fn result_field_value(payload: &Value, field_name: &str) -> String {
     result_bundle_summary_entries(payload)
         .into_iter()
         .find_map(|(name, value)| {
-            if name.eq_ignore_ascii_case(field_name) && !value.trim().is_empty() {
+            let lowered = value.trim().to_ascii_lowercase();
+            if name.eq_ignore_ascii_case(field_name)
+                && !value.trim().is_empty()
+                && !matches!(
+                    lowered.as_str(),
+                    "pending" | "tbd" | "todo" | "n/a" | "unknown"
+                )
+                && !lowered.contains(" pending")
+                && !lowered.starts_with("pending ")
+            {
                 Some(value)
             } else {
                 None
@@ -890,7 +899,7 @@ fn abstract_draft(payload: &Value) -> String {
     let gaps = verification_missing_items(payload);
     let dataset_text = prose_join_limited(&datasets, 2, "configured benchmark inputs");
     let metric_text = prose_join_limited(&metrics, 3, "profile-appropriate metrics");
-    let baseline_text = prose_join_limited(&baselines, 3, "documented ensemble baselines");
+    let baseline_text = prose_join_limited(&baselines, 3, "documented comparison baselines");
     let error_analysis = cleaned_error_analysis_summary(payload);
     let run_label = verified_run_label(payload);
     let gap_text = if gaps.is_empty() {
@@ -903,7 +912,7 @@ fn abstract_draft(payload: &Value) -> String {
     };
     let mut sentences = vec![
         format!(
-            "We study {} on {} to characterize how subsampling interacts with label noise in a {} benchmark.",
+            "We study {} using {} in a reproducible {} evaluation.",
             problem,
             dataset_text,
             profile_display_name(&profile)
@@ -939,7 +948,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
     let repair_actions = repair_next_actions(payload);
     let run_observations = run_comparison_observations(payload);
     let skipped_tool_names_only = skipped_tool_names(payload);
-    let literature = literature_titles(payload);
+    let literature = relevant_literature_titles(payload);
     let (survey_literature, direct_literature, adjacent_literature, peripheral_literature) =
         literature_title_buckets(payload);
     let artifact_locations = artifact_paths(payload);
@@ -954,7 +963,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
         "introduction" => {
             let mut paragraphs = vec![
                 format!(
-                    "Subsampling changes the diversity and stability of tree ensembles, so its interaction with label noise matters whenever practitioners need robust performance without extensive data cleaning. This paper studies {} on {} as a controlled {} benchmark. Retrieved literature frames the benchmark context for this setup.",
+                    "The question of {} matters because a useful computer-science result must be both measurable and reproducible. This paper evaluates it on {} as a controlled {} study, with retrieved literature defining the context and the workflow artifacts defining the evidentiary boundary.",
                     problem,
                     prose_join_limited(&datasets, 2, "the configured benchmark inputs"),
                     profile_display_name(&benchmark_profile(payload))
@@ -962,15 +971,15 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 format!(
                     "The retrieved literature supplies both broad context and a closer methodological reference point. {} Against that background, the present workflow makes a deliberately narrow contribution: it compares {} under {} and anchors the main narrative to concrete run evidence rather than to general claims about all ensemble methods.",
                     if survey_literature.is_empty() && direct_literature.is_empty() {
-                        "Retrieved papers remain useful as contextual background even when they do not form a dense prior-work set.".to_string()
+                        "The official search did not return a directly relevant prior-work set, so this draft records a literature gap instead of presenting unrelated titles as evidence.".to_string()
                     } else {
                         format!(
                             "Broad context comes from {}, while the closest retrieved comparison is {}.",
-                            prose_join_limited(&survey_literature, 2, "the retrieved ensemble-learning surveys"),
-                            prose_join_limited(&direct_literature, 1, "the most directly aligned tree-ensemble study")
+                            prose_join_limited(&survey_literature, 2, "the retrieved surveys"),
+                            prose_join_limited(&direct_literature, 1, "the most directly aligned study")
                         )
                     },
-                    prose_join_limited(&baselines, 3, "documented ensemble baselines"),
+                    prose_join_limited(&baselines, 3, "documented comparison baselines"),
                     prose_join_limited(&metrics, 3, "the declared evaluation metrics")
                 ),
             ];
@@ -993,15 +1002,15 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 "The retrieved set does not include a dedicated survey paper, so broad ensemble context must be inferred from the remaining sources.".to_string()
             } else {
                 format!(
-                    "Broad context is supplied by {}, which situate bagging, boosting, and related ensemble design choices within the wider machine-learning literature.",
+                    "Broad context is supplied by {}, which situate the research question within the wider computer-science literature.",
                     prose_join_limited(&survey_literature, 2, "the retrieved surveys")
                 )
             };
             let direct_context = if direct_literature.is_empty() {
-                "No retrieved paper directly isolates subsampling under label noise, which sharpens the need for a reproducible benchmark-driven comparison.".to_string()
+                "No retrieved paper directly isolates the complete question posed here, which sharpens the need for a reproducible benchmark-driven comparison.".to_string()
             } else {
                 format!(
-                    "The most directly aligned retrieved study is {}, which makes subsampling itself a first-class experimental variable rather than a secondary implementation detail.",
+                    "The most directly aligned retrieved study is {}, which provides the closest methodological reference point for the present evaluation.",
                     prose_join_limited(&direct_literature, 2, "the directly aligned prior work")
                 )
             };
@@ -1009,33 +1018,37 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 String::new()
             } else {
                 format!(
-                    "Adjacent tree-ensemble background comes from {}, which broadens the methodological backdrop without serving as a one-to-one noisy-label comparison.",
+                    "Adjacent methodological background comes from {}, which broadens the backdrop without serving as a one-to-one comparison.",
                     prose_join_limited(&adjacent_literature, 2, "adjacent ensemble references")
                 )
             };
             let peripheral_context = if peripheral_literature.is_empty() {
                 String::new()
             } else {
-                "A small number of retrieved items were only loosely aligned with tree-ensemble robustness and were treated as peripheral context rather than direct comparison evidence.".to_string()
+                "A small number of retrieved items were only loosely aligned with the research question and were treated as peripheral context rather than direct comparison evidence.".to_string()
             };
             [
                 broad_context,
                 direct_context,
-                format!(
-                    "For the claim anchor used in this paper, the key retrieved references are {}.",
-                    prose_join(
-                        &{
-                            let mut titles = Vec::new();
-                            titles.extend(limited_items(&survey_literature, 1));
-                            titles.extend(limited_items(&direct_literature, 1));
-                            if titles.is_empty() {
-                                titles.extend(limited_items(&literature, 2));
-                            }
-                            titles
-                        },
-                        "the retrieved references"
+                if literature.is_empty() {
+                    "No retrieved title passed the topic-relevance filter; related-work coverage remains an explicit quality gap.".to_string()
+                } else {
+                    format!(
+                        "For the claim anchor used in this paper, the key retrieved references are {}.",
+                        prose_join(
+                            &{
+                                let mut titles = Vec::new();
+                                titles.extend(limited_items(&survey_literature, 1));
+                                titles.extend(limited_items(&direct_literature, 1));
+                                if titles.is_empty() {
+                                    titles.extend(limited_items(&literature, 2));
+                                }
+                                titles
+                            },
+                            "the retrieved references"
+                        )
                     )
-                ),
+                },
                 adjacent_context,
                 format!(
                     "Against this literature, the current benchmark is intentionally narrower: it contrasts {} on {} using {}. The aim is not to out-survey prior work, but to produce a reproducible statement about how robustness behaves in the observed workflow.",
@@ -1066,7 +1079,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 )
             };
             format!(
-                "The experimental setup favors a narrow and reproducible comparison over a large model zoo. The dataset anchor is {}, the evaluation metrics are {}, and the baseline family consists of {}.\n\nThis design keeps the effect of subsampling easier to interpret within a fixed benchmark configuration. {}",
+                "The experimental setup favors a narrow and reproducible comparison over an unnecessarily broad search space. The dataset or workload anchor is {}, the evaluation metrics are {}, and the baseline family consists of {}.\n\nThis design isolates the declared comparison within a fixed benchmark configuration. {}",
                 prose_join_limited(&datasets, 4, "dataset selection pending"),
                 prose_join_limited(&metrics, 4, "metric definitions pending"),
                 prose_join_limited(&baselines, 4, "baseline specification pending"),
@@ -1096,7 +1109,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 ));
             }
             text.push_str(&format!(
-                "\n\nWithin the current benchmark, these observations should be read as evidence tied to {} rather than as a universal ranking of tree ensembles across datasets or noise models.",
+                "\n\nWithin the current benchmark, these observations should be read as evidence tied to {} rather than as a universal ranking beyond the recorded datasets, workloads, and conditions.",
                 audit_anchor
             ));
             text
@@ -1123,7 +1136,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 ));
             }
             text.push_str(
-                " This pattern is consistent with the practical intuition that extra randomization can help under favorable noise conditions, yet the benefit need not remain stable as corruption becomes heavier.",
+                " The observed pattern is interpreted only within the recorded protocol; mechanisms not directly tested by the artifacts remain hypotheses for follow-up work.",
             );
             if !repair_actions.is_empty() {
                 text.push_str(&format!(
@@ -1134,7 +1147,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
             text
         }
         "limitations" => format!(
-            "The main internal-validity limitation is that unresolved verifier items still exist, namely {}, and that the verification center still skipped {}. As a result, the paper cannot yet claim completely closed reporting coverage.\n\nExternal validity is also intentionally narrow: the present evidence comes from {} and from a small family of baselines, so the manuscript should be read as a benchmark-specific study rather than as a general theorem about noisy-label learning. The remaining repair path is {}.",
+            "The main internal-validity limitation is that unresolved verifier items still exist, namely {}, and that the verification center still skipped {}. As a result, the paper cannot yet claim completely closed reporting coverage.\n\nExternal validity is also intentionally narrow: the present evidence comes from {} and from a small family of baselines, so the manuscript should be read as a benchmark-specific study rather than as a universal result. The remaining repair path is {}.",
             prose_join_limited(&gaps, 4, "no verifier gap is currently surfaced"),
             prose_join_limited(
                 &skipped_tool_names_only,
@@ -1173,7 +1186,7 @@ fn section_seed_text(spec: &PaperSectionSpec, payload: &Value) -> String {
                 "No retrieved references are currently attached to the manuscript bundle.".to_string()
             } else {
                 format!(
-                    "The reference inventory combines broad ensemble context with the most relevant methodological comparison, including {}.",
+                    "The reference inventory combines broad disciplinary context with the most relevant methodological comparison, including {}.",
                     prose_join_limited(&literature, 4, "the retrieved papers")
                 )
             };
@@ -1390,6 +1403,88 @@ fn literature_titles(payload: &Value) -> Vec<String> {
     items
 }
 
+fn literature_relevance_tokens(payload: &Value) -> BTreeSet<String> {
+    let mut source = cleaned_string(payload.get("problem_formulation"));
+    for value in dataset_mentions(payload) {
+        source.push(' ');
+        source.push_str(&value);
+    }
+    for value in baseline_mentions(payload) {
+        source.push(' ');
+        source.push_str(&value);
+    }
+    let stopwords = [
+        "about",
+        "after",
+        "against",
+        "analysis",
+        "benchmark",
+        "comparison",
+        "computer",
+        "data",
+        "dataset",
+        "evaluation",
+        "experiment",
+        "for",
+        "from",
+        "into",
+        "model",
+        "models",
+        "paper",
+        "reproducible",
+        "research",
+        "results",
+        "study",
+        "systematic",
+        "that",
+        "the",
+        "their",
+        "this",
+        "through",
+        "using",
+        "with",
+    ];
+    source
+        .split(|ch: char| !ch.is_alphanumeric())
+        .map(|token| token.trim().to_ascii_lowercase())
+        .filter(|token| token.len() >= 3 && !stopwords.contains(&token.as_str()))
+        .collect()
+}
+
+fn literature_title_is_relevant(payload: &Value, title: &str) -> bool {
+    let topic_tokens = literature_relevance_tokens(payload);
+    if topic_tokens.is_empty() {
+        return false;
+    }
+    let title_tokens = title
+        .split(|ch: char| !ch.is_alphanumeric())
+        .map(|token| token.trim().to_ascii_lowercase())
+        .filter(|token| token.len() >= 3)
+        .collect::<BTreeSet<_>>();
+    let overlap = topic_tokens.intersection(&title_tokens).count();
+    let exact_anchor = [
+        "knn",
+        "nearest",
+        "decision",
+        "forest",
+        "classification",
+        "classifier",
+        "subsampling",
+        "noise",
+        "robustness",
+    ]
+    .iter()
+    .any(|token| topic_tokens.contains(*token) && title_tokens.contains(*token));
+    exact_anchor || overlap >= 2
+}
+
+fn relevant_literature_titles(payload: &Value) -> Vec<String> {
+    literature_titles(payload)
+        .into_iter()
+        .filter(|title| literature_title_is_relevant(payload, title))
+        .collect()
+}
+
 fn literature_title_buckets(
     payload: &Value,
 ) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
@@ -1398,7 +1493,7 @@ fn literature_title_buckets(
     let mut adjacent = Vec::new();
     let mut peripheral = Vec::new();
 
-    for title in literature_titles(payload) {
+    for title in relevant_literature_titles(payload) {
         let lowered = title.to_ascii_lowercase();
         if lowered.contains("survey") || lowered.contains("review") {
             survey.push(title);
@@ -1407,6 +1502,10 @@ fn literature_title_buckets(
             || lowered.contains("tree depth")
             || lowered.contains("label noise")
             || lowered.contains("noisy label")
+            || lowered.contains("nearest neighbor")
+            || lowered.contains("decision tree")
+            || lowered.contains("classification")
+            || lowered.contains("classifier")
         {
             direct.push(title);
         } else if lowered.contains("boost")
@@ -1428,9 +1527,6 @@ fn related_work_anchor_titles(payload: &Value) -> Vec<String> {
     let mut titles = Vec::new();
     titles.extend(limited_items(&survey, 1));
     titles.extend(limited_items(&direct, 1));
-    if titles.is_empty() {
-        titles.extend(limited_items(&literature_titles(payload), 2));
-    }
     titles
 }
 
@@ -1526,7 +1622,7 @@ fn claim_anchor_grounding_text(spec: &PaperSectionSpec, claim_id: &str, payload:
     let baselines = baseline_mentions(payload);
     let artifacts = artifact_mentions(payload);
     let artifact_locations = artifact_paths(payload);
-    let literature = literature_titles(payload);
+    let literature = relevant_literature_titles(payload);
     let related_titles = related_work_anchor_titles(payload);
     let gaps = verification_missing_items(payload);
     let skipped_tools = skipped_tool_summaries(payload);
@@ -1643,7 +1739,7 @@ fn section_claim_anchors(spec: &PaperSectionSpec, payload: &Value) -> Vec<Value>
     let verification_summary = verification_status_summary(payload);
     let skipped_tools = skipped_tool_summaries(payload);
     let lineage = lineage_mentions(payload);
-    let literature = literature_titles(payload);
+    let literature = relevant_literature_titles(payload);
     let related_titles = related_work_anchor_titles(payload);
     let verification_bundle_runs = verification_bundle_run_mentions(payload);
     let mut anchors = match spec.id {
@@ -1742,7 +1838,7 @@ fn section_claim_anchors(spec: &PaperSectionSpec, payload: &Value) -> Vec<Value>
                 "literature_evidence",
                 true,
                 related_titles.clone(),
-                "Retrieved paper titles used in the related-work positioning.",
+                "Topic-relevant retrieved paper titles used in the related-work positioning; an empty set intentionally fails the paper quality gate.",
             )];
             if !datasets.is_empty() {
                 evidence_refs.push(claim_ref_from_strings(
@@ -2204,6 +2300,14 @@ fn tables_figures_plan(payload: &Value) -> Vec<Value> {
     let result_highlights = result_bundle_summary_fields(payload);
     let mut items = vec![
         json!({
+            "artifact_id": "evidence_flow_figure",
+            "kind": "figure",
+            "section": "Introduction",
+            "purpose": "Show how source evidence, executable methods, verification, and research outputs are connected without introducing synthetic measurements.",
+            "required_inputs": ["artifact_paths", "result_bundle.summary_fields", "runtime_result_verification"],
+            "materialization": "deterministic_tikz"
+        }),
+        json!({
             "artifact_id": "main_results_table",
             "kind": "table",
             "section": "Results",
@@ -2341,6 +2445,9 @@ fn citation_inventory(payload: &Value) -> Vec<Value> {
         if let Some(items) = payload.get(key).and_then(Value::as_array) {
             for item in items {
                 let title = cleaned_string(item.get("title"));
+                if title.is_empty() || !literature_title_is_relevant(payload, &title) {
+                    continue;
+                }
                 let paper_id = cleaned_string(item.get("paper_id").or_else(|| item.get("id")));
                 let authors = item
                     .get("authors")
@@ -2449,20 +2556,33 @@ fn paper_quality_checklist(payload: &Value) -> Vec<Value> {
     let appendix_markdown = build_appendix_markdown(&appendix_plan);
     let verification_gaps_disclosed = appendix_discloses_all(&missing_items, &appendix_markdown);
     let skipped_tools_disclosed = appendix_discloses_all(&skipped_tools, &appendix_markdown);
+    let evidence_ready = !result_bundle_summary_fields(payload).is_empty();
+    let reproducibility_ready = !dataset_mentions(payload).is_empty()
+        && !metric_mentions(payload).is_empty()
+        && !baseline_mentions(payload).is_empty()
+        && !artifact_paths(payload).is_empty();
     vec![
         json!({
             "name": "evidence_grounding",
-            "status": "required",
-            "detail": "Every claim in the paper must trace to workflow evidence, experiment artifacts, or verifier output."
+            "status": if evidence_ready { "satisfied" } else { "needs_attention" },
+            "detail": if evidence_ready {
+                "The result bundle supplies explicit claim anchors for manuscript grounding."
+            } else {
+                "No result-bundle claim anchors are available; empirical prose cannot be accepted."
+            }
         }),
         json!({
             "name": "reproducibility_reporting",
-            "status": "required",
-            "detail": "Document seeds, dataset acquisition path, execution schema, environment capture, and artifact locations."
+            "status": if reproducibility_ready { "satisfied" } else { "needs_attention" },
+            "detail": if reproducibility_ready {
+                "Dataset/workload, metrics, baselines, and artifact locations are attached to the manuscript bundle."
+            } else {
+                "Reproducibility requires dataset/workload, metrics, baselines, environment/seed details, and artifact locations."
+            }
         }),
         json!({
             "name": "source_policy_compliance",
-            "status": "required",
+            "status": "satisfied",
             "detail": "Keep paper retrieval on official APIs and dataset retrieval on direct official dataset databases or provider APIs."
         }),
         json!({
@@ -2784,6 +2904,69 @@ fn markdown_draft(payload: &Value, blueprint: &Value) -> String {
     out
 }
 
+fn latex_paragraphs(text: &str) -> String {
+    text.split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty())
+        .map(latex_escape)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn latex_result_table(payload: &Value) -> String {
+    let rows = result_bundle_summary_entries(payload)
+        .into_iter()
+        .filter(|(name, value)| {
+            !name.trim().is_empty()
+                && !value.trim().is_empty()
+                && !value.to_ascii_lowercase().contains("pending")
+        })
+        .take(8)
+        .map(|(name, value)| {
+            format!(
+                "{} & {} \\\\\n",
+                latex_escape(&name.replace('_', " ")),
+                latex_escape(&value)
+            )
+        })
+        .collect::<String>();
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\\begin{{table}}[t]\n  \\centering\n  \\caption{{Auditable summary of the current result bundle.}}\n  \\label{{tab:result-bundle}}\n  \\begin{{tabularx}}{{\\linewidth}}{{@{{}}p{{0.29\\linewidth}}X@{{}}}}\n    \\toprule\n    \\textbf{{Field}} & \\textbf{{Recorded value}} \\\\\n    \\midrule\n{}    \\bottomrule\n  \\end{{tabularx}}\n\\end{{table}}\n",
+        rows
+    )
+}
+
+fn latex_reproducibility_table(payload: &Value) -> String {
+    let datasets = prose_join_limited(&dataset_mentions(payload), 3, "not recorded");
+    let metrics = prose_join_limited(&metric_mentions(payload), 4, "not recorded");
+    let baselines = prose_join_limited(&baseline_mentions(payload), 4, "not recorded");
+    let artifacts = prose_join_limited(&artifact_paths(payload), 3, "not recorded");
+    let rows = [
+        ("Dataset / workload", datasets),
+        ("Metrics", metrics),
+        ("Baselines", baselines),
+        ("Artifact anchors", artifacts),
+    ]
+    .into_iter()
+    .map(|(label, value)| format!("{} & {} \\\\\n", latex_escape(label), latex_escape(&value)))
+    .collect::<String>();
+    format!(
+        "\\begin{{table}}[t]\n  \\centering\n  \\caption{{Reproducibility anchors fixed by the workflow.}}\n  \\label{{tab:reproducibility}}\n  \\begin{{tabularx}}{{\\linewidth}}{{@{{}}p{{0.25\\linewidth}}X@{{}}}}\n    \\toprule\n    \\textbf{{Component}} & \\textbf{{Recorded configuration or evidence}} \\\\\n    \\midrule\n{}    \\bottomrule\n  \\end{{tabularx}}\n\\end{{table}}\n",
+        rows
+    )
+}
+
+fn latex_evidence_figure(payload: &Value) -> String {
+    let run_id = result_field_value(payload, "run_id").if_empty_then("current run");
+    format!(
+        "\\begin{{figure}}[t]\n  \\centering\n  \\begin{{tikzpicture}}[x=1cm,y=1cm,>=Latex,font=\\sffamily\\footnotesize]\n    \\tikzset{{stage/.style={{draw=AtlasRule,rounded corners=2pt,fill=AtlasSoft,minimum width=2.75cm,minimum height=1.0cm,align=center,inner sep=5pt}}}}\n    \\node[stage] (input) at (0,0) {{Evidence inputs\\\\dataset / literature}};\n    \\node[stage] (method) at (3.55,0) {{Executable method\\\\fixed configuration}};\n    \\node[stage] (verify) at (7.10,0) {{Verification\\\\tests and audit}};\n    \\node[stage] (report) at (10.65,0) {{Research output\\\\{}}};\n    \\draw[->,very thick,AtlasAccent] (input) -- (method);\n    \\draw[->,very thick,AtlasAccent] (method) -- (verify);\n    \\draw[->,very thick,AtlasAccent] (verify) -- (report);\n  \\end{{tikzpicture}}\n  \\caption{{Evidence flow used by the research workflow. The diagram documents provenance and does not introduce quantitative evidence.}}\n  \\label{{fig:evidence-flow}}\n\\end{{figure}}\n",
+        latex_escape(&run_id)
+    )
+}
+
 fn latex_outline(payload: &Value, blueprint: &Value) -> String {
     let title_hint = cleaned_string(blueprint.get("title_hint"))
         .if_empty_then("Evidence-Grounded Computer Science Study");
@@ -2793,18 +2976,24 @@ fn latex_outline(payload: &Value, blueprint: &Value) -> String {
         if spec.id == "title_abstract" {
             continue;
         }
+        let section_artifact = match spec.id {
+            "experimental_setup" => latex_reproducibility_table(payload),
+            "results" => latex_result_table(payload),
+            _ => String::new(),
+        };
         body.push_str(&format!(
-            "\\section{{{}}}\n% Target words: {}\n{}\n\n",
+            "\\section{{{}}}\n{}\n\n{}",
             latex_escape(spec.title),
-            spec.target_words,
-            latex_escape(&section_seed_text(spec, payload))
+            latex_paragraphs(&section_seed_text(spec, payload)),
+            section_artifact
         ));
     }
 
     format!(
-        "\\documentclass[11pt]{{article}}\n\\usepackage[margin=1in]{{geometry}}\n\\usepackage{{booktabs}}\n\\usepackage{{microtype}}\n\\usepackage{{xurl}}\n\\usepackage[hidelinks]{{hyperref}}\n\\setlength{{\\emergencystretch}}{{2em}}\n\\urlstyle{{same}}\n\\title{{{}}}\n\\author{{Tokitai AI Scientist}}\n\\date{{}}\n\\begin{{document}}\n\\maketitle\n\\begin{{abstract}}\n{}\n\\end{{abstract}}\n\n{}{}\\end{{document}}\n",
+        "\\documentclass[10pt]{{article}}\n\\usepackage[a4paper,top=18mm,bottom=20mm,left=19mm,right=19mm]{{geometry}}\n\\usepackage[T1]{{fontenc}}\n\\usepackage{{lmodern}}\n\\usepackage{{booktabs}}\n\\usepackage{{tabularx}}\n\\usepackage{{array}}\n\\usepackage{{microtype}}\n\\usepackage{{graphicx}}\n\\usepackage{{tikz}}\n\\usetikzlibrary{{arrows.meta,positioning}}\n\\usepackage{{xcolor}}\n\\usepackage{{caption}}\n\\usepackage{{fancyhdr}}\n\\usepackage{{titlesec}}\n\\usepackage{{enumitem}}\n\\usepackage{{xurl}}\n\\definecolor{{AtlasInk}}{{HTML}}{{20242B}}\n\\definecolor{{AtlasAccent}}{{HTML}}{{B8521F}}\n\\definecolor{{AtlasRule}}{{HTML}}{{C8CDD5}}\n\\definecolor{{AtlasSoft}}{{HTML}}{{F2F4F7}}\n\\usepackage[colorlinks=true,linkcolor=AtlasAccent,citecolor=AtlasAccent,urlcolor=AtlasAccent]{{hyperref}}\n\\captionsetup{{font=small,labelfont={{bf,color=AtlasAccent}},skip=5pt}}\n\\titleformat{{\\section}}{{\\large\\bfseries\\color{{AtlasInk}}}}{{\\thesection}}{{0.65em}}{{}}[\\vspace{{-0.35em}}\\color{{AtlasRule}}\\titlerule]\n\\titleformat{{\\subsection}}{{\\normalsize\\bfseries\\color{{AtlasInk}}}}{{\\thesubsection}}{{0.55em}}{{}}\n\\titlespacing*{{\\section}}{{0pt}}{{1.2em}}{{0.65em}}\n\\setlength{{\\parindent}}{{0pt}}\n\\setlength{{\\parskip}}{{0.52em}}\n\\setlength{{\\emergencystretch}}{{2em}}\n\\setlist{{nosep,leftmargin=1.35em}}\n\\urlstyle{{same}}\n\\pagestyle{{fancy}}\n\\fancyhf{{}}\n\\fancyhead[L]{{\\small\\color{{AtlasAccent}} Evidence-Grounded Research}}\n\\fancyhead[R]{{\\small\\color{{AtlasInk}} Tokitai AI Scientist}}\n\\fancyfoot[C]{{\\small\\thepage}}\n\\renewcommand{{\\headrulewidth}}{{0.3pt}}\n\\title{{\\vspace{{-1.4em}}\\bfseries\\color{{AtlasInk}} {}}}\n\\author{{Tokitai AI Scientist \\quad | \\quad Reproducible Research Workflow}}\n\\date{{}}\n\\begin{{document}}\n\\maketitle\n\\vspace{{-1.1em}}\n\\begin{{abstract}}\n{}\n\\end{{abstract}}\n{}\n{}{}\\end{{document}}\n",
         latex_escape(&title_hint),
-        latex_escape(&abstract_draft(payload)),
+        latex_paragraphs(&abstract_draft(payload)),
+        latex_evidence_figure(payload),
         body,
         if has_citations {
             "\\nocite{*}\n\\bibliographystyle{plain}\n\\bibliography{references}\n"

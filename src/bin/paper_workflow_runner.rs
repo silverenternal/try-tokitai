@@ -18,6 +18,7 @@ struct RunnerArgs {
     script_path: Option<PathBuf>,
     figure_paths: Vec<PathBuf>,
     search_limit: usize,
+    force_rewrite: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,11 +70,13 @@ fn main() -> Result<()> {
         search_limit: args.search_limit.clamp(1, 10),
         toolchains: Some(auto_detect_toolchain_paths()),
         reviewer_feedback: None,
-        force_rewrite: false,
+        force_rewrite: args.force_rewrite,
         runtime_artifact_paths: Some(runtime.artifact_paths.clone()),
         runtime_result_bundle: Some(runtime.result_bundle.clone()),
         runtime_run_comparison: Some(runtime.run_comparison.clone()),
         runtime_lineage: Some(runtime.lineage.clone()),
+        image_api_key: std::env::var("DASHSCOPE_API_KEY").ok(),
+        generate_images: false,
     };
 
     let runtime_handle =
@@ -159,6 +162,9 @@ fn parse_args() -> Result<RunnerArgs> {
                     .parse::<usize>()
                     .context("invalid --search-limit value")?;
             }
+            "--force-rewrite" => {
+                parsed.force_rewrite = true;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -193,6 +199,7 @@ fn print_help() {
     println!("  --script-path <path>         experiment script path, relative to source workspace");
     println!("  --figure <path>              figure path, repeatable");
     println!("  --search-limit <n>           official paper API search limit, default 5");
+    println!("  --force-rewrite              rebuild report, PDF, and quality gates");
 }
 
 fn next_arg_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
@@ -268,20 +275,18 @@ fn build_runtime_bundle(
             .collect::<Result<Vec<_>>>()?
     };
 
-    let summary_text =
-        fs::read_to_string(source_workspace.join(&summary_rel)).with_context(|| {
-            format!(
-                "failed to read summary markdown {}",
-                source_workspace.join(&summary_rel).display()
-            )
-        })?;
-    let metrics_text =
-        fs::read_to_string(source_workspace.join(&metrics_rel)).with_context(|| {
-            format!(
-                "failed to read metrics markdown {}",
-                source_workspace.join(&metrics_rel).display()
-            )
-        })?;
+    let summary_text = read_utf8_text(&source_workspace.join(&summary_rel)).with_context(|| {
+        format!(
+            "failed to read summary markdown {}",
+            source_workspace.join(&summary_rel).display()
+        )
+    })?;
+    let metrics_text = read_utf8_text(&source_workspace.join(&metrics_rel)).with_context(|| {
+        format!(
+            "failed to read metrics markdown {}",
+            source_workspace.join(&metrics_rel).display()
+        )
+    })?;
 
     let model_rows = parse_model_accuracy_rows(&summary_text);
     let best_model = model_rows
@@ -292,6 +297,12 @@ fn build_runtime_bundle(
         .iter()
         .find(|row| row.name.to_ascii_lowercase().contains("logistic"))
         .cloned();
+    let comparator_row = logistic_row.clone().or_else(|| {
+        model_rows
+            .iter()
+            .min_by(|left, right| left.accuracy.total_cmp(&right.accuracy))
+            .cloned()
+    });
     let metrics_accuracy = extract_metric_value(
         &metrics_text,
         &[
@@ -322,12 +333,13 @@ fn build_runtime_bundle(
             anyhow!("failed to infer a primary metric from supplied experiment files")
         })?;
 
-    let baseline_delta = if let (Some(best), Some(logistic)) =
-        (best_model.as_ref(), logistic_row.as_ref())
+    let baseline_delta = if let (Some(best), Some(comparator)) =
+        (best_model.as_ref(), comparator_row.as_ref())
     {
         Some(format!(
-            "{:+.4} over logistic regression baseline",
-            best.accuracy - logistic.accuracy
+            "{:+.4} over {} comparator",
+            best.accuracy - comparator.accuracy,
+            comparator.name
         ))
     } else if let (Some(best), Some(metric_accuracy)) = (best_model.as_ref(), metrics_accuracy) {
         Some(format!(
@@ -478,32 +490,111 @@ fn normalize_relative_path(path: impl AsRef<Path>) -> String {
         .join("/")
 }
 
-fn parse_model_accuracy_rows(markdown: &str) -> Vec<ModelMetricRow> {
-    markdown
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.starts_with('|') {
-                return None;
-            }
-            let parts = trimmed
-                .split('|')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>();
-            if parts.len() < 3 {
-                return None;
-            }
-            if parts[0].contains("---") || parts[1].contains("---") {
-                return None;
-            }
-            let accuracy = parts[1].parse::<f64>().ok()?;
-            Some(ModelMetricRow {
-                name: parts[0].to_string(),
-                accuracy,
-            })
-        })
+fn read_utf8_text(path: &Path) -> Result<String> {
+    let bytes = fs::read(path)?;
+    String::from_utf8(bytes)
+        .map_err(|error| anyhow!("{} is not valid UTF-8: {}", path.display(), error))
+}
+
+fn markdown_table_cells(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') {
+        return None;
+    }
+    let cells = trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(|part| part.trim().to_string())
+        .collect::<Vec<_>>();
+    (cells.len() >= 2).then_some(cells)
+}
+
+fn normalized_header(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn parse_accuracy_cell(value: &str) -> Option<f64> {
+    let cleaned = value.trim().trim_matches('*').trim_matches('`').trim();
+    let percent = cleaned.ends_with('%');
+    let numeric = cleaned.trim_end_matches('%').trim().parse::<f64>().ok()?;
+    let normalized = if percent { numeric / 100.0 } else { numeric };
+    (normalized.is_finite() && (0.0..=1.0).contains(&normalized)).then_some(normalized)
+}
+
+fn is_markdown_separator_row(cells: &[String]) -> bool {
+    !cells.is_empty()
+        && cells.iter().all(|cell| {
+            let compact = cell.trim().trim_matches(':');
+            compact.len() >= 3 && compact.chars().all(|ch| ch == '-')
+        })
+}
+
+fn parse_model_accuracy_rows(markdown: &str) -> Vec<ModelMetricRow> {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let Some(headers) = markdown_table_cells(lines[index]) else {
+            index += 1;
+            continue;
+        };
+        let normalized = headers
+            .iter()
+            .map(|header| normalized_header(header))
+            .collect::<Vec<_>>();
+        let model_index = normalized.iter().position(|header| {
+            header == "model"
+                || header == "models"
+                || header == "classifier"
+                || header == "method"
+                || header.contains("模型")
+        });
+        let accuracy_index = normalized.iter().position(|header| {
+            header == "accuracy"
+                || header == "testaccuracy"
+                || header == "validationaccuracy"
+                || header.contains("准确率")
+        });
+        let (Some(model_index), Some(accuracy_index)) = (model_index, accuracy_index) else {
+            index += 1;
+            continue;
+        };
+
+        index += 1;
+        if index < lines.len() {
+            if let Some(separator) = markdown_table_cells(lines[index]) {
+                if is_markdown_separator_row(&separator) {
+                    index += 1;
+                }
+            }
+        }
+        while index < lines.len() {
+            let Some(cells) = markdown_table_cells(lines[index]) else {
+                break;
+            };
+            if cells.len() > model_index && cells.len() > accuracy_index {
+                let name = cells[model_index]
+                    .trim()
+                    .trim_matches('*')
+                    .trim_matches('`')
+                    .trim()
+                    .to_string();
+                if !name.is_empty() {
+                    if let Some(accuracy) = parse_accuracy_cell(&cells[accuracy_index]) {
+                        rows.push(ModelMetricRow { name, accuracy });
+                    }
+                }
+            }
+            index += 1;
+        }
+    }
+
+    rows
 }
 
 fn extract_metric_value(text: &str, labels: &[&str]) -> Option<f64> {
@@ -517,11 +608,7 @@ fn extract_metric_value(text: &str, labels: &[&str]) -> Option<f64> {
             }
         }
     }
-    let generic = Regex::new(r"(?im)accuracy[^0-9]*([0-9]+\.[0-9]+)").ok()?;
-    generic
-        .captures(text)
-        .and_then(|captures| captures.get(1))
-        .and_then(|value| value.as_str().parse::<f64>().ok())
+    None
 }
 
 fn infer_error_analysis_summary(metrics_text: &str) -> String {
@@ -603,6 +690,25 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].name, "Logistic Regression");
         assert!((rows[1].accuracy - 0.9778).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ignores_class_level_metric_tables() {
+        let rows = parse_model_accuracy_rows(
+            r#"
+| Class | F1 | Recall |
+|---|---|---|
+| Setosa | 1.0000 | 1.0000 |
+
+| Rank | Model | Parameter | Accuracy |
+|---|---|---|---|
+| 1 | KNN | k=15 | 96.47% |
+| 2 | Random Forest | n=100 | 0.9567 |
+"#,
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "KNN");
+        assert!((rows[0].accuracy - 0.9647).abs() < 1e-9);
     }
 
     #[test]

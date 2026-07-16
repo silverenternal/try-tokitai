@@ -1,15 +1,21 @@
 #![recursion_limit = "256"]
 
-mod app_paths;
 mod agent_skills;
+mod app_paths;
 mod command_resolver;
 mod config;
 mod desktop_host;
 mod domain_prompt;
 mod host;
+mod image_generation;
 mod path_resolver;
+mod process_window;
+mod project_index;
+mod research_domains;
+mod research_os;
 mod sandbox;
 pub mod security;
+mod task_queue;
 mod text_encoding;
 mod tools;
 // Context is now a separate crate: tokitai-context
@@ -33,6 +39,7 @@ pub mod tool_market;
 mod tool_matrix;
 mod toolchain;
 pub mod tui;
+mod visualization;
 mod web;
 
 use anyhow::Result;
