@@ -1,4 +1,0 @@
-Model,Best_Hyperparameter,Best_Accuracy
-KNN,k=15,0.9613
-决策树,max_depth=4,0.9493
-随机森林,n_estimators=100,0.9587

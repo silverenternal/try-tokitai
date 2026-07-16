@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API Cost Tracker for Tokitai Experiments
+API Cost Tracker for Atlas experiments
 
 Tracks API costs in real-time and projects total experiment cost.
 
@@ -124,7 +124,7 @@ class CostTracker:
                      project: bool = False, experiment_days: int = 30):
         """Print a cost report."""
         print("\n" + "=" * 70)
-        print("TOKITAI EXPERIMENT API COST REPORT")
+        print("ATLAS EXPERIMENT API COST REPORT")
         print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 70 + "\n")
         
@@ -196,7 +196,7 @@ class CostTracker:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Track API costs for Tokitai experiments")
+    parser = argparse.ArgumentParser(description="Track API costs for Atlas experiments")
     parser.add_argument("--group", "-g", help="Track specific group")
     parser.add_argument("--all-groups", "-a", action="store_true", help="Track all groups")
     parser.add_argument("--budget", "-b", type=float, default=50.0, help="Budget per group in USD")

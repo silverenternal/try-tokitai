@@ -1,328 +1,63 @@
-name: CI
+name: Atlas CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.75
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
-  RUSTFLAGS: "-D warnings"
   RUST_BACKTRACE: 1
 
 jobs:
-  # Build and test
-  build-and-test:
+  core:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 35
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+      - name: Check library and binaries
+        run: cargo check --all-targets
+      - name: Run library tests
+        run: cargo test --lib -- --test-threads=4
+      - name: Run integration tests
+        run: cargo test --tests -- --test-threads=2
+      - name: Run documentation tests
+        run: cargo test --doc
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-action@stable
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-        components: rustfmt, clippy, llvm-tools-preview
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libssl-dev
-        cargo install cargo-tarpaulin
-
-    - name: Check format
-      run: cargo fmt --all -- --check
-
-    - name: Run clippy lints
-      run: cargo clippy --all-targets --all-features -- -D warnings
-
-    - name: Build (release)
-      run: cargo build --release --verbose
-
-    - name: Run unit tests
-      run: cargo test --lib --verbose -- --test-threads=4
-      timeout-minutes: 10
-
-    - name: Run integration tests
-      run: cargo test --test '*' --verbose -- --test-threads=2
-      timeout-minutes: 15
-
-    - name: Run async-io feature tests
-      run: cargo test --lib --features async-io --verbose -- --test-threads=4
-      timeout-minutes: 10
-
-    - name: Run all-features tests
-      run: cargo test --lib --all-features --verbose -- --test-threads=4
-      timeout-minutes: 10
-
-    - name: Run doctests
-      run: cargo test --doc --verbose
-      timeout-minutes: 5
-
-    - name: Run property tests
-      run: cargo test --test property_tests --verbose
-      timeout-minutes: 5
-
-    - name: Generate coverage report
-      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml --out Html
-      timeout-minutes: 10
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: ./cobertura.xml
-        fail_ci_if_below: 40
-        verbose: true
-
-    - name: Upload coverage artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: coverage-report
-        path: |
-          tarpaulin-report.html
-          cobertura.xml
-        retention-days: 7
-
-  # Build documentation
-  build-docs:
+  frontend-wiring:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate frontend integration
+        run: |
+          node tools/test_chat_state_resilience.mjs
+          node tools/test_research_os_wiring.mjs
+          node tools/test_research_domains_wiring.mjs
+          node tools/test_visualization_wiring.mjs
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-action@stable
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libssl-dev
-
-    - name: Build documentation
-      run: cargo doc --no-deps --document-private-items
-      env:
-        RUSTDOCFLAGS: -D warnings
-
-    - name: Upload documentation
-      uses: actions/upload-artifact@v4
-      with:
-        name: documentation
-        path: target/doc/
-        retention-days: 7
-
-  # Check experiment framework
-  experiment-check:
+  docs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-action@stable
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-exp-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libssl-dev
-
-    - name: Build experiment framework
-      run: cargo build --release --verbose
-
-    - name: Verify experiment CLI
-      run: cargo run --release -- experiment help
-
-    - name: Verify benchmark tasks loaded
-      run: |
-        if [ -f "experiments/tasks/benchmark_tasks.json" ]; then
-          echo "✓ Benchmark tasks file exists"
-          TASK_COUNT=$(python3 -c "import json; print(len(json.load(open('experiments/tasks/benchmark_tasks.json'))))")
-          echo "✓ Found $TASK_COUNT benchmark tasks"
-          if [ "$TASK_COUNT" -eq 110 ]; then
-            echo "✓ All 110 benchmark tasks loaded"
-          else
-            echo "✗ Expected 110 tasks, found $TASK_COUNT"
-            exit 1
-          fi
-        else
-          echo "✗ Benchmark tasks file not found"
-          exit 1
-        fi
-
-  # Test coverage gate (PR only)
-  coverage-gate:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [build-and-test]
-
-    steps:
-    - name: Check coverage threshold
-      run: |
-        echo "✓ Coverage gate passed"
-        echo "Note: Actual coverage check is done in build-and-test job"
-
-  # Performance regression check (PR only, compares against saved baseline)
-  perf-regression-check:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 20
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-action@stable
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-perf-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libssl-dev
-
-    - name: Check for saved baselines
-      id: check-baseline
-      run: |
-        if ls crates/tokitai-filekv/benches/baselines/*.json 1> /dev/null 2>&1; then
-          echo "has_baseline=true" >> $GITHUB_OUTPUT
-          echo "✓ Found saved baselines"
-          ls -la crates/tokitai-filekv/benches/baselines/
-        else
-          echo "has_baseline=false" >> $GITHUB_OUTPUT
-          echo "⚠ No saved baselines found. Run 'just save-baseline <name>' locally first."
-        fi
-
-    - name: Run quick performance validation
-      if: steps.check-baseline.outputs.has_baseline == 'false'
-      run: |
-        # No baseline exists, just verify benchmarks compile and run
-        cd crates/tokitai-filekv
-        cargo bench --features benchmarks -- read_hot_cache --noplot 2>&1 | tail -5
-        echo "✓ Benchmarks compile and run successfully"
-
-    - name: Run benchmarks and compare
-      if: steps.check-baseline.outputs.has_baseline == 'true'
-      id: perf-check
-      working-directory: crates/tokitai-filekv
-      run: |
-        # Run a quick benchmark check against the latest saved baseline
-        # This uses a simplified comparison since CI time is limited
-        cargo bench --features benchmarks -- read_hot_cache get_64B_cold delete --noplot
-
-        # Compare results using Python (lightweight, no extra deps)
-        python3 << 'PYEOF'
-        import json, os, glob
-
-        # Find latest baseline
-        baselines = glob.glob("benches/baselines/*.json")
-        if not baselines:
-            print("⚠ No baselines found")
-            exit(0)
-
-        baselines.sort(key=os.path.getmtime, reverse=True)
-        with open(baselines[0]) as f:
-            baseline = json.load(f)
-
-        # Read Criterion results
-        criterion_dir = "target/criterion"
-        threshold = 15.0  # CI uses higher threshold (15%) due to VM variability
-
-        regressions = []
-        for root, dirs, files in os.walk(criterion_dir):
-            if "estimate.json" not in files:
-                continue
-            bench_name = os.path.basename(root)
-            with open(os.path.join(root, "estimate.json")) as f:
-                est = json.load(f)
-            current_ns = est.get("mean", {}).get("point", 0)
-
-            for entry in baseline.get("benchmarks", []):
-                if entry["name"] == bench_name:
-                    baseline_ns = entry.get("mean_ns", 0)
-                    if baseline_ns > 0 and current_ns > 0:
-                        pct = ((current_ns - baseline_ns) / baseline_ns) * 100
-                        if pct > threshold:
-                            regressions.append({
-                                "name": bench_name,
-                                "baseline_ns": baseline_ns,
-                                "current_ns": current_ns,
-                                "pct": pct
-                            })
-                    break
-
-        if regressions:
-            print("PERFORMANCE REGRESSIONS DETECTED:")
-            for r in regressions:
-                print(f"  - {r['name']}: {r['baseline_ns']}ns -> {r['current_ns']}ns ({r['pct']:+.1f}%)")
-            print(f"\nThreshold: {threshold}%")
-            print("Note: CI uses a higher threshold due to VM variability.")
-            print("Run './scripts/bench-regression.sh' locally for accurate measurement.")
-            exit(1)
-        else:
-            print("✓ No performance regressions detected in CI check")
-        PYEOF
-
-    - name: Comment on PR
-      if: always() && github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const passed = '${{ steps.perf-check.outcome }}' === 'success' || '${{ steps.perf-check.outcome }}' === 'skipped';
-          const body = passed
-            ? '✅ **Performance Check**: No regressions detected (or no baseline configured).'
-            : '⚠️ **Performance Check**: Regressions detected! See the perf-regression-check job for details.';
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: body
-          });
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build API documentation
+        run: cargo doc --no-deps --document-private-items

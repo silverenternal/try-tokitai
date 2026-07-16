@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tokitai AI Assistant 演示脚本
+# Atlas AI Assistant demo script
 # 自动配置环境变量并启动交互式会话
 
 set -e
@@ -38,7 +38,7 @@ done
 
 # 简洁启动信息
 echo "========================================"
-echo "  🔥 Tokitai AI Assistant v2.1.0"
+echo "  🔥 Atlas AI Assistant"
 echo "========================================"
 echo ""
 

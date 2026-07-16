@@ -38,3 +38,9 @@ Ubuntu.appx
 __pycache__/
 *.pyc
 config.toml
+
+# Generated experiment artifacts
+experiments/**/results/
+experiments/**/paper/
+experiments/*.png
+experiments/**/analysis_log.txt

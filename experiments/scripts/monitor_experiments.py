@@ -157,7 +157,7 @@ class ExperimentMonitor:
     
     def send_email_alert(self, alert: Dict, recipient: str, smtp_config: Dict):
         """Send email alert."""
-        subject = f"[Tokitai Experiment {alert['level']}] {alert['type'].replace('_', ' ').title()} Alert"
+        subject = f"[Atlas Experiment {alert['level']}] {alert['type'].replace('_', ' ').title()} Alert"
         
         body = f"""
 Experiment Alert
@@ -173,7 +173,7 @@ Details:
 {json.dumps(alert, indent=2, default=str)}
 
 ---
-Tokitai Experiment Monitor
+Atlas Experiment Monitor
 """
         
         msg = MIMEText(body)
@@ -201,7 +201,7 @@ Tokitai Experiment Monitor
             "attachments": [
                 {
                     "color": color,
-                    "title": f"Tokitai Experiment {alert['level']}",
+                    "title": f"Atlas Experiment {alert['level']}",
                     "text": alert['message'],
                     "fields": [
                         {"title": "Type", "value": alert['type'], "short": True},
@@ -224,7 +224,7 @@ Tokitai Experiment Monitor
                 slack_webhook: Optional[str] = None, smtp_config: Optional[Dict] = None):
         """Run monitoring check."""
         print(f"\n{'='*60}")
-        print(f"Tokitai Experiment Monitor")
+        print(f"Atlas Experiment Monitor")
         print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Budget: ${self.budget_usd:.2f}")
         print(f"{'='*60}\n")
@@ -296,7 +296,7 @@ Tokitai Experiment Monitor
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Monitor Tokitai experiments")
+    parser = argparse.ArgumentParser(description="Monitor Atlas experiments")
     parser.add_argument("--group", "-g", help="Monitor specific group")
     parser.add_argument("--all-groups", "-a", action="store_true", help="Monitor all groups")
     parser.add_argument("--budget", "-b", type=float, default=150.0, help="API budget in USD")

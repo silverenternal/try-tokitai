@@ -1,4 +1,4 @@
-# Tokitai Experiment Framework
+# Atlas Experiment Framework
 
 > **Purpose**: Validate the effectiveness of the Prompt Engineering self-evolution system through controlled experiments
 > 

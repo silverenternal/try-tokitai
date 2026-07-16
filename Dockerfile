@@ -1,4 +1,4 @@
-# Tokitai Experiment Environment
+# Atlas experiment environment
 # Reproducible environment for running 30-day experiments
 #
 # Usage:
