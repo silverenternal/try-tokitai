@@ -36,6 +36,10 @@ use std::os::windows::process::CommandExt;
 
 use crate::agent_skills::{AgentSkillCatalog, AgentSkillMatch, SkillKind};
 use crate::app_paths::AppPaths;
+use crate::atlas_core::{
+    domain_asset_object, domain_task_object, domain_workspace_object, legacy_research_object,
+    AtlasCore, ObjectType, RelationshipKind, ScientificObject,
+};
 use crate::assistant_common::AssistantConfig;
 use crate::cli_assistant::{ChatRunResult, CliAssistant};
 use crate::config::Config;
@@ -64,6 +68,9 @@ use crate::research_os::{
     get_knowledge_graph, ingest_agent_turn, ingest_domain_task, list_decisions, list_diary_entries, list_evidence,
     list_experiments, list_hypotheses, list_memory_entries, list_negative_results,
     list_publications, list_timeline_events,
+};
+use crate::research_intelligence::{
+    ObjectQuery, QueryFilter, ResearchGoalInput, ResearchIntelligenceEngine,
 };
 use crate::sandbox::initialize_app_sandbox;
 use crate::scientist::tools::data::{extract_paper_dataset_hints_from_value, DataTools};
@@ -4243,6 +4250,50 @@ fn research_domain_provider_payload(
     operation(&context)
 }
 
+fn atlas_core_for_workspace(workspace_root: &Path) -> Result<AtlasCore> {
+    AtlasCore::open(workspace_root)
+}
+
+fn sync_domain_workspace_to_core(
+    context: &DomainProviderContext<'_>,
+    workspace: &DomainWorkspace,
+    actor: &str,
+) -> Result<()> {
+    let core = atlas_core_for_workspace(context.workspace_root)?;
+    let workspace_object = core.sync_external(domain_workspace_object(workspace, actor), actor)?;
+    for asset in &workspace.assets {
+        let asset_object = core.sync_external(domain_asset_object(asset, actor), actor)?;
+        core.relate(
+            &workspace_object.id,
+            &asset_object.id,
+            RelationshipKind::Contains,
+            actor,
+            BTreeMap::new(),
+        )?;
+    }
+    Ok(())
+}
+
+fn sync_domain_task_to_core(workspace_root: &Path, task: &DomainTaskRecord, actor: &str) -> Result<()> {
+    let core = atlas_core_for_workspace(workspace_root)?;
+    let task_object = core.sync_external(domain_task_object(task), actor)?;
+    if let Some(asset_id) = task.asset_id.as_deref() {
+        let asset_object_id = blake3::hash(format!("atlas:domain-asset:{asset_id}").as_bytes())
+            .to_hex()[..32]
+            .to_string();
+        if core.get(&asset_object_id).is_ok() {
+            core.relate(
+                &task_object.id,
+                &asset_object_id,
+                RelationshipKind::Uses,
+                actor,
+                BTreeMap::new(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn research_domain_catalog(
     state: &WebAppState,
     request: ResearchDomainCatalogQuery,
@@ -4269,12 +4320,14 @@ fn research_domain_workspace(
         let workspace = state
             .research_domain_registry
             .workspace(context, &request.domain_id)?;
-        Ok(json!(reconcile_domain_workspace_run(
+        let workspace = reconcile_domain_workspace_run(
             state,
             context,
             &request.domain_id,
             workspace,
-        )?))
+        )?;
+        sync_domain_workspace_to_core(context, &workspace, "workspace")?;
+        Ok(json!(workspace))
     })
 }
 
@@ -4520,6 +4573,7 @@ fn research_domain_task_begin(
         let task_json = serde_json::to_value(&task)?;
         ingest_domain_task(context.workspace_root, &task_json, updated_by)
             .map_err(|error| anyhow!("failed to record domain task in Research OS: {error}"))?;
+        sync_domain_task_to_core(context.workspace_root, &task, updated_by)?;
 
         Ok(json!({ "task": task, "workspace_state": workspace_state }))
     })
@@ -4588,6 +4642,7 @@ fn research_domain_task_update(
         let task_json = serde_json::to_value(&task)?;
         ingest_domain_task(context.workspace_root, &task_json, updated_by)
             .map_err(|error| anyhow!("failed to record domain task update in Research OS: {error}"))?;
+        sync_domain_task_to_core(context.workspace_root, &task, updated_by)?;
 
         Ok(json!({ "task": task, "workspace_state": workspace_state }))
     })
@@ -18459,6 +18514,7 @@ async fn assistant_tool_definitions(
         tools.extend(project_knowledge_tool_definitions());
         tools.extend(research_domain_tool_definitions());
         tools.extend(research_os_tool_definitions());
+        tools.extend(atlas_object_tool_definitions());
         tools.push(wan_image_tool_definition());
         tools.push(browser_computer_tool_definition());
         Ok(tools)
@@ -18491,6 +18547,15 @@ fn research_os_tool_definitions() -> Vec<Value> {
     vec![
         json!({"type":"function","function":{"name":"research_os_snapshot","description":"Read the workspace Research OS as one evidence-linked snapshot: hypotheses with computed confidence, experiments and lineage, evidence, negative results, decisions, memory, publications, timeline, warnings and graph relations. Use before planning research or making evidence claims.","parameters":{"type":"object","properties":{"section":{"type":"string","enum":["all","graph","hypotheses","experiments","evidence","failures","decisions","memory","timeline","publications"]},"query":{"type":"string","description":"Optional text used to return the most relevant objects first."}},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"research_os_mutate","description":"Create or update Research OS objects (hypotheses, evidence, experiments, negative results, decisions, memory, publications) and link them together. Every mutation is validated and automatically recorded to the Timeline/Diary. A hypothesis cannot be set to validated/refuted, and a publication cannot be set to ready/published, without linked evidence — such calls return an explicit error. Use research_os_snapshot first to find existing object ids before creating duplicates or linking.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["create_hypothesis","update_hypothesis","create_evidence","create_experiment","update_experiment","create_negative_result","create_decision","create_memory","create_publication","update_publication","link_objects"],"description":"The mutation to perform."},"params":{"type":"object","description":"Operation-specific fields. create_hypothesis: title,description,domain_id. update_hypothesis: id,status(draft|active|validated|refuted|abandoned),title,description,evidence_ids,experiment_ids,summary,motivation,problem,novelty,expected_result,current_confidence,owner,tags,priority. create_evidence: kind(experimental|literature|artifact|benchmark),summary,strength(0-1),supports(bool),hypothesis_id,experiment_id,source_path,source_command. create_experiment: title,domain_id,hypothesis_id,parameters. update_experiment: id,status(planned|running|completed|failed),artifacts,evidence_ids,parent_experiment_ids,hypothesis_id. create_negative_result: title,description,failure_mode,domain_id,learned,hypothesis_id,experiment_id. create_decision: title,context,options(array of {id,label,pros,cons,estimated_cost}),chosen_option_id,decision_score(0-1),rationale. create_memory: content,importance(0-1),related_objects. create_publication: title. update_publication: id,status(draft|review|ready|published),hypothesis_ids,evidence_ids,experiment_ids,artifact_paths. link_objects: from_type,from_id,to_type,to_id,relation(cites|uses|extends|contradicts)."}},"required":["operation","params"],"additionalProperties":false}}}),
+    ]
+}
+
+fn atlas_object_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({"type":"function","function":{"name":"atlas_object","description":"Create, read, update, delete, archive, clone, fork, merge, relate, compare, export, preview or visualize Scientific Objects through Atlas Core. Prefer this over direct file manipulation when an object exists.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["create","read","update","delete","archive","clone","fork","merge","relate","compare","export","preview","visualize","graph","timeline"]},"object_id":{"type":"string"},"source_object_id":{"type":"string"},"target_object_id":{"type":"string"},"relationship_kind":{"type":"string"},"object_type":{"type":"string"},"display_name":{"type":"string"},"description":{"type":"string"},"owner":{"type":"string"},"patch":{"type":"object"},"left_version":{"type":"integer"},"right_version":{"type":"integer"}},"required":["operation"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"atlas_object_query","description":"Search Scientific Objects and their generated relationship graph. Accepts structured filters or natural-language object queries.","parameters":{"type":"object","properties":{"query":{"type":"string"},"object_types":{"type":"array","items":{"type":"string"}},"filters":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"operator":{"type":"string","enum":["eq","not_eq","gt","gte","lt","lte","contains","in"]},"value":{}},"required":["field","operator","value"],"additionalProperties":false}},"limit":{"type":"integer"}},"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"atlas_research_plan","description":"Convert a research goal into a versioned object-backed scientific plan and execution DAG without changing the current UI.","parameters":{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"domain":{"type":"string"},"constraints":{"type":"object"},"target_publication":{"type":"string"},"related_object_ids":{"type":"array","items":{"type":"string"}}},"required":["title","description"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"atlas_recommend","description":"Continuously evaluate the object graph and generate ranked, evidence-linked research recommendations.","parameters":{"type":"object","properties":{"focus_object_id":{"type":"string"}},"additionalProperties":false}}}),
     ]
 }
 
@@ -19448,7 +19513,14 @@ async fn assistant_call_tool(
             | "research_domain_action"
             | "research_os_snapshot"
             | "research_os_mutate"
+            | "atlas_object"
+            | "atlas_object_query"
+            | "atlas_research_plan"
+            | "atlas_recommend"
     ) {
+        if name.starts_with("atlas_") {
+            return execute_atlas_intelligence_tool(state, runtime, name, &args);
+        }
         if name == "research_os_snapshot" {
             return execute_research_os_tool(state, runtime, &args);
         }
@@ -19550,6 +19622,150 @@ async fn assistant_call_tool(
     })
     .await
     .map_err(|err| anyhow!("assistant tool call task failed: {}", err))?
+}
+
+fn execute_atlas_intelligence_tool(
+    state: &WebAppState,
+    runtime: &RuntimeSettings,
+    name: &str,
+    args: &Value,
+) -> Result<String> {
+    let workspace = canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)?;
+    let rie = ResearchIntelligenceEngine::open(&workspace)?;
+    let value = match name {
+        "atlas_object" => execute_atlas_object_operation(&rie.core, args)?,
+        "atlas_object_query" => {
+            if let Some(query) = args.get("query").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+                serde_json::to_value(rie.query.natural_language(query)?)?
+            } else {
+                let object_types = args
+                    .get("object_types")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ObjectType::from)
+                    .collect();
+                let filters = args
+                    .get("filters")
+                    .cloned()
+                    .map(serde_json::from_value::<Vec<QueryFilter>>)
+                    .transpose()?
+                    .unwrap_or_default();
+                serde_json::to_value(rie.query.execute(ObjectQuery {
+                    object_types,
+                    text: String::new(),
+                    filters,
+                    limit: args.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize,
+                })?)?
+            }
+        }
+        "atlas_research_plan" => {
+            let goal = serde_json::from_value::<ResearchGoalInput>(args.clone())?;
+            serde_json::to_value(rie.planning.plan(goal, "agent")?)?
+        }
+        "atlas_recommend" => serde_json::to_value(
+            rie.recommendations
+                .evaluate(args.get("focus_object_id").and_then(Value::as_str), "agent")?,
+        )?,
+        _ => return Err(anyhow!("unknown Atlas intelligence tool: {name}")),
+    };
+    Ok(serde_json::to_string_pretty(&value)?)
+}
+
+fn execute_atlas_object_operation(core: &AtlasCore, args: &Value) -> Result<Value> {
+    let operation = args
+        .get("operation")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("atlas_object requires operation"))?;
+    let object_id = || {
+        args.get("object_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("atlas_object {operation} requires object_id"))
+    };
+    match operation {
+        "create" => {
+            let mut object = ScientificObject::new(
+                ObjectType::new(
+                    args.get("object_type")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("atlas_object create requires object_type"))?,
+                )?,
+                args.get("display_name")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("atlas_object create requires display_name"))?,
+                args.get("owner").and_then(Value::as_str).unwrap_or("agent"),
+            );
+            object.description = args
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            object.rebuild_search_index();
+            Ok(serde_json::to_value(core.create(object, "agent")?)?)
+        }
+        "read" => Ok(serde_json::to_value(core.get(object_id()?)?)?),
+        "update" => Ok(serde_json::to_value(core.update(
+            object_id()?,
+            args.get("patch").unwrap_or(&Value::Null),
+            "agent",
+        )?)?),
+        "archive" => Ok(serde_json::to_value(core.archive(object_id()?, "agent")?)?),
+        "delete" => Ok(serde_json::to_value(core.delete(object_id()?, "agent")?)?),
+        "clone" => Ok(serde_json::to_value(core.clone_object(object_id()?, "agent")?)?),
+        "fork" => Ok(serde_json::to_value(core.fork(object_id()?, "agent", "agent fork")?)?),
+        "merge" => Ok(serde_json::to_value(core.merge(
+            object_id()?,
+            args.get("source_object_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("atlas_object merge requires source_object_id"))?,
+            "agent",
+        )?)?),
+        "compare" => Ok(serde_json::to_value(core.compare(
+            object_id()?,
+            args.get("left_version").and_then(Value::as_u64).unwrap_or(1),
+            args.get("right_version").and_then(Value::as_u64).unwrap_or(2),
+        )?)?),
+        "relate" => {
+            let target = args
+                .get("target_object_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("atlas_object relate requires target_object_id"))?;
+            let kind = match args
+                .get("relationship_kind")
+                .and_then(Value::as_str)
+                .unwrap_or("related_to")
+            {
+                "generated_by" => RelationshipKind::GeneratedBy,
+                "derived_from" => RelationshipKind::DerivedFrom,
+                "supports" => RelationshipKind::Supports,
+                "rejects" => RelationshipKind::Rejects,
+                "depends_on" => RelationshipKind::DependsOn,
+                "uses" => RelationshipKind::Uses,
+                "contains" => RelationshipKind::Contains,
+                "produces" => RelationshipKind::Produces,
+                "consumes" => RelationshipKind::Consumes,
+                "belongs_to" => RelationshipKind::BelongsTo,
+                "version_of" => RelationshipKind::VersionOf,
+                "fork_of" => RelationshipKind::ForkOf,
+                "parent" => RelationshipKind::Parent,
+                "child" => RelationshipKind::Child,
+                "related_to" => RelationshipKind::RelatedTo,
+                other => RelationshipKind::Custom(other.to_string()),
+            };
+            Ok(serde_json::to_value(core.relate(
+                object_id()?, target, kind, "agent", BTreeMap::new(),
+            )?)?)
+        }
+        "export" => core.export(object_id()?),
+        "preview" => core.preview(object_id()?),
+        "visualize" => core.visualize(object_id()?),
+        "graph" => Ok(serde_json::to_value(core.graph()?)?),
+        "timeline" => Ok(serde_json::to_value(core.timeline(
+            args.get("object_id").and_then(Value::as_str),
+        )?)?),
+        _ => Err(anyhow!("unknown atlas_object operation: {operation}")),
+    }
 }
 
 /// Compute a stable per-turn id from the conversation position so finalize/retry paths
@@ -20204,6 +20420,45 @@ fn tail_string(input: &str, max_chars: usize) -> String {
     input.chars().skip(skip).collect()
 }
 
+fn structured_shell_command(command: &str) -> (String, Vec<String>, String) {
+    #[cfg(windows)]
+    {
+        let adapted = adapt_bash_command_for_powershell(command);
+        return (
+            "powershell.exe".to_string(),
+            vec!["-NoLogo".into(), "-NoProfile".into(), "-Command".into(), adapted.clone()],
+            adapted,
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string());
+        (shell, vec!["-lc".into(), command.to_string()], command.to_string())
+    }
+}
+
+fn interactive_shell_command() -> (String, Vec<String>, String) {
+    #[cfg(windows)]
+    {
+        return (
+            "powershell.exe".to_string(),
+            vec!["-NoLogo".into(), "-NoExit".into()],
+            "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'\r\n".to_string(),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string());
+        (shell, vec!["-i".into()], "export PYTHONUTF8=1 PYTHONIOENCODING=utf-8\n".to_string())
+    }
+}
+
 pub(crate) fn run_terminal_command_structured(
     workspace: &Path,
     command: &str,
@@ -20215,12 +20470,12 @@ pub(crate) fn run_terminal_command_structured(
     }
     validate_terminal_command(command)?;
     let timeout_ms = timeout_ms.clamp(250, 120_000);
-    let adapted = adapt_bash_command_for_powershell(command);
+    let (shell, shell_args, adapted) = structured_shell_command(command);
 
-    let mut child = Command::new("powershell.exe");
+    let mut child = Command::new(&shell);
     child
         .current_dir(workspace)
-        .args(["-NoLogo", "-NoProfile", "-Command", &adapted])
+        .args(&shell_args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -24665,10 +24920,11 @@ fn prune_terminal_sessions(runtime: &mut TerminalRuntime) {
 async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> Result<String> {
     let workspace = canonical_workspace_dir_from(state.host.base_dir(), workspace_root)?;
 
-    let mut command = Command::new("powershell.exe");
+    let (shell, shell_args, initialization) = interactive_shell_command();
+    let mut command = Command::new(&shell);
     command
         .current_dir(&workspace)
-        .args(["-NoLogo", "-NoExit"])
+        .args(&shell_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -24708,9 +24964,7 @@ async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> R
 
     let mut stdin = stdin;
     stdin
-        .write_all(
-            b"$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'\r\n",
-        )
+        .write_all(initialization.as_bytes())
         .map_err(|err| anyhow!("failed to initialize terminal encoding: {}", err))?;
     stdin
         .flush()
@@ -24729,7 +24983,7 @@ async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> R
         title: format!("Terminal {}", next_number),
         cwd: display_workspace_path(&workspace),
         created_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
-        command: "powershell.exe -NoLogo -NoExit".to_string(),
+        command: std::iter::once(shell).chain(shell_args).collect::<Vec<_>>().join(" "),
         status: Arc::new(Mutex::new("running".to_string())),
         buffer,
         stdin: Arc::new(Mutex::new(stdin)),
@@ -25403,14 +25657,19 @@ fn ensure_run_dir_command() -> &'static str {
 }
 
 fn process_is_running(pid: u32) -> bool {
-    Command::new("tasklist")
+    #[cfg(windows)]
+    return Command::new("tasklist")
         .hide_window()
         .args(["/FI", &format!("PID eq {}", pid)])
         .output()
-        .map(|output| {
-            output.status.success() && decode_bytes(&output.stdout).contains(&pid.to_string())
-        })
-        .unwrap_or(false)
+        .map(|output| output.status.success() && decode_bytes(&output.stdout).contains(&pid.to_string()))
+        .unwrap_or(false);
+    #[cfg(unix)]
+    return Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
 }
 
 fn run_debug_action(
@@ -25505,13 +25764,20 @@ fn start_run_debug_session(
         )
     })?;
 
+    #[cfg(windows)]
     let mut command = Command::new("cmd");
+    #[cfg(not(windows))]
+    let mut command = Command::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()));
     command
         .current_dir(workspace)
-        .args(["/C", &config.command])
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
+
+    #[cfg(windows)]
+    command.args(["/C", &config.command]);
+    #[cfg(not(windows))]
+    command.args(["-lc", &config.command]);
 
     #[cfg(windows)]
     {
@@ -25535,9 +25801,14 @@ fn start_run_debug_session(
 }
 
 fn stop_run_debug_session(session: &RunDebugSessionRuntime) {
+    #[cfg(windows)]
     let _ = Command::new("taskkill")
         .hide_window()
         .args(["/PID", &session.pid.to_string(), "/T", "/F"])
+        .output();
+    #[cfg(unix)]
+    let _ = Command::new("kill")
+        .args(["-TERM", &session.pid.to_string()])
         .output();
 }
 
@@ -32779,7 +33050,7 @@ fn research_os_snapshot_value(workspace_root: &Path) -> Result<Value> {
         .map(|item| json!({ "id": item.id, "title": item.title, "domain_id": item.domain_id }))
         .collect::<Vec<_>>();
 
-    Ok(json!({
+    let snapshot = json!({
         "schema_version": "atlas.research-os.snapshot.v2",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "hypotheses": hypotheses,
@@ -32797,7 +33068,74 @@ fn research_os_snapshot_value(workspace_root: &Path) -> Result<Value> {
             "similar_failures": unresolved_failures,
             "unsupported_hypotheses": unsupported_hypotheses,
         },
-    }))
+    });
+    sync_research_os_snapshot_to_core(workspace_root, &snapshot, "research-os")?;
+    Ok(snapshot)
+}
+
+fn sync_research_os_snapshot_to_core(
+    workspace_root: &Path,
+    snapshot: &Value,
+    actor: &str,
+) -> Result<()> {
+    let core = atlas_core_for_workspace(workspace_root)?;
+    let nodes = snapshot
+        .get("graph")
+        .and_then(|graph| graph.get("nodes"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut object_ids = HashMap::<String, String>::new();
+    for node in &nodes {
+        let Some(legacy_id) = node.get("id").and_then(Value::as_str) else { continue };
+        let object_type = node
+            .get("object_type")
+            .and_then(Value::as_str)
+            .unwrap_or("research-object");
+        if let Some(object) = legacy_research_object(object_type, node, actor) {
+            let object = core.sync_external(object, actor)?;
+            object_ids.insert(legacy_id.to_string(), object.id);
+        }
+    }
+    let edges = snapshot
+        .get("graph")
+        .and_then(|graph| graph.get("edges"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for edge in &edges {
+        let Some(source) = edge
+            .get("source")
+            .and_then(Value::as_str)
+            .and_then(|id| object_ids.get(id))
+        else { continue };
+        let Some(target) = edge
+            .get("target")
+            .and_then(Value::as_str)
+            .and_then(|id| object_ids.get(id))
+        else { continue };
+        let relation = edge
+            .get("relation")
+            .and_then(Value::as_str)
+            .map(legacy_relationship_kind)
+            .unwrap_or(RelationshipKind::RelatedTo);
+        core.relate(source, target, relation, actor, BTreeMap::new())?;
+    }
+    Ok(())
+}
+
+fn legacy_relationship_kind(value: &str) -> RelationshipKind {
+    match value {
+        "supports" => RelationshipKind::Supports,
+        "rejects" | "challenges" => RelationshipKind::Rejects,
+        "generated" | "generated-by" => RelationshipKind::GeneratedBy,
+        "tested-by" | "uses" => RelationshipKind::Uses,
+        "forked-to" | "revised-as" => RelationshipKind::ForkOf,
+        "published-in" | "reported-in" | "cited-by" => RelationshipKind::BelongsTo,
+        "remembers" => RelationshipKind::RelatedTo,
+        "failed-with" => RelationshipKind::Produces,
+        other => RelationshipKind::Custom(other.to_string()),
+    }
 }
 
 async fn api_research_os_snapshot(

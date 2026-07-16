@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use lopdf::Document;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -9,8 +10,9 @@ use std::time::UNIX_EPOCH;
 use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
-const INDEX_VERSION: u32 = 1;
+const INDEX_VERSION: u32 = 2;
 const CHUNK_CHARS: usize = 4_000;
+const MAX_INDEX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectIndex {
@@ -43,6 +45,14 @@ pub struct IndexUpdate {
     pub skipped: usize,
     pub files: usize,
     pub chunks: usize,
+}
+
+struct PendingFile {
+    path: PathBuf,
+    relative: String,
+    kind: &'static str,
+    size: u64,
+    modified_ns: u128,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,7 +94,7 @@ pub fn update(workspace: &Path) -> Result<IndexUpdate> {
     let workspace = workspace.canonicalize()?;
     let mut prior = load(&workspace)?;
     let mut next = BTreeMap::new();
-    let mut seen = BTreeSet::new();
+    let mut pending = Vec::new();
     let (mut scanned, mut indexed, mut unchanged, mut skipped) = (0, 0, 0, 0);
     for entry in WalkDir::new(&workspace)
         .follow_links(false)
@@ -117,7 +127,6 @@ pub fn update(workspace: &Path) -> Result<IndexUpdate> {
             .and_then(|v| v.duration_since(UNIX_EPOCH).ok())
             .map(|v| v.as_nanos())
             .unwrap_or(0);
-        seen.insert(relative.clone());
         if let Some(old) = prior.files.remove(&relative) {
             if old.size == meta.len() && old.modified_ns == modified_ns {
                 next.insert(relative, old);
@@ -125,15 +134,41 @@ pub fn update(workspace: &Path) -> Result<IndexUpdate> {
                 continue;
             }
         }
-        match parse_file(entry.path(), kind) {
+        if meta.len() > MAX_INDEX_FILE_BYTES
+            && kind != "pdf"
+            && kind != "docx"
+            && kind != "spreadsheet"
+        {
+            skipped += 1;
+            continue;
+        }
+        pending.push(PendingFile {
+            path: entry.path().to_path_buf(),
+            relative,
+            kind,
+            size: meta.len(),
+            modified_ns,
+        });
+    }
+    // Parsing PDFs, Office documents and source files is CPU intensive. Keep the directory walk
+    // deterministic, then fan only the independent parsing work out across Rayon's bounded pool.
+    let parsed: Vec<_> = pending
+        .into_par_iter()
+        .map(|file| {
+            let chunks = parse_file(&file.path, file.kind);
+            (file, chunks)
+        })
+        .collect();
+    for (file, chunks) in parsed {
+        match chunks {
             Ok(chunks) if !chunks.is_empty() => {
                 next.insert(
-                    relative.clone(),
+                    file.relative.clone(),
                     IndexedFile {
-                        path: relative,
-                        kind: kind.into(),
-                        size: meta.len(),
-                        modified_ns,
+                        path: file.relative,
+                        kind: file.kind.into(),
+                        size: file.size,
+                        modified_ns: file.modified_ns,
                         chunks,
                     },
                 );
@@ -184,12 +219,19 @@ pub fn search(
         if kind.is_some_and(|filter| filter != file.kind) {
             continue;
         }
+        let path_lower = file.path.to_lowercase();
+        let path_score = terms
+            .iter()
+            .filter(|term| path_lower.contains(term.as_str()))
+            .count()
+            * 4;
         for chunk in &file.chunks {
             let lower = chunk.text.to_lowercase();
-            let score: usize = terms
+            let content_score: usize = terms
                 .iter()
                 .map(|term| lower.match_indices(term).count())
                 .sum();
+            let score = content_score + path_score;
             if score == 0 {
                 continue;
             }
@@ -220,7 +262,21 @@ fn eligible_entry(entry: &DirEntry) -> bool {
     }
     !matches!(
         entry.file_name().to_string_lossy().as_ref(),
-        ".git" | ".tokitai" | "target" | "node_modules" | ".venv" | "venv" | "dist" | "build"
+        ".git"
+            | ".tokitai"
+            | ".idea"
+            | ".vscode"
+            | ".cache"
+            | ".next"
+            | ".nuxt"
+            | "target"
+            | "node_modules"
+            | ".venv"
+            | "venv"
+            | "dist"
+            | "build"
+            | "coverage"
+            | "vendor"
     )
 }
 

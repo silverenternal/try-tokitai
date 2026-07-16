@@ -2,6 +2,7 @@
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
@@ -22,6 +23,9 @@ const GITHUB_TOKEN_ENV_CANDIDATES: &[&str] = &[
     "GITHUB_PAT",
     "GITHUB_ACCESS_TOKEN",
 ];
+
+static GITHUB_TOKEN: Lazy<Option<GitHubTokenDetection>> = Lazy::new(detect_github_token_uncached);
+static GITHUB_CLIENT: Lazy<Result<Client, String>> = Lazy::new(build_github_client);
 
 #[derive(Debug, Clone, Serialize)]
 struct GitHubRepositoryRecord {
@@ -302,6 +306,10 @@ pub fn detect_github_api_base_public() -> String {
 }
 
 pub fn detect_github_token() -> Option<GitHubTokenDetection> {
+    GITHUB_TOKEN.clone()
+}
+
+fn detect_github_token_uncached() -> Option<GitHubTokenDetection> {
     for env_name in GITHUB_TOKEN_ENV_CANDIDATES {
         if let Ok(value) = std::env::var(env_name) {
             let token = value.trim().to_string();
@@ -330,6 +338,10 @@ pub fn detect_github_token() -> Option<GitHubTokenDetection> {
 }
 
 fn github_client() -> Result<Client, String> {
+    GITHUB_CLIENT.clone()
+}
+
+fn build_github_client() -> Result<Client, String> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(GITHUB_USER_AGENT));
     headers.insert(
@@ -344,7 +356,10 @@ fn github_client() -> Result<Client, String> {
     }
     Client::builder()
         .default_headers(headers)
+        .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(8)
         .build()
         .map_err(|err| format!("failed to build GitHub client: {}", err))
 }

@@ -15,6 +15,7 @@
 
 // 内部模块（不公开）
 pub mod agent_skills;
+pub mod atlas_core;
 pub mod app_paths;
 mod command_resolver;
 pub mod config;
@@ -26,6 +27,7 @@ mod path_resolver;
 pub mod project_index;
 pub mod research_domains;
 pub mod research_os;
+pub mod research_intelligence;
 mod sandbox;
 pub mod security;
 pub mod task_queue;

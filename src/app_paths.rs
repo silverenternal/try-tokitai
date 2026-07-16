@@ -248,7 +248,11 @@ pub fn project_id(workspace: &Path) -> String {
         .replace('\\', "/")
         .trim_start_matches("//?/")
         .trim_end_matches('/')
-        .to_lowercase();
+        .to_string();
+    // Windows paths are case-insensitive; Linux and most macOS development volumes are not.
+    // Lowercasing everywhere caused distinct Unix workspaces to share sessions and indexes.
+    #[cfg(windows)]
+    let identity = identity.to_lowercase();
     let digest = blake3::hash(identity.as_bytes()).to_hex().to_string();
     digest[..16].to_string()
 }

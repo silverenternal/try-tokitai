@@ -9,6 +9,7 @@
 | [USER_GUIDE.md](USER_GUIDE.md) | 日常使用指南 |
 | [RESEARCH_OS_USER_GUIDE.md](../RESEARCH_OS_USER_GUIDE.md) | Research OS 的对象、证据与工作流 |
 | [interactive-visualization.md](interactive-visualization.md) | 交互式可视化说明 |
+| [ATLAS_CORE_ARCHITECTURE.md](ATLAS_CORE_ARCHITECTURE.md) | Atlas Core、Scientific Object Engine 与 RIE 架构 |
 | [DESKTOP_RELEASE.md](../DESKTOP_RELEASE.md) | Windows 桌面端打包与发布 |
 | [../structure_ensure/SERVICES.md](../structure_ensure/SERVICES.md) | 服务与宿主架构 |
 | [../structure_ensure/TOOL_SELECTOR_GUIDE.md](../structure_ensure/TOOL_SELECTOR_GUIDE.md) | 工具选择器说明 |
