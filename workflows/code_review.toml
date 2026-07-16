@@ -1,0 +1,110 @@
+# 代码审查工作流
+# 自动执行代码审查流程
+
+[workflow]
+id = "code_review"
+name = "代码审查工作流"
+description = "分析代码变更，检查风格和质量，生成审查报告"
+version = "1.0.0"
+timeout_secs = 600
+
+# 阶段 1: 准备
+[[workflow.steps]]
+id = "analyze_changes"
+description = "分析 Git 变更"
+tool = "git_diff"
+role = "reviewer"
+timeout_secs = 30
+
+[workflow.steps.retry]
+max_retries = 2
+
+[[workflow.steps]]
+id = "load_context"
+description = "加载项目上下文"
+tool = "read_file"
+role = "executor"
+timeout_secs = 10
+depends_on = ["analyze_changes"]
+
+[workflow.steps.arguments]
+path = "./README.md"
+
+[workflow.steps.retry]
+max_retries = 2
+
+# 阶段 2: 审查
+[[workflow.steps]]
+id = "check_style"
+description = "检查代码风格"
+tool = "analyze_code"
+role = "reviewer"
+timeout_secs = 60
+depends_on = ["analyze_changes"]
+
+[workflow.steps.arguments]
+check_type = "style"
+diff = "{{analyze_changes.diff}}"
+
+[workflow.steps.retry]
+max_retries = 2
+
+[[workflow.steps]]
+id = "check_logic"
+description = "检查逻辑正确性"
+tool = "analyze_code"
+role = "reviewer"
+timeout_secs = 60
+depends_on = ["analyze_changes"]
+
+[workflow.steps.arguments]
+check_type = "logic"
+diff = "{{analyze_changes.diff}}"
+
+[workflow.steps.retry]
+max_retries = 2
+
+[[workflow.steps]]
+id = "check_performance"
+description = "检查性能问题"
+tool = "analyze_code"
+role = "reviewer"
+timeout_secs = 60
+depends_on = ["analyze_changes"]
+
+[workflow.steps.arguments]
+check_type = "performance"
+diff = "{{analyze_changes.diff}}"
+
+[workflow.steps.retry]
+max_retries = 2
+
+# 阶段 3: 报告
+[[workflow.steps]]
+id = "generate_report"
+description = "生成审查报告"
+tool = "write_file"
+role = "reviewer"
+timeout_secs = 30
+depends_on = ["check_style", "check_logic", "check_performance"]
+
+[workflow.steps.arguments]
+path = "./reviews/code_review_{{timestamp}}.md"
+content = """
+# 代码审查报告
+
+## 风格检查
+{{check_style.result}}
+
+## 逻辑检查
+{{check_logic.result}}
+
+## 性能检查
+{{check_performance.result}}
+"""
+
+[workflow.steps.retry]
+max_retries = 3
+
+# 标签
+workflow.tags = ["code-review", "quality", "automation"]

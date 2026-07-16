@@ -1,0 +1,86 @@
+# 研究并撰写报告工作流
+# 使用示例：orchestrator.execute_workflow("research_and_write", &input)
+
+[workflow]
+id = "research_and_write"
+name = "研究并撰写报告"
+description = "搜索网络内容，获取详细信息，总结并写入文件"
+version = "1.0.0"
+timeout_secs = 300
+
+[workflow.on_error]
+strategy = "fail"
+
+# 工作流变量（可在步骤中通过 {{variable}} 引用）
+[workflow.variables]
+output_dir = "./reports"
+
+# 工作流步骤
+[[workflow.steps]]
+id = "search_web"
+description = "搜索相关网页内容"
+tool = "web_search"
+role = "executor"
+timeout_secs = 30
+
+[workflow.steps.arguments]
+query = "{{query}}"
+num_results = 10
+
+[workflow.steps.retry]
+max_retries = 3
+retry_interval_ms = 1000
+exponential_backoff = true
+
+[[workflow.steps]]
+id = "fetch_content"
+description = "获取网页详细内容"
+tool = "http_get"
+role = "executor"
+timeout_secs = 15
+depends_on = ["search_web"]
+
+[workflow.steps.arguments]
+url = "{{search_web.results.0.url}}"
+
+[workflow.steps.retry]
+max_retries = 2
+retry_interval_ms = 2000
+
+[workflow.steps.on_error]
+strategy = "skip"
+
+[[workflow.steps]]
+id = "summarize"
+description = "总结内容"
+tool = "dialogue_tools"
+role = "planner"
+timeout_secs = 60
+depends_on = ["fetch_content"]
+
+[workflow.steps.arguments]
+prompt = "总结以下内容：{{fetch_content.content}}"
+
+[workflow.steps.retry]
+max_retries = 2
+
+[[workflow.steps]]
+id = "write_file"
+description = "写入报告文件"
+tool = "write_file"
+role = "executor"
+timeout_secs = 10
+depends_on = ["summarize"]
+
+[workflow.steps.arguments]
+path = "{{output_dir}}/{{query}}.md"
+content = "{{summarize.response}}"
+
+[workflow.steps.retry]
+max_retries = 3
+
+[workflow.steps.on_error]
+strategy = "fail"
+
+# 标签
+workflow.tags = ["research", "writing", "automation"]

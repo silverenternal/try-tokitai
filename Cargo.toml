@@ -1,0 +1,218 @@
+[package]
+name = "ai-assistant"
+version = "0.1.0"
+edition = "2021"
+description = "Atlas, an extensible desktop IDE for agentic software and research workflows"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/chen-maker999/Atlas"
+keywords = ["ai", "atlas", "ide", "agents", "research"]
+categories = ["development-tools"]
+
+# Atlas uses several upstream tokitai crates as implementation dependencies.
+
+# 允许未使用的变量（调试用）
+[lints.rust]
+unused_variables = "allow"
+unused_imports = "warn"
+
+[lib]
+name = "ai_assistant"
+path = "src/lib.rs"
+
+# Feature flags for optional dependencies
+[features]
+default = []
+# YAML 支持：用于 OpenAPI 规范解析
+yaml = ["serde_yaml"]
+desktop-shell = ["dep:wry", "dep:tao"]
+domain-science = ["dep:ai-scientist-science"]
+# Tensor 计算：实验性功能，提供张量计算和神经网络基础操作
+# 注意：此 feature 主要用于 AI/ML 场景的原型验证，生产环境建议使用专用库（如 candle、tch-rs）
+tensor = ["dep:candle-core", "dep:candle-nn", "dep:safetensors", "dep:half", "dep:ndarray"]
+# 测试模式：允许所有文件路径（仅用于内部测试，不可在生产构建中启用）
+test-allow-all-paths = []
+
+[dependencies]
+# Core AI framework
+tokitai = "0.4.0"
+tokitai-core = "0.4.0"
+tokitai-mcp-server = "0.4.0"
+
+# Context management
+tokitai-context = "0.1.2"
+tokitai-filekv = { path = "crates/tokitai-filekv" }
+
+# AI Scientist crates
+ai-scientist-core = { path = "crates/ai-scientist-core" }
+ai-scientist-rag = { path = "crates/ai-scientist-rag" }
+ai-scientist-verify = { path = "crates/ai-scientist-verify" }
+ai-scientist-science = { path = "crates/ai-scientist-science", optional = true }
+
+# Hashing
+blake3 = "1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = { version = "0.9", optional = true }
+toml = "0.8"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+async-stream = "0.3"
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+reqwest-eventsource = "0.6"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+scopeguard = "1.2"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Random number generation (for experiments)
+rand = "0.8"
+
+# Data processing
+# csv = "1.3"  # 未使用，注释掉
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+urlencoding = "2.1"
+url = "2.5"
+rfd = "0.15"
+
+# Web scraping
+scraper = "0.22"
+
+# File system
+dirs = "6"
+walkdir = "2.4"
+notify = "6.1"
+lopdf = "0.34"
+zip = "2.2"
+memmap2 = "0.9"
+pathdiff = "0.2"
+tempfile = "3.0"
+zstd = "0.13"
+
+# Caching and concurrency
+moka = { version = "0.12", features = ["sync"] }
+parking_lot = "0.12"
+once_cell = "1.19"
+lru = "0.12"
+dashmap = "5.5"
+rayon = "1.10"
+
+# Cryptography
+sha2 = "0.10"
+hex = "0.4"
+hmac = "0.12"
+base64 = "0.22"
+png = "0.17"
+
+# Index and search
+fst = "0.4"
+bk-tree = "0.5"
+jieba-rs = "0.7"
+
+# Template engine
+tera = "1.19"
+
+# Terminal UI
+crossterm = "0.27"
+ratatui = "0.26"
+wry = { version = "0.40", optional = true }
+tao = { version = "0.28", optional = true }
+
+# System utilities
+which = "6.0"
+libc = "0.2"
+sysinfo = "0.31"
+
+# UUID
+uuid = { version = "1.0", features = ["v4"] }
+
+[build-dependencies]
+winresource = "0.1"
+png = "0.17"
+
+[dev-dependencies]
+# Benchmark dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Test dependencies
+proptest = "1.4"
+mockall = "0.12"
+insta = { version = "1.34", features = ["json", "redactions"] }
+
+[dependencies.candle-core]
+version = "0.8"
+optional = true
+
+[dependencies.candle-nn]
+version = "0.8"
+optional = true
+
+[dependencies.safetensors]
+version = "0.7"
+optional = true
+
+[dependencies.half]
+version = "2.4"
+optional = true
+
+[dependencies.ndarray]
+version = "0.16"
+optional = true
+
+# Tensor computation (optional, feature-gated)
+
+# ============================================================================
+# cargo-machete 忽略列表（这些是 optional feature 或特定场景使用）
+# ============================================================================
+[package.metadata.cargo-machete]
+ignored = [
+    "bk-tree",       # 用于 BK-Tree 拼写纠错（IMP-003）
+    "candle-core",   # optional tensor feature
+    "candle-nn",     # optional tensor feature
+    "half",          # optional tensor feature
+    "safetensors",   # optional tensor feature
+    "ndarray",       # optional tensor feature
+    "ai-scientist-science", # optional domain-science feature
+    "serde_yaml",    # optional yaml feature
+    "rand",          # used by experiments
+]
+
+# 排除独立测试目录
+[workspace]
+members = ["crates/arc-swap", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science"]
+exclude = ["test_tensor"]
+
+[profile.release]
+incremental = false
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+
+[[bench]]
+name = "core_benchmarks"
+harness = false
+
+[[bin]]
+name = "desktop_shell"
+path = "src/bin/desktop_shell.rs"
+required-features = ["desktop-shell"]
+
+[[bin]]
+name = "desktop_wry"
+path = "src/bin/desktop_wry.rs"
+required-features = ["desktop-shell"]

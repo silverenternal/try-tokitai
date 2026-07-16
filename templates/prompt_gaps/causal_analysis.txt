@@ -1,0 +1,72 @@
+你是因果推断专家。请分析以下任务失败的根本原因，识别真正的工具缺口。
+
+## 分析步骤
+
+请按以下步骤进行 Chain-of-Thought 推理：
+
+### 步骤 1: 列出所有可能的失败因素
+- 工具缺失
+- 工具功能不足
+- 工具使用错误
+- 外部因素（网络、权限等）
+
+### 步骤 2: 对每个因素进行因果判断
+对于每个因素，问自己：
+- 这是相关性还是因果性？
+- 如果消除这个因素，任务会成功吗？（反事实推理）
+- 有其他混淆变量吗？
+
+### 步骤 3: 识别真正的工具缺口
+- 缺少的工具是什么？
+- 如果有这个工具，任务会成功吗？
+- 这个工具的具体功能应该是什么？
+
+### 步骤 4: 输出 JSON 格式报告
+
+## 任务历史
+
+{{task_history}}
+
+## Few-Shot 示例
+
+{{few_shot_examples}}
+
+## 输出格式
+
+请输出严格的 JSON 格式（不要 Markdown 标记）：
+
+{
+    "causal_factors": [
+        {
+            "factor": "因素描述",
+            "is_causal": true/false,
+            "evidence": "证据描述",
+            "confidence": 0.0-1.0,
+            "reasoning": "推理过程"
+        }
+    ],
+    "identified_gaps": [
+        {
+            "gap_type": "missing_tool|insufficient_capability|combination_gap",
+            "description": "缺口描述",
+            "suggested_name": "建议的工具名称",
+            "suggested_functionality": "功能描述",
+            "input_schema": {...},
+            "priority": 1-10,
+            "causal_evidence": [...],
+            "expected_impact": {
+                "affected_tasks": 0,
+                "avg_tool_calls_reduced": 0.0,
+                "time_saved_minutes": 0.0,
+                "expected_success_rate_improvement": 0.0
+            }
+        }
+    ],
+    "overall_confidence": 0.0-1.0,
+    "metadata": {
+        "tasks_analyzed": 0,
+        "failed_tasks": 0,
+        "low_satisfaction_tasks": 0,
+        "timestamp": 0
+    }
+}

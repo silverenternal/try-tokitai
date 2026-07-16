@@ -1,0 +1,27 @@
+{
+  "how_to": {
+    "description": "询问如何做某事",
+    "patterns": ["怎么.*", "如何.*", "怎样.*", "how to.*", "what's the way to.*", "what is the best way to.*"],
+    "action": "remove_question_words"
+  },
+  "check_status": {
+    "description": "查看状态或信息",
+    "patterns": ["查看.*状态", "检查.*", "当前.*是什么", "check.*status", "what is.*", "show.*", "list.*", "显示.*"],
+    "action": "extract_target"
+  },
+  "perform_action": {
+    "description": "执行某个动作",
+    "patterns": ["帮我.*", "请.*", "执行.*", "please.*", "I want to.*", "I need to.*"],
+    "action": "extract_action"
+  },
+  "compare": {
+    "description": "比较两个或多个事物",
+    "patterns": ["比较.*", "compare.*", ".*和.*有什么区别", "difference between.*"],
+    "action": "extract_items"
+  },
+  "create_or_modify": {
+    "description": "创建或修改内容",
+    "patterns": ["创建.*", "新建.*", "修改.*", "create.*", "make.*", "add.*", "update.*"],
+    "action": "extract_action_and_target"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "文件操作": ["文件", "读取", "写入", "复制", "删除", "file", "read", "write", "copy", "delete", "创建", "修改", "移动"],
+  "Git 操作": ["git", "提交", "分支", "合并", "commit", "branch", "merge", "push", "pull", "版本控制", "仓库"],
+  "网络请求": ["网络", "HTTP", "GET", "POST", "下载", "上传", "http", "download", "upload", "API", "请求", "响应"],
+  "代码分析": ["分析", "统计", "检测", "查找", "analyze", "count", "detect", "find", "代码", "函数", "行数"],
+  "系统命令": ["系统", "命令", "执行", "shell", "进程", "environment", "path", "system", "command", "process"],
+  "数据处理": ["数据", "JSON", "XML", "CSV", "解析", "格式化", "转换", "data", "json", "parse", "format"],
+  "文件搜索": ["搜索", "查找", "grep", "查找文件", "递归", "search", "find", "grep", "lookup"],
+  "PDF 处理": ["PDF", "pdf", "文档", "document", "阅读 pdf", "提取"]
+}

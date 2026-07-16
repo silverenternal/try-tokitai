@@ -1,0 +1,1195 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas IDE</title>
+    <link rel="icon" type="image/svg+xml" href="./atlas-mark.svg" />
+    <script>try{document.documentElement.dataset.theme=localStorage.getItem("atlas-color-theme-v1")||"dark"}catch(_){}</script>
+    <link rel="stylesheet" href="./vendor/monaco/vs/editor/editor.main.css" />
+    <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260716e" />
+  </head>
+  <body>
+    <div class="atlas-launch" id="atlas-launch" aria-hidden="true">
+      <div class="atlas-launch-focus-ring"></div>
+      <img class="atlas-launch-mark atlas-launch-mark-light" src="./atlas-lockup-light.png" alt="" />
+      <img class="atlas-launch-mark atlas-launch-mark-dark" src="./atlas-lockup-dark.png" alt="" />
+    </div>
+    <div class="app-shell">
+      <header class="workspace-header shell-topbar">
+        <div class="shell-topbar-left">
+          <div class="atlas-brand" aria-label="Atlas IDE">
+            <img class="atlas-wordmark atlas-wordmark-light" src="./atlas-wordmark-light.png" alt="ATLAS" />
+            <img class="atlas-wordmark atlas-wordmark-dark" src="./atlas-wordmark-dark.png" alt="ATLAS" />
+          </div>
+          <button
+            id="left-sidebar-toggle"
+            class="layout-corner-button shell-topbar-button"
+            type="button"
+            aria-label="Toggle left sidebar"
+            title="Toggle left sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 5.5h6v13h-6z"></path>
+              <path d="M13.5 6.5h6"></path>
+              <path d="M13.5 12h6"></path>
+              <path d="M13.5 17.5h6"></path>
+            </svg>
+          </button>
+
+          <div class="mode-switch workspace-mode-switch" id="mode-switch" role="tablist" aria-label="Workspace mode">
+            <button
+              class="mode-switch-button is-active"
+              id="mode-chat"
+              type="button"
+              data-mode="chat"
+              aria-selected="true"
+              aria-label="Chat"
+              title="Chat"
+            >
+              <span class="mode-switch-button-text" data-i18n="modeChat">Chat</span>
+            </button>
+            <button
+              class="mode-switch-button"
+              id="mode-research"
+              type="button"
+              data-mode="research"
+              aria-selected="false"
+              aria-label="Agent"
+              title="Agent"
+            >
+              <span class="mode-switch-button-text" data-i18n="modeResearch">Agent</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="shell-topbar-spacer" aria-hidden="true"></div>
+
+        <div class="shell-topbar-right">
+          <div class="workspace-meta">
+            <span class="workspace-header-label" id="workspace-title">Workspace</span>
+            <span class="workspace-header-root" id="workspace-root-label"></span>
+          </div>
+
+          <button
+            id="right-sidebar-toggle"
+            class="layout-corner-button shell-topbar-button"
+            type="button"
+            aria-label="Toggle right sidebar"
+            title="Toggle right sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13.5 5.5h6v13h-6z"></path>
+              <path d="M4.5 6.5h6"></path>
+              <path d="M4.5 12h6"></path>
+              <path d="M4.5 17.5h6"></path>
+            </svg>
+          </button>
+          <div class="desktop-window-controls" id="desktop-window-controls" hidden>
+            <button class="desktop-window-button" type="button" data-window-action="minimize" aria-label="Minimize" title="Minimize">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5h8"></path></svg>
+            </button>
+            <button class="desktop-window-button" type="button" data-window-action="toggle_maximize" aria-label="Maximize" title="Maximize">
+              <svg class="window-icon-maximize" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.25" y="2.25" width="7.5" height="7.5"></rect></svg>
+              <svg class="window-icon-restore" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.25h5.75V8M2.25 4H8v5.75H2.25z"></path></svg>
+            </button>
+            <button class="desktop-window-button is-close" type="button" data-window-action="close" aria-label="Close" title="Close">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 2.5 7 7m0-7-7 7"></path></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <aside class="activity-rail" id="activity-rail">
+        <div class="activity-rail-main">
+          <button class="activity-rail-button is-active" type="button" data-activity-panel="nav" aria-label="Navigation" title="Navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 6.5h15"></path>
+              <path d="M4.5 12h15"></path>
+              <path d="M4.5 17.5h15"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="search" aria-label="Search" title="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="5.5"></circle>
+              <path d="m16 16 4 4"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="git" aria-label="Source Control" title="Source Control">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="7" cy="6" r="2"></circle>
+              <circle cx="17" cy="18" r="2"></circle>
+              <circle cx="17" cy="6" r="2"></circle>
+              <path d="M9 6h6"></path>
+              <path d="M7 8v7a3 3 0 0 0 3 3h5"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="run" aria-label="Run and Debug" title="Run and Debug">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 6.5v11l8-5.5z"></path>
+              <path d="M5.5 19.5h13"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" id="browser-rail-button" aria-label="Browser" title="Browser">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.25"></circle>
+              <path d="M3.75 12h16.5"></path>
+              <path d="M12 3.75c2.2 2.25 3.25 5 3.25 8.25S14.2 18 12 20.25C9.8 18 8.75 15.25 8.75 12S9.8 6 12 3.75z"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" id="visualization-rail-button" aria-label="Interactive Visualization" title="Interactive Visualization">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="6" cy="7" r="2"></circle>
+              <circle cx="17.5" cy="5.5" r="2"></circle>
+              <circle cx="18" cy="17" r="2"></circle>
+              <circle cx="7" cy="17.5" r="2"></circle>
+              <path d="m7.8 6.7 7.7-.9M7.4 8.6l8.8 6.8M16 7l1.3 8M9 17.4l7-.3"></path>
+            </svg>
+          </button>
+          <button class="activity-rail-button" type="button" id="terminal-rail-button" aria-label="Terminal" title="Terminal">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 6.5h15v11h-15z"></path>
+              <path d="m8 10 2.5 2L8 14"></path>
+              <path d="M12.75 14H16"></path>
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <div class="activity-flyout is-open" id="activity-flyout">
+        <section class="activity-panel is-active" id="activity-panel-nav" data-activity-panel-id="nav">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group">
+              <div class="activity-panel-eyebrow">Workspace</div>
+              <div class="activity-panel-title" id="sidebar-workspace-title">Workspace</div>
+            </div>
+            <div class="activity-panel-actions">
+              <button
+                class="sidebar-action sidebar-action-primary"
+                type="button"
+                id="new-session-button"
+                data-i18n="newSession"
+              >
+                + New session
+              </button>
+              <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 6.5 9 12l6 5.5"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <section class="sidebar-section sidebar-section-current">
+            <div class="section-head" data-i18n="currentSession">Current session</div>
+            <div class="current-session-list" id="current-session-list"></div>
+          </section>
+
+          <section class="sidebar-section sidebar-section-research">
+            <div class="section-head" data-i18n="researchLabel">Research pipeline</div>
+            <div class="research-panel" id="research-panel"></div>
+          </section>
+
+          <section class="sidebar-section sidebar-section-history">
+            <div class="section-head" data-i18n="sessionsLabel">Recents</div>
+            <div class="session-list"></div>
+          </section>
+        </section>
+
+        <section class="activity-panel" id="activity-panel-search" data-activity-panel-id="search">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group">
+              <div class="activity-panel-eyebrow" data-i18n="searchLabel">Search</div>
+              <div class="activity-panel-title" data-i18n="searchTitle">Research Search</div>
+            </div>
+            <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6.5 9 12l6 5.5"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="search-mode-switch segmented-control" id="search-mode-switch" data-segmented>
+            <button type="button" class="segment is-active" data-value="web" data-i18n="searchModeWeb">Web</button>
+            <button type="button" class="segment" data-value="papers" data-i18n="searchModePapers">Papers</button>
+            <button type="button" class="segment" data-value="tracking" data-i18n="searchModeTracking">Tracking</button>
+            <button type="button" class="segment" data-value="benchmarks" data-i18n="searchModeBenchmarks">Benchmarks</button>
+            <button type="button" class="segment" data-value="models" data-i18n="searchModeModels">Models</button>
+            <button type="button" class="segment" data-value="datasets" data-i18n="searchModeDatasets">Datasets</button>
+            <button type="button" class="segment" data-value="github" data-i18n="searchModeGitHub">GitHub</button>
+          </div>
+
+          <div class="extension-search-shell">
+            <input id="search-query-input" class="extension-search-input" type="text" placeholder="Search" />
+          </div>
+
+          <div class="search-panel-meta" id="search-health-strip"></div>
+          <div class="search-panel-actions">
+            <button class="git-action-button git-action-button-primary" type="button" id="search-run-button" data-i18n="searchRun">Search</button>
+          </div>
+          <div class="search-workspace" id="search-workspace">
+            <div class="search-results" id="search-results"></div>
+            <aside class="search-preview-panel" id="search-preview-panel"></aside>
+          </div>
+        </section>
+
+        <section class="activity-panel" id="activity-panel-git" data-activity-panel-id="git">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group">
+              <div class="activity-panel-eyebrow">Source Control</div>
+              <div class="activity-panel-title" data-i18n="gitLabel">Git workspace</div>
+            </div>
+            <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6.5 9 12l6 5.5"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="git-nav" id="git-nav">
+            <button class="git-nav-item is-active" type="button" data-git-view="overview">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6.5 7.5h11"></path>
+                <path d="M6.5 12h11"></path>
+                <path d="M6.5 16.5h7"></path>
+              </svg>
+              <span data-i18n="gitOverview">Overview</span>
+            </button>
+            <button class="git-nav-item" type="button" data-git-view="changes">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 7.5h10"></path>
+                <path d="M12 4v7"></path>
+                <path d="M7 16.5h10"></path>
+                <path d="M12 13v7"></path>
+              </svg>
+              <span data-i18n="gitChanges">Changes</span>
+            </button>
+            <button class="git-nav-item" type="button" data-git-view="history">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 6v6l4 2"></path>
+                <path d="M20 12a8 8 0 1 1-2.35-5.65"></path>
+              </svg>
+              <span data-i18n="gitHistory">History</span>
+            </button>
+            <button class="git-nav-item" type="button" data-git-view="branches">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="7" cy="6" r="2"></circle>
+                <circle cx="17" cy="18" r="2"></circle>
+                <circle cx="17" cy="6" r="2"></circle>
+                <path d="M9 6h6"></path>
+                <path d="M7 8v7a3 3 0 0 0 3 3h5"></path>
+              </svg>
+              <span data-i18n="gitBranches">Branches</span>
+            </button>
+            <button class="git-nav-item" type="button" data-git-view="graph">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="6" cy="6" r="2"></circle>
+                <circle cx="18" cy="12" r="2"></circle>
+                <circle cx="8" cy="18" r="2"></circle>
+                <path d="M7.6 7.3 16.2 11"></path>
+                <path d="M16.45 13.65 9.55 16.35"></path>
+              </svg>
+              <span data-i18n="gitGraph">Graph</span>
+            </button>
+          </div>
+
+          <section class="git-workspace" id="git-workspace">
+            <div class="git-toolbar">
+              <div class="git-toolbar-group" aria-label="Repository sync">
+                <button class="git-action-button" type="button" id="git-refresh-button"><span data-i18n="gitRefresh">Refresh</span></button>
+                <button class="git-action-button" type="button" id="git-fetch-button"><span data-i18n="gitFetch">Fetch</span></button>
+                <button class="git-action-button" type="button" id="git-pull-button"><span data-i18n="gitPull">Pull</span></button>
+                <button class="git-action-button" type="button" id="git-push-button"><span data-i18n="gitPush">Push</span></button>
+              </div>
+              <div class="git-toolbar-group git-toolbar-group-changes" aria-label="Change actions">
+                <button class="git-action-button" type="button" id="git-stage-all-button"><span data-i18n="gitStageAll">Stage all</span></button>
+                <button class="git-action-button" type="button" id="git-unstage-all-button"><span data-i18n="gitUnstageAll">Unstage all</span></button>
+                <button class="git-action-button git-action-button-primary" type="button" id="git-commit-button"><span data-i18n="gitCommit">Commit</span></button>
+              </div>
+            </div>
+            <div class="git-status-banner" id="git-status-banner"></div>
+            <div class="git-view git-view-overview" id="git-view-overview"></div>
+            <div class="git-view" id="git-view-changes" hidden></div>
+            <div class="git-view" id="git-view-history" hidden></div>
+            <div class="git-view" id="git-view-branches" hidden></div>
+            <div class="git-view" id="git-view-graph" hidden></div>
+          </section>
+        </section>
+
+        <section class="activity-panel" id="activity-panel-run" data-activity-panel-id="run">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group">
+              <div class="activity-panel-eyebrow">Run</div>
+              <div class="activity-panel-title">Run & Debug</div>
+            </div>
+            <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6.5 9 12l6 5.5"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="run-card-list" id="run-debug-list"></div>
+          <div class="run-session-panel" id="run-debug-session" hidden></div>
+          <section class="project-operations">
+            <div class="project-operations-head"><strong>Project knowledge</strong><button type="button" id="project-window-open">New window</button><button type="button" id="project-index-update">Update index</button></div>
+            <input id="project-index-query" type="search" placeholder="Search local files" />
+            <div id="project-index-state" class="project-index-state"></div>
+            <div id="project-index-results" class="project-index-results"></div>
+          </section>
+          <section class="project-operations">
+            <div class="project-operations-head"><strong>Background tasks</strong><button type="button" id="project-task-add">New task</button></div>
+            <div id="project-task-list" class="project-task-list"></div>
+          </section>
+        </section>
+      </div>
+      <div class="shell-resizer shell-resizer-flyout" id="activity-flyout-resizer" data-layout-resizer-kind="flyout" aria-hidden="true"></div>
+
+      <aside class="research-domains-sidebar" id="research-domains-sidebar" aria-label="Research Domains">
+        <nav class="research-domains-nav" id="research-domains-nav" aria-label="Registered research domains"></nav>
+        <div class="research-domains-footer">
+          <button id="research-os-toggle" class="activity-rail-button research-os-toggle" type="button" title="Research OS" aria-label="Toggle Research OS" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="6" r="2"></circle><circle cx="19" cy="11" r="2"></circle><circle cx="13" cy="18" r="2"></circle>
+              <path d="m6.6 10.8 3.8-3.5m3.5-.6 3.3 3.1m.2 2.7-3 4M11.1 17 6.7 13"></path>
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <div class="corner-tools">
+        <button
+          id="workspace-picker-toggle"
+          class="icon-button corner-tool-button"
+          type="button"
+          aria-label="Switch workspace"
+          title="Switch workspace"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3.75 7.5h5l1.7 2.05h9.8v6.9a1.8 1.8 0 0 1-1.8 1.8H5.55a1.8 1.8 0 0 1-1.8-1.8z"></path>
+            <path d="M3.75 7.5V6.3a1.8 1.8 0 0 1 1.8-1.8h4.2l1.7 2.05"></path>
+          </svg>
+        </button>
+        <button
+          id="settings-toggle"
+          class="icon-button corner-tool-button"
+          type="button"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.15"></circle>
+            <path d="M19.4 15a1 1 0 0 0 .2 1.1l.06.06a1.85 1.85 0 0 1 0 2.62 1.85 1.85 0 0 1-2.62 0l-.06-.06a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.92V19.8A1.85 1.85 0 0 1 13.43 21h-2.86a1.85 1.85 0 0 1-1.85-1.85v-.1a1 1 0 0 0-.6-.92 1 1 0 0 0-1.1.2l-.06.06a1.85 1.85 0 0 1-2.62 0 1.85 1.85 0 0 1 0-2.62l.06-.06a1 1 0 0 0 .2-1.1 1 1 0 0 0-.92-.6H4.2A1.85 1.85 0 0 1 2.35 12.2v-.4A1.85 1.85 0 0 1 4.2 9.95h.1a1 1 0 0 0 .92-.6 1 1 0 0 0-.2-1.1l-.06-.06a1.85 1.85 0 0 1 0-2.62 1.85 1.85 0 0 1 2.62 0l.06.06a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.92V4.2A1.85 1.85 0 0 1 10.57 2.35h2.86a1.85 1.85 0 0 1 1.85 1.85v.1a1 1 0 0 0 .6.92 1 1 0 0 0 1.1-.2l.06-.06a1.85 1.85 0 0 1 2.62 0 1.85 1.85 0 0 1 0 2.62l-.06.06a1 1 0 0 0-.2 1.1 1 1 0 0 0 .92.6h.1a1.85 1.85 0 0 1 1.85 1.85v.4a1.85 1.85 0 0 1-1.85 1.85h-.1a1 1 0 0 0-.92.6z"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="dock-workspace" id="dock-workspace">
+        <section class="dock-panel dock-panel-sidebar" data-panel-id="sidebar" hidden>
+          <div class="dock-panel-bar">
+            <span class="dock-panel-name">Navigation</span>
+          </div>
+
+          <aside class="sidebar">
+            <div class="sidebar-fallback"></div>
+          </aside>
+        </section>
+
+        <div class="panel-resizer" data-resizer-after="sidebar" aria-hidden="true"></div>
+
+        <section class="dock-panel dock-panel-chat" data-panel-id="chat">
+          <div class="dock-panel-bar">
+            <span class="dock-panel-name">Conversation</span>
+          </div>
+
+          <main class="workspace">
+              <section class="workspace-body" id="workspace-body">
+              <section class="workspace-chat">
+                <div class="visualization-floating-chat-head" id="visualization-floating-chat-head" hidden>
+                  <span id="visualization-floating-chat-title">Current conversation</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h8M8 12h8M8 17h8"></path></svg>
+                </div>
+                <button class="visualization-floating-chat-resize" id="visualization-floating-chat-resize" type="button" aria-label="Resize conversation card" title="Drag to resize conversation card" hidden></button>
+                <section class="conversation-stage">
+                  <section class="review-strip" id="review-strip" hidden></section>
+                  <section class="research-floating-board" id="research-floating-board" hidden>
+                    <div class="research-floating-head" id="research-floating-head">
+                      <span>Research flow</span>
+                      <button type="button" id="research-floating-hide" aria-label="Hide research flow">×</button>
+                    </div>
+                    <div class="research-floating-body" id="research-floating-body"></div>
+                  </section>
+                  <button
+                    class="research-floating-reopen"
+                    id="research-floating-reopen"
+                    type="button"
+                    aria-label="Show research flow"
+                    title="Show research flow"
+                    hidden
+                  ></button>
+                  <div class="message-stream"></div>
+                </section>
+
+                <section class="terminal-drawer" id="terminal-drawer" hidden>
+                  <div class="terminal-drawer-head">
+                    <div class="terminal-tab-list" id="terminal-tab-list"></div>
+                    <div class="terminal-drawer-actions">
+                      <button class="terminal-head-button" type="button" id="terminal-new-inline" aria-label="New terminal" title="New terminal">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 6.5v11"></path>
+                          <path d="M6.5 12h11"></path>
+                        </svg>
+                      </button>
+                      <button class="terminal-head-button" type="button" id="terminal-hide-button" aria-label="Hide terminal" title="Hide terminal">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M6 9.5 12 15l6-5.5"></path>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="terminal-drawer-body" id="terminal-screen">
+                    <pre class="terminal-output" id="terminal-output"></pre>
+                    <div class="terminal-inline-input">
+                      <span class="terminal-input-prefix">></span>
+                      <input id="terminal-input" class="terminal-input" type="text" autocomplete="off" spellcheck="false" />
+                    </div>
+                  </div>
+                </section>
+
+                <section class="composer-shell">
+                  <div class="composer-status-row">
+                    <div class="composer-status-left">
+                      <section class="agent-runtime-strip composer-runtime-strip" id="agent-runtime-strip" hidden></section>
+                      <section class="permission-strip" id="permission-strip" hidden></section>
+                    </div>
+                    <div class="composer-status-right">
+                      <div class="context-usage" id="context-usage" title="Context usage">
+                        <span class="context-usage-ring" id="context-usage-ring" aria-hidden="true"></span>
+                        <span class="context-usage-model" id="context-usage-model"></span>
+                        <span class="context-usage-label" id="context-usage-label">0%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="composer-attachments" id="composer-attachments" hidden></div>
+
+                  <label class="composer-field" for="message-input">
+                    <textarea
+                      id="message-input"
+                      rows="3"
+                      placeholder=""
+                    ></textarea>
+                    <div class="composer-inline-tools">
+                      <div class="composer-inline-tools-left">
+                        <button class="attach-button" type="button" id="attach-button" aria-label="Attach files" title="Attach files">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="12" cy="12" r="8.5"></circle>
+                            <path d="M12 8.5v7"></path>
+                            <path d="M8.5 12h7"></path>
+                          </svg>
+                        </button>
+                        <button class="prompt-optimize-button" type="button" id="prompt-optimize-button" aria-label="Optimize prompt" title="Optimize prompt">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m12 3 1.25 4.05L17 8.5l-3.75 1.45L12 14l-1.25-4.05L7 8.5l3.75-1.45z"></path>
+                            <path d="m18.25 14 .72 2.28L21 17l-2.03.72L18.25 20l-.72-2.28L15.5 17l2.03-.72z"></path>
+                          </svg>
+                        </button>
+                        <input id="file-input" type="file" multiple hidden />
+                      </div>
+                      <div class="composer-inline-tools-right">
+                        <button class="composer-stop" type="button" id="composer-stop" hidden>
+                          Stop
+                        </button>
+                        <details class="effort-anchor" id="effort-disclosure">
+                          <summary class="effort-trigger" id="effort-trigger">
+                            <span class="effort-trigger-label" data-i18n="effortTitle">Effort</span>
+                            <span class="effort-trigger-value" id="effort-trigger-value" data-i18n="effortLow">Low</span>
+                          </summary>
+
+                          <section class="effort-popover" id="effort-panel">
+                            <div class="effort-popover-head">
+                              <strong id="effort-panel-title">Effort Low</strong>
+                            </div>
+
+                            <p class="effort-panel-meta" id="effort-panel-meta"></p>
+
+                            <div class="effort-scale-labels">
+                              <span data-i18n="effortFast">Faster</span>
+                              <span data-i18n="effortSmart">Smarter</span>
+                            </div>
+
+                            <div class="effort-slider" id="effort-slider" role="tablist" aria-label="Thinking level">
+                              <div class="effort-slider-track" aria-hidden="true">
+                                <div class="effort-slider-matrix" id="effort-slider-matrix"></div>
+                                <span class="effort-slider-dot effort-slider-dot-0"></span>
+                                <span class="effort-slider-dot effort-slider-dot-1"></span>
+                                <span class="effort-slider-dot effort-slider-dot-2"></span>
+                                <span class="effort-slider-dot effort-slider-dot-3"></span>
+                                <span class="effort-slider-thumb"></span>
+                              </div>
+                              <div class="effort-slider-hitareas">
+                                <button class="effort-stop is-active" type="button" data-effort="low" aria-label="Low"></button>
+                                <button class="effort-stop" type="button" data-effort="medium" aria-label="Medium"></button>
+                                <button class="effort-stop" type="button" data-effort="high" aria-label="High"></button>
+                                <button class="effort-stop" type="button" data-effort="max" aria-label="Max"></button>
+                              </div>
+                            </div>
+                          </section>
+                        </details>
+                      </div>
+                    </div>
+                  </label>
+
+                  <div class="settings-popovers">
+                    <section class="settings-popover" id="settings-panel" hidden>
+                      <div class="settings-panel-shell">
+                        <div class="settings-panel-header">
+                          <strong data-i18n="settingsLabel">Settings</strong>
+                          <button class="settings-close" type="button" id="settings-close">x</button>
+                        </div>
+
+                        <div class="settings-tabs">
+                          <button class="settings-tab is-active" type="button" data-settings-tab="model" data-i18n="tabModel">Model</button>
+                          <button class="settings-tab" type="button" data-settings-tab="security" data-i18n="tabSecurity">Security</button>
+                          <button class="settings-tab" type="button" data-settings-tab="runtime" data-i18n="tabRuntime">Runtime</button>
+                          <button class="settings-tab" type="button" data-settings-tab="providers" data-i18n="tabProviders">Providers</button>
+                        </div>
+
+                        <div class="settings-panel-body">
+                          <div class="settings-tab-panel is-active" data-settings-tab-panel="model">
+                            <label class="field-block">
+                              <span class="field-label" data-i18n="fieldApiKey">API Key</span>
+                              <input id="runtime-api-key" type="password" />
+                            </label>
+
+                            <label class="field-block">
+                              <span class="field-label" data-i18n="fieldPrimaryModel">Primary model</span>
+                              <select id="primary-model">
+                                <option value="qwen3.7-plus">Qwen 3.7 Plus</option>
+                                <option value="qwen3.7-max">Qwen 3.7 Max</option>
+                                <option value="qwen3.6-plus">Qwen 3.6 Plus</option>
+                                <option value="qwen3.6-max-preview">Qwen 3.6 Max (Preview)</option>
+                                <option value="qwen3.6-flash">Qwen 3.6 Flash</option>
+                                <option value="qwen3.5-plus">Qwen 3.5 Plus</option>
+                                <option value="qwen3.5-flash">Qwen 3.5 Flash</option>
+                                <option value="qwq-plus">QwQ Plus (reasoning only)</option>
+                              </select>
+                            </label>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label">Deep Think (thinking/reasoning)</span>
+                              <input id="deep-think" type="checkbox" />
+                            </label>
+                            <span class="field-help">Send thinking tokens to the model and display reasoning content.</span>
+                          </div>
+
+                          <div class="settings-tab-panel" data-settings-tab-panel="security">
+                            <label class="field-block compact-toggle">
+                              <span class="field-label" data-i18n="fieldCompetitionMode">Competition mode</span>
+                              <input id="competition-mode" type="checkbox" />
+                            </label>
+                            <span class="field-help" data-i18n="helpCompetitionMode">Pause at checkpoints and wait for approval.</span>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label" data-i18n="fieldPrivacyMode">Privacy guard</span>
+                              <input id="privacy-mode" type="checkbox" />
+                            </label>
+                            <span class="field-help" data-i18n="helpPrivacyMode">Reduce sensitive exposure and tighten external access.</span>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label" data-i18n="fieldApproveSafe">Auto approve safe tools</span>
+                              <input id="auto-approve-tools" type="checkbox" />
+                            </label>
+                            <span class="field-help" data-i18n="helpApproveSafe">When off, every tool call still requires manual approval regardless of the risk boundary. When on, tool calls are auto-approved up to the selected boundary.</span>
+
+                            <label class="field-block">
+                              <span class="field-label" data-i18n="fieldRiskBoundary">Risk boundary</span>
+                              <div class="segmented-control" id="risk-boundary" data-segmented>
+                                <button type="button" class="segment is-active" data-value="safe" data-i18n="riskSafe">Safe</button>
+                                <button type="button" class="segment" data-value="moderate" data-i18n="riskModerate">Moderate</button>
+                                <button type="button" class="segment" data-value="low" data-i18n="riskUnlimited" data-danger="true">Unlimited</button>
+                              </div>
+                            </label>
+                            <span class="field-help" data-i18n="helpRiskBoundary">Set the highest risk level allowed for auto-approved tool calls.</span>
+
+                            <div class="field-grid">
+                              <label class="field-block">
+                                <span class="field-label" data-i18n="fieldMaxCalls">Max tool calls / min</span>
+                                <div class="segmented-control" id="max-tool-calls" data-segmented>
+                                  <button type="button" class="segment" data-value="10">10</button>
+                                  <button type="button" class="segment" data-value="30">30</button>
+                                  <button type="button" class="segment" data-value="0" data-i18n="limitUnlimited" data-danger="true">Unlimited</button>
+                                </div>
+                              </label>
+
+                              <label class="field-block">
+                                <span class="field-label" data-i18n="fieldBurstLimit">Burst limit</span>
+                                <div class="segmented-control" id="burst-limit" data-segmented>
+                                  <button type="button" class="segment" data-value="1">1</button>
+                                  <button type="button" class="segment" data-value="5">5</button>
+                                  <button type="button" class="segment" data-value="0" data-i18n="limitUnlimited" data-danger="true">Unlimited</button>
+                                </div>
+                              </label>
+                            </div>
+                            <span class="field-help" data-i18n="helpRateLimit">Limit tool-call rate to avoid too many external actions.</span>
+                          </div>
+
+                          <div class="settings-tab-panel" data-settings-tab-panel="runtime">
+                            <label class="field-block">
+                              <span class="field-label">Appearance</span>
+                              <div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="Color theme">
+                                <button class="theme-choice is-active" type="button" data-theme-choice="dark" aria-checked="true">
+                                  <span class="theme-preview theme-preview-dark" aria-hidden="true"><i></i><i></i><i></i></span>
+                                  <span>Dark</span>
+                                </button>
+                                <button class="theme-choice" type="button" data-theme-choice="light" aria-checked="false">
+                                  <span class="theme-preview theme-preview-light" aria-hidden="true"><i></i><i></i><i></i></span>
+                                  <span>Light</span>
+                                </button>
+                              </div>
+                            </label>
+
+                            <label class="field-block">
+                              <span class="field-label">Language</span>
+                              <button class="language-toggle" type="button" id="lang-toggle">EN</button>
+                            </label>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label">Show activity panel</span>
+                              <input id="auto-open-activity-panel" type="checkbox" />
+                            </label>
+                            <span class="field-help">Show the activity panel inside assistant messages.</span>
+
+                            <label class="field-block compact-toggle">
+                              <span class="field-label">System monitoring</span>
+                              <input id="system-monitor-enabled" type="checkbox" />
+                            </label>
+                            <span class="field-help">Show live CPU, GPU, memory, disk and network values at the bottom of the IDE.</span>
+
+                            <label class="field-block">
+                              <span class="field-label" data-i18n="fieldWorkspaceRoot">Workspace root</span>
+                              <input id="runtime-workspace-root" type="text" />
+                            </label>
+
+                            <div class="runtime-toolchain-grid" id="runtime-toolchain-grid">
+                              <label class="field-block"><span class="field-label">Cargo</span><input data-toolchain-key="cargo" type="text" /></label>
+                              <label class="field-block"><span class="field-label">NPM</span><input data-toolchain-key="npm" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Python</span><input data-toolchain-key="python" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Java</span><input data-toolchain-key="java" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Javac</span><input data-toolchain-key="javac" type="text" /></label>
+                              <label class="field-block"><span class="field-label">C compiler</span><input data-toolchain-key="c" type="text" /></label>
+                              <label class="field-block"><span class="field-label">C++ compiler</span><input data-toolchain-key="cpp" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Go</span><input data-toolchain-key="go" type="text" /></label>
+                              <label class="field-block"><span class="field-label">.NET</span><input data-toolchain-key="dotnet" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Julia</span><input data-toolchain-key="julia" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Rscript</span><input data-toolchain-key="rscript" type="text" /></label>
+                              <label class="field-block"><span class="field-label">Tectonic</span><input data-toolchain-key="tectonic" type="text" /></label>
+                              <label class="field-block"><span class="field-label">PDFLaTeX</span><input data-toolchain-key="pdflatex" type="text" /></label>
+                            </div>
+                            <span class="field-help">Leave a value as a command name to use PATH, or enter an absolute executable path.</span>
+                          </div>
+
+                          <div class="settings-tab-panel" data-settings-tab-panel="providers">
+                            <div class="provider-list" id="provider-list"></div>
+                          </div>
+                        </div>
+
+                        <button class="settings-save settings-save-wide" type="button" id="settings-save" data-i18n="settingsSave">Save</button>
+                      </div>
+                    </section>
+                  </div>
+                </section>
+              </section>
+              <div class="shell-resizer shell-resizer-browser" id="browser-split-resizer" data-layout-resizer-kind="browser" aria-hidden="true"></div>
+              <aside class="browser-workspace" id="browser-workspace" hidden>
+                <div class="browser-toolbar">
+                  <div class="browser-toolbar-group">
+                    <button class="git-action-button" type="button" id="browser-back-button">Back</button>
+                    <button class="git-action-button" type="button" id="browser-forward-button">Forward</button>
+                    <button class="git-action-button" type="button" id="browser-refresh-button">Refresh</button>
+                    <button class="git-action-button" type="button" id="browser-home-button">Home</button>
+                    <button class="git-action-button" type="button" id="browser-external-button">External</button>
+                  </div>
+                  <form class="browser-toolbar-address-form" id="browser-address-form">
+                    <input class="browser-toolbar-address" id="browser-toolbar-address" type="text" value="" placeholder="Enter a URL" autocomplete="off" spellcheck="false" />
+                  </form>
+                  <button
+                    class="browser-toolbar-button"
+                    type="button"
+                    id="browser-close-button"
+                    aria-label="Close browser"
+                    title="Close browser"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m7 7 10 10"></path>
+                      <path d="M17 7 7 17"></path>
+                    </svg>
+                  </button>
+                </div>
+                <div class="browser-frame-shell">
+                  <iframe
+                    class="browser-frame"
+                    id="browser-frame"
+                    title="In-app browser"
+                    referrerpolicy="no-referrer"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+                  ></iframe>
+                </div>
+              </aside>
+              <section class="visualization-workspace" id="visualization-workspace" hidden aria-label="Interactive Visualization">
+                <header class="visualization-toolbar">
+                  <div class="visualization-type-tabs" id="visualization-type-tabs" role="tablist" aria-label="Visualization type"></div>
+                  <label class="visualization-source-field">
+                    <span>Source</span>
+                    <select id="visualization-source-select" aria-label="Visualization source"></select>
+                  </label>
+                  <div class="visualization-toolbar-actions">
+                    <span class="visualization-live-state" id="visualization-live-state"></span>
+                    <button class="git-action-button" type="button" id="visualization-refresh">Refresh</button>
+                    <button class="git-action-button" type="button" id="visualization-fit">Fit</button>
+                    <button class="browser-toolbar-button" type="button" id="visualization-close" aria-label="Close visualization" title="Close visualization">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10"></path><path d="M17 7 7 17"></path></svg>
+                    </button>
+                  </div>
+                </header>
+                <div class="visualization-status" id="visualization-status" role="status" aria-live="polite"></div>
+                <div class="visualization-stage" id="visualization-stage">
+                  <canvas class="domain-3d-canvas visualization-domain-3d-canvas" id="visualization-3d-canvas" aria-label="Interactive 3D geometry viewport" hidden></canvas>
+                  <svg id="visualization-canvas" role="img" aria-label="Interactive visualization canvas">
+                    <defs>
+                      <marker id="visualization-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z"></path>
+                      </marker>
+                    </defs>
+                    <g id="visualization-viewport">
+                      <g id="visualization-series-layer"></g>
+                      <g id="visualization-edge-layer"></g>
+                      <g id="visualization-node-layer"></g>
+                    </g>
+                  </svg>
+                  <aside class="visualization-inspector" id="visualization-inspector" hidden></aside>
+                  <div class="visualization-empty" id="visualization-empty" hidden></div>
+                  <button class="browser-toolbar-button visualization-chat-toggle" type="button" id="visualization-chat-toggle" data-visualization-control aria-label="Show conversation beside visualization" title="Show conversation beside visualization" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v13h-15z"></path><path d="M11 5.5v13"></path><path d="M6.8 9h2M6.8 12h2M6.8 15h2"></path></svg>
+                  </button>
+                </div>
+                <footer class="visualization-playback" id="visualization-playback">
+                  <button class="browser-toolbar-button visualization-playback-step" type="button" id="visualization-previous" aria-label="Previous frame" title="Previous frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7-5 5 5 5"></path></svg></button>
+                  <button class="git-action-button visualization-playback-toggle" type="button" id="visualization-play" aria-label="Play animation" title="Play animation">Play</button>
+                  <button class="browser-toolbar-button visualization-playback-step" type="button" id="visualization-next" aria-label="Next frame" title="Next frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 7 5 5-5 5"></path></svg></button>
+                  <input id="visualization-timeline" type="range" min="0" max="0" value="0" aria-label="Animation frame" />
+                  <span id="visualization-frame-label">No timeline</span>
+                </footer>
+              </section>
+              <section class="research-domain-workspace" id="research-domain-workspace" hidden aria-label="Research Domain Workspace">
+                <header class="research-domain-toolbar">
+                  <div class="research-domain-heading">
+                    <span class="research-domain-kicker" id="research-domain-kicker">Research Domain</span>
+                    <strong id="research-domain-title">Workspace</strong>
+                  </div>
+                  <div class="research-domain-toolbar-meta" id="research-domain-toolbar-meta"></div>
+                  <div class="research-domain-toolbar-actions">
+                    <button class="git-action-button" type="button" id="research-domain-refresh">Refresh</button>
+                    <button class="browser-toolbar-button" type="button" id="research-domain-close" aria-label="Close domain workspace" title="Close domain workspace">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10"></path><path d="M17 7 7 17"></path></svg>
+                    </button>
+                  </div>
+                </header>
+                <nav class="research-domain-global-tabs" id="research-domain-global-tabs" aria-label="Research domain sections"></nav>
+                <div class="research-domain-workspace-body research-domain-v2-body">
+                  <aside class="research-domain-assets-panel">
+                    <div class="research-domain-section-head">
+                      <span id="research-domain-resources-label">Resources</span>
+                      <span id="research-domain-asset-count"></span>
+                    </div>
+                    <label class="research-domain-asset-search">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 4 4"></path></svg>
+                      <input id="research-domain-asset-filter" type="search" autocomplete="off" placeholder="Filter assets" aria-label="Filter domain assets" />
+                    </label>
+                    <div class="research-domain-object-types" id="research-domain-object-types"></div>
+                    <div class="research-domain-assets" id="research-domain-assets"></div>
+                    <div class="research-domain-asset-footer" id="research-domain-asset-footer"></div>
+                  </aside>
+                  <section class="research-domain-primary-panel research-domain-studio">
+                    <div class="research-domain-primary-toolbar research-domain-native-toolbar">
+                      <div class="research-domain-primary-heading">
+                        <span id="research-domain-primary-kicker">Active workbench</span>
+                        <strong id="research-domain-primary-label">Domain workspace</strong>
+                      </div>
+                      <div class="research-domain-native-actions" id="research-domain-native-actions"></div>
+                      <button class="git-action-button" type="button" id="research-domain-open-asset" disabled>Open asset</button>
+                    </div>
+                    <div class="research-domain-tab-surface" id="research-domain-tab-surface">
+                      <div class="research-domain-native-surface" id="research-domain-native-surface"></div>
+                    </div>
+                    <section class="research-domain-preview-panel" id="research-domain-preview-panel" hidden>
+                      <div class="research-domain-viewer-toolbar" id="research-domain-viewer-toolbar" hidden>
+                        <div class="research-domain-viewer-tabs" id="research-domain-viewer-tabs" role="tablist" aria-label="Visualization type"></div>
+                        <button class="git-action-button git-action-button-primary" type="button" id="research-domain-open-visualization">Open Visualization</button>
+                      </div>
+                      <div class="research-domain-preview-stage" id="research-domain-preview-stage">
+                        <canvas class="domain-3d-canvas research-domain-3d-canvas" id="research-domain-3d-canvas" aria-label="Interactive research domain 3D viewport" hidden></canvas>
+                        <svg id="research-domain-preview-canvas" viewBox="0 0 960 600" role="img" aria-label="Research domain visualization preview"></svg>
+                        <div class="research-domain-empty" id="research-domain-empty"></div>
+                      </div>
+                      <aside class="research-domain-inspector" id="research-domain-inspector" hidden></aside>
+                    </section>
+                    <section class="research-domain-operations-panel" id="research-domain-operations-panel">
+                      <div class="research-domain-subsection-head research-domain-operations-head">
+                        <div>
+                          <span class="research-domain-surface-label">EXECUTION LEDGER</span>
+                          <strong id="research-domain-operations-label">Agent runs & evidence</strong>
+                        </div>
+                        <button type="button" id="research-domain-clear-runs">Clear</button>
+                      </div>
+                      <div class="research-domain-runs" id="research-domain-runs"></div>
+                    </section>
+                  </section>
+                  <aside class="research-domain-agent-panel">
+                    <div class="research-domain-section-head">
+                      <span>Agent control plane</span>
+                      <span class="research-domain-live-state"><i></i> LIVE</span>
+                    </div>
+                    <section class="research-domain-agent-context">
+                      <span class="research-domain-surface-label">ROUTING TARGET</span>
+                      <strong id="research-domain-agent-context-title">Domain agents</strong>
+                      <p id="research-domain-agent-context-copy">Choose an agent role, then dispatch a native operation.</p>
+                    </section>
+                    <div class="research-domain-agents" id="research-domain-agents"></div>
+                    <section class="research-domain-live-context" id="research-domain-live-context"></section>
+                    <details class="research-domain-agent-details">
+                      <summary>
+                        <span class="research-domain-surface-label">TOOLCHAIN</span>
+                        <strong>SDK & provider readiness</strong>
+                      </summary>
+                      <section class="research-domain-adapters-section">
+                        <div class="research-domain-adapters" id="research-domain-adapters"></div>
+                      </section>
+                      <section class="research-domain-provider-section" id="research-domain-provider-section"></section>
+                    </details>
+                  </aside>
+                </div>
+              </section>
+            </section>
+          </main>
+        </section>
+
+        <div class="panel-resizer" data-resizer-after="chat" aria-hidden="true"></div>
+
+        <section class="dock-panel dock-panel-tree" data-panel-id="tree">
+          <div class="dock-panel-bar">
+            <div class="dock-panel-title-group">
+              <strong id="workspace-files-title">Workspace files</strong>
+              <span class="workspace-panel-meta" id="workspace-files-subtitle"></span>
+            </div>
+          </div>
+
+          <section class="workspace-tree-panel">
+            <div class="workspace-tree" id="workspace-tree"></div>
+          </section>
+        </section>
+
+        <div class="panel-resizer" data-resizer-after="tree" aria-hidden="true"></div>
+
+        <section class="dock-panel dock-panel-code" data-panel-id="code">
+          <div class="dock-panel-bar dock-panel-bar-code">
+            <div class="dock-panel-bar-main">
+              <div class="dock-panel-title-group">
+                <strong id="workspace-code-title">Code preview</strong>
+                <span class="workspace-panel-meta" id="workspace-code-path">Select a file</span>
+              </div>
+            </div>
+            <div class="dock-panel-bar-actions">
+              <button
+                class="workspace-code-save"
+                type="button"
+                id="workspace-code-save"
+                aria-label="Save code"
+                title="Save code"
+                hidden
+              >
+                Save
+              </button>
+              <button
+                class="workspace-code-render-toggle"
+                type="button"
+                id="workspace-code-render-toggle"
+                aria-label="Toggle markdown rendering"
+                title="Toggle markdown rendering"
+                hidden
+              >
+                渲染
+              </button>
+              <span class="workspace-code-meta" id="workspace-code-meta"></span>
+            </div>
+          </div>
+
+          <div class="workspace-code-context">
+            <div class="workspace-code-tabs-row">
+              <div class="workspace-code-tabs" id="workspace-code-tabs"></div>
+              <div class="workspace-code-toolbar">
+                <button
+                  class="workspace-code-tool workspace-code-tool-run"
+                  type="button"
+                  id="workspace-code-run"
+                  aria-label="Run and debug"
+                  title="Run and debug"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 6.5v11l8-5.5z"></path>
+                    <path d="M5.5 19.5h13"></path>
+                  </svg>
+                </button>
+                <button
+                  class="workspace-code-tool"
+                  type="button"
+                  id="workspace-code-search"
+                  aria-label="Find in file"
+                  title="Find in file"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="5.5"></circle>
+                    <path d="m16 16 4 4"></path>
+                  </svg>
+                </button>
+                <button
+                  class="workspace-code-tool"
+                  type="button"
+                  id="workspace-code-replace"
+                  aria-label="Replace in file"
+                  title="Replace in file"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 7.5h9"></path>
+                    <path d="m13 4.5 3 3-3 3"></path>
+                    <path d="M17 16.5H8"></path>
+                    <path d="m11 13.5-3 3 3 3"></path>
+                  </svg>
+                </button>
+                <button
+                  class="workspace-code-tool"
+                  type="button"
+                  id="workspace-code-line"
+                  aria-label="Go to line"
+                  title="Go to line"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 6.5h12"></path>
+                    <path d="M6 12h7.5"></path>
+                    <path d="M6 17.5h5"></path>
+                    <path d="m16 14 2 2 3-3"></path>
+                  </svg>
+                </button>
+                <button
+                  class="workspace-code-tool"
+                  type="button"
+                  id="workspace-code-symbols"
+                  aria-label="File symbols"
+                  title="File symbols"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 7h12"></path>
+                    <path d="M6 12h12"></path>
+                    <path d="M6 17h7"></path>
+                    <circle cx="17.5" cy="17" r="1.25"></circle>
+                  </svg>
+                </button>
+                <button
+                  class="workspace-code-tool"
+                  type="button"
+                  id="workspace-code-references"
+                  aria-label="Find references"
+                  title="Find references"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="9" cy="12" r="2.25"></circle>
+                    <circle cx="16.75" cy="8" r="1.75"></circle>
+                    <circle cx="16.75" cy="16" r="1.75"></circle>
+                    <path d="M11.05 10.9 15 8.8"></path>
+                    <path d="m11.05 13.1 3.95 2.1"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="workspace-code-breadcrumbs" id="workspace-code-breadcrumbs"></div>
+          </div>
+
+          <section class="workspace-code-panel is-closed">
+            <div class="workspace-launcher" id="workspace-launcher" hidden>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="git">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⊞</span>
+                  <span class="workspace-launcher-label">审查</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+Shift+G</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="terminal">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⌘</span>
+                  <span class="workspace-launcher-label">终端</span>
+                </span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="browser">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">◌</span>
+                  <span class="workspace-launcher-label">浏览器</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+T</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="files">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">◫</span>
+                  <span class="workspace-launcher-label">文件</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+P</span>
+              </button>
+              <button class="workspace-launcher-card" type="button" data-workspace-launch="side-chat">
+                <span class="workspace-launcher-main">
+                  <span class="workspace-launcher-icon">⊕</span>
+                  <span class="workspace-launcher-label">侧边聊天</span>
+                </span>
+                <span class="workspace-launcher-shortcut">Ctrl+Alt+S</span>
+              </button>
+            </div>
+            <div class="workspace-code-scroll" id="workspace-code-scroll">
+              <div class="workspace-code-placeholder" id="workspace-code-content">Double-click a file to preview its contents.</div>
+            </div>
+          </section>
+        </section>
+
+        <div class="panel-resizer" data-resizer-after="research" aria-hidden="true"></div>
+
+        <section class="dock-panel dock-panel-research" data-panel-id="research" hidden>
+          <div class="dock-panel-bar">
+            <div class="dock-panel-title-group">
+              <strong>Research Flow</strong>
+              <span class="dock-panel-name">Agent research</span>
+            </div>
+          </div>
+          <section class="research-detail-panel" id="research-detail-panel"></section>
+        </section>
+      </div>
+      <footer class="system-metrics-bar" id="system-metrics-bar" hidden aria-label="Live system monitoring"></footer>
+    </div>
+
+    <div id="session-menu" class="session-floating-menu" hidden>
+      <button class="session-floating-menu-item" type="button" id="session-menu-rename">Rename</button>
+      <button class="session-floating-menu-item is-danger" type="button" id="session-menu-delete">Delete</button>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite">Copied</div>
+
+    <section class="atlas-dialog" id="atlas-dialog" hidden aria-modal="true" role="dialog" aria-labelledby="atlas-dialog-title">
+      <div class="atlas-dialog-card">
+        <div class="atlas-dialog-copy">
+          <h2 id="atlas-dialog-title"></h2>
+          <p id="atlas-dialog-message"></p>
+        </div>
+        <input id="atlas-dialog-input" type="text" autocomplete="off" hidden />
+        <div class="atlas-dialog-actions">
+          <button class="atlas-dialog-button" type="button" id="atlas-dialog-cancel">Cancel</button>
+          <button class="atlas-dialog-button is-primary" type="button" id="atlas-dialog-confirm">Confirm</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sandbox-welcome" id="sandbox-welcome" hidden aria-modal="true" role="dialog" aria-labelledby="sandbox-welcome-title">
+      <div class="sandbox-welcome-card">
+        <div class="sandbox-welcome-mark" aria-hidden="true"><img src="./atlas-mark.svg" alt="" /></div>
+        <div class="sandbox-welcome-copy">
+          <span class="sandbox-welcome-eyebrow">First launch</span>
+          <h2 id="sandbox-welcome-title">Set up your sandbox</h2>
+          <p>Atlas uses an isolated workspace for agent operations. You can keep the recommended sandbox or choose your own workspace.</p>
+          <code id="sandbox-welcome-path"></code>
+        </div>
+        <div class="sandbox-welcome-actions">
+          <button class="sandbox-secondary" type="button" id="sandbox-choose-workspace">Choose workspace</button>
+          <button class="sandbox-primary" type="button" id="sandbox-use-default">Use sandbox</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="research-os-panel" class="research-os-panel" hidden aria-label="Research Operating System">
+      <header class="research-os-header">
+        <div class="research-os-identity">
+          <span>ATLAS / RESEARCH OPERATING SYSTEM</span>
+          <strong>Evidence-linked research state</strong>
+        </div>
+        <nav class="research-os-tabs" role="tablist" aria-label="Research OS surfaces">
+          <button data-tab="graph" type="button" role="tab" class="is-active" aria-selected="true">Knowledge</button>
+          <button data-tab="hypotheses" type="button" role="tab">Hypotheses</button>
+          <button data-tab="evidence" type="button" role="tab">Evidence</button>
+          <button data-tab="lineage" type="button" role="tab">Lineage</button>
+          <button data-tab="diary" type="button" role="tab">Diary</button>
+          <button data-tab="timeline" type="button" role="tab">Timeline</button>
+          <button data-tab="decisions" type="button" role="tab">Decisions</button>
+          <button data-tab="memory" type="button" role="tab">Memory</button>
+          <button data-tab="publication" type="button" role="tab">Publication</button>
+        </nav>
+        <div class="research-os-header-actions">
+          <span id="research-os-sync-state" class="research-os-sync-state"><i></i> LIVE</span>
+          <button id="research-os-refresh" type="button">Refresh</button>
+          <button id="research-os-close" class="icon-button" type="button" aria-label="Close Research OS">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10"></path><path d="M17 7 7 17"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div class="research-os-workspace">
+        <aside class="research-os-tree-panel">
+          <label class="research-os-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 4 4"></path></svg>
+            <input id="research-os-search" type="search" autocomplete="off" placeholder="Find research objects" />
+          </label>
+          <div id="research-os-tree" class="research-os-tree"></div>
+        </aside>
+        <main id="research-os-content" class="research-os-content" role="tabpanel"></main>
+        <aside id="research-os-inspector" class="research-os-inspector" aria-label="Selected research object"></aside>
+      </div>
+      <footer class="research-os-footer">
+        <div id="research-os-warning" class="research-os-warning"></div>
+        <div class="research-os-time-machine">
+          <button id="research-os-prev" type="button" aria-label="Previous research moment">‹</button>
+          <input id="research-os-scrubber" type="range" min="0" max="0" value="0" aria-label="Scientific timeline position" />
+          <span id="research-os-time-label">Current state</span>
+          <button id="research-os-next" type="button" aria-label="Next research moment">›</button>
+        </div>
+      </footer>
+    </section>
+
+    <script src="./vendor/katex/katex.min.js?v=20260619m"></script>
+    <script src="./vendor/monaco/vs/loader.js"></script>
+    <script>
+      window.__ATLAS_HOST__ = window.__ATLAS_HOST__ || {
+        mode: "web",
+        transport: "http",
+        supportsStreaming: true,
+        supportsFileDialog: true,
+        supportsTerminal: true,
+        supportsTerminalPty: false,
+        supportsNativeMenu: false,
+        bridgeProtocol: "",
+      };
+      window.__ATLAS_DESKTOP_BRIDGE__ = window.__ATLAS_DESKTOP_BRIDGE__ || null;
+      window.MonacoEnvironment = {
+        baseUrl: "./vendor/monaco/vs",
+        getWorkerUrl() {
+          return "./vendor/monaco/vs/base/worker/workerMain.js";
+        },
+      };
+      window.require.config({
+        paths: {
+          vs: "./vendor/monaco/vs",
+        },
+      });
+    </script>
+    <script src="./domain-3d-viewer.js?v=20260715a"></script>
+    <script src="./research-domain-specs.js?v=20260716b"></script>
+    <script src="./research-workbenches.js?v=20260716b"></script>
+    <script src="./research-domains.js?v=20260716b"></script>
+    <script src="./research-os.js?v=20260716d"></script>
+    <script src="./app.js?v=20260716b"></script>
+    <script src="./visualization.js?v=20260715b"></script>
+    <script src="./system-monitor.js?v=20260714a"></script>
+  </body>
+</html>

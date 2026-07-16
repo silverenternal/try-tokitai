@@ -1,0 +1,8 @@
+# Clippy configuration for tokitai-filekv
+# https://doc.rust-lang.org/clippy/
+
+# Too many arguments threshold
+too-many-arguments-threshold = 8
+
+# Doc parameters that should be checked
+doc-valid-idents = ["SQLite", "PostgreSQL", "Redis", "RocksDB", "LevelDB", "mimalloc", "Tokio", "LSM-Tree", "Write-Ahead-Log", ".."]

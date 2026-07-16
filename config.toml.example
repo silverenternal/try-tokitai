@@ -1,0 +1,128 @@
+# AI Assistant 配置文件
+
+[ai]
+# 模型名称
+model = "qwen3.5:397b"
+# 温度（0.0-1.0，越高越有创造性）
+temperature = 0.7
+# 最大 token 数
+max_tokens = 4096
+# 默认提供商（可选，留空则使用第一个）
+# default_provider = "openai"
+
+# ============================================================================
+# 多提供商配置（可选）
+# ============================================================================
+# 配置多个 LLM 提供商，支持运行时动态切换
+# 使用 /model list 查看所有可用模型
+# 使用 /model switch <provider> 切换提供商
+
+[ai.providers.openai]
+api_url = "https://api.openai.com/v1/chat/completions"
+api_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 OPENAI_API_KEY
+model = "gpt-4o"
+cost_per_1k_tokens = 0.03
+quality_score = 9.0
+context_window = 128000
+
+[ai.providers.gemini]
+api_url = "https://generativelanguage.googleapis.com/v1beta/models"
+api_key = "xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 GEMINI_API_KEY
+model = "gemini-2.0-flash"
+cost_per_1k_tokens = 0.00075
+quality_score = 8.5
+context_window = 1048576
+
+[ai.providers.anthropic]
+api_url = "https://api.anthropic.com/v1/messages"
+api_key = "sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 ANTHROPIC_API_KEY
+model = "claude-3-5-sonnet-20241022"
+cost_per_1k_tokens = 0.03
+quality_score = 9.5
+context_window = 200000
+
+[ai.providers.zhipu]
+api_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+api_key = "xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 ZHIPU_API_KEY
+model = "glm-4"
+cost_per_1k_tokens = 0.005
+quality_score = 7.5
+context_window = 128000
+
+[ai.providers.moonshot]
+api_url = "https://api.moonshot.cn/v1/chat/completions"
+api_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"  # 或使用环境变量 MOONSHOT_API_KEY
+model = "moonshot-v1-8k"
+cost_per_1k_tokens = 0.012
+quality_score = 7.0
+context_window = 8192
+
+[ai.providers.ollama]
+api_url = "http://localhost:11434/v1/chat/completions"
+api_key = ""  # Ollama 不需要 API Key
+model = "qwen3.5:397b"
+cost_per_1k_tokens = 0.0
+quality_score = 6.0
+context_window = 32768
+
+[tools]
+# 启用的工具集（留空表示全部启用）
+# enabled = ["file_ops", "system", "code_analysis", "web_search", "download", "git_ops"]
+
+[search]
+# SearXNG 服务地址（推荐配置，提高搜索可靠性）
+# 系统会自动尝试多个公共 SearXNG 实例（按优先级）：
+#   1. SEARXNG_URL 环境变量（如果设置）
+#   2. https://searx.be
+#   3. https://search.ononoki.org
+#   4. https://s.x.com
+#   5. https://searx.org
+# 所有 SearXNG 不可用时，自动回退到 DuckDuckGo
+# searxng_url = "https://searx.be"
+# 搜索引擎列表
+engines = ["bing", "duckduckgo"]
+# 搜索缓存容量（条数）
+cache_capacity = 100
+# 缓存过期时间（秒）
+cache_ttl_secs = 3600
+
+[download]
+# 默认下载目录（可选，留空则使用系统下载目录）
+# default_dir = "/tmp/downloads"
+
+[user_tools]
+# 默认工作目录（文件操作、项目模板等）
+# 留空表示使用当前工作目录
+# workspace_dir = "./workspace"
+
+# 默认下载目录（优先级高于 download.default_dir）
+# 留空表示使用系统下载目录（或回退到 ./downloads）
+# download_dir = "./downloads"
+
+[context]
+# 上下文存储根目录（可选，留空则使用 ./.context）
+# root_dir = "./.context"
+# 短期层最大保留轮数（超出自动裁剪）
+max_short_term_rounds = 10
+# 是否启用 mmap 内存映射优化（大文件读取更高效）
+enable_mmap = true
+# 是否启用增量日志（记录所有上下文变更）
+enable_logging = true
+# 是否启用内容去重（相同内容只存储一次）
+enable_deduplication = true
+
+# ⭐ 知识库配置（新增）
+# 知识库根目录（用于从目录结构构建知识索引）
+knowledge_root = "./docs"
+# 是否从目录结构自动同步分类到长期层
+auto_sync_categories = true
+# 是否启用知识索引（提问时自动推荐相关知识）
+enable_knowledge_index = true
+# 知识索引更新间隔（秒）
+index_update_interval_secs = 300
+# 自动推荐相关知识（提问时根据关键词匹配）
+auto_recommend_knowledge = true
+# 推荐阈值（0-1，越高越严格）
+recommend_threshold = 0.5
+# 最多推荐知识数量
+recommend_limit = 3

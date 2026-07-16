@@ -1,0 +1,253 @@
+# AI Scientist Workflow
+# Computer-science-only minimum viable pipeline.
+# Tools marked [NotImplemented] return explicit errors rather than fake results.
+
+[workflow]
+id = "ai-scientist-cs-minimal"
+name = "AI Scientist CS Minimal Pipeline"
+description = "Computer-science-only research pipeline for literature, implementation, evaluation, verification, and reporting"
+
+[[workflow.stages]]
+id = "literature_review"
+name = "CS Literature Review"
+
+[[workflow.stages.steps]]
+id = "search_literature"
+description = "Search for relevant computer science papers, benchmarks, or technical reports"
+tool = "search_paper"
+role = "researcher"
+
+[[workflow.stages.steps]]
+id = "fetch_paper"
+description = "Fetch a paper by ID from local cache or configured providers"
+tool = "fetch_paper"
+depends_on = ["search_literature"]
+role = "researcher"
+
+[[workflow.stages]]
+id = "problem_formulation"
+name = "Problem Formulation"
+
+[[workflow.stages.steps]]
+id = "formulate_problem"
+description = "Formulate a testable computer science problem statement, baseline, and evaluation target"
+tool = "run_python"
+depends_on = ["fetch_paper"]
+role = "hypothesizer"
+
+[[workflow.stages]]
+id = "implementation_or_benchmark_design"
+name = "Implementation Or Benchmark Design"
+
+[[workflow.stages.steps]]
+id = "design_pipeline"
+description = "Design the implementation, benchmark, dataset split, or evaluation pipeline for the computer science task"
+tool = "run_python"
+depends_on = ["formulate_problem"]
+role = "experimenter"
+
+[[workflow.stages]]
+id = "verification"
+name = "Verification And Evaluation"
+
+[[workflow.stages.steps]]
+id = "math_simplify"
+description = "Simplify derived expressions or sanity-check analytical reasoning using SymPy"
+tool = "sympy_simplify"
+depends_on = ["design_pipeline"]
+role = "verifier"
+
+[[workflow.stages.steps]]
+id = "math_integrate"
+description = "Integrate or cross-check derived expressions when formal reasoning is part of the CS task"
+tool = "sympy_integrate"
+depends_on = ["design_pipeline"]
+role = "verifier"
+
+[[workflow.stages]]
+id = "result_analysis"
+name = "Result Analysis"
+
+[[workflow.stages.steps]]
+id = "summarize_results"
+description = "Summarize benchmark, training, analysis, and verification outputs"
+tool = "run_python"
+depends_on = ["math_integrate"]
+role = "verifier"
+
+[[workflow.stages]]
+id = "report_generation"
+name = "Report Generation"
+
+[[workflow.stages.steps]]
+id = "plan_paper_blueprint"
+description = "Assemble an experiment-grounded paper blueprint with section-specific prompts, writing skills, and evidence contracts"
+tool = "run_python"
+depends_on = ["summarize_results"]
+role = "reporter"
+
+[[workflow.stages.steps]]
+id = "draft_paper_sections"
+description = "Draft title, abstract, introduction, related work, method, setup, results, discussion, limitations, and conclusion modules"
+tool = "run_python"
+depends_on = ["plan_paper_blueprint"]
+role = "reporter"
+
+[[workflow.stages.steps]]
+id = "generate_output"
+description = "Package the final manuscript scaffold with LaTeX outline, citation plan, artifact appendix, and paper quality checklist"
+tool = "run_python"
+depends_on = ["draft_paper_sections"]
+role = "reporter"
+
+# Not implemented tool notes:
+# - formulate_problem and design_pipeline currently piggyback on generic execution tools
+# - richer benchmark orchestration can replace these placeholders later
+# - lean_verify requires Lean4 installation (`lake`)
+# - plot requires a plotting backend such as matplotlib
+
+
+[research_progress]
+description = "Config-driven user-facing progress prompts for research workflows. Keep messages editable here instead of hard-coding them in Rust or JavaScript."
+
+[[research_progress.prompts]]
+lane = "plan"
+message = "我准备开始界定「{topic}」的研究目标：先明确当前阶段「{stage}」，并把成功标准、约束和证据口径写清楚。"
+evidence_contract = ["研究目标", "成功指标", "约束条件", "下一阶段入口"]
+
+[[research_progress.prompts]]
+lane = "evidence"
+message = "我准备开始收集「{stage}」所需证据：{detail}。我会记录来源、版本和可复现路径。"
+evidence_contract = ["数据/文献来源", "检索或获取方式", "版本/时间戳", "质量筛选记录"]
+
+[[research_progress.prompts]]
+lane = "reason"
+message = "我准备进入分析设计：围绕「{stage}」拆解方法、假设和可能失败模式，避免直接跳到结论。"
+evidence_contract = ["方法选择理由", "关键假设", "风险/失败模式", "替代路径"]
+
+[[research_progress.prompts]]
+lane = "execute"
+message = "我准备执行「{stage}」：会保留工具调用、输入输出、日志和产物路径，确保后续可以审查。"
+evidence_contract = ["工具调用记录", "输入参数", "运行日志", "产物路径"]
+
+[[research_progress.prompts]]
+lane = "branch"
+message = "我准备检查分支或回退点：如果「{stage}」不满足证据要求，会说明原因并给出下一步修正。"
+evidence_contract = ["失败原因", "回退点", "修正动作", "复测条件"]
+
+[[research_progress.prompts]]
+lane = "validate"
+message = "我准备审查「{stage}」：核对数据、分析、工具轨迹和结论之间是否闭环。"
+evidence_contract = ["一致性检查", "误差/反例分析", "对照或 verifier", "未解决问题"]
+
+[[research_progress.prompts]]
+lane = "review"
+message = "我准备做环节审查：把已完成步骤和缺口对齐，确认是否需要补数据、补实验或补证明。"
+evidence_contract = ["完成项", "缺口", "责任阶段", "补救计划"]
+
+[[research_progress.prompts]]
+lane = "report"
+message = "我准备形成结论：只基于已闭环证据输出结果、局限和下一步建议。"
+evidence_contract = ["结论", "证据映射", "局限", "下一步"]
+
+[[research_progress.kind_overrides]]
+kind = "theory"
+lane = "execute"
+message = "我准备推进理论推理阶段「{stage}」：会保留定义、引理依赖、反例搜索和每一步核查，而不是伪造实验数据。"
+evidence_contract = ["定义", "引理链", "反例搜索", "证明核查"]
+
+[[research_progress.kind_overrides]]
+kind = "literature_review"
+lane = "evidence"
+message = "我准备进行文献检索与筛选：围绕「{topic}」记录检索式、纳入/排除标准和证据表。"
+evidence_contract = ["检索式", "筛选标准", "证据表", "研究空白"]
+
+[[research_progress.kind_overrides]]
+kind = "security_analysis"
+lane = "validate"
+message = "我准备审查安全分析结果：区分真实问题、误报、影响范围和可复验修复建议。"
+evidence_contract = ["真实发现", "误报说明", "影响判断", "复验路径"]
+
+[[research_progress.kind_overrides]]
+kind = "deep_learning"
+lane = "execute"
+message = "我准备推进训练执行阶段「{stage}」：会连续记录 epoch、loss、验证指标、checkpoint 和资源占用，确保中断后还能恢复。"
+evidence_contract = ["训练日志", "验证指标", "checkpoint", "资源监控"]
+
+[[research_progress.kind_overrides]]
+kind = "deep_learning"
+lane = "branch"
+message = "我准备检查训练分支与回退点：如果「{stage}」出现显存、收敛或配置问题，会明确停在哪里、保留了什么、下一次从哪里恢复。"
+evidence_contract = ["阻塞原因", "保留的训练状态", "回退或恢复点", "复测条件"]
+
+[[research_progress.kind_overrides]]
+kind = "classical_ml"
+lane = "evidence"
+message = "我准备先固定轻量机器学习实验的输入边界：围绕「{stage}」锁定数据来源、dataset manifest、切分方式、baseline 和评估指标。"
+evidence_contract = ["数据来源", "dataset manifest", "baseline", "评估指标"]
+
+[[research_progress.kind_overrides]]
+kind = "classical_ml"
+lane = "validate"
+message = "我准备审查轻量机器学习结果：确认 accuracy/F1、baseline 差值、误差分析和随机性影响是否已经闭环。"
+evidence_contract = ["核心指标", "baseline 对照", "误差分析", "随机种子/稳健性"]
+
+[[research_progress.kind_overrides]]
+kind = "systems_evaluation"
+lane = "reason"
+message = "我准备布置系统评测观测面：围绕「{stage}」定义 workload、基线版本、profiling 位置和性能指标口径。"
+evidence_contract = ["workload 定义", "基线版本", "profiling 方案", "指标口径"]
+
+[[research_progress.kind_overrides]]
+kind = "systems_evaluation"
+lane = "validate"
+message = "我准备审查系统评测结果：核对 latency、throughput、memory、瓶颈归因和复现条件是否一致。"
+evidence_contract = ["性能指标", "瓶颈分析", "对照结果", "复现条件"]
+
+[[research_progress.kind_overrides]]
+kind = "agent_evaluation"
+lane = "plan"
+message = "我准备先界定智能体评测边界：明确任务集、成功标准、judge 规则、工具权限和成本约束。"
+evidence_contract = ["任务集", "成功标准", "judge 口径", "工具/成本边界"]
+
+[[research_progress.kind_overrides]]
+kind = "agent_evaluation"
+lane = "validate"
+message = "我准备审查智能体评测轨迹：确认任务成功率、关键失败轨迹、工具错误和修复前后变化是否能支撑当前判断。"
+evidence_contract = ["任务成功率", "失败轨迹", "工具错误", "修复前后对照"]
+
+[[research_progress.kind_overrides]]
+kind = "data_analysis"
+lane = "plan"
+message = "我准备先理解数据分析任务的输入边界：明确字段含义、目标变量、缺失情况和可用样本范围。"
+evidence_contract = ["字段说明", "目标变量", "缺失/异常概况", "样本边界"]
+
+[[research_progress.kind_overrides]]
+kind = "data_analysis"
+lane = "validate"
+message = "我准备审查数据分析结论：确认清洗、基线分析、统计证据和可视化结论之间没有跳步。"
+evidence_contract = ["清洗记录", "统计/模型结果", "可视化证据", "结论约束"]
+
+[[research_progress.kind_overrides]]
+kind = "scope_boundary"
+lane = "plan"
+message = "我准备先划清范围边界：把请求里超出计算机科学工作流的部分标出来，并重述成当前可执行的 CS 任务。"
+evidence_contract = ["越界内容", "可执行 CS 子问题", "暂不处理部分", "后续入口"]
+
+[[research_progress.kind_overrides]]
+kind = "scope_boundary"
+lane = "report"
+message = "我准备输出边界结论：明确哪些部分已被收敛到 CS 路径，哪些仍需外部领域方法支持。"
+evidence_contract = ["已收敛部分", "未覆盖部分", "风险边界", "下一步建议"]
+
+[[research_progress.kind_overrides]]
+kind = "cs_adaptive_research"
+lane = "plan"
+message = "我准备先给当前研究任务定轮廓：根据「{topic}」判断更接近代码实现、评测、分析还是综述，并据此安排证据路径。"
+evidence_contract = ["任务轮廓", "证据路径", "关键里程碑", "下一阶段入口"]
+
+[[research_progress.kind_overrides]]
+kind = "cs_adaptive_research"
+lane = "review"
+message = "我准备做自适应环节审查：检查当前任务是否需要切换到更具体的研究模板，还是继续沿现有路径补证据。"
+evidence_contract = ["当前模板适配性", "缺口", "是否切换工作流", "补证据动作"]

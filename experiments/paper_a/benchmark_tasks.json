@@ -1,0 +1,429 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created_at": "2026-03-27",
+    "description": "Benchmark tasks for Paper A: Parallel Context Architecture",
+    "total_tasks": 24,
+    "categories": 4
+  },
+  "categories": {
+    "code_refactoring": {
+      "name": "Code Refactoring",
+      "description": "Tasks requiring exploration of multiple refactoring approaches",
+      "task_count": 6
+    },
+    "debugging": {
+      "name": "Debugging",
+      "description": "Tasks requiring validation of multiple bug hypotheses",
+      "task_count": 6
+    },
+    "creative_writing": {
+      "name": "Creative Writing",
+      "description": "Tasks requiring exploration of different narrative directions",
+      "task_count": 6
+    },
+    "research": {
+      "name": "Research",
+      "description": "Tasks requiring comparison of multiple design options",
+      "task_count": 6
+    }
+  },
+  "tasks": [
+    {
+      "id": "CR-01",
+      "category": "code_refactoring",
+      "title": "Explore 3 Refactoring Approaches for Legacy Module",
+      "description": "Refactor a legacy Rust module using three different approaches: (1) incremental refactoring, (2) complete rewrite, (3) wrapper-based modernization. Compare trade-offs and merge the best solution.",
+      "initial_state": "Legacy module with technical debt",
+      "success_criteria": [
+        "Three distinct branches created",
+        "Each approach fully explored",
+        "Best solution merged to main",
+        "Other branches properly aborted"
+      ],
+      "expected_branches": ["refactor-incremental", "refactor-rewrite", "refactor-wrapper"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 45
+    },
+    {
+      "id": "CR-02",
+      "category": "code_refactoring",
+      "title": "Compare Dependency Injection Patterns",
+      "description": "Explore three dependency injection patterns: constructor injection, setter injection, and interface injection. Evaluate each pattern and select the best fit.",
+      "initial_state": "Tightly coupled Rust code",
+      "success_criteria": [
+        "Three DI patterns implemented in separate branches",
+        "Comparison analysis documented",
+        "Best pattern selected and merged"
+      ],
+      "expected_branches": ["di-constructor", "di-setter", "di-interface"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 30
+    },
+    {
+      "id": "CR-03",
+      "category": "code_refactoring",
+      "title": "Experiment with Caching Strategies",
+      "description": "Implement and compare three caching strategies: LRU, LFU, and time-based expiration. Measure performance impact of each strategy.",
+      "initial_state": "Performance-critical code without caching",
+      "success_criteria": [
+        "Three caching strategies implemented",
+        "Performance benchmarks run for each",
+        "Best strategy selected based on metrics"
+      ],
+      "expected_branches": ["cache-lru", "cache-lfu", "cache-time-based"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 60
+    },
+    {
+      "id": "CR-04",
+      "category": "code_refactoring",
+      "title": "Refactor Error Handling Patterns",
+      "description": "Explore different error handling patterns: Result types, custom error enums, and error context wrappers.",
+      "initial_state": "Code with inconsistent error handling",
+      "success_criteria": [
+        "Three error handling patterns explored",
+        "Error coverage improved",
+        "Best pattern merged"
+      ],
+      "expected_branches": ["error-result", "error-enum", "error-context"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 35
+    },
+    {
+      "id": "CR-05",
+      "category": "code_refactoring",
+      "title": "Optimize Data Structure Choices",
+      "description": "Compare different data structures (Vec, HashMap, BTreeMap) for a specific use case and select the optimal one.",
+      "initial_state": "Code with suboptimal data structure",
+      "success_criteria": [
+        "Multiple data structures tested",
+        "Performance comparison completed",
+        "Optimal choice merged"
+      ],
+      "expected_branches": ["ds-vec", "ds-hashmap", "ds-btreemap"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 25
+    },
+    {
+      "id": "CR-06",
+      "category": "code_refactoring",
+      "title": "Explore Async vs Sync Implementations",
+      "description": "Implement both synchronous and asynchronous versions of I/O-bound operations and compare performance.",
+      "initial_state": "Synchronous I/O-bound code",
+      "success_criteria": [
+        "Async version implemented",
+        "Performance comparison completed",
+        "Better approach selected"
+      ],
+      "expected_branches": ["sync-version", "async-version"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 50
+    },
+    {
+      "id": "DB-01",
+      "category": "debugging",
+      "title": "Validate 3 Bug Hypotheses for Crash",
+      "description": "A production crash occurs. Explore three hypotheses: (1) null pointer dereference, (2) race condition, (3) resource exhaustion.",
+      "initial_state": "Crash report with stack trace",
+      "success_criteria": [
+        "Three hypotheses explored in parallel branches",
+        "Root cause identified",
+        "Fix implemented and merged"
+      ],
+      "expected_branches": ["hypothesis-null-ptr", "hypothesis-race", "hypothesis-resource"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 60
+    },
+    {
+      "id": "DB-02",
+      "category": "debugging",
+      "title": "Trace Memory Leak Through Multiple Paths",
+      "description": "Memory leak detected. Explore multiple potential leak sources: unclosed files, circular references, forgotten subscriptions.",
+      "initial_state": "Memory leak report",
+      "success_criteria": [
+        "Multiple leak sources investigated",
+        "Actual leak identified and fixed",
+        "Memory profile improved"
+      ],
+      "expected_branches": ["leak-files", "leak-circular", "leak-subscriptions"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 55
+    },
+    {
+      "id": "DB-03",
+      "category": "debugging",
+      "title": "Debug Intermittent Test Failures",
+      "description": "Tests fail intermittently. Explore potential causes: timing issues, shared state, random seed dependency.",
+      "initial_state": "Flaky test suite",
+      "success_criteria": [
+        "Multiple causes investigated",
+        "Root cause identified",
+        "Tests stabilized"
+      ],
+      "expected_branches": ["debug-timing", "debug-state", "debug-random"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 40
+    },
+    {
+      "id": "DB-04",
+      "category": "debugging",
+      "title": "Fix Performance Regression",
+      "description": "Performance regression detected. Explore potential causes: algorithmic complexity, I/O bottlenecks, memory allocation patterns.",
+      "initial_state": "Performance regression report",
+      "success_criteria": [
+        "Multiple causes profiled",
+        "Bottleneck identified and fixed",
+        "Performance restored"
+      ],
+      "expected_branches": ["perf-algorithm", "perf-io", "perf-memory"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 65
+    },
+    {
+      "id": "DB-05",
+      "category": "debugging",
+      "title": "Resolve API Integration Failures",
+      "description": "Third-party API integration failing. Explore causes: authentication issues, rate limiting, API version mismatch.",
+      "initial_state": "API integration failures",
+      "success_criteria": [
+        "Multiple causes investigated",
+        "Root cause identified",
+        "Integration fixed"
+      ],
+      "expected_branches": ["api-auth", "api-rate-limit", "api-version"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 35
+    },
+    {
+      "id": "DB-06",
+      "category": "debugging",
+      "title": "Debug Concurrent Access Issues",
+      "description": "Data corruption under concurrent access. Explore solutions: mutex-based locking, lock-free data structures, actor model.",
+      "initial_state": "Concurrent data corruption",
+      "success_criteria": [
+        "Multiple concurrency models explored",
+        "Safe implementation selected",
+        "Data integrity verified"
+      ],
+      "expected_branches": ["concur-mutex", "concur-lockfree", "concur-actor"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 70
+    },
+    {
+      "id": "CW-01",
+      "category": "creative_writing",
+      "title": "Explore Different Plot Directions",
+      "description": "Write a short story with three different plot twists. Evaluate which creates the most engaging narrative.",
+      "initial_state": "Story premise and characters",
+      "success_criteria": [
+        "Three plot variations written",
+        "Each variation complete",
+        "Best version selected"
+      ],
+      "expected_branches": ["plot-twist-a", "plot-twist-b", "plot-twist-c"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 45
+    },
+    {
+      "id": "CW-02",
+      "category": "creative_writing",
+      "title": "Develop Multiple Character Arcs",
+      "description": "Develop a character through three different arcs: redemption, fall from grace, and steady growth.",
+      "initial_state": "Character description and setting",
+      "success_criteria": [
+        "Three character arcs developed",
+        "Each arc coherent and compelling",
+        "Best arc selected for continuation"
+      ],
+      "expected_branches": ["arc-redemption", "arc-fall", "arc-growth"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 40
+    },
+    {
+      "id": "CW-03",
+      "category": "creative_writing",
+      "title": "Experiment with Narrative Perspectives",
+      "description": "Tell the same story from three perspectives: first person, third person limited, and omniscient narrator.",
+      "initial_state": "Story outline",
+      "success_criteria": [
+        "Three narrative versions written",
+        "Each perspective consistently maintained",
+        "Most effective perspective selected"
+      ],
+      "expected_branches": ["pov-first", "pov-third-limited", "pov-omniscient"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 55
+    },
+    {
+      "id": "CW-04",
+      "category": "creative_writing",
+      "title": "Explore Different Genre Treatments",
+      "description": "Write the same scene in three genres: thriller, romance, and comedy.",
+      "initial_state": "Basic scene description",
+      "success_criteria": [
+        "Three genre versions written",
+        "Each captures genre conventions",
+        "Best fit selected for project"
+      ],
+      "expected_branches": ["genre-thriller", "genre-romance", "genre-comedy"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 35
+    },
+    {
+      "id": "CW-05",
+      "category": "creative_writing",
+      "title": "Develop Alternative Endings",
+      "description": "Write three alternative endings for a story: happy, tragic, and ambiguous.",
+      "initial_state": "Story up to climax",
+      "success_criteria": [
+        "Three endings written",
+        "Each ending satisfying in its own way",
+        "Best ending selected"
+      ],
+      "expected_branches": ["ending-happy", "ending-tragic", "ending-ambiguous"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 40
+    },
+    {
+      "id": "CW-06",
+      "category": "creative_writing",
+      "title": "Experiment with Pacing Variations",
+      "description": "Write the same scene with three pacing approaches: fast-paced action, slow contemplative, and balanced.",
+      "initial_state": "Scene outline",
+      "success_criteria": [
+        "Three pacing variations written",
+        "Each pacing distinct and effective",
+        "Best pacing selected"
+      ],
+      "expected_branches": ["pace-fast", "pace-slow", "pace-balanced"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 35
+    },
+    {
+      "id": "RS-01",
+      "category": "research",
+      "title": "Compare API Design Patterns",
+      "description": "Design the same API using three patterns: REST, GraphQL, and gRPC. Compare trade-offs for the use case.",
+      "initial_state": "API requirements",
+      "success_criteria": [
+        "Three API designs created",
+        "Trade-offs documented",
+        "Best pattern selected"
+      ],
+      "expected_branches": ["api-rest", "api-graphql", "api-grpc"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 60
+    },
+    {
+      "id": "RS-02",
+      "category": "research",
+      "title": "Evaluate Database Schema Options",
+      "description": "Design database schemas using three approaches: relational, document-based, and graph database.",
+      "initial_state": "Data requirements",
+      "success_criteria": [
+        "Three schema designs created",
+        "Query patterns evaluated",
+        "Best schema selected"
+      ],
+      "expected_branches": ["db-relational", "db-document", "db-graph"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 55
+    },
+    {
+      "id": "RS-03",
+      "category": "research",
+      "title": "Compare Authentication Mechanisms",
+      "description": "Implement three authentication mechanisms: JWT tokens, OAuth 2.0, and session-based auth.",
+      "initial_state": "Authentication requirements",
+      "success_criteria": [
+        "Three auth mechanisms implemented",
+        "Security and UX trade-offs analyzed",
+        "Best mechanism selected"
+      ],
+      "expected_branches": ["auth-jwt", "auth-oauth", "auth-session"],
+      "difficulty": "hard",
+      "estimated_time_minutes": 65
+    },
+    {
+      "id": "RS-04",
+      "category": "research",
+      "title": "Explore Deployment Strategies",
+      "description": "Design deployment strategies: blue-green, canary, and rolling deployments.",
+      "initial_state": "Deployment requirements",
+      "success_criteria": [
+        "Three strategies designed",
+        "Risk and complexity analyzed",
+        "Best strategy selected"
+      ],
+      "expected_branches": ["deploy-bluegreen", "deploy-canary", "deploy-rolling"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 40
+    },
+    {
+      "id": "RS-05",
+      "category": "research",
+      "title": "Evaluate Logging Architectures",
+      "description": "Design logging architectures: centralized logging, distributed tracing, and hybrid approach.",
+      "initial_state": "Logging requirements",
+      "success_criteria": [
+        "Three architectures designed",
+        "Scalability and cost analyzed",
+        "Best architecture selected"
+      ],
+      "expected_branches": ["log-centralized", "log-distributed", "log-hybrid"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 45
+    },
+    {
+      "id": "RS-06",
+      "category": "research",
+      "title": "Compare Testing Strategies",
+      "description": "Implement three testing strategies: test pyramid, testing trophy, and end-to-end focused.",
+      "initial_state": "Testing requirements",
+      "success_criteria": [
+        "Three testing strategies implemented",
+        "Coverage and maintenance analyzed",
+        "Best strategy selected"
+      ],
+      "expected_branches": ["test-pyramid", "test-trophy", "test-e2e"],
+      "difficulty": "medium",
+      "estimated_time_minutes": 50
+    }
+  ],
+  "evaluation_metrics": {
+    "success_rate": {
+      "description": "Percentage of tasks completed successfully",
+      "calculation": "completed_tasks / total_tasks"
+    },
+    "exploration_depth": {
+      "description": "Average number of branches explored per task",
+      "calculation": "total_branches_created / total_tasks"
+    },
+    "error_recovery_rate": {
+      "description": "Percentage of failed branches that were successfully recovered",
+      "calculation": "recovered_failures / total_failures"
+    },
+    "time_efficiency": {
+      "description": "Ratio of actual time to estimated time",
+      "calculation": "estimated_time / actual_time"
+    },
+    "user_satisfaction": {
+      "description": "Average satisfaction score (1-5 Likert scale)",
+      "calculation": "mean(satisfaction_scores)"
+    }
+  },
+  "experimental_protocol": {
+    "design": "Crossover design: each participant uses both linear and parallel systems",
+    "counterbalancing": "Half participants start with linear, half with parallel",
+    "washout_period": "30 minutes between conditions",
+    "training": "15-minute tutorial before each condition",
+    "data_collection": [
+      "Task completion status",
+      "Branch operations logged",
+      "Time spent per task",
+      "Post-task satisfaction rating",
+      "Think-aloud protocol (optional)"
+    ]
+  }
+}
