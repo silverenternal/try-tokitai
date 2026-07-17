@@ -1,0 +1,59 @@
+# Experiment data and datasets (too large for crates.io)
+experiment/
+
+# Python virtual environment
+.venv/
+
+# Generated files
+*.arrow
+dataset_info.json
+state.json
+
+# Internal documentation (development notes, paper planning, etc.)
+doc/archive/
+doc/AI_FEATURES_GUIDE.md
+doc/CONCURRENCY.md
+doc/CONSISTENCY_CHECK.md
+doc/DOCUMENT_CONSOLIDATION_SUMMARY.md
+doc/DOC_INDEX.md
+doc/ERROR_HANDLING.md
+doc/IMPLEMENTATION_SUMMARY_v2.md
+doc/MECHANISMS.md
+doc/MIGRATION_GUIDE.md
+doc/P0_P1_FIXES_SUMMARY_v2.md
+doc/P1_001_PERFORMANCE_STATUS.md
+doc/P1_005_CRASH_RECOVERY_TESTS.md
+doc/P2_P3_FEATURES_SUMMARY.md
+doc/PAPER_CONTRIBUTIONS.md
+doc/PARALLEL_CONTEXT_IMPLEMENTATION.md
+doc/PERFORMANCE_BENCHMARKS_2026.md
+doc/PERFORMANCE_REPORT.md
+doc/PUBLISH_CHECKLIST.md
+doc/TEST_IMPROVEMENT_REPORT.md
+doc/TRACING_CLASSIFICATION.md
+doc/UNSAFE_BLOCKS_AUDIT.md
+doc/USER_GUIDE.md
+doc/API_DESIGN_PROPOSAL.md
+
+# Build artifacts
+/target/
+**/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak

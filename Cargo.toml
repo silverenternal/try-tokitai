@@ -39,7 +39,7 @@ tokitai-core = "0.4.0"
 tokitai-mcp-server = "0.4.0"
 
 # Context management
-tokitai-context = "0.1.2"
+tokitai-context = { path = "crates/tokitai-context" }
 tokitai-filekv = { path = "crates/tokitai-filekv" }
 
 # AI Scientist crates
@@ -193,7 +193,7 @@ ignored = [
 
 # 排除独立测试目录
 [workspace]
-members = ["crates/arc-swap", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science"]
+members = ["crates/arc-swap", "crates/ai-scientist-core", "crates/ai-scientist-rag", "crates/ai-scientist-verify", "crates/ai-scientist-science", "crates/tokitai-context"]
 exclude = ["test_tensor"]
 
 [profile.release]

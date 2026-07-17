@@ -434,6 +434,7 @@ impl Orchestrator {
         // 使用 df 命令检查磁盘空间（仅 Unix-like 系统）
         #[cfg(unix)]
         {
+            use std::process::Command;
             let output = Command::new("df").args(["-h", "."]).output().ok();
 
             if let Some(out) = output {
