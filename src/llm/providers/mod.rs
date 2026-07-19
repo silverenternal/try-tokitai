@@ -6,6 +6,29 @@ use super::{ChatRequest, ChatResponse, LLMProvider, Message, ProviderType, Strea
 use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+fn resilient_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        // This is an overall safety bound, not the streaming idle timeout. Long agent turns
+        // are allowed, but a dead transport must eventually release the supervised task.
+        .timeout(Duration::from_secs(20 * 60))
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
+fn validate_openai_stream_terminal(saw_done: bool, saw_finish_reason: bool) -> Result<()> {
+    if saw_done || saw_finish_reason {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "SSE stream ended unexpectedly before [DONE] or finish_reason"
+        ))
+    }
+}
 
 fn openai_messages(
     messages: Vec<Message>,
@@ -38,7 +61,7 @@ pub struct OpenAIProvider {
 impl OpenAIProvider {
     pub fn new(api_key: String, model: Option<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: resilient_http_client(),
             api_key,
             api_url: "https://api.openai.com/v1/chat/completions".to_string(),
             default_model: model.unwrap_or_else(|| "gpt-4o".to_string()),
@@ -47,7 +70,7 @@ impl OpenAIProvider {
 
     pub fn with_base_url(api_key: String, base_url: String, model: Option<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: resilient_http_client(),
             api_key,
             api_url: base_url,
             default_model: model.unwrap_or_else(|| "gpt-4o".to_string()),
@@ -202,29 +225,47 @@ impl LLMProvider for OpenAIProvider {
                 }
             });
             let mut has_legacy_function_call = false;
+            let mut saw_done = false;
+            let mut saw_finish_reason = false;
 
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(reqwest_eventsource::Event::Open) => {}
                     Ok(reqwest_eventsource::Event::Message(message)) => {
                         if message.data == "[DONE]" {
-                            break;
-                        }
-                        if let Ok(response) = serde_json::from_str::<OpenAIStreamResponse>(&message.data) {
-                            if let Some(usage) = response.usage.as_ref() {
+                            saw_done = true;
+                            if !saw_finish_reason {
                                 yield Ok(StreamChunk {
                                     content: String::new(),
-                                    finish_reason: None,
+                                    finish_reason: Some(if tc_index.is_empty() && !has_legacy_function_call {
+                                        "stop".to_string()
+                                    } else {
+                                        "tool_calls".to_string()
+                                    }),
                                     thinking: None,
                                     tool_calls: None,
-                                    usage: Some(Usage {
-                                        prompt_tokens: usage.prompt_tokens,
-                                        completion_tokens: usage.completion_tokens,
-                                        total_tokens: usage.total_tokens,
-                                    }),
+                                    usage: None,
                                 });
                             }
-                            if let Some(choice) = response.choices.first() {
+                            break;
+                        }
+                        match serde_json::from_str::<OpenAIStreamResponse>(&message.data) {
+                            Ok(response) => {
+                                if let Some(usage) = response.usage.as_ref() {
+                                    yield Ok(StreamChunk {
+                                        content: String::new(),
+                                        finish_reason: None,
+                                        thinking: None,
+                                        tool_calls: None,
+                                        usage: Some(Usage {
+                                            prompt_tokens: usage.prompt_tokens,
+                                            completion_tokens: usage.completion_tokens,
+                                            total_tokens: usage.total_tokens,
+                                        }),
+                                    });
+                                }
+                                if let Some(choice) = response.choices.first() {
+                                    saw_finish_reason |= choice.finish_reason.is_some();
                                 // Accumulate tool call deltas
                                 if let Some(delta_tool_calls) = &choice.delta.tool_calls {
                                     for dtc in delta_tool_calls {
@@ -291,6 +332,11 @@ impl LLMProvider for OpenAIProvider {
                                         usage: None,
                                     });
                                 }
+                                }
+                            }
+                            Err(err) => {
+                                yield Err(anyhow::anyhow!("invalid SSE JSON frame: {}", err));
+                                break;
                             }
                         }
                     }
@@ -299,6 +345,9 @@ impl LLMProvider for OpenAIProvider {
                         break;
                     }
                 }
+            }
+            if let Err(err) = validate_openai_stream_terminal(saw_done, saw_finish_reason) {
+                yield Err(err);
             }
         };
 
@@ -943,3 +992,20 @@ struct AnthropicUsage {
 
 // Re-export Pin for stream return type
 pub use std::pin::Pin;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_stream_requires_a_terminal_marker() {
+        assert!(validate_openai_stream_terminal(false, false).is_err());
+        assert!(validate_openai_stream_terminal(true, false).is_ok());
+        assert!(validate_openai_stream_terminal(false, true).is_ok());
+    }
+
+    #[test]
+    fn malformed_openai_stream_frame_is_not_accepted() {
+        assert!(serde_json::from_str::<OpenAIStreamResponse>("{not-json}").is_err());
+    }
+}

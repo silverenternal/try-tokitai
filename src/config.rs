@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn test_default_ai_config() {
         let config = AiConfig::default();
-        assert_eq!(config.model, "qwen3.5:397b");
+        assert_eq!(config.model, "qwen3.7-plus");
         assert_eq!(config.temperature, 0.7);
         assert_eq!(config.max_tokens, 4096);
         assert!(config.providers.is_empty());
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert_eq!(config.ai.model, "qwen3.7-plus");
         assert!(config.tools.enabled.is_empty());
         assert_eq!(config.context.max_short_term_rounds, 10);
     }
@@ -625,7 +625,7 @@ mod tests {
         let config: Config = toml::from_str(toml_content).unwrap();
 
         // 应该使用默认值
-        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert_eq!(config.ai.model, "qwen3.7-plus");
         assert_eq!(config.ai.temperature, 0.7);
         assert!(config.context.enable_mmap);
         assert!(config.context.enable_logging);
@@ -656,7 +656,7 @@ mod tests {
         let config = Config::load(Some(PathBuf::from("/nonexistent/config.toml"))).unwrap();
 
         // 应该返回默认配置
-        assert_eq!(config.ai.model, "qwen3.5:397b");
+        assert_eq!(config.ai.model, "qwen3.7-plus");
     }
 
     #[test]

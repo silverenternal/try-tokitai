@@ -497,6 +497,8 @@ const BRIDGE_COMMANDS = {
   promptOptimize: "prompt.optimize",
   chatStream: "chat.stream",
   chatStop: "chat.stop",
+  scheduleManage: "schedule.manage",
+  nativeRequest: "native.request",
   toolApprove: "tool.approval.approve",
   toolDeny: "tool.approval.deny",
   gitState: "git.state",
@@ -542,6 +544,37 @@ function createHostClient(meta) {
     };
   }
 
+  async function nativeApiFetch(input, options = {}) {
+    const rawUrl = typeof input === "string" || input instanceof URL
+      ? String(input)
+      : String(input?.url || "");
+    const url = new URL(rawUrl, window.location.href);
+    const nativeRequest = input instanceof Request
+      ? new Request(input, options)
+      : new Request(url.href, options);
+    const body = nativeRequest.method === "GET" || nativeRequest.method === "HEAD"
+      ? new Uint8Array()
+      : new Uint8Array(await nativeRequest.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < body.length; offset += 0x8000) {
+      binary += String.fromCharCode(...body.subarray(offset, offset + 0x8000));
+    }
+    const result = await bridgeInvoke(BRIDGE_COMMANDS.nativeRequest, {
+      method: nativeRequest.method,
+      path: `${url.pathname}${url.search}`,
+      headers: Object.fromEntries(nativeRequest.headers.entries()),
+      body_base64: binary ? btoa(binary) : "",
+    });
+    if (result?.ok === false) throw new Error(result.error || "native request failed");
+    const response = result?.data?.data ?? result?.data ?? {};
+    const decoded = response.body_base64 ? atob(response.body_base64) : "";
+    const bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+    return new Response(bytes, {
+      status: Number(response.status || 500),
+      headers: response.headers || {},
+    });
+  }
+
   async function request(path, options = {}) {
     if (resolved.mode === "desktop" && resolved.transport === "bridge") {
       const command = String(path || "");
@@ -556,6 +589,20 @@ function createHostClient(meta) {
       return bridgeJsonResponse(command, payload);
     }
     return fetch(apiUrl(path), options);
+  }
+
+  if (resolved.mode === "desktop" && resolved.transport === "bridge") {
+    const networkFetch = window.fetch.bind(window);
+    window.fetch = (input, options = {}) => {
+      const rawUrl = typeof input === "string" || input instanceof URL
+        ? String(input)
+        : String(input?.url || "");
+      const url = new URL(rawUrl, window.location.href);
+      if (url.origin === window.location.origin && url.pathname.startsWith("/api/")) {
+        return nativeApiFetch(input, options);
+      }
+      return networkFetch(input, options);
+    };
   }
 
   return {
@@ -755,16 +802,20 @@ function createHostClient(meta) {
       },
     },
     chat: {
-      send(content, language = currentLanguage) {
+      send(content, language = currentLanguage, personalization = clientPersonalizationPayload()) {
         return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.chatSend : "/api/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, language }),
+          body: JSON.stringify({ content, language, personalization }),
         });
       },
       stream(payload) {
-        // The desktop shell is served from its own loopback HTTP origin. Keep high-frequency
-        // token streaming on fetch instead of injecting every chunk through WebView2 scripts.
+        if (resolved.mode === "desktop" && resolved.transport === "bridge") {
+          if (!desktopBridge || typeof desktopBridge.openStream !== "function") {
+            throw new Error("desktop native stream transport is unavailable");
+          }
+          return desktopBridge.openStream(BRIDGE_COMMANDS.chatStream, payload);
+        }
         return fetch(apiUrl("/api/send-stream"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -772,7 +823,7 @@ function createHostClient(meta) {
         });
       },
       stop(sessionId) {
-        return fetch(apiUrl("/api/send-stop"), {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.chatStop : "/api/send-stop", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: sessionId }),
@@ -783,6 +834,15 @@ function createHostClient(meta) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content, language }),
+        });
+      },
+    },
+    schedule: {
+      manage(command, sessionId) {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.scheduleManage : "/api/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command, session_id: sessionId }),
         });
       },
     },
@@ -845,10 +905,11 @@ function createHostClient(meta) {
       state() {
         return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.terminalsState : "/api/terminals");
       },
-      create() {
+      create(shell = clientPreferences.terminalShell) {
         return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.terminalsCreate : "/api/terminals/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shell }),
         });
       },
       input(terminalId, input) {
@@ -917,7 +978,7 @@ let effortPersistTimer = null;
 let effortPersistRequestId = 0;
 let bootstrapData = null;
 let activeSettingsPanel = null;
-let activeSettingsTab = "model";
+let activeSettingsTab = "general";
 let activeSessionMenuId = null;
 let activeSessionMenuAnchor = null;
 let toastTimer = null;
@@ -1106,11 +1167,6 @@ const paperWorkflowAutoTriggeredSessions = new Set();
 const paperWorkflowPromptDismissedSessions = new Set();
 let terminalDrawerDismissed = false;
 let terminalPollTimer = null;
-let researchFloatingDismissed = false;
-let researchFloatingDrag = null;
-let researchFloatingReopenDrag = null;
-let researchFloatingReopenSuppressClick = false;
-let researchFloatingBoardPosition = null;
 let visualizationConversationSplit = false;
 let visualizationActiveKind = "";
 let visualizationChatDrag = null;
@@ -1282,6 +1338,7 @@ let lastContextUsage = { used: 0, limit: 128000, estimated: true, sessionId: "",
 let autoOpenActivityPanel = false;
 const MAX_LIVE_PROCESS_EVENTS = 4;
 let researchDetailOpen = false;
+let messageJumpRailFrame = null;
 
 try {
   currentLanguage = localStorage.getItem("atlas-language") || "zh";
@@ -1313,6 +1370,63 @@ const sessionList = document.querySelector(".session-list");
 const currentSessionList = document.getElementById("current-session-list");
 const branchList = document.querySelector(".branch-list");
 const messageStream = document.querySelector(".message-stream");
+const messageJumpRail = document.getElementById("message-jump-rail");
+messageStream?.addEventListener("scroll", scheduleMessageJumpRailSync, { passive: true });
+const messageJumpRailObserver = messageStream && typeof MutationObserver === "function"
+  ? new MutationObserver(scheduleMessageJumpRailSync)
+  : null;
+messageJumpRailObserver?.observe(messageStream, { childList: true, subtree: true, characterData: true });
+window.addEventListener("resize", scheduleMessageJumpRailSync, { passive: true });
+
+function scheduleMessageJumpRailSync() {
+  if (messageJumpRailFrame != null) return;
+  messageJumpRailFrame = window.requestAnimationFrame(() => {
+    messageJumpRailFrame = null;
+    syncMessageJumpRail();
+  });
+}
+
+function syncMessageJumpRail() {
+  if (!messageJumpRail || !messageStream) return;
+  const targets = Array.from(messageStream.children).filter((node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node.classList.contains("conversation-paper-entry-anchor")) return false;
+    return node.matches(".message-row, .codex-turn-anchor") && !node.hidden;
+  });
+  messageJumpRail.replaceChildren();
+  messageJumpRail.hidden = targets.length === 0;
+  if (!targets.length) return;
+  const isZh = currentLanguage === "zh";
+  targets.forEach((target, index) => {
+    const rawText = target.querySelector(".message-body, .codex-answer, .assistant-card")?.textContent || target.textContent || "";
+    const preview = String(rawText).replace(/\s+/g, " ").trim() || (isZh ? "空消息" : "Empty message");
+    const role = target.classList.contains("user-row") ? (isZh ? "你" : "You") : (isZh ? "助手" : "Assistant");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "message-jump-item";
+    button.dataset.jumpIndex = String(index);
+    button.setAttribute("aria-label", `${role}: ${preview.slice(0, 80)}`);
+    button.innerHTML = `<span class="message-jump-marker" aria-hidden="true"></span><span class="message-jump-preview"><strong>${escapeHtml(role)}</strong><span>${escapeHtml(preview.slice(0, 110))}${preview.length > 110 ? "…" : ""}</span></span>`;
+    button.addEventListener("pointerenter", () => {
+      messageJumpRail.dataset.hoverIndex = String(index);
+      Array.from(messageJumpRail.children).forEach((item, itemIndex) => {
+        const distance = Math.abs(itemIndex - index);
+        item.style.setProperty("--jump-wave-width", `${Math.max(3, 13 - distance * 2)}px`);
+      });
+    });
+    button.addEventListener("pointerleave", () => {
+      delete messageJumpRail.dataset.hoverIndex;
+      Array.from(messageJumpRail.children).forEach((item) => item.style.removeProperty("--jump-wave-width"));
+    });
+    button.addEventListener("click", () => {
+      const targetTop = target.offsetTop - Math.max(0, (messageStream.clientHeight - target.offsetHeight) / 2);
+      messageStream.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+      target.classList.add("message-jump-highlight");
+      window.setTimeout(() => target.classList.remove("message-jump-highlight"), 900);
+    });
+    messageJumpRail.appendChild(button);
+  });
+}
 const reviewStrip = document.getElementById("review-strip");
 const appShell = document.querySelector(".app-shell");
 const shellTopbar = document.querySelector(".shell-topbar");
@@ -1330,6 +1444,10 @@ const workspaceRootLabel = document.getElementById("workspace-root-label");
 const workspaceTitle = document.getElementById("workspace-title");
 const riskPill = document.getElementById("risk-pill");
 const primaryModel = document.getElementById("primary-model");
+const QWEN_MODEL_IDS = new Set([
+  "qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.6-max-preview",
+  "qwen3.6-flash", "qwen3.5-plus", "qwen3.5-flash", "qwq-plus",
+]);
 const primaryApiUrl = document.getElementById("primary-api-url");
 const competitionMode = document.getElementById("competition-mode");
 const privacyMode = document.getElementById("privacy-mode");
@@ -1368,6 +1486,8 @@ const browserRailButton = document.getElementById("browser-rail-button");
 const visualizationRailButton = document.getElementById("visualization-rail-button");
 const visualizationWorkspace = document.getElementById("visualization-workspace");
 const researchDomainWorkspace = document.getElementById("research-domain-workspace");
+const atlasNotebookWorkspace = document.getElementById("atlas-notebook-workspace");
+const notebookRailButton = document.getElementById("notebook-rail-button");
 const visualizationChatToggle = document.getElementById("visualization-chat-toggle");
 const visualizationFloatingChatHead = document.getElementById("visualization-floating-chat-head");
 const visualizationFloatingChatTitle = document.getElementById("visualization-floating-chat-title");
@@ -1394,6 +1514,8 @@ const newSessionButton = document.getElementById("new-session-button");
 const settingsToggle = document.getElementById("settings-toggle");
 const settingsPanel = document.getElementById("settings-panel");
 const settingsClose = document.getElementById("settings-close");
+const settingsSearchInput = document.getElementById("settings-search");
+const settingsSaveState = document.getElementById("settings-save-state");
 const settingsTabs = document.querySelectorAll("[data-settings-tab]");
 const settingsTabPanels = document.querySelectorAll("[data-settings-tab-panel]");
 const settingsSaveButton = document.getElementById("settings-save");
@@ -1417,13 +1539,9 @@ const atlasDialogMessage = document.getElementById("atlas-dialog-message");
 const atlasDialogInput = document.getElementById("atlas-dialog-input");
 const atlasDialogCancel = document.getElementById("atlas-dialog-cancel");
 const atlasDialogConfirm = document.getElementById("atlas-dialog-confirm");
+const atlasContextMenu = document.getElementById("atlas-context-menu");
 const researchPanel = document.getElementById("research-panel");
 const researchSection = document.querySelector(".sidebar-section-research");
-const researchFloatingBoard = document.getElementById("research-floating-board");
-const researchFloatingHead = document.getElementById("research-floating-head");
-const researchFloatingBody = document.getElementById("research-floating-body");
-const researchFloatingHide = document.getElementById("research-floating-hide");
-const researchFloatingReopen = document.getElementById("research-floating-reopen");
 const researchDetailPanel = document.getElementById("research-detail-panel");
 const segmentedControls = document.querySelectorAll("[data-segmented]");
 const modeButtons = document.querySelectorAll("[data-mode]");
@@ -1452,6 +1570,7 @@ const rightSidebarToggleButton = document.getElementById("right-sidebar-toggle")
 const gitNav = document.getElementById("git-nav");
 const gitWorkspace = document.getElementById("git-workspace");
 const browserSplitResizer = document.getElementById("browser-split-resizer");
+const domainSplitResizer = document.getElementById("domain-split-resizer");
 const browserWorkspace = document.getElementById("browser-workspace");
 const browserFrame = document.getElementById("browser-frame");
 const browserBackButton = document.getElementById("browser-back-button");
@@ -1481,19 +1600,157 @@ const DOCK_LAYOUT_KEY = "atlas-dock-layout-v1";
 const RESEARCH_STARTED_KEY = "atlas-research-started-v1";
 const SANDBOX_NOTICE_KEY = "atlas-sandbox-notice-v1";
 const THEME_KEY = "atlas-color-theme-v1";
+const CLIENT_PREFERENCES_KEY = "atlas-client-preferences-v2";
+const DEFAULT_CLIENT_PREFERENCES = Object.freeze({
+  defaultOpenTarget: "atlas",
+  terminalShell: "powershell",
+  showBottomPanel: true,
+  showContextUsage: true,
+  sendShortcut: "enter",
+  followBehavior: "guide",
+  completionNotifications: "unfocused",
+  permissionNotifications: true,
+  questionNotifications: true,
+  lightAccent: "#339cff",
+  lightBackground: "#ffffff",
+  lightForeground: "#1a1c1f",
+  lightContrast: 45,
+  darkAccent: "#339cff",
+  darkBackground: "#181818",
+  darkForeground: "#ffffff",
+  darkContrast: 60,
+  translucentSidebar: true,
+  pointerCursor: false,
+  reducedMotion: "system",
+  uiFont: "system",
+  codeFont: "system-mono",
+  uiFontSize: 14,
+  codeFontSize: 12,
+  diffMarkers: "color",
+  personality: "friendly",
+  customInstructions: "",
+  memoryEnabled: false,
+  toolMemoryEnabled: true,
+  memories: [],
+});
+let clientPreferences = loadClientPreferences();
 const PANEL_IDS = ["sidebar", "chat", "research", "code", "tree"];
-const LEFT_ACTIVITY_ORDER = ["nav", "search", "git", "run"];
+const LEFT_ACTIVITY_ORDER = ["nav", "git", "run", "notebook", "ssh", "events", "snapshots"];
 const RIGHT_DOCK_PANEL_IDS = ["tree", "code", "research"];
 const DEFAULT_DOCK_LAYOUT = {
   order: ["sidebar", "chat", "code", "tree", "research"],
   hidden: { sidebar: true, chat: false, research: true, tree: true, code: true },
-  widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 760 },
+  widths: { sidebar: 280, chat: 1, research: 380, tree: 320, code: 860, flyout: 304, browser: 760, domain: 760 },
 };
 const MIN_ACTIVITY_FLYOUT_WIDTH = 248;
 const MAX_ACTIVITY_FLYOUT_WIDTH = 820;
+const MIN_DOMAIN_WORKBENCH_WIDTH = 480;
+const DOMAIN_WORKBENCH_COMPACT_BREAKPOINT = 840;
 const SEARCH_GITHUB_FLYOUT_BREAKPOINT = 1120;
 const SEARCH_GITHUB_FLYOUT_MIN_WIDTH = 760;
 const SEARCH_GITHUB_FLYOUT_MAX_WIDTH = 980;
+
+function loadClientPreferences() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CLIENT_PREFERENCES_KEY) || "{}");
+    return { ...DEFAULT_CLIENT_PREFERENCES, ...(parsed && typeof parsed === "object" ? parsed : {}) };
+  } catch (_error) {
+    return { ...DEFAULT_CLIENT_PREFERENCES };
+  }
+}
+
+function persistClientPreferences() {
+  try {
+    localStorage.setItem(CLIENT_PREFERENCES_KEY, JSON.stringify(clientPreferences));
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
+function syncClientPreferenceControls() {
+  document.querySelectorAll("[data-client-pref]").forEach((control) => {
+    const key = control.getAttribute("data-client-pref") || "";
+    if (!key || !(key in clientPreferences)) return;
+    if (control instanceof HTMLInputElement && control.type === "checkbox") {
+      control.checked = Boolean(clientPreferences[key]);
+    } else {
+      control.value = String(clientPreferences[key] ?? "");
+    }
+  });
+  document.querySelectorAll("[data-color-value]").forEach((node) => {
+    const key = node.getAttribute("data-color-value") || "";
+    node.textContent = String(clientPreferences[key] || "").toUpperCase();
+  });
+  document.querySelectorAll("[data-pref-output]").forEach((node) => {
+    const key = node.getAttribute("data-pref-output") || "";
+    node.textContent = String(clientPreferences[key] ?? "");
+  });
+}
+
+function applyClientPreferences() {
+  const root = document.documentElement;
+  const light = root.dataset.theme === "light";
+  const accent = String(light ? clientPreferences.lightAccent : clientPreferences.darkAccent);
+  const background = String(light ? clientPreferences.lightBackground : clientPreferences.darkBackground);
+  const foreground = String(light ? clientPreferences.lightForeground : clientPreferences.darkForeground);
+  const contrast = Number(light ? clientPreferences.lightContrast : clientPreferences.darkContrast) || 50;
+  root.style.setProperty("--accent", accent);
+  root.style.setProperty("--accent-2", accent);
+  root.style.setProperty("--bg", background);
+  root.style.setProperty("--text", foreground);
+  root.style.setProperty("--text-2", `color-mix(in srgb, ${foreground} ${Math.max(60, contrast)}%, ${background})`);
+  root.style.setProperty("--text-3", `color-mix(in srgb, ${foreground} ${Math.max(38, contrast - 15)}%, ${background})`);
+  root.style.setProperty("--line", `color-mix(in srgb, ${foreground} 11%, transparent)`);
+  root.style.setProperty("--line-soft", `color-mix(in srgb, ${foreground} 6%, transparent)`);
+  root.style.setProperty("--ui-font-size", `${Number(clientPreferences.uiFontSize) || 14}px`);
+  root.style.setProperty("--code-font-size", `${Number(clientPreferences.codeFontSize) || 12}px`);
+  const uiFonts = {
+    system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    segoe: '"Segoe UI", sans-serif',
+    sans: 'Arial, "Helvetica Neue", sans-serif',
+  };
+  const codeFonts = {
+    "system-mono": 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+    consolas: 'Consolas, "Liberation Mono", monospace',
+    cascadia: '"Cascadia Mono", Consolas, monospace',
+  };
+  root.style.setProperty("--font-ui", uiFonts[clientPreferences.uiFont] || uiFonts.system);
+  root.style.setProperty("--font-mono", codeFonts[clientPreferences.codeFont] || codeFonts["system-mono"]);
+  root.dataset.pointerCursor = clientPreferences.pointerCursor ? "true" : "false";
+  root.dataset.reduceMotion = String(clientPreferences.reducedMotion || "system");
+  root.dataset.translucentSidebar = clientPreferences.translucentSidebar ? "true" : "false";
+  root.dataset.diffMarkers = String(clientPreferences.diffMarkers || "color");
+  appShell?.classList.toggle("hide-context-usage", !clientPreferences.showContextUsage);
+  if (!clientPreferences.showBottomPanel) {
+    setTerminalDrawerVisible(false);
+  } else if (terminalState?.sessions?.length) {
+    terminalDrawerDismissed = false;
+    renderTerminalDrawer();
+  }
+  workspaceMonacoEditor?.updateOptions?.({
+    fontSize: Number(clientPreferences.codeFontSize) || 12,
+    fontFamily: codeFonts[clientPreferences.codeFont] || codeFonts["system-mono"],
+  });
+}
+
+function clientPersonalizationPayload() {
+  return {
+    personality: String(clientPreferences.personality || "friendly"),
+    custom_instructions: String(clientPreferences.customInstructions || "").slice(0, 8000),
+    memory_enabled: Boolean(clientPreferences.memoryEnabled),
+    tool_memory_enabled: Boolean(clientPreferences.toolMemoryEnabled),
+    memories: Array.isArray(clientPreferences.memories) ? clientPreferences.memories.slice(-20) : [],
+  };
+}
+
+function showAtlasNotification(title, body, preference = true) {
+  if (!preference || typeof Notification === "undefined") return;
+  const display = () => new Notification(title, { body, silent: false });
+  if (Notification.permission === "granted") display();
+  else if (Notification.permission === "default") Notification.requestPermission().then((permission) => {
+    if (permission === "granted") display();
+  }).catch(() => {});
+}
 
 function t(key) {
   return translations[currentLanguage]?.[key] || translations.en[key] || key;
@@ -1545,18 +1802,28 @@ function syncShellLayoutVars() {
   );
   const effectiveFlyoutWidth = isSearchGitHubPreviewActive()
     ? resolveSearchGitHubFlyoutWidth(flyoutWidth)
-    : activeActivityPanel === "git"
-      ? Math.max(flyoutWidth, Math.min(480, Math.max(360, (window?.innerWidth || 1280) - 760)))
-      : flyoutWidth;
+    : flyoutWidth;
   const browserMaxWidth = Math.max(760, Math.min(1400, Math.round((window?.innerWidth || 1280) * 0.82)));
   const browserWidth = clamp(Number(dockLayout?.widths?.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 420, browserMaxWidth);
+  const domainAvailableWidth = workspaceBody?.clientWidth || (window?.innerWidth || 1280);
+  const domainMaxWidth = Math.max(MIN_DOMAIN_WORKBENCH_WIDTH, Math.min(1500, domainAvailableWidth - 320));
+  const domainWidth = clamp(Number(dockLayout?.widths?.domain || DEFAULT_DOCK_LAYOUT.widths.domain), MIN_DOMAIN_WORKBENCH_WIDTH, domainMaxWidth);
   if (dockLayout?.widths) {
     dockLayout.widths.flyout = flyoutWidth;
     dockLayout.widths.browser = browserWidth;
+    dockLayout.widths.domain = domainWidth;
   }
   setRootCssVar("--activity-flyout-width", `${flyoutWidth}px`);
   setRootCssVar("--activity-flyout-effective-width", `${effectiveFlyoutWidth}px`);
   setRootCssVar("--browser-panel-width", `${browserWidth}px`);
+  setRootCssVar("--domain-workbench-width", `${domainWidth}px`);
+}
+
+function syncDomainWorkbenchLayout() {
+  if (!workspaceBody) return;
+  const isCompact = currentMainView === "domain"
+    && workspaceBody.clientWidth < DOMAIN_WORKBENCH_COMPACT_BREAKPOINT;
+  workspaceBody.classList.toggle("is-domain-compact", isCompact);
 }
 
 function readDockLayout() {
@@ -1575,6 +1842,7 @@ function readDockLayout() {
       MAX_ACTIVITY_FLYOUT_WIDTH,
     );
     widths.browser = clamp(Number(widths.browser || DEFAULT_DOCK_LAYOUT.widths.browser), 420, 1400);
+    widths.domain = clamp(Number(widths.domain || DEFAULT_DOCK_LAYOUT.widths.domain), MIN_DOMAIN_WORKBENCH_WIDTH, 1500);
     return {
       order: Array.isArray(parsed.order)
         ? PANEL_IDS.filter((id) => parsed.order.includes(id)).concat(PANEL_IDS.filter((id) => !parsed.order.includes(id)))
@@ -1607,13 +1875,6 @@ function readResearchStartedSessions() {
 }
 
 let researchStartedSessions = readResearchStartedSessions();
-
-if (researchFloatingBoard && researchFloatingBoard.parentElement !== document.body) {
-  document.body.appendChild(researchFloatingBoard);
-}
-if (researchFloatingReopen && researchFloatingReopen.parentElement !== document.body) {
-  document.body.appendChild(researchFloatingReopen);
-}
 
 function saveResearchStartedSessions() {
   try {
@@ -1832,9 +2093,18 @@ function workspaceAllFileEntries() {
   return workspaceFlattenFiles(bootstrapData?.workspace_browser?.entries || [], []);
 }
 
-async function openWorkspaceFileAt(path, lineNumber = null, column = null) {
+async function openWorkspaceFileAt(path, lineNumber = null, column = null, options = {}) {
   const nextPath = String(path || "").trim();
   if (!nextPath) return;
+  const openTarget = String(clientPreferences.defaultOpenTarget || "atlas");
+  if (!options.forceInternal && openTarget !== "atlas" && window.__ATLAS_NATIVE_WINDOW__) {
+    const root = String(bootstrapData?.config?.workspace_root || currentWorkspaceRoot || "").replace(/[\\/]+$/, "");
+    const absolutePath = /^[a-zA-Z]:[\\/]/.test(nextPath) || nextPath.startsWith("/")
+      ? nextPath
+      : `${root}\\${nextPath.replace(/^[\\/]+/, "")}`;
+    sendNativeWindowAction(openTarget === "vscode" ? "open_vscode" : "open_system", { workspace: absolutePath });
+    return;
+  }
   captureMessageScrollPosition();
   activeWorkspaceFilePath = nextPath;
   expandWorkspacePathAncestors(nextPath);
@@ -3359,7 +3629,7 @@ function applyDockLayout() {
     if (!panel) return;
     const isHidden =
       panelId !== "chat" &&
-      ((currentMainView === "visualization" || currentMainView === "domain") || Boolean(dockLayout.hidden[panelId]));
+      ((currentMainView === "visualization" || currentMainView === "domain" || currentMainView === "notebook") || Boolean(dockLayout.hidden[panelId]));
     panel.hidden = isHidden;
     panel.classList.toggle("is-hidden", isHidden);
     if (panelId === "chat") {
@@ -3474,6 +3744,10 @@ function syncLayoutCornerControls() {
   if (browserSplitResizer) {
     browserSplitResizer.hidden = currentMainView !== "browser";
   }
+  if (domainSplitResizer) {
+    domainSplitResizer.hidden = currentMainView !== "domain"
+      || workspaceBody?.classList.contains("is-domain-compact");
+  }
 }
 
 function toggleLeftSidebarVisibility() {
@@ -3487,6 +3761,7 @@ function toggleLeftSidebarVisibility() {
 function showRightSidebarMode(mode) {
   const nextMode = String(mode || "").trim();
   if (!nextMode) return;
+  if (currentMainView === "notebook") setMainView("chat");
   if (nextMode === "browser") {
     if (!hasBrowserSidebarTarget()) return;
     rightSidebarCollapsed = false;
@@ -3506,6 +3781,9 @@ function showRightSidebarMode(mode) {
 }
 
 function toggleRightSidebarVisibility() {
+  if (currentMainView === "notebook") {
+    setMainView("chat");
+  }
   if (currentMainView === "browser") {
     rightSidebarCollapsed = true;
     setMainView("chat");
@@ -3535,7 +3813,7 @@ function stopResizerDrag() {
   }
   activeResizerDrag.handle?.classList.remove("is-active");
   appShell?.classList.remove("is-resizing-flyout");
-  document.getElementById("workspace-body")?.classList.remove("is-browser-resizing");
+  document.getElementById("workspace-body")?.classList.remove("is-browser-resizing", "is-domain-resizing");
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
   activeResizerDrag = null;
@@ -3590,6 +3868,16 @@ function handleResizerPointerDown(event, handle) {
     };
     handle.classList.add("is-active");
     document.getElementById("workspace-body")?.classList.add("is-browser-resizing");
+  } else if (kind === "domain") {
+    if (currentMainView !== "domain" || !researchDomainWorkspace) return;
+    activeResizerDrag = {
+      kind,
+      handle,
+      pointerId: event.pointerId ?? null,
+      startX: event.clientX,
+    };
+    handle.classList.add("is-active");
+    document.getElementById("workspace-body")?.classList.add("is-domain-resizing");
   } else {
     const afterId = handle?.getAttribute("data-resizer-after") || "";
     const visible = renderedPanelIds();
@@ -3644,6 +3932,15 @@ function onResizerPointerMove(event) {
     );
     syncShellLayoutVars();
     syncNativeBrowser("layout");
+  } else if (activeResizerDrag.kind === "domain") {
+    const workspaceWidth = Math.max(workspaceBody?.clientWidth || 0, window?.innerWidth || 0);
+    const domainMaxWidth = Math.max(MIN_DOMAIN_WORKBENCH_WIDTH, Math.min(1500, workspaceWidth - 320));
+    dockLayout.widths.domain = clamp(
+      Number(dockLayout.widths.domain || DEFAULT_DOCK_LAYOUT.widths.domain) - deltaX,
+      MIN_DOMAIN_WORKBENCH_WIDTH,
+      domainMaxWidth,
+    );
+    syncShellLayoutVars();
   } else {
     const { leftPanelId, rightPanelId } = activeResizerDrag;
     if (leftPanelId !== "chat") {
@@ -3717,7 +4014,6 @@ function applyWorkspaceMode(mode) {
   saveDockLayout();
   applyDockLayout();
   syncAgentPreludeBackground(bootstrapData?.messages || []);
-  renderResearchFloatingBoard(bootstrapData?.research || null);
   requestAnimationFrame(() => restoreMessageScrollPosition());
 }
 
@@ -3727,7 +4023,6 @@ function setResearchDetailOpen(open) {
   }
   researchDetailOpen = Boolean(open) && currentWorkspaceMode === "research";
   if (researchDetailOpen) {
-    researchFloatingDismissed = false;
     preferredDockRightSidebarPanelId = "research";
     rightSidebarCollapsed = false;
   } else if (preferredDockRightSidebarPanelId === "research") {
@@ -3735,7 +4030,6 @@ function setResearchDetailOpen(open) {
   }
   saveDockLayout();
   applyDockLayout();
-  renderResearchFloatingBoard(bootstrapData?.research || null);
 }
 
 function setSegmentedValue(element, value) {
@@ -3746,7 +4040,9 @@ function setSegmentedValue(element, value) {
   const resolved = matched ? next : String(buttons[0]?.dataset.value || "");
   element.dataset.value = resolved;
   buttons.forEach((button) => {
-    button.classList.toggle("is-active", String(button.dataset.value || "") === resolved);
+    const active = String(button.dataset.value || "") === resolved;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
   });
 }
 
@@ -5458,7 +5754,7 @@ function summarizeOperationTools(tools) {
   const list = Array.isArray(tools) ? tools : [];
   if (!list.length) return null;
   const names = list.map((tool) => String(tool?.name || "").trim().toLowerCase());
-  const hasWorkspaceScan = names.some((name) => ["list_dir", "find_files", "search_files", "tree_dir", "read_file", "read_file_range"].includes(name));
+  const hasWorkspaceScan = names.some((name) => ["workspace_overview", "list_dir", "find_files", "search_files", "tree_dir", "read_file", "read_file_range"].includes(name));
   const hasEdit = names.some((name) => ["write_file", "apply_patch", "search_and_replace", "search_and_replace_multi", "rename_path", "mkdir"].includes(name));
   const hasGit = names.some((name) => name.startsWith("git_"));
   if (hasWorkspaceScan && !hasEdit && !hasGit) {
@@ -5940,6 +6236,7 @@ function openAtlasDialog(options = {}) {
   atlasDialogMessage.textContent = String(options.message || "");
   atlasDialogMessage.hidden = !atlasDialogMessage.textContent;
   atlasDialogInput.hidden = mode !== "prompt";
+  atlasDialogInput.type = options.sensitive ? "password" : "text";
   atlasDialogInput.value = mode === "prompt" ? String(options.value || "") : "";
   atlasDialogInput.placeholder = String(options.placeholder || "");
   atlasDialogCancel.textContent = String(options.cancelLabel || (currentLanguage === "zh" ? "取消" : "Cancel"));
@@ -5969,6 +6266,12 @@ function atlasConfirm(message, options = {}) {
 function atlasPrompt(title, value = "", options = {}) {
   return openAtlasDialog({ ...options, mode: "prompt", title, value });
 }
+
+window.AtlasUI = Object.freeze({
+  confirm: (message, options = {}) => atlasConfirm(message, options),
+  prompt: (title, value = "", options = {}) => atlasPrompt(title, value, options),
+  notify: (message) => showToast(String(message || "")),
+});
 
 
 function classifyAppError(error, context = "generic") {
@@ -6014,10 +6317,35 @@ function classifyAppError(error, context = "generic") {
   }
 
   if (
+    normalized.includes("output token limit") ||
+    normalized.includes("max output tokens") ||
+    normalized.includes("max_tokens")
+  ) {
+    return result(
+      "output_truncated",
+      zh ? "模型回答达到输出长度上限，本轮未完整结束。请提高输出上限或缩小任务范围后重试。" : "The model reached its output limit before finishing. Increase the output limit or retry with a smaller task."
+    );
+  }
+
+  if (
+    normalized.includes("content filter") ||
+    normalized.includes("content_filtered")
+  ) {
+    return result(
+      "content_filtered",
+      zh ? "模型服务的内容过滤器终止了本轮输出。请调整请求后重试。" : "The provider content filter stopped this response. Revise the request and try again."
+    );
+  }
+
+  if (
     normalized.includes("sse error") ||
     normalized.includes("eventsource") ||
     normalized.includes("invalid status code") ||
-    normalized.includes("stream failed")
+    normalized.includes("stream failed") ||
+    normalized.includes("stream ended unexpectedly") ||
+    normalized.includes("closed before a complete") ||
+    normalized.includes("without a finish reason") ||
+    normalized.includes("invalid sse json frame")
   ) {
     return result(
       "sse_interrupted",
@@ -6104,6 +6432,7 @@ function applyColorTheme(theme) {
   } catch (_error) {
     // Ignore storage failures.
   }
+  applyClientPreferences();
 }
 
 function restoreColorTheme() {
@@ -6154,6 +6483,16 @@ function parseAgentInputProtocol(rawContent) {
   const content = String(rawContent || "");
   const trimmed = content.trim();
   const inAgentMode = currentWorkspaceMode === "research";
+  const scheduleMatch = trimmed.match(/^\/schedule(?:\s+([\s\S]*))?$/i);
+  if (scheduleMatch) {
+    return {
+      outbound: "",
+      display: trimmed,
+      mode: "agent",
+      forceResearch: false,
+      scheduleCommand: String(scheduleMatch[1] || "help").trim() || "help",
+    };
+  }
   const forceResearch = /^\/spec(?:\s|$)/i.test(trimmed);
   if (forceResearch) {
     const stripped = trimmed.replace(/^\/spec(?:\s+)?/i, "").trim();
@@ -6508,9 +6847,11 @@ function syncAutoApproveUI() {
   if (!riskBoundary) return;
   const enabled = Boolean(autoApproveTools?.checked);
   riskBoundary.classList.toggle("is-disabled", !enabled);
-  riskBoundary
-    .querySelectorAll(".segment")
-    .forEach((button) => button.toggleAttribute("disabled", !enabled));
+  riskBoundary.dataset.autoApprove = enabled ? "true" : "false";
+  riskBoundary.querySelectorAll(".segment").forEach((button) => {
+    button.disabled = false;
+    button.setAttribute("aria-pressed", button.classList.contains("is-active") ? "true" : "false");
+  });
 }
 
 function setStopButtonVisible(visible) {
@@ -7051,11 +7392,28 @@ function pushTurnTextSegment(turn, text, options = {}) {
   const cleanText = sanitizeMessageContent(String(text || ""));
   if (!cleanText.trim()) return false;
   const forceNew = Boolean(options.forceNew);
+  const appendToLast = Boolean(options.appendToLast);
   const nextTimestamp = Number(options.timestamp) || Date.now();
   const items = Array.isArray(turn.textSegments) ? turn.textSegments.slice() : [];
   const last = items[items.length - 1] || null;
-  if (!forceNew && last && turn.lastStreamEventKind === "text") {
-    last.text = mergeStreamingTextDelta(String(last.text || ""), cleanText);
+  const existingCombined = items
+    .map((item) => String(item?.text || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  const mergedCombined = mergeStreamingTextDelta(existingCombined, cleanText);
+  if (mergedCombined === existingCombined) {
+    turn.lastStreamEventKind = "text";
+    return false;
+  }
+  if (last && (appendToLast || (!forceNew && turn.lastStreamEventKind === "text"))) {
+    const previousCumulativeText = String(options.previousCumulativeText || "");
+    const cumulativeText = String(options.cumulativeText || "");
+    const fragment = appendToLast
+      && previousCumulativeText
+      && cumulativeText.startsWith(previousCumulativeText)
+      ? cumulativeText.slice(previousCumulativeText.length)
+      : cleanText;
+    last.text = mergeStreamingTextDelta(String(last.text || ""), fragment);
     last.timestamp = nextTimestamp;
     turn.textSegments = items.slice(-10);
     turn.textUpdatedAt = nextTimestamp;
@@ -7063,9 +7421,26 @@ function pushTurnTextSegment(turn, text, options = {}) {
     turn.text = turn.textSegments.map((item) => String(item?.text || "").trim()).filter(Boolean).join("\n\n");
     return false;
   }
+  let uniqueText = cleanText;
+  const previousCumulativeText = String(options.previousCumulativeText || "");
+  const cumulativeText = String(options.cumulativeText || "");
+  if (previousCumulativeText && cumulativeText === previousCumulativeText) {
+    turn.lastStreamEventKind = "text";
+    return false;
+  }
+  if (previousCumulativeText && cumulativeText.startsWith(previousCumulativeText)) {
+    uniqueText = cumulativeText.slice(previousCumulativeText.length);
+  }
+  if (existingCombined && mergedCombined.startsWith(existingCombined)) {
+    uniqueText = mergedCombined.slice(existingCombined.length);
+  }
+  if (!uniqueText.trim()) {
+    turn.lastStreamEventKind = "text";
+    return false;
+  }
   items.push({
     id: `${nextTimestamp}-${Math.random().toString(36).slice(2, 8)}`,
-    text: cleanText,
+    text: uniqueText,
     timestamp: nextTimestamp,
   });
   turn.textSegments = items.slice(-10);
@@ -7426,6 +7801,50 @@ function renderAgentRuntimeStrip() {
   if (agentRuntimeStrip.firstChild) agentRuntimeStrip.replaceChildren();
 }
 
+function permissionRiskLabel(risk) {
+  const normalized = String(risk || "moderate").trim().toLowerCase();
+  const labels = currentLanguage === "zh"
+    ? { safe: "安全风险", moderate: "中等风险", low: "高风险" }
+    : { safe: "Safe risk", moderate: "Moderate risk", low: "High risk" };
+  return labels[normalized] || (risk ? String(risk) : labels.moderate);
+}
+
+function renderPermissionApprovalCard(permission, { compact = false } = {}) {
+  if (!permission) return "";
+  const name = cleanDisplayText(permission.name || "", currentLanguage === "zh" ? "工具调用" : "Tool call");
+  const risk = String(permission.risk || "moderate").trim().toLowerCase();
+  const reason = cleanDisplayText(permission.reason || "", "");
+  const args = permission.args && typeof permission.args === "object" ? permission.args : {};
+  const hasArgs = Object.keys(args).length > 0;
+  return `
+    <section class="permission-card permission-approval-card${compact ? " is-compact" : ""}" data-risk="${escapeHtml(risk)}">
+      <div class="permission-card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.2c0 4.4-2.8 7.8-7 9.3-4.2-1.5-7-4.9-7-9.3V6l7-2.5Z"></path><path d="M9.2 12.1 11 14l3.9-4.1"></path></svg>
+      </div>
+      <div class="permission-card-content">
+        <div class="permission-card-heading">
+          <div>
+            <div class="permission-eyebrow">${escapeHtml(currentLanguage === "zh" ? "需要你的批准" : "Approval required")}</div>
+            <div class="permission-title">${escapeHtml(name)}</div>
+          </div>
+          <span class="permission-risk">${escapeHtml(permissionRiskLabel(risk))}</span>
+        </div>
+        ${reason ? `<p class="permission-reason">${escapeHtml(reason)}</p>` : ""}
+        ${hasArgs ? `
+          <details class="permission-details">
+            <summary>${escapeHtml(currentLanguage === "zh" ? "查看工具参数" : "View tool arguments")}</summary>
+            <pre class="permission-args">${escapeHtml(JSON.stringify(args, null, 2))}</pre>
+          </details>
+        ` : ""}
+      </div>
+      <div class="permission-actions">
+        <button class="permission-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
+        <button class="permission-button is-primary" type="button" data-permission-action="approve">${escapeHtml(currentLanguage === "zh" ? "允许" : "Allow")}</button>
+      </div>
+    </section>
+  `;
+}
+
 function renderPermissionStrip() {
   if (!permissionStrip) return;
   if (!pendingPermissionRequest) {
@@ -7442,17 +7861,7 @@ function renderPermissionStrip() {
     activeAssistantTurn.permission = pendingPermissionRequest;
   }
   permissionStrip.hidden = false;
-  permissionStrip.innerHTML = `
-    <div class="permission-card">
-      <div>
-        <div class="permission-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
-      </div>
-      <pre class="permission-args">${escapeHtml(JSON.stringify(pendingPermissionRequest.args || {}, null, 2))}</pre>
-      <div class="permission-actions">
-        <button class="permission-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
-      </div>
-    </div>
-  `;
+  permissionStrip.innerHTML = renderPermissionApprovalCard(pendingPermissionRequest);
   bindTurnInteractionHandlers(permissionStrip);
   schedulePendingAssistantTextSync();
 }
@@ -7575,7 +7984,9 @@ function setActivityPanel(panelId, { preserveMainView = false } = {}) {
   appShell?.classList.toggle("has-search-github-preview", isSearchGitHubPreviewActive());
 
   if (!preserveMainView) {
-    if (currentMainView === "browser" && nextPanel) {
+    if (currentMainView === "notebook" && nextPanel) {
+      setMainView("chat");
+    } else if (currentMainView === "browser" && nextPanel) {
       setMainView("chat");
     } else if (currentMainView === "git" && nextPanel !== "git") {
       setMainView("chat");
@@ -9109,13 +9520,34 @@ function renderRunDebug(state) {
 }
 
 function setSettingsTab(tab) {
-  activeSettingsTab = tab || "model";
+  activeSettingsTab = tab || "general";
   settingsTabs.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.settingsTab === activeSettingsTab);
+    const active = button.dataset.settingsTab === activeSettingsTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
   settingsTabPanels.forEach((panel) => {
     panel.classList.toggle("is-active", panel.dataset.settingsTabPanel === activeSettingsTab);
   });
+  settingsPanel?.querySelector(".settings-panel-body")?.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function filterSettings(query = "") {
+  const keyword = String(query || "").trim().toLowerCase();
+  let firstMatchingTab = null;
+  settingsTabPanels.forEach((panel) => {
+    const matchesPanel = !keyword || String(panel.textContent || "").toLowerCase().includes(keyword);
+    const tab = Array.from(settingsTabs).find((button) => button.dataset.settingsTab === panel.dataset.settingsTabPanel);
+    if (tab) {
+      tab.hidden = !matchesPanel;
+      if (matchesPanel && !firstMatchingTab) firstMatchingTab = tab.dataset.settingsTab;
+    }
+    panel.querySelectorAll("[data-settings-searchable]").forEach((section) => {
+      section.hidden = Boolean(keyword) && !String(section.textContent || "").toLowerCase().includes(keyword);
+    });
+  });
+  const activeButton = Array.from(settingsTabs).find((button) => button.dataset.settingsTab === activeSettingsTab);
+  if (keyword && activeButton?.hidden && firstMatchingTab) setSettingsTab(firstMatchingTab);
 }
 
 function renderPendingFiles() {
@@ -9434,10 +9866,14 @@ function shouldSuppressInlineAssistantCode(text, diffs = []) {
     || looksLikeToolPayloadDump(content)
     || looksLikeDirectoryTreeDump(content);
   const hasDiffs = Array.isArray(diffs) && diffs.length > 0;
+  const explicitProtocolPayload = /^\s*<(?:tool_call|function=|function\s|function_)/i.test(content)
+    || (
+      /^\s*[\[{]/.test(content)
+      && /"(?:tool_args|call_id|tool_result|tool_call_id|function_call)"\s*:/.test(content)
+    );
   return Boolean(
-    looksPayloadLike
-    || looksJsonLike
-    || (longCodeLike && (hasDiffs || content.trim().length > 420))
+    explicitProtocolPayload
+    || (hasDiffs && (looksPayloadLike || looksJsonLike || longCodeLike))
   );
 }
 
@@ -9457,9 +9893,7 @@ function turnHasRealWorkspaceChanges(turn) {
 
 function visibleAssistantWorkspaceNotice(turn = activeAssistantTurn) {
   if (!turnHasRealWorkspaceChanges(turn)) {
-    return currentLanguage === "zh"
-      ? "\u5df2\u7701\u7565\u4e0d\u9002\u5408\u4f5c\u4e3a\u804a\u5929\u6b63\u6587\u5c55\u793a\u7684\u4ee3\u7801\u6216\u5de5\u5177\u8f7d\u8377\u3002"
-      : "Code or tool payload unsuitable for the chat body was omitted.";
+    return "";
   }
   return currentLanguage === "zh"
     ? "本轮结果已直接写入工作区文件，聊天区域不再展开完整源码。"
@@ -10224,21 +10658,7 @@ function syncPendingAssistantRuntimePanel() {
   }
   const runtimeSummaryParts = summarizeTurnRuntime(activeAssistantTurn);
   const permissionMarkup = activeAssistantTurn.permission
-    ? `
-      <div class="codex-approval-card codex-tool-step codex-approval-step">
-        <div class="codex-step-rail" aria-hidden="true">
-          <span class="codex-step-dot"></span>
-        </div>
-        <div class="codex-approval-copy">
-          <div class="codex-approval-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
-          <div class="codex-approval-meta">${escapeHtml(activeAssistantTurn.permission.name || "")}${activeAssistantTurn.permission.risk ? ` / ${escapeHtml(activeAssistantTurn.permission.risk || "")}` : ""}</div>
-        </div>
-        <div class="codex-approval-actions">
-          <button class="codex-approval-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
-          <button class="codex-approval-button is-primary" type="button" data-permission-action="approve">${escapeHtml(currentLanguage === "zh" ? "批准" : "Approve")}</button>
-        </div>
-      </div>
-    `
+    ? renderPermissionApprovalCard(activeAssistantTurn.permission, { compact: true })
     : "";
   const runtimePanelContent = [
     permissionMarkup,
@@ -10767,6 +11187,8 @@ function syncPendingAssistantText() {
   );
   if (shouldSuppressInlineCode) {
     activeAssistantTurn.suppressedInlineContent = true;
+  } else if (content) {
+    activeAssistantTurn.suppressedInlineContent = false;
   }
   const visibleContent = shouldSuppressInlineCode || (!content && activeAssistantTurn.suppressedInlineContent)
     ? visibleAssistantWorkspaceNotice(activeAssistantTurn)
@@ -10817,6 +11239,7 @@ function syncPendingAssistantText() {
   syncPendingAssistantOperations();
   syncPendingAssistantRuntimePanel();
   pendingAssistantBubble?.querySelector(".codex-answer")?.classList.toggle("codex-answer-empty", parts.isEmpty);
+  scheduleMessageJumpRailSync();
 }
 
 function schedulePendingAssistantTextSync({ keepBottom = false } = {}) {
@@ -11063,7 +11486,7 @@ function renderWorklogRuntimeStatuses(turn, isStreaming) {
   const tools = Array.isArray(turn.tools) ? turn.tools : [];
   const diffs = Array.isArray(turn.diffs) ? turn.diffs : [];
 
-  const scanToolNames = new Set(["list_dir", "find_files", "read_file", "read_file_range", "tree_dir", "search_files"]);
+  const scanToolNames = new Set(["workspace_overview", "list_dir", "find_files", "read_file", "read_file_range", "tree_dir", "search_files"]);
 
   function isScanTool(tool) {
     return scanToolNames.has(String(tool.name || "").toLowerCase());
@@ -11911,21 +12334,7 @@ function renderAssistantTurn(turn, options = {}) {
   );
 
   const permissionMarkup = streamingInlineRuntime && permission
-    ? `
-      <div class="codex-approval-card codex-tool-step codex-approval-step">
-        <div class="codex-step-rail" aria-hidden="true">
-          <span class="codex-step-dot"></span>
-        </div>
-        <div class="codex-approval-copy">
-          <div class="codex-approval-title">${escapeHtml(currentLanguage === "zh" ? "等待工具授权" : "Awaiting tool approval")}</div>
-          <div class="codex-approval-meta">${escapeHtml(permission.name || "")}${permission.risk ? ` · ${escapeHtml(permission.risk || "")}` : ""}</div>
-        </div>
-        <div class="codex-approval-actions">
-          <button class="codex-approval-button" type="button" data-permission-action="deny">${escapeHtml(currentLanguage === "zh" ? "拒绝" : "Deny")}</button>
-          <button class="codex-approval-button is-primary" type="button" data-permission-action="approve">${escapeHtml(currentLanguage === "zh" ? "批准" : "Approve")}</button>
-        </div>
-      </div>
-    `
+    ? renderPermissionApprovalCard(permission, { compact: true })
     : "";
 
   const diffMarkup = !isStreaming && visibleDiffs.length
@@ -12032,6 +12441,7 @@ function appendUserBubble(content) {
     </div>
   `;
   messageStream.appendChild(row);
+  scheduleMessageJumpRailSync();
   scrollMessageStreamToBottom(true);
   return row;
 }
@@ -12068,6 +12478,7 @@ function appendAssistantBubble(content) {
     activeAssistantTurn.text = content || "";
   }
   messageStream.appendChild(row);
+  scheduleMessageJumpRailSync();
   pendingAssistantBubble = row;
   pendingAssistantBubble.innerHTML = renderPendingAssistantShell();
   bindTurnInteractionHandlers(pendingAssistantBubble);
@@ -12105,12 +12516,17 @@ function updateAssistantBubble(content) {
     activeAssistantTurn.suppressedInlineContent = true;
     pendingAssistantStoryDirty = true;
   } else {
+    activeAssistantTurn.suppressedInlineContent = false;
+    const previousStreamingText = String(activeAssistantTurn.streamingAnchorText || "");
     activeAssistantTurn.streamingAnchorText = mergeStreamingTextDelta(
-      String(activeAssistantTurn.streamingAnchorText || ""),
+      previousStreamingText,
       deltaContent,
     );
     createdNewSegment = pushTurnTextSegment(activeAssistantTurn, deltaContent, {
       forceNew: activeAssistantTurn.lastStreamEventKind !== "text",
+      appendToLast: Boolean(previousStreamingText && deltaContent.startsWith(previousStreamingText)),
+      previousCumulativeText: previousStreamingText,
+      cumulativeText: activeAssistantTurn.streamingAnchorText,
     });
     if (createdNewSegment) {
       pendingAssistantStoryDirty = true;
@@ -12193,6 +12609,7 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
     : finalAssistantTurn.data;
   const keepBottom = isNearMessageStreamBottom();
   pendingAssistantBubble.innerHTML = renderAssistantTurn(finalData, { streaming: false });
+  scheduleMessageJumpRailSync();
   bindTurnInteractionHandlers(pendingAssistantBubble);
   pendingAssistantBubble.querySelectorAll(".codex-runtime-panel-shell[open]").forEach((details) => {
     animateDetailsToggle(details, false);
@@ -12884,6 +13301,7 @@ function renderMessages(messages, options = {}) {
   }
   if (shouldPreserveStreamingConversationDom()) {
     syncAgentPreludeBackground(messages || []);
+    scheduleMessageJumpRailSync();
     if (preserveScroll) {
       requestAnimationFrame(() => restoreMessageScrollPosition());
     }
@@ -12909,6 +13327,7 @@ function renderMessages(messages, options = {}) {
 
   if (!visibleMessages.length) {
     messageStream.innerHTML = renderEmptyState();
+    scheduleMessageJumpRailSync();
     resetPendingAssistantRenderState();
     return;
   }
@@ -12958,6 +13377,7 @@ function renderMessages(messages, options = {}) {
     messageStream.appendChild(wrapper);
   }
   bindTurnInteractionHandlers(messageStream);
+  scheduleMessageJumpRailSync();
   syncResearchDomainFinalOutputCard(visibleMessages, [...turns].reverse().find((turn) => turn?.kind === "assistant_turn")?.data || null);
   messageStream.querySelectorAll("[data-inline-link]").forEach((link) => {
     link.addEventListener("click", (event) => {
@@ -13091,8 +13511,31 @@ function workspaceFileIcon(entry) {
   `;
 }
 
+function workspaceGitStatusForEntry(entry) {
+  const changedFiles = Array.isArray(bootstrapData?.git?.status?.changed_files)
+    ? bootstrapData.git.status.changed_files
+    : [];
+  const normalizePath = (value) => String(value || "").replace(/\\/g, "/").replace(/^\.\//, "");
+  const target = normalizePath(entry?.path || entry?.name || "");
+  const candidates = entry?.kind === "directory"
+    ? changedFiles.filter((file) => normalizePath(file?.path).startsWith(`${target.replace(/\/$/, "")}/`))
+    : changedFiles.filter((file) => normalizePath(file?.path) === target);
+  const states = candidates.map((file) => {
+    if (file?.conflicted) return "conflicted";
+    if (file?.untracked) return "untracked";
+    return String(file?.change_type || file?.status || "modified").trim().toLowerCase();
+  });
+  const priority = ["conflicted", "deleted", "untracked", "added", "renamed", "modified", "changed"];
+  return priority.find((state) => states.includes(state)) || "";
+}
+
+function workspaceGitStatusBadge(status) {
+  return ({ conflicted: "!", deleted: "D", untracked: "U", added: "A", renamed: "R", modified: "M", changed: "M" })[status] || "";
+}
+
 function renderWorkspaceTreeNode(entry, depth = 0) {
   const rowClass = entry.kind === "directory" ? "workspace-tree-entry is-directory" : "workspace-tree-entry is-file";
+  const gitStatus = workspaceGitStatusForEntry(entry);
   const isActive = entry.path === activeWorkspaceFilePath;
   const hasChildren = Array.isArray(entry.children) && entry.children.length;
   const isExpanded = entry.kind === "directory" ? expandedWorkspaceDirs.has(entry.path) : false;
@@ -13103,7 +13546,7 @@ function renderWorkspaceTreeNode(entry, depth = 0) {
   return `
     <div class="workspace-tree-node">
       <button
-        class="${rowClass}${isActive ? " is-active" : ""}"
+        class="${rowClass}${isActive ? " is-active" : ""}${gitStatus ? ` git-${gitStatus}` : ""}"
         type="button"
         data-workspace-path="${escapeHtml(entry.path)}"
         data-workspace-kind="${escapeHtml(entry.kind)}"
@@ -13117,6 +13560,7 @@ function renderWorkspaceTreeNode(entry, depth = 0) {
         }
         ${workspaceFileIcon(entry)}
         <span class="workspace-tree-entry-label">${escapeHtml(entry.name)}</span>
+        ${gitStatus ? `<span class="workspace-tree-git-status" aria-label="Git ${escapeHtml(gitStatus)}">${workspaceGitStatusBadge(gitStatus)}</span>` : ""}
       </button>
       ${childrenMarkup}
     </div>
@@ -15281,67 +15725,7 @@ function renderResearch(research) {
     )}</div>
   `;
   bindTurnInteractionHandlers(researchPanel);
-  renderResearchFloatingBoard(research, graphMarkup);
   renderResearchDetailPanel(research, graphMarkup);
-}
-
-function syncResearchFloatingBoardPositionFromButton() {
-  if (!researchFloatingBoard || !researchFloatingReopen) return;
-  if (researchFloatingBoardPosition) {
-    researchFloatingBoard.style.left = `${researchFloatingBoardPosition.left}px`;
-    researchFloatingBoard.style.top = `${researchFloatingBoardPosition.top}px`;
-    researchFloatingBoard.style.right = "auto";
-    return;
-  }
-  const buttonRect = researchFloatingReopen.getBoundingClientRect();
-  const boardWidth = Math.min(348, Math.max(248, window.innerWidth - 132));
-  const nextLeft = Math.max(8, Math.min(window.innerWidth - boardWidth - 8, buttonRect.right - boardWidth));
-  const nextTop = Math.max(8, Math.min(window.innerHeight - 220, buttonRect.top - 12));
-  researchFloatingBoard.style.left = `${nextLeft}px`;
-  researchFloatingBoard.style.top = `${nextTop}px`;
-  researchFloatingBoard.style.right = "auto";
-}
-
-function renderResearchFloatingBoard(research, graphMarkup = researchGraphMarkup(research, { minHeight: 320 })) {
-  if (!researchFloatingBoard || !researchFloatingBody) return;
-  const shouldShow = currentWorkspaceMode === "research" && hasResearchStartedForCurrentSession() && !researchFloatingDismissed;
-  researchFloatingBoard.hidden = !shouldShow;
-  if (researchFloatingReopen) {
-    researchFloatingReopen.hidden =
-      currentWorkspaceMode !== "research" || !hasResearchStartedForCurrentSession() || shouldShow || researchDetailOpen;
-  }
-  if (!shouldShow) return;
-  syncResearchFloatingBoardPositionFromButton();
-  const topic = cleanDisplayText(research?.topic || "", t("researchTemplateTopic")) || t("researchTemplateTopic");
-  const reviewItems = cleanDisplayList((research?.review || []).slice(0, 3));
-  const resumePoints = cleanDisplayList((research?.resume_points || []).slice(0, 2));
-  const runtimeSubagents = Array.isArray(research?.runtime?.subagents) ? research.runtime.subagents : [];
-  const runtimeVerifier = research?.runtime?.verifier || null;
-  const runtimeTimeline = Array.isArray(research?.runtime?.timeline) ? research.runtime.timeline : [];
-  const paperWorkflowMarkup = renderPaperWorkflowPanel(research, {
-    compact: true,
-  });
-  const reviewerFeedbackMarkup = renderReviewerFeedbackPanel(research?.reviewer_feedback || null, {
-    compact: true,
-    allowForm: false,
-  });
-  const blocker = cleanDisplayText(research?.blocker || "");
-  researchFloatingBody.innerHTML = `
-    <div class="research-floating-topic">${escapeHtml(topic)}</div>
-    <div class="research-floating-meta">${escapeHtml(researchWorkflowLabel(research?.workflow_kind))} / ${escapeHtml(researchStateLabel(research?.overall_state))} / ${escapeHtml(cleanDisplayText(research?.phase || ""))}</div>
-    ${blocker ? `<div class="research-review-item">${escapeHtml(blocker)}</div>` : ""}
-    ${graphMarkup.html}
-    ${renderResearchRuntimeSubagents(runtimeSubagents, { limit: 2, outputLimit: 120, evidenceLimit: 2 })}
-    ${renderResearchRuntimeVerifier(runtimeVerifier, { checkLimit: 2, issueLimit: 2 })}
-    ${paperWorkflowMarkup}
-    ${reviewerFeedbackMarkup}
-    ${renderRuntimeTimeline(runtimeTimeline, { limit: 4, title: currentLanguage === "zh" ? "时间线" : "Timeline" })}
-    <div class="research-review-list">
-      ${resumePoints.map((item) => `<div class="research-review-item">${escapeHtml(item)}</div>`).join("")}
-      ${reviewItems.map((item) => `<div class="research-review-item">${escapeHtml(item)}</div>`).join("")}
-    </div>
-  `;
-  bindTurnInteractionHandlers(researchFloatingBody);
 }
 
 function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(research, { minHeight: 420 })) {
@@ -15404,128 +15788,6 @@ function renderResearchDetailPanel(research, graphMarkup = researchGraphMarkup(r
   bindTurnInteractionHandlers(researchDetailPanel);
 }
 
-function startResearchFloatingDrag(event) {
-  if (!researchFloatingBoard || event.button !== 0) return;
-  if (event.target instanceof HTMLElement && event.target.closest("button, a, input, textarea, select, summary")) {
-    return;
-  }
-  const rect = researchFloatingBoard.getBoundingClientRect();
-  researchFloatingDrag = {
-    pointerId: event.pointerId ?? null,
-    offsetX: event.clientX - rect.left,
-    offsetY: event.clientY - rect.top,
-  };
-  researchFloatingBoard.classList.add("is-dragging");
-  if (researchFloatingHead?.setPointerCapture && event.pointerId != null) {
-    try {
-      researchFloatingHead.setPointerCapture(event.pointerId);
-    } catch (_error) {
-      // Ignore pointer capture failures.
-    }
-  }
-  event.preventDefault();
-}
-
-function moveResearchFloatingDrag(event) {
-  if (!researchFloatingDrag || !researchFloatingBoard) return;
-  if ("buttons" in event && (event.buttons & 1) !== 1) {
-    endResearchFloatingDrag();
-    return;
-  }
-  const boardRect = researchFloatingBoard.getBoundingClientRect();
-  const boardWidth = Math.max(220, Math.round(boardRect.width || 320));
-  const boardHeight = Math.max(160, Math.round(boardRect.height || 240));
-  const nextLeft = Math.max(8, Math.min(window.innerWidth - boardWidth - 8, event.clientX - researchFloatingDrag.offsetX));
-  const nextTop = Math.max(8, Math.min(window.innerHeight - boardHeight - 8, event.clientY - researchFloatingDrag.offsetY));
-  researchFloatingBoard.style.left = `${nextLeft}px`;
-  researchFloatingBoard.style.top = `${nextTop}px`;
-  researchFloatingBoard.style.right = "auto";
-  researchFloatingBoardPosition = { left: nextLeft, top: nextTop };
-}
-
-function endResearchFloatingDrag() {
-  if (!researchFloatingDrag || !researchFloatingBoard) return;
-  if (researchFloatingHead?.releasePointerCapture && researchFloatingDrag.pointerId != null) {
-    try {
-      researchFloatingHead.releasePointerCapture(researchFloatingDrag.pointerId);
-    } catch (_error) {
-      // Ignore pointer capture release failures.
-    }
-  }
-  researchFloatingDrag = null;
-  researchFloatingBoard.classList.remove("is-dragging");
-}
-
-function startResearchFloatingReopenDrag(event) {
-  if (!researchFloatingReopen || event.button !== 0) return;
-  researchFloatingReopenSuppressClick = false;
-  const rect = researchFloatingReopen.getBoundingClientRect();
-  researchFloatingReopenDrag = {
-    pointerId: event.pointerId ?? null,
-    startX: event.clientX,
-    startY: event.clientY,
-    left: rect.left,
-    top: rect.top,
-    moved: false,
-  };
-  researchFloatingReopen.classList.add("is-dragging");
-  if (researchFloatingReopen.setPointerCapture && event.pointerId != null) {
-    try {
-      researchFloatingReopen.setPointerCapture(event.pointerId);
-    } catch (_error) {
-      // Ignore pointer capture failures.
-    }
-  }
-  event.preventDefault();
-}
-
-function moveResearchFloatingReopenDrag(event) {
-  if (!researchFloatingReopenDrag || !researchFloatingReopen) return;
-  if ("buttons" in event && (event.buttons & 1) !== 1) {
-    endResearchFloatingReopenDrag();
-    return;
-  }
-  const deltaX = event.clientX - researchFloatingReopenDrag.startX;
-  const deltaY = event.clientY - researchFloatingReopenDrag.startY;
-  if (Math.abs(deltaX) > 6 || Math.abs(deltaY) > 6) {
-    researchFloatingReopenDrag.moved = true;
-  }
-  const size = researchFloatingReopen.offsetWidth || 16;
-  const nextLeft = Math.max(8, Math.min(window.innerWidth - size - 8, researchFloatingReopenDrag.left + deltaX));
-  const nextTop = Math.max(8, Math.min(window.innerHeight - size - 8, researchFloatingReopenDrag.top + deltaY));
-  researchFloatingReopen.style.left = `${nextLeft}px`;
-  researchFloatingReopen.style.top = `${nextTop}px`;
-  researchFloatingReopen.style.right = "auto";
-  researchFloatingBoardPosition = null;
-}
-
-function endResearchFloatingReopenDrag() {
-  if (!researchFloatingReopenDrag || !researchFloatingReopen) return;
-  if (researchFloatingReopen.releasePointerCapture && researchFloatingReopenDrag.pointerId != null) {
-    try {
-      researchFloatingReopen.releasePointerCapture(researchFloatingReopenDrag.pointerId);
-    } catch (_error) {
-      // Ignore pointer capture release failures.
-    }
-  }
-  researchFloatingReopenSuppressClick = researchFloatingReopenDrag.moved;
-  researchFloatingReopen.classList.remove("is-dragging");
-  researchFloatingReopenDrag = null;
-}
-
-function dismissResearchFloatingBoard() {
-  researchFloatingDismissed = true;
-  researchDetailOpen = false;
-  dockLayout.hidden.research = true;
-  saveDockLayout();
-  applyDockLayout();
-  researchFloatingBoardPosition = null;
-  if (researchFloatingBoard) {
-    researchFloatingBoard.hidden = true;
-  }
-  renderResearchFloatingBoard(bootstrapData?.research || null);
-}
-
 function renderProviderList(providers, primaryModel) {
   if (!providerList) return;
   providerList.innerHTML = "";
@@ -15558,8 +15820,9 @@ function collectSettingsPayload() {
     if (!key) return;
     toolchains[key] = String(input.value || "").trim();
   });
+  const requestedModel = String(primaryModel?.value || config.model || "").trim();
   return {
-    model: String(primaryModel?.value || config.model || "").trim(),
+    model: QWEN_MODEL_IDS.has(requestedModel) ? requestedModel : "qwen3.7-plus",
     api_url: "https://llm-fnab949h4etu47rc.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
     deep_think: Boolean(deepThinkToggle?.checked ?? true),
     reasoning_effort: currentEffort,
@@ -15577,7 +15840,7 @@ function collectSettingsPayload() {
 
 function syncSettingsFromConfig(config) {
   if (!config) return;
-  if (primaryModel) primaryModel.value = config.model || "";
+  if (primaryModel) primaryModel.value = QWEN_MODEL_IDS.has(config.model) ? config.model : "qwen3.7-plus";
   if (competitionMode) competitionMode.checked = Boolean(config.competition_mode);
   if (privacyMode) privacyMode.checked = Boolean(config.privacy_mode);
   if (autoApproveTools) autoApproveTools.checked = Boolean(config.auto_approve_tools);
@@ -16120,6 +16383,9 @@ function renderGitWorkspace(git) {
   renderGitHistory(git);
   renderGitBranches(git);
   renderGitGraph(git);
+  if (workspaceTreeData.length) {
+    renderWorkspaceTree(bootstrapData?.workspace_browser || null);
+  }
 
   document.querySelectorAll("[data-git-file-action]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -16323,26 +16589,33 @@ function setMainView(nextView) {
       ? "visualization"
       : nextView === "domain"
         ? "domain"
+        : nextView === "notebook"
+          ? "notebook"
         : "chat";
   const conversationStage = document.querySelector(".conversation-stage");
   const composer = document.querySelector(".composer-shell");
   const isVisualization = currentMainView === "visualization";
   const isDomain = currentMainView === "domain";
+  const isNotebook = currentMainView === "notebook";
 
   appShell?.classList.toggle("is-visualization-fullscreen", isVisualization);
   appShell?.classList.toggle("is-research-domain-workspace", isDomain);
+  appShell?.classList.remove("is-notebook-mode");
 
-  if (workspaceChat) workspaceChat.hidden = isVisualization && visualizationActiveKind === "system";
+  if (workspaceChat) workspaceChat.hidden = isNotebook || (isVisualization && visualizationActiveKind === "system");
   if (gitWorkspace) gitWorkspace.hidden = false;
   if (browserWorkspace) browserWorkspace.hidden = currentMainView !== "browser";
   if (visualizationWorkspace) visualizationWorkspace.hidden = !isVisualization;
   if (researchDomainWorkspace) researchDomainWorkspace.hidden = !isDomain;
+  if (atlasNotebookWorkspace) atlasNotebookWorkspace.hidden = false;
   if (currentHostMeta.supportsNativeBrowser) {
     window.setTimeout(() => syncNativeBrowser(currentMainView === "browser" && browserState.currentUrl ? "show" : "hide"), 0);
   }
   if (workspaceBody) {
     workspaceBody.classList.toggle("is-browser-split", currentMainView === "browser");
     workspaceBody.classList.toggle("is-domain-split", isDomain);
+    workspaceBody.classList.remove("is-notebook");
+    syncDomainWorkbenchLayout();
   }
   if (conversationStage) conversationStage.hidden = false;
   if (composer) composer.hidden = false;
@@ -16351,6 +16624,7 @@ function setMainView(nextView) {
   }
   browserRailButton?.classList.toggle("is-active", currentMainView === "browser");
   visualizationRailButton?.classList.toggle("is-active", isVisualization);
+  notebookRailButton?.classList.toggle("is-active", activeActivityPanel === "notebook");
   syncVisualizationConversationLayout();
   applyDockLayout();
   syncLayoutCornerControls();
@@ -16869,6 +17143,7 @@ async function closeTerminal(terminalId) {
 }
 
 async function runRunDebugAction(action, configId = null) {
+  if (["run", "start", "restart"].includes(String(action))) await window.AtlasScientificInfrastructure?.captureSnapshot?.("before_execution").catch(() => null);
   const response = await hostClient.runDebug.action(action, configId);
   if (!response.ok) {
     const errorText = await response.text();
@@ -17083,6 +17358,7 @@ async function consumeStream(response, sessionId) {
   const runState = getSessionRunState(sessionId);
   const streamGeneration = runState?.generation ?? activeStreamGeneration;
   const bridgeAsyncStream = response && typeof response[Symbol.asyncIterator] === "function";
+  let sawTerminalEvent = false;
   if (bridgeAsyncStream) {
     const stream = response;
     if (!stream || typeof stream[Symbol.asyncIterator] !== "function") {
@@ -17104,9 +17380,13 @@ async function consumeStream(response, sessionId) {
       }
       if (!rawChunk) continue;
       const event = typeof rawChunk === "string" ? JSON.parse(rawChunk) : rawChunk;
+      sawTerminalEvent ||= event?.type === "complete" || event?.type === "error";
       enqueueStreamPresentationEvent(event, sessionId);
     }
     await drainStreamPresentationQueue(sessionId);
+    if (!sawTerminalEvent) {
+      throw new Error("desktop agent stream closed before a complete or error event");
+    }
     const finalState = getSessionRunState(sessionId);
     if (finalState?.running) {
       await refreshBackgroundSessionState().catch(() => {});
@@ -17148,6 +17428,7 @@ async function consumeStream(response, sessionId) {
 
         if (line) {
           const event = JSON.parse(line);
+          sawTerminalEvent ||= event?.type === "complete" || event?.type === "error";
           enqueueStreamPresentationEvent(event, sessionId);
         }
 
@@ -17160,9 +17441,14 @@ async function consumeStream(response, sessionId) {
 
   const trailing = buffer.trim();
   if (trailing) {
-    enqueueStreamPresentationEvent(JSON.parse(trailing), sessionId);
+    const event = JSON.parse(trailing);
+    sawTerminalEvent ||= event?.type === "complete" || event?.type === "error";
+    enqueueStreamPresentationEvent(event, sessionId);
   }
   await drainStreamPresentationQueue(sessionId);
+  if (!sawTerminalEvent) {
+    throw new Error("agent stream closed before a complete or error event");
+  }
   const finalState = getSessionRunState(sessionId);
   if (finalState?.running) {
     await refreshBackgroundSessionState().catch(() => {});
@@ -17324,6 +17610,13 @@ function handleStreamEvent(event, expectedSessionId = null) {
       if (!finalizedInPlace) {
         renderMessages(visibleMessages);
       }
+      const completionPreference = String(clientPreferences.completionNotifications || "unfocused");
+      if (completionPreference === "always" || (completionPreference === "unfocused" && !document.hasFocus())) {
+        showAtlasNotification("Atlas 已完成", latestConversationSummary(visibleMessages, 90) || "任务已完成。", true);
+      }
+      if (clientPreferences.questionNotifications && visibleMessages.some((message) => messageHasAssistantChoices(message))) {
+        showAtlasNotification("Atlas 需要你的选择", "返回应用选择下一步。", true);
+      }
       refreshBackgroundSessionState().catch(() => {});
       return;
     }
@@ -17385,6 +17678,9 @@ function handleStreamEvent(event, expectedSessionId = null) {
     const status = event.activity?.status || "";
     const meta = event.activity?.meta || "";
     const agent = event.activity?.agent || "";
+    if (label === "permission_required" && clientPreferences.permissionNotifications) {
+      showAtlasNotification("Atlas 等待权限", detail || "返回应用审批工具操作。", true);
+    }
     if (label === "context_usage") {
       const [contextWindow, contextModel = ""] = String(meta || "").split("|", 2);
       lastContextUsage.estimated = status !== "complete";
@@ -17632,7 +17928,7 @@ function applyContextUsageSnapshot(snapshot, sessionId = bootstrapData?.current_
 }
 
 async function sendMessageFallback(content) {
-  const response = await hostClient.chat.send(content, currentLanguage);
+  const response = await hostClient.chat.send(content, currentLanguage, clientPersonalizationPayload());
 
   if (!response.ok) {
     const errText = await response.text();
@@ -17654,6 +17950,22 @@ async function sendMessage() {
     showToast(classifyAppError(new Error("session not ready"), "send").message);
     return;
   }
+  if (parsedInput.scheduleCommand) {
+    try {
+      const response = await hostClient.schedule.manage(parsedInput.scheduleCommand, targetSessionId);
+      if (!response.ok) throw new Error(await response.text() || "schedule command failed");
+      const payload = await response.json();
+      if (messageInput) messageInput.value = "";
+      await loadBootstrap();
+      showToast(cleanDisplayText(payload?.data?.message || payload?.message || "定时任务已更新"));
+    } catch (error) {
+      console.error(error);
+      showToast(classifyAppError(error, "send").message);
+    } finally {
+      messageInput?.focus();
+    }
+    return;
+  }
 
   isSending = true;
   composerSendSessionId = targetSessionId;
@@ -17668,6 +17980,12 @@ async function sendMessage() {
   renderAgentRuntimeStrip();
   renderAgentProcessStrip();
   renderPermissionStrip();
+
+  // Snapshotting a large workspace can be expensive. It must never delay the visible send
+  // transition or the model request; capture it independently from the conversation path.
+  window.setTimeout(() => {
+    window.AtlasScientificInfrastructure?.captureSnapshot?.("before_agent").catch(() => null);
+  }, 0);
 
   try {
     if (!parsedInput.outbound) {
@@ -17715,7 +18033,7 @@ async function sendMessage() {
     const streamGeneration = beginSessionRun(targetSessionId);
     activeStreamGeneration = streamGeneration || activeStreamGeneration + 1;
     currentStreamingSessionId = targetSessionId;
-    const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage, attachments });
+    const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage, attachments, personalization: clientPersonalizationPayload() });
 
     if (messageInput && composerSendSessionId === targetSessionId) {
       messageInput.value = "";
@@ -17823,8 +18141,50 @@ settingsTabs.forEach((tab) => {
   tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
 });
 
+settingsSearchInput?.addEventListener("input", () => {
+  filterSettings(settingsSearchInput.value);
+});
+
 settingsPanel?.addEventListener("click", (event) => {
   event.stopPropagation();
+});
+
+settingsPanel?.addEventListener("input", (event) => {
+  if (event.target === settingsSearchInput) return;
+  if (settingsSaveState) settingsSaveState.textContent = "有未保存的更改";
+});
+
+settingsPanel?.addEventListener("change", () => {
+  if (settingsSaveState) settingsSaveState.textContent = "有未保存的更改";
+});
+
+settingsPanel?.querySelectorAll("[data-client-pref]").forEach((control) => {
+  const updatePreference = () => {
+    const key = control.getAttribute("data-client-pref") || "";
+    if (!key) return;
+    const value = control instanceof HTMLInputElement && control.type === "checkbox"
+      ? control.checked
+      : control instanceof HTMLInputElement && ["number", "range"].includes(control.type)
+        ? Number(control.value)
+        : control.value;
+    clientPreferences = { ...clientPreferences, [key]: value };
+    persistClientPreferences();
+    syncClientPreferenceControls();
+    applyClientPreferences();
+    if (["permissionNotifications", "questionNotifications"].includes(key) && value) {
+      showAtlasNotification("Atlas 通知已启用", "需要你关注的任务会在这里提醒。", true);
+    }
+  };
+  control.addEventListener(control instanceof HTMLTextAreaElement ? "input" : "change", updatePreference);
+  if (control instanceof HTMLInputElement && ["color", "range"].includes(control.type)) {
+    control.addEventListener("input", updatePreference);
+  }
+});
+
+document.getElementById("settings-reset-memory")?.addEventListener("click", () => {
+  clientPreferences = { ...clientPreferences, memories: [] };
+  persistClientPreferences();
+  showToast(currentLanguage === "zh" ? "本机偏好记忆已重置" : "Local preference memory was reset");
 });
 
 effortButtons.forEach((button) => {
@@ -17851,8 +18211,10 @@ segmentedControls.forEach((group) => {
       if (group === riskBoundary && autoApproveTools && !autoApproveTools.checked) {
         autoApproveTools.checked = true;
         syncAutoApproveUI();
+        autoApproveTools.dispatchEvent(new Event("change", { bubbles: true }));
       }
       setSegmentedValue(group, button.dataset.value || "");
+      group.dispatchEvent(new Event("input", { bubbles: true }));
     });
   });
 });
@@ -17879,35 +18241,6 @@ autoOpenActivityPanelToggle?.addEventListener("change", () => {
     renderMessages(visibleConversationMessages(bootstrapData?.messages || []), { preserveScroll: true });
   }
 });
-
-researchFloatingHead?.addEventListener("pointerdown", startResearchFloatingDrag);
-researchFloatingBoard?.addEventListener("dblclick", (event) => {
-  if (event.target instanceof HTMLElement && event.target.closest("button")) return;
-  setResearchDetailOpen(true);
-});
-researchFloatingHide?.addEventListener("pointerdown", (event) => {
-  event.stopPropagation();
-});
-researchFloatingHide?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  dismissResearchFloatingBoard();
-});
-researchFloatingReopen?.addEventListener("click", () => {
-  if (researchFloatingReopenSuppressClick) {
-    researchFloatingReopenSuppressClick = false;
-    return;
-  }
-  researchFloatingDismissed = false;
-  researchFloatingBoardPosition = null;
-  syncResearchFloatingBoardPositionFromButton();
-  renderResearchFloatingBoard(bootstrapData?.research || null);
-});
-researchFloatingReopen?.addEventListener("pointerdown", startResearchFloatingReopenDrag);
-document.addEventListener("pointermove", moveResearchFloatingDrag);
-document.addEventListener("pointerup", endResearchFloatingDrag);
-document.addEventListener("pointermove", moveResearchFloatingReopenDrag);
-document.addEventListener("pointerup", endResearchFloatingReopenDrag);
 
 document.addEventListener("click", (event) => {
   const paperWorkflowButton = event.target instanceof HTMLElement
@@ -17994,6 +18327,11 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    if (activeSettingsPanel === "settings-panel") {
+      event.preventDefault();
+      settingsSaveButton?.click();
+      return;
+    }
     const hasEditor = Boolean(workspaceMonacoEditor || document.getElementById("workspace-code-editor"));
     if (hasEditor && workspaceEditorDirty) {
       event.preventDefault();
@@ -18040,6 +18378,7 @@ window.addEventListener("resize", () => {
   positionSettingsPanel();
   captureMessageScrollPosition();
   stopResizerDrag();
+  syncDomainWorkbenchLayout();
   syncShellLayoutVars();
   applyDockLayout();
   applyVisualizationChatPosition();
@@ -18068,8 +18407,6 @@ window.addEventListener("pointermove", onResizerPointerMove);
 window.addEventListener("pointerup", stopResizerDrag);
 window.addEventListener("pointercancel", stopResizerDrag);
 window.addEventListener("blur", stopResizerDrag);
-window.addEventListener("blur", endResearchFloatingDrag);
-window.addEventListener("blur", endResearchFloatingReopenDrag);
 
 panelResizers.forEach((resizer) => {
   resizer.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, resizer));
@@ -18077,6 +18414,17 @@ panelResizers.forEach((resizer) => {
 
 activityFlyoutResizer?.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, activityFlyoutResizer));
 browserSplitResizer?.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, browserSplitResizer));
+domainSplitResizer?.addEventListener("pointerdown", (event) => handleResizerPointerDown(event, domainSplitResizer));
+if (typeof ResizeObserver !== "undefined" && workspaceBody) {
+  new ResizeObserver(() => {
+    const wasCompact = workspaceBody.classList.contains("is-domain-compact");
+    syncDomainWorkbenchLayout();
+    if (wasCompact !== workspaceBody.classList.contains("is-domain-compact")) {
+      syncShellLayoutVars();
+      syncLayoutCornerControls();
+    }
+  }).observe(workspaceBody);
+}
 
 langToggle?.addEventListener("click", () => {
   setLanguage(currentLanguage === "zh" ? "en" : "zh");
@@ -18143,6 +18491,8 @@ settingsToggle?.addEventListener("click", () => {
   }
   openSettingsPanel("settings-panel");
   setSettingsTab(activeSettingsTab);
+  filterSettings(settingsSearchInput?.value || "");
+  window.setTimeout(() => settingsSearchInput?.focus(), 80);
 });
 
 themePicker?.addEventListener("click", (event) => {
@@ -18648,10 +18998,16 @@ settingsClose?.addEventListener("click", () => {
 
 settingsSaveButton?.addEventListener("click", async () => {
   try {
+    settingsSaveButton.disabled = true;
+    if (settingsSaveState) settingsSaveState.textContent = "正在保存…";
     await saveSettings();
+    if (settingsSaveState) settingsSaveState.textContent = "所有更改已保存";
   } catch (error) {
     console.error(error);
+    if (settingsSaveState) settingsSaveState.textContent = "保存失败，请重试";
     showToast(error?.message || t("toastSendFailed"));
+  } finally {
+    settingsSaveButton.disabled = false;
   }
 });
 
@@ -18786,15 +19142,69 @@ atlasDialogInput?.addEventListener("keydown", (event) => {
     closeAtlasDialog(true);
   }
 });
+
+let atlasContextTarget = null;
+function closeAtlasContextMenu() {
+  if (atlasContextMenu) atlasContextMenu.hidden = true;
+  atlasContextTarget = null;
+}
+
+document.addEventListener("contextmenu", (event) => {
+  if (event.target.closest(".monaco-editor, .monaco-menu-container")) return;
+  event.preventDefault();
+  if (!atlasContextMenu) return;
+  const editable = event.target.closest("input, textarea, [contenteditable='true']");
+  const selection = window.getSelection()?.toString() || "";
+  atlasContextTarget = editable || event.target;
+  atlasContextMenu.querySelector('[data-context-action="cut"]').disabled = !editable;
+  atlasContextMenu.querySelector('[data-context-action="paste"]').disabled = !editable;
+  atlasContextMenu.querySelector('[data-context-action="copy"]').disabled = !selection && !editable;
+  atlasContextMenu.hidden = false;
+  const width = 210;
+  const height = 166;
+  atlasContextMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX))}px`;
+  atlasContextMenu.style.top = `${Math.max(8, Math.min(window.innerHeight - height - 8, event.clientY))}px`;
+});
+
+atlasContextMenu?.addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-context-action]")?.dataset.contextAction;
+  const target = atlasContextTarget;
+  if (!action || !target) return;
+  try {
+    if (action === "copy") {
+      const text = target.matches?.("input, textarea") ? target.value.slice(target.selectionStart, target.selectionEnd) : window.getSelection()?.toString();
+      if (text) await navigator.clipboard.writeText(text);
+    } else if (action === "cut" && target.matches?.("input, textarea")) {
+      const start = target.selectionStart, end = target.selectionEnd;
+      await navigator.clipboard.writeText(target.value.slice(start, end));
+      target.setRangeText("", start, end, "end");
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (action === "paste" && target.matches?.("input, textarea")) {
+      const text = await navigator.clipboard.readText();
+      target.setRangeText(text, target.selectionStart, target.selectionEnd, "end");
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (action === "select-all") {
+      if (target.select) target.select(); else { const range = document.createRange(); range.selectNodeContents(target); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }
+    }
+  } catch (error) { console.warn("Atlas context action failed", error); }
+  closeAtlasContextMenu();
+});
+document.addEventListener("pointerdown", (event) => { if (!event.target.closest("#atlas-context-menu")) closeAtlasContextMenu(); }, true);
+window.addEventListener("blur", closeAtlasContextMenu);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && atlasDialog && !atlasDialog.hidden) {
     event.preventDefault();
     closeAtlasDialog(null);
   }
+  if (event.key === "Escape" && atlasContextMenu && !atlasContextMenu.hidden) closeAtlasContextMenu();
 });
 
 messageInput?.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  const sendsWithCtrl = clientPreferences.sendShortcut === "ctrl-enter";
+  const shouldSend = event.key === "Enter"
+    && !event.shiftKey
+    && (sendsWithCtrl ? (event.ctrlKey || event.metaKey) : !event.ctrlKey && !event.metaKey);
+  if (shouldSend) {
     event.preventDefault();
     sendMessage();
   }
@@ -18809,7 +19219,12 @@ desktopWindowControls?.addEventListener("click", (event) => {
   if (!button) return;
   event.preventDefault();
   event.stopPropagation();
-  sendNativeWindowAction(button.dataset.windowAction || "");
+  const action = button.dataset.windowAction || "";
+  if (action === "close" && typeof window.__ATLAS_REQUEST_CLOSE__ === "function") {
+    window.__ATLAS_REQUEST_CLOSE__();
+    return;
+  }
+  sendNativeWindowAction(action);
 });
 
 shellTopbar?.addEventListener("mousedown", (event) => {
@@ -18829,13 +19244,14 @@ window.__ATLAS_WINDOW_STATE__ = (maximized) => {
 };
 
 applyTranslations();
+syncClientPreferenceControls();
 restoreColorTheme();
 updateEffortUI();
 setActivityPanel("nav", { preserveMainView: true });
 applyWorkspaceMode("chat");
 setMainView("chat");
 setGitView("overview");
-setSettingsTab("model");
+setSettingsTab("general");
 closeSettingsPanels();
 if (effortDisclosure) effortDisclosure.removeAttribute("open");
 renderPendingFiles();
@@ -18843,10 +19259,11 @@ hideCodePanel();
 renderWorkspaceFile(null);
 renderTerminalDrawer();
 refreshLatexRendering().catch(() => {});
-loadBootstrap().catch((error) => {
+const initialBootstrapPromise = loadBootstrap().catch((error) => {
   console.error(error);
   showToast(t("toastSendFailed"));
 });
+window.setTimeout(scheduleMessageJumpRailSync, 250);
 window.setInterval(() => {
   const hasRunningSessions = Array.from(sessionRunState.values()).some((state) => Boolean(state?.running));
   if (!hasRunningSessions || document.hidden) return;
@@ -18857,3 +19274,155 @@ loadTerminalState()
   .finally(() => {
     scheduleTerminalPoll(1500);
   });
+
+window.AtlasWorkspaceBridge = {
+  capture() {
+    syncWorkspaceDraftForCurrentFile();
+    const position = workspaceMonacoEditor?.getPosition?.() || null;
+    return {
+      editor: {
+        active_file: currentWorkspaceFile?.path || activeReviewFilePath,
+        cursor: position,
+        content_revision: currentWorkspaceFile?.revision || null,
+        drafts: Array.from(workspaceDraftCache.entries()),
+      },
+      open_files: workspaceOpenTabs.slice(),
+      split_layout: dockLayout,
+      panels: {
+        activity: activeActivityPanel,
+        main_view: currentMainView,
+        git_view: currentGitView,
+        settings_open: Boolean(settingsPanel && !settingsPanel.hidden),
+        settings_tab: document.querySelector("[data-settings-tab].is-active")?.dataset?.settingsTab || "model",
+      },
+      professional_environments: { active_domain: document.querySelector(".research-domain-workspace:not([hidden])")?.dataset?.domainId || null },
+      visualization: { active: currentMainView === "visualization", kind: visualizationActiveKind || null },
+      browser: { url: browserState?.currentUrl || "" },
+      terminal: { active_id: terminalState?.active_id || null, drawer_open: Boolean(terminalDrawer && !terminalDrawer.hidden) },
+      search_state: { mode: searchMode, query: searchQueryInput?.value || "" },
+      agent_context: {
+        mode: currentWorkspaceMode,
+        session_id: bootstrapData?.current_session_id || null,
+        draft: messageInput?.value || "",
+        conversation_scroll_top: messageStream?.scrollTop || 0,
+      },
+      selected_scientific_objects: Array.from(document.querySelectorAll("[data-object-id].is-active")).map((node) => node.dataset.objectId).filter(Boolean),
+      filters: {}, simulation: {}, docker: {},
+    };
+  },
+  async navigate(target = {}) {
+    let handled = false;
+    const restoreContext = target?.restore_context && typeof target.restore_context === "object" ? target.restore_context : {};
+    const internalUrl = cleanDisplayText(restoreContext.url || target?.url || "", "");
+    if (/^https?:\/\//i.test(internalUrl)) {
+      await openUrlInAppBrowser(internalUrl);
+      handled = true;
+    }
+    if (target.artifact_path && !/^https?:\/\//i.test(target.artifact_path)) {
+      try { await openWorkspaceFileAt(target.artifact_path); handled = true; }
+      catch (error) { console.warn("Atlas navigation could not open artifact", error); }
+    }
+    if (["ssh", "events", "snapshots", "notebook", "run", "git", "nav"].includes(target.environment_id)) { setActivityPanel(target.environment_id); handled = true; }
+    if (target.environment_id === "settings") { settingsPanel.hidden = false; positionSettingsPanel(); handled = true; }
+    if (restoreContext.snapshot_id) {
+      setActivityPanel("snapshots");
+      window.dispatchEvent(new CustomEvent("atlas:workspace-snapshot-locate", { detail: { snapshotId: restoreContext.snapshot_id } }));
+      handled = true;
+    }
+    if (restoreContext.terminal_id) {
+      await loadTerminalState();
+      const terminal = (terminalState.sessions || []).find((session) => session.id === restoreContext.terminal_id);
+      if (terminal) {
+        terminalState.active_id = terminal.id;
+        terminalDrawerDismissed = false;
+        setMainView("chat");
+        renderTerminalDrawer();
+        terminalInput?.focus();
+        handled = true;
+      }
+    }
+    if (restoreContext.domain_id || target.domain_id) {
+      const domainId = cleanDisplayText(restoreContext.domain_id || target.domain_id || "", "");
+      if (domainId) {
+        window.dispatchEvent(new CustomEvent("atlas:research-domain-open", { detail: { domainId, assetId: restoreContext.asset_id || target.asset_id || "", tab: restoreContext.tab || target.tab || "" } }));
+        handled = true;
+      }
+    }
+    if (target.visualization_kind) { setActivityPanel(null, { preserveMainView: true }); setMainView("visualization"); await window.AtlasVisualization?.open?.({ kind: target.visualization_kind, sourceId: target.object_id }); handled = true; }
+    if (target.object_id) {
+      window.dispatchEvent(new CustomEvent("atlas:locate-scientific-object", { detail: target }));
+      const nodes = Array.from(document.querySelectorAll(`[data-object-id="${CSS.escape(target.object_id)}"]`));
+      if (nodes.length) {
+        nodes.forEach((node) => { node.classList.add("is-active", "atlas-object-highlight"); node.scrollIntoView({ block: "center", behavior: "smooth" }); });
+      } else {
+        window.AtlasResearchOS?.open?.();
+        window.setTimeout(() => window.AtlasResearchOS?.selectObject?.(target.object_id), 120);
+      }
+      handled = true;
+    }
+    if (!handled) window.AtlasUI?.notify?.(currentLanguage === "zh" ? "此结果暂时没有可打开的目标。" : "This result has no navigable target yet.");
+    return handled;
+  },
+  openPanel(panel) { setActivityPanel(panel); },
+  openMainView(view) { setActivityPanel(null, { preserveMainView: true }); setMainView(view); },
+  async restore(snapshot) {
+    const client = snapshot?.state?.client || {};
+    const savedSessionId = String(client.agent_context?.session_id || "").trim();
+    if (
+      savedSessionId
+      && savedSessionId !== String(bootstrapData?.current_session_id || "").trim()
+      && (bootstrapData?.sessions || []).some((session) => String(session?.id || "") === savedSessionId)
+    ) {
+      const response = await hostClient.sessions.select(savedSessionId);
+      if (response.ok) await loadBootstrap();
+    }
+    if (client.agent_context?.mode) applyWorkspaceMode(client.agent_context.mode);
+    if (client.split_layout) { dockLayout = { ...dockLayout, ...client.split_layout }; saveDockLayout(); applyDockLayout(); }
+    if (client.panels?.activity !== undefined) setActivityPanel(client.panels.activity, { preserveMainView: true });
+    if (client.panels?.git_view) setGitView(client.panels.git_view);
+    if (client.panels?.main_view) setMainView(client.panels.main_view);
+    if (Array.isArray(client.editor?.drafts)) {
+      workspaceDraftCache = new Map(client.editor.drafts.filter((entry) => Array.isArray(entry) && typeof entry[0] === "string" && typeof entry[1] === "string"));
+    }
+    if (Array.isArray(client.open_files)) {
+      workspaceOpenTabs = client.open_files.filter((path) => typeof path === "string");
+    }
+    if (client.editor?.active_file) { await openWorkspaceFileAt(client.editor.active_file, client.editor.cursor?.lineNumber, client.editor.cursor?.column, { forceInternal: true }); }
+    else renderWorkspaceTabs();
+    if (client.search_state?.query != null) searchQueryInput.value = client.search_state.query;
+    if (client.agent_context?.draft != null && messageInput) messageInput.value = client.agent_context.draft;
+    if (client.terminal?.active_id && (terminalState?.sessions || []).some((session) => session.id === client.terminal.active_id)) {
+      terminalState.active_id = client.terminal.active_id;
+    }
+    if (client.terminal?.drawer_open) {
+      terminalDrawerDismissed = false;
+      renderTerminalDrawer();
+    }
+    if (client.panels?.settings_tab) setSettingsTab(client.panels.settings_tab);
+    if (client.panels?.settings_open && settingsPanel) {
+      settingsPanel.hidden = false;
+      positionSettingsPanel();
+    }
+    if (client.panels?.main_view === "browser" && client.browser?.url) {
+      await openUrlInAppBrowser(client.browser.url);
+    } else if (client.panels?.main_view === "visualization" && client.visualization?.kind) {
+      await window.AtlasVisualization?.open?.({ kind: client.visualization.kind });
+    }
+    if (client.panels?.main_view === "domain" && client.professional_environments?.active_domain) {
+      window.dispatchEvent(new CustomEvent("atlas:research-domain-open", { detail: { domainId: client.professional_environments.active_domain } }));
+    }
+    requestAnimationFrame(() => {
+      if (messageStream && Number.isFinite(Number(client.agent_context?.conversation_scroll_top))) {
+        messageStream.scrollTop = Number(client.agent_context.conversation_scroll_top);
+      }
+    });
+    window.dispatchEvent(new CustomEvent("atlas:workspace-snapshot-restored", { detail: snapshot }));
+  },
+};
+
+initialBootstrapPromise.finally(() => {
+  const restoreState = window.__ATLAS_HOST__?.restoreState;
+  if (!restoreState?.client) return;
+  window.AtlasWorkspaceBridge.restore({ state: { client: restoreState.client } })
+    .catch((error) => console.warn("Atlas desktop session restore failed", error));
+});

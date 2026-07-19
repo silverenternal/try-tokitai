@@ -2,18 +2,23 @@
 
 mod agent_skills;
 mod app_paths;
+mod atlas_core;
 mod command_resolver;
 mod config;
 mod desktop_host;
 mod domain_prompt;
 mod host;
 mod image_generation;
+mod notebook;
 mod path_resolver;
 mod process_window;
 mod project_index;
+mod remote_ssh;
 mod research_domains;
+mod research_intelligence;
 mod research_os;
 mod sandbox;
+mod scientific_infrastructure;
 pub mod security;
 mod task_queue;
 mod text_encoding;

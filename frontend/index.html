@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Atlas IDE</title>
     <link rel="icon" type="image/svg+xml" href="./atlas-mark.svg" />
-    <script>try{document.documentElement.dataset.theme=localStorage.getItem("atlas-color-theme-v1")||"dark"}catch(_){}</script>
+    <script>try{const r=document.documentElement,t=localStorage.getItem("atlas-color-theme-v1")||"dark",p=JSON.parse(localStorage.getItem("atlas-client-preferences-v2")||"{}");r.dataset.theme=t;const b=t==="light"?(p.lightBackground||"#ffffff"):(p.darkBackground||"#181818");r.style.setProperty("--bg",b);r.style.background=b}catch(_){document.documentElement.dataset.theme="dark"}</script>
     <link rel="stylesheet" href="./vendor/monaco/vs/editor/editor.main.css" />
     <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260716e" />
+    <link rel="stylesheet" href="./styles.css?v=20260719a" />
+    <link rel="stylesheet" href="./professional-overrides.css?v=20260719b" />
   </head>
   <body>
     <div class="atlas-launch" id="atlas-launch" aria-hidden="true">
@@ -66,11 +67,33 @@
 
         <div class="shell-topbar-spacer" aria-hidden="true"></div>
 
+        <div class="global-search-shell" id="global-search-shell">
+          <button class="global-search-scope" id="global-search-scope" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="global-search-scope-label">All Atlas</span><svg viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"></path></svg></button>
+          <input id="global-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search the scientific platform…" aria-label="Atlas Universal Search" />
+          <div class="global-search-scope-menu" id="global-search-scope-menu" role="listbox" hidden></div>
+        </div>
+
         <div class="shell-topbar-right">
           <div class="workspace-meta">
             <span class="workspace-header-label" id="workspace-title">Workspace</span>
             <span class="workspace-header-root" id="workspace-root-label"></span>
           </div>
+
+          <button
+            id="research-os-toggle"
+            class="layout-corner-button shell-topbar-button research-os-top-trigger"
+            type="button"
+            title="Research OS"
+            aria-label="Toggle Research OS"
+            aria-pressed="false"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="7" cy="7" r="2.25"></circle>
+              <circle cx="17" cy="8" r="2.25"></circle>
+              <circle cx="12" cy="17" r="2.25"></circle>
+              <path d="m8.9 8.2 2.2 6.5M15.1 9.4l-2 5.4M9.2 7.2l5.5.6"></path>
+            </svg>
+          </button>
 
           <button
             id="right-sidebar-toggle"
@@ -110,12 +133,6 @@
               <path d="M4.5 17.5h15"></path>
             </svg>
           </button>
-          <button class="activity-rail-button" type="button" data-activity-panel="search" aria-label="Search" title="Search">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="5.5"></circle>
-              <path d="m16 16 4 4"></path>
-            </svg>
-          </button>
           <button class="activity-rail-button" type="button" data-activity-panel="git" aria-label="Source Control" title="Source Control">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="7" cy="6" r="2"></circle>
@@ -130,6 +147,16 @@
               <path d="M8 6.5v11l8-5.5z"></path>
               <path d="M5.5 19.5h13"></path>
             </svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="notebook" id="notebook-rail-button" aria-label="Atlas Notebook" title="Atlas Notebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v15H6zM9 4.5v15"></path><path d="M12 9h3M12 13h3M12 17h2"></path></svg></button>
+          <button class="activity-rail-button" type="button" data-activity-panel="ssh" id="ssh-rail-button" aria-label="SSH Remote Development" title="SSH Remote Development">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8.5V6a5 5 0 0 1 10 0v2.5"></path><path d="M5 8.5h14v10H5z"></path><path d="m8.5 12 2 1.5-2 1.5M12.5 15h3"></path></svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="events" id="event-center-rail-button" aria-label="Scientific Event Center" title="Scientific Event Center">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v13H5z"></path><path d="M8 9h8M8 12h5M8 15h7"></path><circle cx="18" cy="6" r="2.5"></circle></svg>
+          </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="snapshots" id="snapshot-rail-button" aria-label="Workspace Time Machine" title="Workspace Time Machine">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5A8 8 0 1 1 4.5 15"></path><path d="M5 4.5v4h4M12 7.5V12l3 2"></path></svg>
           </button>
           <button class="activity-rail-button" type="button" id="browser-rail-button" aria-label="Browser" title="Browser">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -343,19 +370,22 @@
             <div id="project-task-list" class="project-task-list"></div>
           </section>
         </section>
+        <section class="activity-panel ssh-activity-panel" id="activity-panel-ssh" data-activity-panel-id="ssh">
+          <div class="activity-panel-head"><div class="activity-panel-title-group"><div class="activity-panel-eyebrow">Atlas Core</div><div class="activity-panel-title">Remote Development</div></div><div class="activity-panel-actions"><button class="sidebar-action" type="button" id="ssh-import-config">Import Config</button><button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar"><svg viewBox="0 0 24 24"><path d="M15 6.5 9 12l6 5.5"></path></svg></button></div></div>
+          <div class="ssh-control-deck"><div class="ssh-host-toolbar"><button type="button" id="ssh-add-host">+ Host</button><button type="button" id="ssh-refresh">Refresh</button><span id="ssh-transport-state">transport</span></div><div class="ssh-host-list" id="ssh-host-list"></div></div>
+          <div class="ssh-remote-workspace" id="ssh-remote-workspace"><div class="ssh-empty-state">Select or add a remote research server.</div></div>
+        </section>
+        <section class="activity-panel scientific-event-panel" id="activity-panel-events" data-activity-panel-id="events"><div id="scientific-event-center"></div></section>
+        <section class="activity-panel workspace-time-machine-panel" id="activity-panel-snapshots" data-activity-panel-id="snapshots"><div id="workspace-time-machine"></div></section>
+        <section class="activity-panel notebook-activity-panel" id="activity-panel-notebook" data-activity-panel-id="notebook">
+          <div class="activity-panel-head"><div class="activity-panel-title-group"><div class="activity-panel-eyebrow">Scientific Document</div><div class="activity-panel-title">Atlas Notebook</div></div><button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar"><svg viewBox="0 0 24 24"><path d="M15 6.5 9 12l6 5.5"></path></svg></button></div>
+          <section class="atlas-notebook-workspace" id="atlas-notebook-workspace" aria-label="Atlas Notebook"></section>
+        </section>
       </div>
       <div class="shell-resizer shell-resizer-flyout" id="activity-flyout-resizer" data-layout-resizer-kind="flyout" aria-hidden="true"></div>
 
       <aside class="research-domains-sidebar" id="research-domains-sidebar" aria-label="Research Domains">
         <nav class="research-domains-nav" id="research-domains-nav" aria-label="Registered research domains"></nav>
-        <div class="research-domains-footer">
-          <button id="research-os-toggle" class="activity-rail-button research-os-toggle" type="button" title="Research OS" aria-label="Toggle Research OS" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="6" r="2"></circle><circle cx="19" cy="11" r="2"></circle><circle cx="13" cy="18" r="2"></circle>
-              <path d="m6.6 10.8 3.8-3.5m3.5-.6 3.3 3.1m.2 2.7-3 4M11.1 17 6.7 13"></path>
-            </svg>
-          </button>
-        </div>
       </aside>
 
       <div class="corner-tools">
@@ -413,21 +443,7 @@
                 <button class="visualization-floating-chat-resize" id="visualization-floating-chat-resize" type="button" aria-label="Resize conversation card" title="Drag to resize conversation card" hidden></button>
                 <section class="conversation-stage">
                   <section class="review-strip" id="review-strip" hidden></section>
-                  <section class="research-floating-board" id="research-floating-board" hidden>
-                    <div class="research-floating-head" id="research-floating-head">
-                      <span>Research flow</span>
-                      <button type="button" id="research-floating-hide" aria-label="Hide research flow">×</button>
-                    </div>
-                    <div class="research-floating-body" id="research-floating-body"></div>
-                  </section>
-                  <button
-                    class="research-floating-reopen"
-                    id="research-floating-reopen"
-                    type="button"
-                    aria-label="Show research flow"
-                    title="Show research flow"
-                    hidden
-                  ></button>
+                  <nav class="message-jump-rail" id="message-jump-rail" aria-label="Conversation message navigation" hidden></nav>
                   <div class="message-stream"></div>
                 </section>
 
@@ -542,166 +558,158 @@
                   </label>
 
                   <div class="settings-popovers">
-                    <section class="settings-popover" id="settings-panel" hidden>
+                    <section class="settings-popover" id="settings-panel" hidden aria-label="设置">
                       <div class="settings-panel-shell">
-                        <div class="settings-panel-header">
-                          <strong data-i18n="settingsLabel">Settings</strong>
-                          <button class="settings-close" type="button" id="settings-close">x</button>
-                        </div>
+                        <aside class="settings-sidebar">
+                          <button class="settings-close settings-back" type="button" id="settings-close">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+                            <span>返回应用</span>
+                          </button>
+                          <label class="settings-search-shell">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+                            <input id="settings-search" type="search" placeholder="搜索设置…" autocomplete="off" />
+                          </label>
+                          <nav class="settings-tabs" aria-label="设置分类">
+                            <span class="settings-nav-heading">个人</span>
+                            <button class="settings-tab is-active" type="button" data-settings-tab="general"><span class="settings-nav-icon">⚙</span><span>常规</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="appearance"><span class="settings-nav-icon">☼</span><span>外观</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="personalization"><span class="settings-nav-icon">◉</span><span>个性化</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="model"><span class="settings-nav-icon">✦</span><span>模型</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="security"><span class="settings-nav-icon">◇</span><span>权限</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="shortcuts"><span class="settings-nav-icon">⌨</span><span>键盘快捷键</span></button>
+                            <span class="settings-nav-heading">集成</span>
+                            <button class="settings-tab" type="button" data-settings-tab="providers"><span class="settings-nav-icon">⌘</span><span>提供商</span></button>
+                            <span class="settings-nav-heading">编码</span>
+                            <button class="settings-tab" type="button" data-settings-tab="runtime"><span class="settings-nav-icon">›_</span><span>运行环境</span></button>
+                          </nav>
+                          <div class="settings-sidebar-foot"><span>Atlas IDE</span><small>桌面设置</small></div>
+                        </aside>
 
-                        <div class="settings-tabs">
-                          <button class="settings-tab is-active" type="button" data-settings-tab="model" data-i18n="tabModel">Model</button>
-                          <button class="settings-tab" type="button" data-settings-tab="security" data-i18n="tabSecurity">Security</button>
-                          <button class="settings-tab" type="button" data-settings-tab="runtime" data-i18n="tabRuntime">Runtime</button>
-                          <button class="settings-tab" type="button" data-settings-tab="providers" data-i18n="tabProviders">Providers</button>
-                        </div>
+                        <main class="settings-panel-body">
+                          <div class="settings-tab-panel is-active" data-settings-tab-panel="general">
+                            <header class="settings-content-head"><h1>常规</h1><p>控制 Atlas 的权限、语言与对话行为。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>权限</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>默认权限</strong><small>允许 Atlas 在当前工作区读取和编辑文件。</small></span><input id="auto-approve-tools" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>检查点审批</strong><small>执行高影响任务前暂停，并等待你的确认。</small></span><input id="competition-mode" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>隐私保护</strong><small>减少敏感信息暴露并限制不必要的外部访问。</small></span><input id="privacy-mode" type="checkbox" /></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>常规</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>默认文件打开目标</strong><small>选择从 Atlas 打开文件和文件夹的位置。</small></span><select data-client-pref="defaultOpenTarget"><option value="atlas">Atlas</option><option value="vscode">VS Code</option><option value="system">系统默认应用</option></select></label>
+                              <label class="settings-row"><span><strong>集成终端 Shell</strong><small>选择集成终端默认使用的 Shell。</small></span><select data-client-pref="terminalShell"><option value="powershell">PowerShell</option><option value="cmd">Command Prompt</option><option value="bash">Bash</option></select></label>
+                              <div class="settings-row"><span><strong>语言</strong><small>设置应用界面的显示语言。</small></span><button class="settings-inline-button language-toggle" type="button" id="lang-toggle">中文</button></div>
+                              <label class="settings-row"><span><strong>显示活动面板</strong><small>在助手消息中显示工具与运行活动。</small></span><input id="auto-open-activity-panel" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>底部面板</strong><small>有终端会话时显示底部终端面板。</small></span><input data-client-pref="showBottomPanel" type="checkbox" /></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>编辑器</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>显示上下文窗口使用情况</strong><small>在对话输入框上方显示模型上下文占用。</small></span><input data-client-pref="showContextUsage" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>发送快捷键</strong><small>选择 Enter 键发送消息还是插入新行。</small></span><select data-client-pref="sendShortcut"><option value="enter">按 Enter 键</option><option value="ctrl-enter">按 Ctrl + Enter</option></select></label>
+                              <label class="settings-row"><span><strong>跟进行为</strong><small>任务运行时，新的消息是引导当前任务还是等待下一轮。</small></span><select data-client-pref="followBehavior"><option value="guide">引导</option><option value="queue">排队</option></select></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>通知</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>轮次完成通知</strong><small>设置 Atlas 完成回复时提醒你的条件。</small></span><select data-client-pref="completionNotifications"><option value="unfocused">仅当应用失焦时</option><option value="always">始终</option><option value="never">从不</option></select></label>
+                              <label class="settings-row"><span><strong>启用权限通知</strong><small>代理需要工具权限时显示系统通知。</small></span><input data-client-pref="permissionNotifications" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>启用问题通知</strong><small>任务需要你继续输入时显示系统通知。</small></span><input data-client-pref="questionNotifications" type="checkbox" /></label>
+                            </div></section>
+                          </div>
 
-                        <div class="settings-panel-body">
-                          <div class="settings-tab-panel is-active" data-settings-tab-panel="model">
-                            <label class="field-block">
-                              <span class="field-label" data-i18n="fieldApiKey">API Key</span>
-                              <input id="runtime-api-key" type="password" />
-                            </label>
+                          <div class="settings-tab-panel" data-settings-tab-panel="appearance">
+                            <header class="settings-content-head"><h1>外观</h1><p>调整 Atlas 的颜色与状态显示。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>主题</h2><div class="settings-card settings-theme-card">
+                              <div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="颜色主题">
+                                <button class="theme-choice is-active" type="button" data-theme-choice="dark" aria-checked="true"><span class="theme-preview theme-preview-dark" aria-hidden="true"><i></i><i></i><i></i></span><span>深色</span></button>
+                                <button class="theme-choice" type="button" data-theme-choice="light" aria-checked="false"><span class="theme-preview theme-preview-light" aria-hidden="true"><i></i><i></i><i></i></span><span>浅色</span></button>
+                              </div>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>浅色主题</h2><div class="settings-card settings-color-card">
+                              <label class="settings-row"><span><strong>强调色</strong></span><span class="settings-color-control"><input data-client-pref="lightAccent" type="color" value="#339cff" /><code data-color-value="lightAccent">#339CFF</code></span></label>
+                              <label class="settings-row"><span><strong>背景</strong></span><span class="settings-color-control"><input data-client-pref="lightBackground" type="color" value="#ffffff" /><code data-color-value="lightBackground">#FFFFFF</code></span></label>
+                              <label class="settings-row"><span><strong>前景</strong></span><span class="settings-color-control"><input data-client-pref="lightForeground" type="color" value="#1a1c1f" /><code data-color-value="lightForeground">#1A1C1F</code></span></label>
+                              <label class="settings-row"><span><strong>对比度</strong></span><span class="settings-range-control"><input data-client-pref="lightContrast" type="range" min="20" max="100" value="45" /><output data-pref-output="lightContrast">45</output></span></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>深色主题</h2><div class="settings-card settings-color-card">
+                              <label class="settings-row"><span><strong>强调色</strong></span><span class="settings-color-control"><input data-client-pref="darkAccent" type="color" value="#339cff" /><code data-color-value="darkAccent">#339CFF</code></span></label>
+                              <label class="settings-row"><span><strong>背景</strong></span><span class="settings-color-control"><input data-client-pref="darkBackground" type="color" value="#181818" /><code data-color-value="darkBackground">#181818</code></span></label>
+                              <label class="settings-row"><span><strong>前景</strong></span><span class="settings-color-control"><input data-client-pref="darkForeground" type="color" value="#ffffff" /><code data-color-value="darkForeground">#FFFFFF</code></span></label>
+                              <label class="settings-row"><span><strong>半透明侧边栏</strong><small>允许侧边栏透出底层背景。</small></span><input data-client-pref="translucentSidebar" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>对比度</strong></span><span class="settings-range-control"><input data-client-pref="darkContrast" type="range" min="20" max="100" value="60" /><output data-pref-output="darkContrast">60</output></span></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>偏好设置</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>使用指针光标</strong><small>悬停交互元素时切换为指针光标。</small></span><input data-client-pref="pointerCursor" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>减少动态效果</strong><small>减少动画效果或匹配系统设置。</small></span><select data-client-pref="reducedMotion"><option value="system">系统</option><option value="on">开启</option><option value="off">关闭</option></select></label>
+                              <label class="settings-row"><span><strong>UI 字体</strong><small>设置应用界面使用的字体。</small></span><select data-client-pref="uiFont"><option value="system">系统字体</option><option value="segoe">Segoe UI</option><option value="sans">通用无衬线</option></select></label>
+                              <label class="settings-row"><span><strong>代码字体</strong><small>设置编辑器和终端使用的等宽字体。</small></span><select data-client-pref="codeFont"><option value="system-mono">系统等宽</option><option value="consolas">Consolas</option><option value="cascadia">Cascadia Mono</option></select></label>
+                              <label class="settings-row"><span><strong>UI 字号</strong><small>调整 Atlas 界面的基准字号。</small></span><span class="settings-number-control"><input data-client-pref="uiFontSize" type="number" min="11" max="18" value="14" /><em>px</em></span></label>
+                              <label class="settings-row"><span><strong>代码字体大小</strong><small>调整编辑器和差异视图中的代码字号。</small></span><span class="settings-number-control"><input data-client-pref="codeFontSize" type="number" min="10" max="20" value="12" /><em>px</em></span></label>
+                              <label class="settings-row"><span><strong>差异标记</strong><small>选择颜色或 +/- 标记显示更改。</small></span><select data-client-pref="diffMarkers"><option value="color">颜色</option><option value="symbols">+/-</option></select></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><h2>状态栏</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>系统监控</strong><small>在 IDE 底部显示 CPU、GPU、内存、磁盘和网络状态。</small></span><input id="system-monitor-enabled" type="checkbox" /></label>
+                            </div></section>
+                          </div>
 
-                            <label class="field-block">
-                              <span class="field-label" data-i18n="fieldPrimaryModel">Primary model</span>
-                              <select id="primary-model">
-                                <option value="qwen3.7-plus">Qwen 3.7 Plus</option>
-                                <option value="qwen3.7-max">Qwen 3.7 Max</option>
-                                <option value="qwen3.6-plus">Qwen 3.6 Plus</option>
-                                <option value="qwen3.6-max-preview">Qwen 3.6 Max (Preview)</option>
-                                <option value="qwen3.6-flash">Qwen 3.6 Flash</option>
-                                <option value="qwen3.5-plus">Qwen 3.5 Plus</option>
-                                <option value="qwen3.5-flash">Qwen 3.5 Flash</option>
-                                <option value="qwq-plus">QwQ Plus (reasoning only)</option>
-                              </select>
-                            </label>
+                          <div class="settings-tab-panel" data-settings-tab-panel="personalization">
+                            <header class="settings-content-head"><h1>个性化</h1><p>调整 Atlas 的语气、自定义指令与跨任务记忆。</p></header>
+                            <div class="settings-callout"><span>!</span><strong>不同 Qwen 模型对个性设置的遵循程度可能不同。</strong></div>
+                            <section class="settings-section" data-settings-searchable><div class="settings-card">
+                              <label class="settings-row"><span><strong>个性</strong><small>选择 Atlas 回复时使用的默认语气。</small></span><select data-client-pref="personality"><option value="friendly">亲和</option><option value="concise">简洁</option><option value="professional">专业</option><option value="direct">直接</option></select></label>
+                            </div></section>
+                            <section class="settings-section" data-settings-searchable><div class="settings-section-head"><span><h2>自定义指令</h2><small>为此设备上的所有任务提供额外说明和上下文。</small></span></div><textarea class="settings-instructions" data-client-pref="customInstructions" placeholder="添加自定义指令…" maxlength="8000"></textarea></section>
+                            <section class="settings-section" data-settings-searchable><div class="settings-section-head"><span><h2>记忆</h2><small>配置 Atlas 如何收集、保留和整合跨任务偏好。</small></span></div><div class="settings-card">
+                              <label class="settings-row"><span><strong>启用记忆</strong><small>从任务中保留偏好，并将其带入新任务。</small></span><input data-client-pref="memoryEnabled" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>允许工具辅助任务生成记忆</strong><small>使用工具或网页搜索的任务也可以更新偏好记忆。</small></span><input data-client-pref="toolMemoryEnabled" type="checkbox" /></label>
+                              <div class="settings-row"><span><strong>重置记忆</strong><small>删除 Atlas 在本机保存的所有偏好记忆。</small></span><button class="settings-danger-button" type="button" id="settings-reset-memory">重置</button></div>
+                            </div></section>
+                          </div>
 
-                            <label class="field-block compact-toggle">
-                              <span class="field-label">Deep Think (thinking/reasoning)</span>
-                              <input id="deep-think" type="checkbox" />
-                            </label>
-                            <span class="field-help">Send thinking tokens to the model and display reasoning content.</span>
+                          <div class="settings-tab-panel" data-settings-tab-panel="model">
+                            <header class="settings-content-head"><h1>模型</h1><p>Atlas 仅支持 Qwen 系列模型。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>Qwen</h2><div class="settings-card">
+                              <label class="settings-row"><span><strong>主模型</strong><small>用于对话、代码编辑和代理任务。</small></span><select id="primary-model"><option value="qwen3.7-plus">Qwen 3.7 Plus</option><option value="qwen3.7-max">Qwen 3.7 Max</option><option value="qwen3.6-plus">Qwen 3.6 Plus</option><option value="qwen3.6-max-preview">Qwen 3.6 Max Preview</option><option value="qwen3.6-flash">Qwen 3.6 Flash</option><option value="qwen3.5-plus">Qwen 3.5 Plus</option><option value="qwen3.5-flash">Qwen 3.5 Flash</option><option value="qwq-plus">QwQ Plus</option></select></label>
+                              <label class="settings-row"><span><strong>深度思考</strong><small>启用 Qwen 的 thinking/reasoning 输出。</small></span><input id="deep-think" type="checkbox" /></label>
+                              <label class="settings-row settings-row-stack"><span><strong>API Key</strong><small>密钥只保存在本机配置中。</small></span><input id="runtime-api-key" type="password" autocomplete="off" placeholder="输入 Qwen API Key" /></label>
+                            </div></section>
                           </div>
 
                           <div class="settings-tab-panel" data-settings-tab-panel="security">
-                            <label class="field-block compact-toggle">
-                              <span class="field-label" data-i18n="fieldCompetitionMode">Competition mode</span>
-                              <input id="competition-mode" type="checkbox" />
-                            </label>
-                            <span class="field-help" data-i18n="helpCompetitionMode">Pause at checkpoints and wait for approval.</span>
-
-                            <label class="field-block compact-toggle">
-                              <span class="field-label" data-i18n="fieldPrivacyMode">Privacy guard</span>
-                              <input id="privacy-mode" type="checkbox" />
-                            </label>
-                            <span class="field-help" data-i18n="helpPrivacyMode">Reduce sensitive exposure and tighten external access.</span>
-
-                            <label class="field-block compact-toggle">
-                              <span class="field-label" data-i18n="fieldApproveSafe">Auto approve safe tools</span>
-                              <input id="auto-approve-tools" type="checkbox" />
-                            </label>
-                            <span class="field-help" data-i18n="helpApproveSafe">When off, every tool call still requires manual approval regardless of the risk boundary. When on, tool calls are auto-approved up to the selected boundary.</span>
-
-                            <label class="field-block">
-                              <span class="field-label" data-i18n="fieldRiskBoundary">Risk boundary</span>
-                              <div class="segmented-control" id="risk-boundary" data-segmented>
-                                <button type="button" class="segment is-active" data-value="safe" data-i18n="riskSafe">Safe</button>
-                                <button type="button" class="segment" data-value="moderate" data-i18n="riskModerate">Moderate</button>
-                                <button type="button" class="segment" data-value="low" data-i18n="riskUnlimited" data-danger="true">Unlimited</button>
-                              </div>
-                            </label>
-                            <span class="field-help" data-i18n="helpRiskBoundary">Set the highest risk level allowed for auto-approved tool calls.</span>
-
-                            <div class="field-grid">
-                              <label class="field-block">
-                                <span class="field-label" data-i18n="fieldMaxCalls">Max tool calls / min</span>
-                                <div class="segmented-control" id="max-tool-calls" data-segmented>
-                                  <button type="button" class="segment" data-value="10">10</button>
-                                  <button type="button" class="segment" data-value="30">30</button>
-                                  <button type="button" class="segment" data-value="0" data-i18n="limitUnlimited" data-danger="true">Unlimited</button>
-                                </div>
-                              </label>
-
-                              <label class="field-block">
-                                <span class="field-label" data-i18n="fieldBurstLimit">Burst limit</span>
-                                <div class="segmented-control" id="burst-limit" data-segmented>
-                                  <button type="button" class="segment" data-value="1">1</button>
-                                  <button type="button" class="segment" data-value="5">5</button>
-                                  <button type="button" class="segment" data-value="0" data-i18n="limitUnlimited" data-danger="true">Unlimited</button>
-                                </div>
-                              </label>
-                            </div>
-                            <span class="field-help" data-i18n="helpRateLimit">Limit tool-call rate to avoid too many external actions.</span>
+                            <header class="settings-content-head"><h1>权限</h1><p>控制代理可以自动执行的操作范围。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>自动审批</h2><div class="settings-card">
+                              <div class="settings-row"><span><strong>风险边界</strong><small>超过边界的工具调用始终需要确认。</small></span><div class="segmented-control" id="risk-boundary" data-segmented><button type="button" class="segment is-active" data-value="safe">安全</button><button type="button" class="segment" data-value="moderate">适中</button><button type="button" class="segment" data-value="low" data-danger="true">完全访问</button></div></div>
+                              <div class="settings-row"><span><strong>每分钟工具调用</strong><small>限制自动执行的调用频率。</small></span><div class="segmented-control" id="max-tool-calls" data-segmented><button type="button" class="segment" data-value="10">10</button><button type="button" class="segment" data-value="30">30</button><button type="button" class="segment" data-value="0" data-danger="true">不限</button></div></div>
+                              <div class="settings-row"><span><strong>突发调用上限</strong><small>限制短时间内连续执行的操作数量。</small></span><div class="segmented-control" id="burst-limit" data-segmented><button type="button" class="segment" data-value="1">1</button><button type="button" class="segment" data-value="5">5</button><button type="button" class="segment" data-value="0" data-danger="true">不限</button></div></div>
+                            </div></section>
                           </div>
 
-                          <div class="settings-tab-panel" data-settings-tab-panel="runtime">
-                            <label class="field-block">
-                              <span class="field-label">Appearance</span>
-                              <div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="Color theme">
-                                <button class="theme-choice is-active" type="button" data-theme-choice="dark" aria-checked="true">
-                                  <span class="theme-preview theme-preview-dark" aria-hidden="true"><i></i><i></i><i></i></span>
-                                  <span>Dark</span>
-                                </button>
-                                <button class="theme-choice" type="button" data-theme-choice="light" aria-checked="false">
-                                  <span class="theme-preview theme-preview-light" aria-hidden="true"><i></i><i></i><i></i></span>
-                                  <span>Light</span>
-                                </button>
-                              </div>
-                            </label>
-
-                            <label class="field-block">
-                              <span class="field-label">Language</span>
-                              <button class="language-toggle" type="button" id="lang-toggle">EN</button>
-                            </label>
-
-                            <label class="field-block compact-toggle">
-                              <span class="field-label">Show activity panel</span>
-                              <input id="auto-open-activity-panel" type="checkbox" />
-                            </label>
-                            <span class="field-help">Show the activity panel inside assistant messages.</span>
-
-                            <label class="field-block compact-toggle">
-                              <span class="field-label">System monitoring</span>
-                              <input id="system-monitor-enabled" type="checkbox" />
-                            </label>
-                            <span class="field-help">Show live CPU, GPU, memory, disk and network values at the bottom of the IDE.</span>
-
-                            <label class="field-block">
-                              <span class="field-label" data-i18n="fieldWorkspaceRoot">Workspace root</span>
-                              <input id="runtime-workspace-root" type="text" />
-                            </label>
-
-                            <div class="runtime-toolchain-grid" id="runtime-toolchain-grid">
-                              <label class="field-block"><span class="field-label">Cargo</span><input data-toolchain-key="cargo" type="text" /></label>
-                              <label class="field-block"><span class="field-label">NPM</span><input data-toolchain-key="npm" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Python</span><input data-toolchain-key="python" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Java</span><input data-toolchain-key="java" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Javac</span><input data-toolchain-key="javac" type="text" /></label>
-                              <label class="field-block"><span class="field-label">C compiler</span><input data-toolchain-key="c" type="text" /></label>
-                              <label class="field-block"><span class="field-label">C++ compiler</span><input data-toolchain-key="cpp" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Go</span><input data-toolchain-key="go" type="text" /></label>
-                              <label class="field-block"><span class="field-label">.NET</span><input data-toolchain-key="dotnet" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Julia</span><input data-toolchain-key="julia" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Rscript</span><input data-toolchain-key="rscript" type="text" /></label>
-                              <label class="field-block"><span class="field-label">Tectonic</span><input data-toolchain-key="tectonic" type="text" /></label>
-                              <label class="field-block"><span class="field-label">PDFLaTeX</span><input data-toolchain-key="pdflatex" type="text" /></label>
-                            </div>
-                            <span class="field-help">Leave a value as a command name to use PATH, or enter an absolute executable path.</span>
+                          <div class="settings-tab-panel" data-settings-tab-panel="shortcuts">
+                            <header class="settings-content-head"><h1>键盘快捷键</h1><p>常用操作的快捷方式。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>编辑器</h2><div class="settings-card settings-shortcut-list">
+                              <div class="settings-row"><span><strong>发送消息</strong><small>在输入框中发送当前内容。</small></span><kbd>Enter</kbd></div>
+                              <div class="settings-row"><span><strong>插入换行</strong><small>在消息中创建新行。</small></span><kbd>Shift + Enter</kbd></div>
+                              <div class="settings-row"><span><strong>保存文件</strong><small>保存当前编辑器文件。</small></span><kbd>Ctrl + S</kbd></div>
+                              <div class="settings-row"><span><strong>全局搜索</strong><small>聚焦顶部搜索框。</small></span><kbd>Ctrl + K</kbd></div>
+                            </div></section>
                           </div>
 
                           <div class="settings-tab-panel" data-settings-tab-panel="providers">
-                            <div class="provider-list" id="provider-list"></div>
+                            <header class="settings-content-head"><h1>提供商</h1><p>查看 Qwen 与本地能力提供商的连接状态。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>已配置</h2><div class="provider-list settings-card" id="provider-list"></div></section>
                           </div>
-                        </div>
 
-                        <button class="settings-save settings-save-wide" type="button" id="settings-save" data-i18n="settingsSave">Save</button>
+                          <div class="settings-tab-panel" data-settings-tab-panel="runtime">
+                            <header class="settings-content-head"><h1>运行环境</h1><p>设置工作区和本机工具链。</p></header>
+                            <section class="settings-section" data-settings-searchable><h2>工作区</h2><div class="settings-card"><label class="settings-row settings-row-stack"><span><strong>工作区根目录</strong><small>Atlas 读取、编辑和运行代码的默认位置。</small></span><input id="runtime-workspace-root" type="text" /></label></div></section>
+                            <section class="settings-section" data-settings-searchable><h2>工具链</h2><div class="settings-card runtime-toolchain-grid" id="runtime-toolchain-grid">
+                              <label class="settings-row"><span><strong>Cargo</strong></span><input data-toolchain-key="cargo" type="text" /></label><label class="settings-row"><span><strong>NPM</strong></span><input data-toolchain-key="npm" type="text" /></label><label class="settings-row"><span><strong>Python</strong></span><input data-toolchain-key="python" type="text" /></label><label class="settings-row"><span><strong>Java</strong></span><input data-toolchain-key="java" type="text" /></label><label class="settings-row"><span><strong>Javac</strong></span><input data-toolchain-key="javac" type="text" /></label><label class="settings-row"><span><strong>C 编译器</strong></span><input data-toolchain-key="c" type="text" /></label><label class="settings-row"><span><strong>C++ 编译器</strong></span><input data-toolchain-key="cpp" type="text" /></label><label class="settings-row"><span><strong>Go</strong></span><input data-toolchain-key="go" type="text" /></label><label class="settings-row"><span><strong>.NET</strong></span><input data-toolchain-key="dotnet" type="text" /></label><label class="settings-row"><span><strong>Julia</strong></span><input data-toolchain-key="julia" type="text" /></label><label class="settings-row"><span><strong>Rscript</strong></span><input data-toolchain-key="rscript" type="text" /></label><label class="settings-row"><span><strong>Tectonic</strong></span><input data-toolchain-key="tectonic" type="text" /></label><label class="settings-row"><span><strong>PDFLaTeX</strong></span><input data-toolchain-key="pdflatex" type="text" /></label>
+                            </div></section>
+                          </div>
+                          <div class="settings-save-bar"><span id="settings-save-state">更改将在保存后应用</span><button class="settings-save settings-save-wide" type="button" id="settings-save">保存设置</button></div>
+                        </main>
                       </div>
                     </section>
                   </div>
                 </section>
               </section>
               <div class="shell-resizer shell-resizer-browser" id="browser-split-resizer" data-layout-resizer-kind="browser" aria-hidden="true"></div>
+              <div class="shell-resizer shell-resizer-domain" id="domain-split-resizer" data-layout-resizer-kind="domain" role="separator" aria-label="Resize research domain workbench" aria-orientation="vertical" hidden></div>
               <aside class="browser-workspace" id="browser-workspace" hidden>
                 <div class="browser-toolbar">
                   <div class="browser-toolbar-group">
@@ -1094,6 +1102,14 @@
       </div>
     </section>
 
+    <nav class="atlas-context-menu" id="atlas-context-menu" hidden role="menu" aria-label="Atlas text actions">
+      <button type="button" role="menuitem" data-context-action="cut">Cut <kbd>Ctrl+X</kbd></button>
+      <button type="button" role="menuitem" data-context-action="copy">Copy <kbd>Ctrl+C</kbd></button>
+      <button type="button" role="menuitem" data-context-action="paste">Paste <kbd>Ctrl+V</kbd></button>
+      <span></span>
+      <button type="button" role="menuitem" data-context-action="select-all">Select all <kbd>Ctrl+A</kbd></button>
+    </nav>
+
     <section class="sandbox-welcome" id="sandbox-welcome" hidden aria-modal="true" role="dialog" aria-labelledby="sandbox-welcome-title">
       <div class="sandbox-welcome-card">
         <div class="sandbox-welcome-mark" aria-hidden="true"><img src="./atlas-mark.svg" alt="" /></div>
@@ -1188,7 +1204,10 @@
     <script src="./research-workbenches.js?v=20260716b"></script>
     <script src="./research-domains.js?v=20260716b"></script>
     <script src="./research-os.js?v=20260716d"></script>
-    <script src="./app.js?v=20260716b"></script>
+    <script src="./app.js?v=20260718q"></script>
+    <script src="./ssh-remote.js?v=20260717a"></script>
+    <script src="./scientific-infrastructure.js?v=20260718c"></script>
+    <script src="./notebook.js?v=20260717a"></script>
     <script src="./visualization.js?v=20260715b"></script>
     <script src="./system-monitor.js?v=20260714a"></script>
   </body>

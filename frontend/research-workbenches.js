@@ -3,10 +3,10 @@
 
   const WORKBENCHES = Object.freeze({
     "ai-ml": {
-      id: "ml-experiment-console", signature: "RUN MATRIX / METRIC BOARD", mode: "metrics",
-      primary: "Run comparison", secondary: "Metrics & learning curves", inspector: "Checkpoint / hyperparameters", dock: "Experiment timeline",
+      id: "ml-experiment-console", signature: "EXPERIMENT / RUN / REGISTRY", mode: "metrics",
+      primary: "Experiment & run matrix", secondary: "Metrics / version comparison", inspector: "Run / checkpoint / registry", dock: "Experiment → deployment lineage",
       columns: "260px minmax(390px, 1fr) 250px", areas: '"primary secondary inspector" "dock dock inspector"',
-      commands: ["Metric board", "Runs", "Checkpoints", "Hyperparameters"],
+      commands: ["Runs", "Metric board", "Checkpoints", "Registry versions", "Artifacts"],
     },
     "computer-vision": {
       id: "vision-annotation-console", signature: "MEDIA / ANNOTATION / FRAMES", mode: "image",
@@ -33,10 +33,10 @@
       commands: ["Model", "Sketch", "Constraints", "Section", "Assembly"],
     },
     robotics: {
-      id: "robot-runtime-console", signature: "DISPLAY / TF / SENSOR / MOTION", mode: "robot",
-      primary: "Displays & TF", secondary: "Robot scene / occupancy map", inspector: "Joint & sensor state", dock: "ROS time / motion timeline",
+      id: "robot-physics-console", signature: "WORLD / PHYSICS / JOINT / SENSOR", mode: "robot",
+      primary: "World & bodies", secondary: "Interactive physics viewport", inspector: "Joint / collision / sensor", dock: "Simulation & trajectory timeline",
       columns: "205px minmax(440px,1fr) 250px", areas: '"primary secondary inspector" "primary dock inspector"',
-      commands: ["TF frames", "Robot model", "Sensors", "Trajectory", "Map"],
+      commands: ["Simulation", "Robot model", "Joints", "Sensors", "Trajectory"],
     },
     "computer-networks": {
       id: "packet-analysis-console", signature: "PACKETS / PROTOCOL / BYTES", mode: "packets",
@@ -63,22 +63,22 @@
       commands: ["SQL / results", "Actual plan", "Schema", "Locks", "Storage"],
     },
     "software-engineering": {
-      id: "engineering-governance-console", signature: "ARCHITECTURE / CHANGE / RELEASE", mode: "architecture",
-      primary: "Modules & ownership", secondary: "Architecture / dependency map", inspector: "Change health & gates", dock: "Milestones / release train",
-      columns: "220px minmax(430px,1fr) 250px", areas: '"primary secondary inspector" "primary dock dock"',
-      commands: ["Architecture", "Dependencies", "Issues", "Milestones", "Release"],
+      id: "repository-history-console", signature: "REFERENCE / COMMIT / DIFF / MERGE", mode: "repository",
+      primary: "References & repository tree", secondary: "Commit DAG / revision diff", inspector: "Commit / hunk / conflict", dock: "Branch history & merge state",
+      columns: "215px minmax(450px,1fr) 255px", areas: '"primary secondary inspector" "primary dock inspector"',
+      commands: ["Commit graph", "Revision diff", "Branches", "Merge state", "History"],
     },
     "program-analysis": {
-      id: "binary-analysis-console", signature: "SYMBOL / DISASSEMBLY / CFG / FACTS", mode: "binary",
-      primary: "Symbols & cross-references", secondary: "Disassembly / decompiler", inspector: "Control/data-flow graph", dock: "Facts / trace / coverage",
+      id: "semantic-query-console", signature: "CODE DATABASE / QUERY / PATH", mode: "semantic",
+      primary: "Queries & code databases", secondary: "Semantic query / source", inspector: "Path / predicate inspector", dock: "Call graph & data-flow steps",
       columns: "210px minmax(390px,1fr) minmax(270px,.75fr)", areas: '"primary secondary inspector" "primary dock inspector"',
-      commands: ["CFG", "Disassembly", "Decompiler", "Data flow", "Coverage"],
+      commands: ["Query console", "Results", "Call graph", "Data flow", "Security paths"],
     },
     "cyber-security": {
-      id: "security-operations-console", signature: "FINDING / EVIDENCE / ATTACK PATH", mode: "security",
-      primary: "Findings & threat queue", secondary: "Evidence / attack graph", inspector: "Risk & remediation", dock: "Threat timeline / audit trail",
-      columns: "250px minmax(430px,1fr) 245px", areas: '"primary secondary inspector" "primary dock inspector"',
-      commands: ["Attack paths", "Findings", "Evidence", "Risk", "Audit trail"],
+      id: "reverse-engineering-console", signature: "SYMBOL / DISASSEMBLY / DECOMPILER", mode: "reverse",
+      primary: "Programs, symbols & functions", secondary: "Decompiler / disassembly", inspector: "Function / reference inspector", dock: "Function graph / memory map",
+      columns: "225px minmax(440px,1fr) 255px", areas: '"primary secondary inspector" "primary dock inspector"',
+      commands: ["Decompiler", "Disassembly", "Function graph", "Xrefs", "Memory map"],
     },
     hpc: {
       id: "parallel-profile-console", signature: "JOB / RANK / GPU / COUNTERS", mode: "gpu",
@@ -87,16 +87,16 @@
       commands: ["GPU timeline", "Jobs", "Ranks", "Kernels", "Counters"],
     },
     "distributed-systems": {
-      id: "distributed-observability-console", signature: "CLUSTER / SERVICE / TRACE / CONSENSUS", mode: "cluster",
-      primary: "Cluster & namespace", secondary: "Service topology / health", inspector: "Replica / SLO details", dock: "Request waterfall / consensus",
+      id: "container-runtime-console", signature: "COMPOSE / CONTAINER / IMAGE / LOG", mode: "containers",
+      primary: "Compose, containers & images", secondary: "Runtime topology / lifecycle", inspector: "Container / mount / health", dock: "Log streams & runtime events",
       columns: "215px minmax(430px,1fr) 250px", areas: '"primary secondary inspector" "primary dock dock"',
-      commands: ["Services", "Cluster", "Requests", "Replicas", "Consensus"],
+      commands: ["Runtime", "Containers", "Images", "Volumes", "Logs"],
     },
     "scientific-computing": {
-      id: "numerical-model-console", signature: "MODEL / EQUATION / FIELD / SOLVER", mode: "scientific",
-      primary: "Model & variables", secondary: "Field / surface visualization", inspector: "Equation & solver properties", dock: "Convergence / study timeline",
+      id: "scientific-visualization-console", signature: "PIPELINE / DATASET / FIELD / VIEW", mode: "scientific",
+      primary: "Visualization pipeline & arrays", secondary: "3D volume / surface / slice", inspector: "Field / cell / transfer function", dock: "Simulation time & pipeline state",
       columns: "220px minmax(440px,1fr) 255px", areas: '"primary secondary inspector" "primary dock inspector"',
-      commands: ["Fields", "Model", "Equations", "Mesh", "Convergence"],
+      commands: ["Volume", "Surface", "Slice", "Contour", "Streamline"],
     },
   });
 
@@ -544,6 +544,57 @@
     return host;
   }
 
+  function simulationConsole(context) {
+    const host = el("div", "atlas-wb-simulation-console");
+    const controls = el("header");
+    const running = context.workspaceState?.ui?.simulation_state === "running";
+    const run = el("button", running ? "is-running" : "", running ? "Pause" : "Run");
+    const step = el("button", "", "Step");
+    const reset = el("button", "", "Reset");
+    const clock = el("code", "", `STEP ${context.workspaceState?.ui?.simulation_step || 0}`);
+    run.type = step.type = reset.type = "button";
+    run.addEventListener("click", () => context.updateUi?.({ simulation_state: running ? "paused" : "running", selection_kind: "physics-clock" }));
+    step.addEventListener("click", () => context.updateUi?.({ simulation_state: "paused", simulation_step: Number(context.workspaceState?.ui?.simulation_step || 0) + 1, selection_kind: "physics-step" }));
+    reset.addEventListener("click", () => context.updateUi?.({ simulation_state: "paused", simulation_step: 0, time_index: 0, selection_kind: "physics-reset" }));
+    controls.append(run, step, reset, clock);
+    host.append(controls, viewport(context, "robot"));
+    return host;
+  }
+
+  function linkedCodeWorkbench(context, kind, labels) {
+    const host = el("div", `atlas-wb-linked-code is-${kind}`);
+    labels.forEach(([label, matcher]) => {
+      const section = el("section");
+      const narrowed = (context.documentData?.nodes || []).filter((node) => matcher.test(`${node.category || ""} ${node.label || ""}`));
+      section.append(el("header", "", label), codePane({ ...context, documentData: { ...context.documentData, metadata: {}, nodes: narrowed.length ? narrowed : context.documentData?.nodes || [] } }, label.toLowerCase()));
+      host.appendChild(section);
+    });
+    return host;
+  }
+
+  function repositoryWorkbench(context) {
+    const host = el("div", "atlas-wb-repository-workbench");
+    const graphPane = el("section");
+    graphPane.append(el("header", "", "COMMIT DAG"), graph(context, "commit-dag"));
+    const diffPane = el("section");
+    diffPane.append(el("header", "", "REVISION DIFF"), codePane(context, "diff"));
+    host.append(graphPane, diffPane);
+    return host;
+  }
+
+  function containerRuntime(context) {
+    const host = el("div", "atlas-wb-container-runtime");
+    const lifecycle = el("header");
+    ["Create", "Start", "Pause", "Restart", "Stop"].forEach((label) => {
+      const button = el("button", "", label);
+      button.type = "button";
+      button.addEventListener("click", () => context.updateUi?.({ container_operation: label.toLowerCase(), selection_kind: "container-lifecycle" }));
+      lifecycle.appendChild(button);
+    });
+    host.append(lifecycle, graph(context, "container-topology"));
+    return host;
+  }
+
   function timeline(context, mode) {
     const host = el("div", `atlas-wb-timeline is-${mode}`);
     const events = context.documentData?.events || context.documentData?.frames || [];
@@ -665,12 +716,12 @@
       "operating-systems": { "Process / thread": ui.selection_id || "—", "Time range": ui.time_cursor ?? "—", "Symbol status": parameters.symbol_path ? "configured" : "not configured", "Trace profile": parameters.trace_profile || "—" },
       compiler: { "Source selection": ui.selection_id || "—", "IR stage": ui.workbench_view || "—", "Target": parameters.target_triple || "—", "Pass pipeline": parameters.pass_pipeline || "—" },
       database: { "Connection": parameters.connection || "—", "Schema": parameters.schema || "—", "Plan node / row": ui.selection_id || "—", "Transaction": parameters.transaction_mode || "—" },
-      "software-engineering": { "Module / change": ui.selection_id || asset?.name || "—", "Quality gate": parameters.quality_gate || "—", "Release": parameters.release_channel || "—", "Revision owner": context.workspaceState?.updated_by || "system" },
-      "program-analysis": { "Address / symbol": ui.selection_id || "—", "Selection type": ui.selection_kind || "—", "Trace cursor": ui.time_cursor ?? "—", "Confidence": parameters.confidence_threshold || "—" },
-      "cyber-security": { "Authorized scope": parameters.authorized_scope || "not declared", "Finding / path": ui.selection_id || "—", "Evidence type": ui.selection_kind || "—", "Retest": lastRun.status || "—" },
+      "software-engineering": { "Reference / commit": ui.selection_id || asset?.name || "—", "Diff algorithm": parameters.diff_algorithm || "—", "Rename detection": parameters.rename_detection || "—", "Merge state": ui.merge_state || lastRun.status || "clean" },
+      "program-analysis": { "Query / result": ui.selection_id || "—", "Selection type": ui.selection_kind || "—", "Code database": parameters.fact_database || "—", "Confidence": parameters.confidence_threshold || "—" },
+      "cyber-security": { "Address / function": ui.selection_id || asset?.name || "—", "Selection type": ui.selection_kind || "—", "Language / compiler": parameters.scanner_profile || "auto", "Analysis state": lastRun.status || "—" },
       hpc: { "Rank / kernel": ui.selection_id || "—", "Time cursor": ui.time_cursor ?? "—", "Node / ranks": `${parameters.node_count || "—"} / ${parameters.rank_count || "—"}`, "Affinity": parameters.affinity || "—" },
-      "distributed-systems": { "Context": parameters.cluster_context || "—", "Namespace": parameters.namespace || "—", "Service / span": ui.selection_id || "—", "SLO window": parameters.time_window || "—" },
-      "scientific-computing": { "Variable / region": ui.selection_id || "—", "Solver": parameters.solver || "—", "Tolerance": parameters.tolerance || "—", "Iteration": ui.time_index ?? "—" },
+      "distributed-systems": { "Engine / project": parameters.cluster_context || "local", "Container / image": ui.selection_id || "—", "Lifecycle op": ui.container_operation || "inspect", "Health": lastRun.status || "—" },
+      "scientific-computing": { "Dataset / array": ui.selection_id || "—", "Representation": ui.workbench_view || "volume", "Field association": parameters.solver || "point / cell", "Time step": ui.time_index ?? "—" },
     };
     const values = { ...base, ...(domainValues[context.domainId] || {}), "Agent API": context.spec.agentApi };
     Object.entries(values).forEach(([key, value]) => {
@@ -684,14 +735,15 @@
   function primaryContent(context, definition) {
     if (context.domainId === "ai-ml") return runMatrix(context);
     if (context.domainId === "compiler") return compilerCorrelation(context);
-    if (context.domainId === "program-analysis") return codePane(context, definition.mode);
+    if (context.domainId === "program-analysis") return editableConsole(context, "query", [["Run Query", "query", "scan"], ["Build Database", "database", "index"]]);
+    if (context.domainId === "cyber-security") return objectTree(context, "symbol-function");
     if (context.domainId === "computer-networks") return packetTable(context);
     if (context.domainId === "operating-systems" || context.domainId === "cyber-security") return dataGrid(context);
     if (context.domainId === "hpc") return objectTree(context, "job-rank");
     if (context.domainId === "nlp") return editableConsole(context, "prompt", [["Run", "prompt", "run"], ["Tokenize", "token"], ["Retrieve", "retrieve"]]);
     const treeKinds = {
       "computer-graphics": "scene", cad: "feature", robotics: "display", database: "schema",
-      "software-engineering": "module", "distributed-systems": "cluster", "scientific-computing": "model",
+      "software-engineering": "reference", "distributed-systems": "container", "scientific-computing": "pipeline",
     };
     if (treeKinds[context.domainId]) return objectTree(context, treeKinds[context.domainId]);
     return assetRows(context, 20);
@@ -699,10 +751,15 @@
 
   function secondaryContent(context, definition) {
     if (definition.mode === "metrics") return metricBoard(context);
-    if (["viewport", "image", "cad", "robot", "scientific"].includes(definition.mode)) return viewport(context, definition.mode);
+    if (definition.mode === "robot") return simulationConsole(context);
+    if (["viewport", "image", "cad", "scientific"].includes(definition.mode)) return viewport(context, definition.mode);
     if (["timeline", "gpu"].includes(definition.mode)) return timeline(context, definition.mode);
     if (definition.mode === "database") return databaseConsole(context);
-    if (["compiler", "binary"].includes(definition.mode)) return codePane(context, definition.mode);
+    if (definition.mode === "repository") return repositoryWorkbench(context);
+    if (definition.mode === "semantic") return linkedCodeWorkbench(context, "semantic", [["QUERY / SOURCE", /query|source|predicate/i], ["PATH STEPS", /flow|path|call|result/i]]);
+    if (definition.mode === "reverse") return linkedCodeWorkbench(context, "reverse", [["DECOMPILER", /decomp|function|variable/i], ["DISASSEMBLY", /instruction|block|assembly/i]]);
+    if (definition.mode === "containers") return containerRuntime(context);
+    if (definition.mode === "compiler") return codePane(context, definition.mode);
     if (definition.mode === "packets") return protocolTree(context);
     if (definition.mode === "tokens") return tokenFlow(context);
     return graph(context, definition.mode);
@@ -767,32 +824,32 @@
       return dataGrid(context);
     }
     if (context.domainId === "software-engineering") {
-      if (key.includes("issue")) return dataGrid(context);
-      if (key.includes("milestone") || key.includes("release")) return timeline(context, key);
-      return graph(context, key);
+      if (key.includes("diff")) return codePane(context, "revision-diff");
+      if (key.includes("history")) return timeline(context, "commit-history");
+      if (key.includes("merge")) return dataGrid(context);
+      return repositoryWorkbench(context);
     }
     if (context.domainId === "program-analysis") {
-      if (key === "cfg" || key.includes("flow")) return graph(context, key);
-      if (key.includes("coverage")) return dataGrid(context);
-      return codePane(context, key);
+      if (key.includes("graph") || key.includes("flow") || key.includes("path")) return graph(context, key);
+      if (key.includes("result")) return dataGrid(context);
+      return editableConsole(context, "query", [["Run Query", "query", "scan"], ["Build Database", "database"]]);
     }
     if (context.domainId === "cyber-security") {
-      if (key.includes("path") || key.includes("risk")) return graph(context, key);
-      return dataGrid(context);
+      if (key.includes("graph") || key.includes("xref") || key.includes("memory")) return graph(context, key);
+      return linkedCodeWorkbench(context, "reverse", [["DECOMPILER", /decomp|function|variable/i], ["DISASSEMBLY", /instruction|block|assembly/i]]);
     }
     if (context.domainId === "hpc") {
       if (key.includes("timeline")) return timeline(context, "gpu");
       return dataGrid(context);
     }
     if (context.domainId === "distributed-systems") {
-      if (key.includes("service") || key.includes("cluster") || key.includes("replica")) return graph(context, key);
-      if (key.includes("request") || key.includes("consensus")) return timeline(context, key);
+      if (key.includes("log") || key.includes("runtime")) return timeline(context, "container-events");
+      if (key.includes("image") || key.includes("volume")) return objectTree(context, key);
+      return containerRuntime(context);
     }
     if (context.domainId === "scientific-computing") {
-      if (key.includes("field") || key === "mesh") return viewport(context, "scientific");
-      if (key.includes("equation")) return codePane(context, "equation");
-      if (key.includes("convergence")) return metricBoard(context);
-      return graph(context, "model");
+      if (/volume|surface|slice|contour|streamline/.test(key)) return viewport(context, "scientific");
+      return graph(context, "visualization-pipeline");
     }
     return secondaryContent(context, definition);
   }
@@ -803,6 +860,11 @@
     if (context.domainId === "computer-networks") return graph(context, "flow");
     if (context.domainId === "compiler") return graph(context, "cfg");
     if (context.domainId === "database") return graph(context, "plan");
+    if (context.domainId === "software-engineering") return timeline(context, "branch-history");
+    if (context.domainId === "program-analysis") return graph(context, "data-flow-path");
+    if (context.domainId === "cyber-security") return graph(context, "function-graph");
+    if (context.domainId === "distributed-systems") return timeline(context, "container-events");
+    if (context.domainId === "scientific-computing") return timeline(context, "simulation-time");
     if (["timeline", "gpu", "metrics", "cluster", "security", "architecture", "robot", "cad", "viewport"].includes(definition.mode)) return timeline(context, definition.mode);
     return graph(context, definition.mode);
   }

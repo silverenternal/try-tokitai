@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tao::window::{Icon, WindowBuilder};
+use tao::window::{Icon, Window, WindowBuilder};
 use tokio::sync::mpsc::UnboundedReceiver;
 use wry::http::Request;
 use wry::{Rect, WebContext, WebView, WebViewBuilder};
@@ -31,9 +31,9 @@ enum DesktopEvent {
         request_id: String,
         response: HostBridgeResponse,
     },
-    StreamEvent {
+    StreamEvents {
         stream_id: String,
-        event: Value,
+        events: Vec<Value>,
     },
     StreamClosed {
         stream_id: String,
@@ -67,6 +67,8 @@ struct NativeWindowRequest {
     action: String,
     #[serde(default)]
     workspace: String,
+    #[serde(default)]
+    state: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +111,9 @@ fn main() -> Result<()> {
     let desktop_paths =
         ai_assistant::app_paths::AppPaths::for_desktop_project(&requested_workspace)
             .unwrap_or_else(|| ai_assistant::app_paths::AppPaths::for_local_dev(cwd.clone()));
+    let desktop_session_path = desktop_paths.state_dir().join("desktop-session.json");
+    let desktop_restore_state =
+        load_desktop_session_state(&desktop_session_path, &requested_workspace);
 
     let host = WebHostConfig {
         paths: desktop_paths.clone(),
@@ -136,6 +141,10 @@ fn main() -> Result<()> {
         meta.insert("projectId".into(), json!(project_id));
         meta.insert("windowId".into(), json!(window_id));
         meta.insert("workspaceRoot".into(), json!(requested_workspace));
+        meta.insert(
+            "restoreState".into(),
+            desktop_restore_state.clone().unwrap_or(Value::Null),
+        );
     }
 
     let async_runtime = Arc::new(tokio::runtime::Runtime::new()?);
@@ -178,14 +187,20 @@ fn main() -> Result<()> {
 
     let event_loop = EventLoopBuilder::<DesktopEvent>::with_user_event().build();
     let event_proxy = event_loop.create_proxy();
-    let window = WindowBuilder::new()
+    let mut window_builder = WindowBuilder::new()
         .with_title("Atlas IDE")
         .with_window_icon(build_atlas_window_icon())
         .with_decorations(false)
         .with_resizable(true)
         .with_min_inner_size(LogicalSize::new(900.0, 600.0))
-        .with_inner_size(LogicalSize::new(1440.0, 920.0))
-        .build(&event_loop)?;
+        .with_inner_size(restored_window_size(&desktop_restore_state));
+    if let Some(position) = restored_window_position(&desktop_restore_state) {
+        window_builder = window_builder.with_position(position);
+    }
+    let window = window_builder.build(&event_loop)?;
+    if restored_window_maximized(&desktop_restore_state) {
+        window.set_maximized(true);
+    }
 
     let initialization_script = build_initialization_script(&frontend_host_meta);
     let ipc_proxy = event_proxy.clone();
@@ -222,6 +237,7 @@ fn main() -> Result<()> {
     let url = format!("http://{}", server_addr);
     let webview = builder
         .with_web_context(&mut shell_web_context)
+        .with_background_color((24, 24, 24, 255))
         .with_initialization_script(&initialization_script)
         .with_ipc_handler(move |req: Request<String>| {
             if let Err(err) = handle_ipc_message(
@@ -240,9 +256,12 @@ fn main() -> Result<()> {
     // The browser child WebView is intentionally lazy. Creating two WebView2 controllers at
     // startup made chat-only sessions vulnerable to native controller/message-loop failures.
     let mut native_browser: Option<WebView> = None;
+    let mut close_deadline: Option<Instant> = None;
 
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        *control_flow = close_deadline
+            .map(ControlFlow::WaitUntil)
+            .unwrap_or(ControlFlow::Wait);
 
         match event {
             Event::NewEvents(StartCause::Init) => {}
@@ -250,13 +269,29 @@ fn main() -> Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                // Wry 0.40/WebView2 can trip a native stack guard while two webviews are
-                // synchronously torn down with their parent HWND. The OS owns the remaining
-                // browser processes, so exiting here avoids the unsafe destructor ordering.
-                if let Some(browser) = native_browser.as_ref() {
-                    let _ = browser.set_visible(false);
+                if close_deadline.is_none() {
+                    close_deadline = Some(Instant::now() + Duration::from_secs(2));
+                    if let Err(err) = webview.evaluate_script(
+                        "window.__ATLAS_REQUEST_CLOSE__ && window.__ATLAS_REQUEST_CLOSE__();",
+                    ) {
+                        eprintln!("desktop state capture request failed: {}", err);
+                        let _ = persist_desktop_session_state(
+                            &desktop_session_path,
+                            &requested_workspace,
+                            Value::Null,
+                            &window,
+                        );
+                        std::process::exit(0);
+                    }
                 }
-                window.set_visible(false);
+            }
+            Event::MainEventsCleared if close_deadline.is_some_and(|deadline| Instant::now() >= deadline) => {
+                let _ = persist_desktop_session_state(
+                    &desktop_session_path,
+                    &requested_workspace,
+                    Value::Null,
+                    &window,
+                );
                 std::process::exit(0);
             }
             Event::UserEvent(DesktopEvent::InvokeResult {
@@ -267,8 +302,8 @@ fn main() -> Result<()> {
                     eprintln!("desktop bridge invoke dispatch error: {}", err);
                 }
             }
-            Event::UserEvent(DesktopEvent::StreamEvent { stream_id, event }) => {
-                let event_json = match serde_json::to_string(&event) {
+            Event::UserEvent(DesktopEvent::StreamEvents { stream_id, events }) => {
+                let events_json = match serde_json::to_string(&events) {
                     Ok(value) => value,
                     Err(err) => {
                         eprintln!("desktop bridge stream serialization error: {}", err);
@@ -276,7 +311,7 @@ fn main() -> Result<()> {
                     }
                 };
                 let script = format!(
-                    "window.__ATLAS_BRIDGE_STREAM_PUSH__ && window.__ATLAS_BRIDGE_STREAM_PUSH__({stream_id:?}, {event_json});",
+                    "window.__ATLAS_BRIDGE_STREAM_PUSH_BATCH__ && window.__ATLAS_BRIDGE_STREAM_PUSH_BATCH__({stream_id:?}, {events_json});",
                 );
                 if let Err(err) = webview.evaluate_script(&script) {
                     eprintln!("desktop bridge stream push error: {}", err);
@@ -385,7 +420,40 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    "open_vscode" => {
+                        let target = PathBuf::from(request.workspace.trim());
+                        if target.exists() {
+                            let mut command = std::process::Command::new("code");
+                            command.arg(target).hide_window();
+                            if let Err(err) = command.spawn() {
+                                eprintln!("open in VS Code failed: {}", err);
+                            }
+                        }
+                    }
+                    "open_system" => {
+                        let target = PathBuf::from(request.workspace.trim());
+                        if target.exists() {
+                            let mut command = std::process::Command::new("explorer.exe");
+                            if target.is_file() {
+                                command.arg(format!("/select,{}", target.display()));
+                            } else {
+                                command.arg(target);
+                            }
+                            command.hide_window();
+                            if let Err(err) = command.spawn() {
+                                eprintln!("open in system explorer failed: {}", err);
+                            }
+                        }
+                    }
                     "close" => {
+                        if let Err(err) = persist_desktop_session_state(
+                            &desktop_session_path,
+                            &requested_workspace,
+                            request.state,
+                            &window,
+                        ) {
+                            eprintln!("desktop session state save failed: {}", err);
+                        }
                         if let Some(browser) = native_browser.as_ref() {
                             let _ = browser.set_visible(false);
                         }
@@ -406,10 +474,30 @@ fn main() -> Result<()> {
 }
 
 fn command_line_workspace() -> Option<PathBuf> {
-    let mut args = std::env::args_os().skip(1);
-    while let Some(arg) = args.next() {
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < args.len() {
+        let arg = &args[index];
         if arg == "--workspace" {
-            return args.next().map(PathBuf::from).filter(|v| v.is_dir());
+            // Windows launchers occasionally pass an unquoted path containing spaces. Rejoin
+            // adjacent non-option arguments and prefer the longest existing directory.
+            let mut best = None;
+            let mut joined = String::new();
+            for value in args.iter().skip(index + 1) {
+                let part = value.to_string_lossy();
+                if part.starts_with("--") {
+                    break;
+                }
+                if !joined.is_empty() {
+                    joined.push(' ');
+                }
+                joined.push_str(&part);
+                let candidate = PathBuf::from(&joined);
+                if candidate.is_dir() {
+                    best = Some(candidate);
+                }
+            }
+            return best;
         }
         if let Some(value) = arg.to_string_lossy().strip_prefix("--workspace=") {
             let path = PathBuf::from(value);
@@ -417,6 +505,7 @@ fn command_line_workspace() -> Option<PathBuf> {
                 return Some(path);
             }
         }
+        index += 1;
     }
     None
 }
@@ -432,6 +521,96 @@ fn last_desktop_workspace() -> Option<PathBuf> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
+}
+
+fn load_desktop_session_state(
+    path: &std::path::Path,
+    workspace: &std::path::Path,
+) -> Option<Value> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: Value = serde_json::from_str(&content).ok()?;
+    let saved_workspace = value.get("workspace_root")?.as_str()?;
+    if PathBuf::from(saved_workspace) != workspace {
+        return None;
+    }
+    Some(value)
+}
+
+fn restored_window_size(state: &Option<Value>) -> LogicalSize<f64> {
+    let width = state
+        .as_ref()
+        .and_then(|value| value.pointer("/window/width"))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(1440.0)
+        .max(900.0);
+    let height = state
+        .as_ref()
+        .and_then(|value| value.pointer("/window/height"))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(920.0)
+        .max(600.0);
+    LogicalSize::new(width, height)
+}
+
+fn restored_window_position(state: &Option<Value>) -> Option<LogicalPosition<f64>> {
+    let value = state.as_ref()?;
+    let x = value.pointer("/window/x")?.as_f64()?;
+    let y = value.pointer("/window/y")?.as_f64()?;
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(LogicalPosition::new(x, y))
+}
+
+fn restored_window_maximized(state: &Option<Value>) -> bool {
+    state
+        .as_ref()
+        .and_then(|value| value.pointer("/window/maximized"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn persist_desktop_session_state(
+    path: &std::path::Path,
+    workspace: &std::path::Path,
+    client_state: Value,
+    window: &Window,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let scale = window.scale_factor();
+    let size = window.inner_size().to_logical::<f64>(scale);
+    let position = window
+        .outer_position()
+        .ok()
+        .map(|position| position.to_logical::<f64>(scale));
+    let saved_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let value = json!({
+        "version": 1,
+        "saved_at": saved_at,
+        "workspace_root": workspace,
+        "window": {
+            "x": position.map(|value| value.x),
+            "y": position.map(|value| value.y),
+            "width": size.width,
+            "height": size.height,
+            "maximized": window.is_maximized(),
+        },
+        "client": client_state,
+    });
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&value)?)?;
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    std::fs::rename(temporary, path)?;
+    Ok(())
 }
 
 fn build_atlas_window_icon() -> Option<Icon> {
@@ -487,6 +666,9 @@ fn handle_ipc_message(
             });
         }
         BridgeIpcMessage::OpenStream(request) => {
+            // dispatch_bridge_stream creates Tokio tasks synchronously. IPC callbacks run on
+            // Wry's UI thread, so enter the owned runtime before opening the native stream.
+            let _runtime_guard = async_runtime.enter();
             match runtime
                 .open_stream(&request.command, request.payload)
                 .with_context(|| format!("failed to open stream '{}'", request.command))
@@ -525,11 +707,26 @@ fn forward_stream(
     event_proxy: EventLoopProxy<DesktopEvent>,
 ) {
     async_runtime.spawn(async move {
-        while let Some(event) = receiver.recv().await {
+        let mut saw_terminal_event = false;
+        while let Some(first_event) = receiver.recv().await {
+            let mut events = vec![first_event];
+            tokio::time::sleep(Duration::from_millis(12)).await;
+            while events.len() < 128 {
+                match receiver.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(_) => break,
+                }
+            }
+            saw_terminal_event |= events.iter().any(|event| {
+                event
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "complete" | "error"))
+            });
             if event_proxy
-                .send_event(DesktopEvent::StreamEvent {
+                .send_event(DesktopEvent::StreamEvents {
                     stream_id: stream_id.clone(),
-                    event,
+                    events,
                 })
                 .is_err()
             {
@@ -539,7 +736,9 @@ fn forward_stream(
 
         let _ = event_proxy.send_event(DesktopEvent::StreamClosed {
             stream_id,
-            error: None,
+            error: (!saw_terminal_event).then(|| {
+                "desktop agent stream closed before a complete or error event".to_string()
+            }),
         });
     });
 }
@@ -646,6 +845,25 @@ fn build_initialization_script(host_meta: &Value) -> String {
     send(payload = {{}}) {{
       window.ipc.postMessage(JSON.stringify({{ kind: "native_window", ...payload }}));
     }}
+  }};
+
+  window.__ATLAS_BRIDGE_STREAM_PUSH_BATCH__ = (id, events) => {{
+    if (!Array.isArray(events)) return;
+    for (const event of events) {{
+      window.__ATLAS_BRIDGE_STREAM_PUSH__(id, event);
+    }}
+  }};
+  let closeRequested = false;
+  window.__ATLAS_REQUEST_CLOSE__ = () => {{
+    if (closeRequested) return;
+    closeRequested = true;
+    let state = {{}};
+    try {{
+      state = window.AtlasWorkspaceBridge?.capture?.() || {{}};
+    }} catch (error) {{
+      console.warn("Atlas desktop state capture failed", error);
+    }}
+    window.__ATLAS_NATIVE_WINDOW__.send({{ action: "close", state }});
   }};
 }})();
 "#

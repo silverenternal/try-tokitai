@@ -137,7 +137,7 @@ expect(registry.includes("content_revision"), "workspace-to-agent synchronizatio
 expect(registry.includes("DomainWorkbenchStageDescriptor"), "domain workbenches do not expose workflow contracts");
 expect(registry.includes("fn workflow_for"), "domain workbenches do not define domain-specific quality gates");
 expect(registry.includes("fn intents_for"), "domain workbenches do not define domain-specific natural-language task contracts");
-expect(registry.includes("text-to-parametric-model") && registry.includes("gpu-profile-study") && registry.includes("cluster-diagnosis"), "task contracts are not distributed across all research domains");
+expect(registry.includes("text-to-parametric-model") && registry.includes("gpu-profile-study") && registry.includes("container-runtime-inspection"), "task contracts are not distributed across all research domains");
 expect(web.includes("/api/research-domains/state"), "shared Research Domain workspace state API is missing");
 expect(web.includes("research_domain_workspace_state"), "Agent cannot read or update live domain workspace state");
 expect(web.includes("/api/research-domains/actions"), "Research Domain Action Catalog API is missing");
@@ -152,6 +152,27 @@ expect(workbenches.includes("database-query-console"), "Database workbench does 
 expect(domainSpecs.includes("environmentContracts"), "domain environments do not own independent IA/runtime contracts");
 for (const contractField of ["runtime", "agentApi", "selectionModel", "previewTarget", "navigation"]) {
   expect(domainSpecs.includes(`${contractField}:`), `domain environment contract is missing ${contractField}`);
+}
+for (const contractField of ["object_model", "interaction_model", "inspector_model", "visualization_model", "runtime", "preview_kind"]) {
+  expect(registry.includes(contractField), `Atlas Core professional contract is missing ${contractField}`);
+}
+for (const capability of [
+  "MLflow", "OpenCV", "Hugging Face", "Blender", "OpenCascade", "PyBullet", "Wireshark", "Windows ETW",
+  "LLVM", "DuckDB", "libgit2", "CodeQL", "Ghidra", "CUDA", "Docker Engine API", "ParaView",
+]) {
+  expect(`${domainSpecs}\n${registry}`.includes(capability), `missing capability-aligned environment contract for ${capability}`);
+}
+for (const workbench of [
+  "ml-experiment-console", "vision-annotation-console", "language-reasoning-console", "graphics-scene-console",
+  "parametric-cad-console", "robot-physics-console", "packet-analysis-console", "system-performance-console",
+  "compiler-explorer-console", "database-query-console", "repository-history-console", "semantic-query-console",
+  "reverse-engineering-console", "parallel-profile-console", "container-runtime-console", "scientific-visualization-console",
+]) {
+  expect(workbenches.includes(workbench), `missing unique professional workbench ${workbench}`);
+}
+expect(domains.includes("DOMAIN_PREVIEW_GRAMMARS"), "professional environments do not own preview-card grammars");
+for (const grammar of ["experiment-lineage", "media-overlay", "token-retrieval", "commit-dag", "reverse-engineering", "container-runtime", "vtk-pipeline"]) {
+  expect(domains.includes(grammar), `missing domain preview grammar ${grammar}`);
 }
 for (const environmentApi of [
   "atlas.ml.experiment", "atlas.vision.annotation", "atlas.language.trace", "atlas.graphics.scene",

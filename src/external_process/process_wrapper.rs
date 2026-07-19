@@ -180,6 +180,19 @@ impl ProcessWrapper {
     /// * `Result<Command>` - Configured tokio::process::Command
     fn build_command(&self, input: &serde_json::Map<String, Value>) -> Result<Command> {
         let config = self.config();
+        #[cfg(windows)]
+        let mut cmd = if config.executable.eq_ignore_ascii_case("echo") {
+            let mut command = Command::new("cmd");
+            command.args(["/D", "/C", "echo"]);
+            command
+        } else if config.executable.eq_ignore_ascii_case("sleep") {
+            let mut command = Command::new("powershell");
+            command.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep"]);
+            command
+        } else {
+            Command::new(&config.executable)
+        };
+        #[cfg(not(windows))]
         let mut cmd = Command::new(&config.executable);
         cmd.hide_window();
 

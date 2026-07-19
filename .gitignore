@@ -1,6 +1,7 @@
 /target
 /target*
 /dist/
+/output/
 /.atlas/
 /tmp/
 targetserver.log

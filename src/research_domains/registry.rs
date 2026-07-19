@@ -668,12 +668,20 @@ fn include_walk_entry(entry: &DirEntry) -> bool {
     if entry.depth() == 0 || !entry.file_type().is_dir() {
         return true;
     }
+    let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+    if name == ".atlas" {
+        return true;
+    }
+    if entry
+        .path()
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|parent| parent.to_string_lossy().eq_ignore_ascii_case(".atlas"))
+    {
+        return name == "domain-actions";
+    }
     !matches!(
-        entry
-            .file_name()
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .as_str(),
+        name.as_str(),
         ".git"
             | ".svn"
             | ".hg"
@@ -686,7 +694,6 @@ fn include_walk_entry(entry: &DirEntry) -> bool {
             | ".venv"
             | "venv"
             | "__pycache__"
-            | ".atlas"
     )
 }
 
@@ -781,7 +788,10 @@ fn infer_from_assets(
             let terms = descriptor
                 .capabilities
                 .iter()
-                .chain(descriptor.supported_file_types.iter())
+                .chain(descriptor.supported_file_types.iter().filter(|value| {
+                    let normalized = value.to_ascii_lowercase();
+                    normalized.len() >= 3 && !is_ambiguous_file_type(&normalized)
+                }))
                 .chain(descriptor.sdk_adapters.iter())
                 .map(|value| value.to_ascii_lowercase())
                 .chain(std::iter::once(
@@ -791,7 +801,7 @@ fn infer_from_assets(
                 .collect::<Vec<_>>();
             let matched = terms
                 .iter()
-                .filter(|term| !term.is_empty() && normalized_query.contains(term.as_str()))
+                .filter(|term| term.len() >= 3 && normalized_query.contains(term.as_str()))
                 .count();
             let asset_score = assets.len().min(12) as f64 * 0.025;
             let query_score = matched as f64 * 0.24;
@@ -1618,10 +1628,10 @@ fn workflow_for(domain: &str) -> Vec<DomainWorkbenchStageDescriptor> {
             ("verify-data", "Verify results", "Check row-level invariants, lineage, regressions, and transactional effects.", "data", &["results", "result contract"], &["validation report", "lineage"], "Result and side-effect assertions pass"),
         ],
         "software-engineering" => [
-            ("scope-change", "Scope the change", "Map requirements to modules, owners, dependencies, tests, and risk boundaries.", "architecture", &["task", "repository index"], &["change plan", "impact map"], "Acceptance criteria and affected surfaces are explicit"),
-            ("implement-change", "Implement", "Edit the smallest coherent set of files while preserving repository conventions.", "coding", &["change plan", "source"], &["patch", "change notes"], "Diff is focused and internally consistent"),
-            ("verify-change", "Build & test", "Run targeted checks followed by the repository's required validation gates.", "testing", &["patch", "test targets"], &["test report", "build evidence"], "Required checks pass with recorded commands"),
-            ("review-change", "Review & handoff", "Inspect behavior, security, compatibility, migrations, and operational impact.", "review", &["diff", "verification evidence"], &["review findings", "handoff"], "Findings are resolved or explicitly accepted"),
+            ("open-repository", "Open repository", "Resolve references, HEAD, index, worktree and object database through Atlas Core.", "repository", &["repository path"], &["repository snapshot", "reference map"], "Repository identity and HEAD are fixed"),
+            ("trace-history", "Trace history", "Walk commit ancestry and correlate trees, authors, branches and tags.", "repository", &["repository snapshot", "reference selection"], &["commit DAG", "history selection"], "Every edge is a real parent relationship"),
+            ("review-diff", "Review diff", "Compare revisions or index/worktree state at file and hunk granularity.", "review", &["base", "target"], &["structured diff", "review annotations"], "Every hunk maps to repository objects"),
+            ("resolve-merge", "Resolve merge", "Compute merge bases, conflicts and resulting tree while preserving review evidence.", "merge", &["ours", "theirs", "strategy"], &["merge state", "conflict set"], "Conflicts are resolved or explicitly retained"),
         ],
         "program-analysis" => [
             ("analysis-target", "Target model", "Resolve binaries/sources, build flags, dependencies, entry points, and assumptions.", "analysis", &["analysis target", "build metadata"], &["target manifest", "fact schema"], "Target revision and analysis scope are reproducible"),
@@ -1630,10 +1640,10 @@ fn workflow_for(domain: &str) -> Vec<DomainWorkbenchStageDescriptor> {
             ("validate-findings", "Validate findings", "Deduplicate, reproduce, classify confidence, and suppress with rationale.", "verification", &["findings", "runtime evidence"], &["triage report", "validated findings"], "Reported findings are reproducible"),
         ],
         "cyber-security" => [
-            ("security-scope", "Scope & threat model", "Define authorization, assets, trust boundaries, attack surfaces, and exclusions.", "threat-model", &["authorized target", "architecture"], &["scope record", "threat model"], "Authorization and test boundaries are recorded"),
-            ("collect-security", "Collect evidence", "Run configured scanners and collect code, dependency, traffic, or runtime evidence.", "security", &["scope record", "target"], &["raw findings", "scan logs"], "Evidence retains tool versions and target revision"),
-            ("triage-security", "Triage & validate", "Reproduce findings, trace exploitability, remove duplicates, and assign severity.", "audit", &["raw findings", "target context"], &["validated findings", "attack paths"], "Severity is evidence-based and reproducible"),
-            ("remediate-security", "Remediate & retest", "Apply bounded fixes and rerun the original evidence path plus regressions.", "security", &["validated finding", "fix"], &["retest report", "residual risk"], "Original finding is closed without regression"),
+            ("import-binary", "Import binary", "Fix program identity, language, compiler assumptions, memory map and loader options.", "reverse-engineering", &["binary", "loader configuration"], &["program database", "memory map"], "Hash, format and load address are recorded"),
+            ("analyze-functions", "Analyze functions", "Recover instructions, functions, symbols, calling conventions and references.", "binary-analysis", &["program database"], &["function index", "reference graph"], "Analysis provenance and unresolved regions are explicit"),
+            ("decompile-type", "Decompile & type", "Recover structured code and apply reviewable names, signatures and data types.", "reverse-engineering", &["function", "type context"], &["decompiler output", "symbol/type revision"], "Edits remain linked to addresses and bytes"),
+            ("validate-behavior", "Validate behavior", "Trace calls and data references to support or reject a behavior hypothesis.", "verification", &["hypothesis", "function/reference selection"], &["function graph", "finding evidence"], "Every claim links to instructions and references"),
         ],
         "hpc" => [
             ("hpc-baseline", "Reproducible baseline", "Record hardware, drivers, ranks, affinity, input size, and warm-up policy.", "hpc", &["workload", "launch config"], &["baseline", "environment manifest"], "Variance and environment are documented"),
@@ -1642,16 +1652,16 @@ fn workflow_for(domain: &str) -> Vec<DomainWorkbenchStageDescriptor> {
             ("benchmark-hpc", "Benchmark scaling", "Compare corrected runs across problem sizes, devices, and rank counts.", "hpc", &["optimized workload", "benchmark matrix"], &["scaling report", "regression gate"], "Correctness and performance thresholds pass"),
         ],
         "distributed-systems" => [
-            ("topology-contract", "Topology & SLO", "Resolve services, versions, dependencies, traffic, replicas, and SLO budgets.", "distributed", &["deployment", "service metadata"], &["topology snapshot", "SLO contract"], "Observed topology matches intended deployment"),
-            ("collect-spans", "Collect telemetry", "Correlate traces, metrics, logs, RPC metadata, and cluster events.", "observability", &["telemetry sources", "time range"], &["trace set", "signal quality report"], "Trace coverage and clock alignment are measured"),
-            ("analyze-distributed", "Analyze behavior", "Inspect critical paths, retries, queues, consensus, replicas, and failure propagation.", "reliability", &["trace set", "topology"], &["causal timeline", "failure hypothesis"], "Hypothesis is supported across signals"),
-            ("verify-resilience", "Verify resilience", "Run bounded failure scenarios and compare recovery, correctness, and SLO impact.", "reliability", &["failure hypothesis", "scenario"], &["experiment report", "recovery evidence"], "Safety and recovery invariants pass"),
+            ("define-compose", "Define Compose", "Resolve services, images, networks, volumes, ports and health contracts.", "container", &["compose project"], &["runtime plan", "dependency graph"], "Compose model is valid and bounded"),
+            ("build-images", "Build images", "Build or resolve immutable image identities and retain layer provenance.", "container", &["build contexts", "image references"], &["image manifests", "layer evidence"], "Every service resolves to an image digest"),
+            ("run-containers", "Run & observe", "Create and start containers, then correlate health, logs and runtime events.", "runtime", &["runtime plan"], &["container snapshot", "log streams"], "Declared services reach an explainable state"),
+            ("preserve-state", "Stop & preserve", "Stop the bounded runtime and retain volumes, logs and final lifecycle evidence.", "runtime", &["running project"], &["final snapshot", "artifact manifest"], "Shutdown and preservation policy complete"),
         ],
         "scientific-computing" => [
-            ("numerical-contract", "Numerical contract", "Define equations, units, domains, boundary conditions, tolerances, and reference cases.", "scientific", &["model", "input data"], &["problem specification", "reference case"], "Units and mathematical assumptions are explicit"),
-            ("discretize", "Discretize & configure", "Validate mesh/grid quality, solver configuration, convergence criteria, and stability limits.", "numerical", &["problem specification", "mesh"], &["solver config", "mesh diagnostics"], "Discretization and stability checks pass"),
-            ("simulate", "Run simulation", "Execute the model while retaining residuals, iterations, checkpoints, and environment data.", "simulation", &["solver config", "initial state"], &["fields", "convergence history"], "Solver converges under the declared criteria"),
-            ("validate-science", "Validate & quantify", "Compare against analytic/reference data and quantify error, sensitivity, and uncertainty.", "scientific", &["simulation outputs", "reference case"], &["validation report", "uncertainty bounds"], "Error and conservation thresholds pass"),
+            ("load-vtk-data", "Load data", "Read VTK-compatible datasets, blocks, geometry, arrays and simulation time.", "visualization", &["simulation result"], &["dataset profile", "array catalog"], "Topology and array associations are valid"),
+            ("build-viz-pipeline", "Build pipeline", "Compose native filters such as slice, contour, clip, glyph and streamline.", "visualization", &["dataset", "filter parameters"], &["pipeline graph", "derived dataset"], "Every derived object retains source provenance"),
+            ("map-render-fields", "Map & render fields", "Configure representation, field mapping, transfer functions, camera and volume settings.", "visualization", &["pipeline output", "field selection"], &["render state", "interactive view"], "Displayed values derive from selected arrays"),
+            ("publish-view", "Probe & publish", "Probe cells/points, scrub time and preserve the reviewed visualization state.", "scientific", &["interactive view", "probe selections"], &["extracts", "published view"], "View includes data, pipeline and rendering provenance"),
         ],
         _ => [
             ("scope", "Scope", "Resolve the real workspace inputs and define the acceptance contract.", "research", &["workspace assets"], &["task contract"], "Inputs and acceptance criteria are explicit"),
@@ -1764,19 +1774,19 @@ fn intents_for(domain: &str) -> Vec<DomainIntentDescriptor> {
             workbench_intent("transaction-diagnosis", "Diagnose transactions & locks", "Correlate real queries, lock/transaction evidence and storage behavior around contention or correctness symptoms.", "data", "Database/trace, transaction scope, isolation level, time window and suspected conflict.", &["transaction timeline", "lock/dependency graph", "root-cause and verification report"], &["sqlite-schema", "sqlite-query"], &["SQLite"], &["connect", "plan-query", "verify-data"], "transaction-report", "Diagnosis is reproduced under the stated isolation level and links to real statements/locks.", true),
         ],
         "software-engineering" => vec![
-            workbench_intent("agent-engineering-change", "Plan, implement & verify change", "Turn a change request into an impact map, focused implementation, targeted checks and reviewable handoff.", "coding", "Change objective, acceptance criteria, repository revision, constraints and quality gate.", &["change plan", "focused patch", "test/build evidence", "handoff summary"], &["cargo-metadata", "npm-metadata"], &["Cargo", "npm"], &["scope-change", "implement-change", "verify-change", "review-change"], "change-review", "Acceptance criteria map to passing checks and every changed file belongs to the declared scope.", false),
-            workbench_intent("architecture-analysis", "Analyze architecture & impact", "Map real modules, ownership and dependency impact for a proposed change or research question.", "architecture", "Repository revision, scope/modules, question, ownership source and architecture rules.", &["module/dependency graph", "impact and ownership report", "risk boundaries"], &["cargo-metadata", "npm-metadata"], &["Cargo", "npm"], &["scope-change", "review-change"], "architecture-report", "Graph edges derive from repository metadata/source and affected surfaces are explicit.", false),
-            workbench_intent("release-readiness", "Assess release readiness", "Assemble real build, test, dependency, migration and operational evidence against release gates.", "review", "Release target, channel, required checks, compatibility/migration policy and known risks.", &["release manifest", "quality-gate evidence", "residual-risk report"], &["cargo-metadata", "npm-metadata"], &["Cargo", "npm"], &["scope-change", "verify-change", "review-change"], "release-report", "All required checks are recorded and unresolved risk is explicitly accepted or blocks release.", false),
+            workbench_intent("repository-history-review", "Review repository history", "Traverse commits and references, compare revisions and produce a reviewable change-set narrative.", "repository", "Repository revision, reference range, path scope and review question.", &["commit DAG", "structured revision diff", "history report"], &[], &["libgit2"], &["open-repository", "trace-history", "review-diff"], "change-set-review", "Every commit edge and diff hunk resolves to repository objects.", false),
+            workbench_intent("branch-merge-analysis", "Analyze branch / merge", "Compute merge bases, inspect divergent histories and prepare a conflict-aware merge plan.", "merge", "Repository, ours/theirs references, merge strategy and conflict policy.", &["branch comparison", "merge-base evidence", "conflict set"], &[], &["libgit2"], &["open-repository", "trace-history", "resolve-merge"], "merge-review", "Merge state is reproducible from fixed references and no conflict is hidden.", false),
+            workbench_intent("diff-review", "Review change set", "Inspect file and hunk-level changes with ancestry, author and tree context.", "review", "Base/target revisions, path filters, rename policy and review rubric.", &["annotated diff", "change summary", "review findings"], &[], &["libgit2"], &["open-repository", "review-diff"], "revision-diff", "Every finding links to a concrete hunk and revision pair.", false),
         ],
         "program-analysis" => vec![
-            workbench_intent("static-analysis-study", "Run static analysis study", "Build a reproducible target/fact model, execute real analyzers and validate findings with evidence paths.", "analysis", "Selected source/target, build metadata, scope, rules/queries and confidence policy.", &["target manifest", "findings", "CFG/call/data-flow evidence", "triage report"], &["semgrep-scan", "clang-cfg"], &["Semgrep", "Clang"], &["analysis-target", "extract-facts", "run-analysis", "validate-findings"], "analysis-finding", "Each reported finding traces to target revision and a reproducible evidence path.", true),
-            workbench_intent("dataflow-investigation", "Trace data / control flow", "Investigate definitions, uses, control dependencies or taint paths in a real target.", "security", "Target revision, entry points, source/sink or value question, build flags and assumptions.", &["CFG/data-flow graph", "path evidence", "analysis report"], &["clang-cfg", "semgrep-scan"], &["Clang", "Semgrep"], &["analysis-target", "extract-facts", "run-analysis", "validate-findings"], "dataflow-report", "Paths are complete under the declared model and false positives are reproduced or excluded with rationale.", true),
-            workbench_intent("execution-coverage-study", "Analyze execution & coverage", "Correlate real runtime traces, profiles or coverage with static structure and selected hypotheses.", "verification", "Target/build, test or trace source, entry points, time/test range and coverage question.", &["execution trace", "coverage/profile artifact", "correlation report"], &["clang-cfg"], &["Clang"], &["analysis-target", "extract-facts", "validate-findings"], "execution-coverage", "Runtime evidence maps to the exact binary/source revision and coverage gaps are measured.", true),
+            workbench_intent("semantic-query-study", "Run semantic query", "Build or select a CodeQL database, execute a query suite and preserve semantic result provenance.", "analysis", "Code database, language, query/suite, source scope and confidence policy.", &["query results", "semantic facts", "provenance report"], &[], &["CodeQL"], &["analysis-target", "extract-facts", "run-analysis", "validate-findings"], "semantic-finding", "Every result resolves to a database revision, query and source location.", false),
+            workbench_intent("dataflow-investigation", "Trace data flow path", "Trace selected sources, sinks and barriers through semantic call and data-flow steps.", "security", "Code database, query, sources/sinks, path limits and modeling assumptions.", &["call graph", "data-flow paths", "path explanation"], &[], &["CodeQL"], &["analysis-target", "extract-facts", "run-analysis", "validate-findings"], "semantic-path", "Each path step is supported by the CodeQL semantic model.", false),
+            workbench_intent("security-query-review", "Review security findings", "Execute security queries, deduplicate results and validate complete evidence paths.", "verification", "Code database, security suite, severity policy and review scope.", &["security findings", "path evidence", "triage report"], &[], &["CodeQL"], &["extract-facts", "run-analysis", "validate-findings"], "security-path-review", "Findings retain query, model, source and sink provenance.", false),
         ],
         "cyber-security" => vec![
-            workbench_intent("authorized-security-assessment", "Run authorized assessment", "Define an explicit authorization boundary, execute configured scanners and validate findings against real target evidence.", "security", "Authorized target/scope, exclusions, threat model, ruleset and evidence-retention policy.", &["scope record", "scan result", "validated findings", "risk report"], &["semgrep-scan", "yara-scan"], &["Semgrep", "YARA"], &["security-scope", "collect-security", "triage-security", "remediate-security"], "security-finding", "Authorization is recorded and every finding retains tool/target versions plus reproducible evidence.", true),
-            workbench_intent("malware-binary-triage", "Triage binary / malware evidence", "Analyze authorized binary or rule evidence, retain indicators and distinguish validated behavior from hypotheses.", "audit", "Authorized artifact, hash/provenance, YARA rules or analysis scope and isolation policy.", &["binary/rule result", "indicator set", "triage and confidence report"], &["yara-scan"], &["YARA"], &["security-scope", "collect-security", "triage-security"], "malware-triage", "Artifact identity is fixed and all behavioral claims are separated from unverified indicators.", true),
-            workbench_intent("remediation-retest", "Remediate & retest finding", "Apply a bounded fix and rerun the original evidence path plus regression checks.", "security", "Validated finding, target revision, remediation constraints, original command/rules and acceptance gate.", &["remediation diff", "retest evidence", "residual-risk report"], &["semgrep-scan", "yara-scan"], &["Semgrep", "YARA"], &["triage-security", "remediate-security"], "security-retest", "Original finding is no longer reproducible and required regressions pass.", true),
+            workbench_intent("binary-reverse-engineering", "Analyze binary", "Import an authorized binary, recover functions and produce linked decompiler, disassembly and reference evidence.", "reverse-engineering", "Authorized binary, hash/provenance, load address, language/compiler assumptions and analysis scope.", &["program database", "function graph", "decompiler/disassembly evidence"], &[], &["Ghidra"], &["import-binary", "analyze-functions", "decompile-type", "validate-behavior"], "reverse-engineering-finding", "Every behavioral claim links to addresses, bytes, instructions and references.", true),
+            workbench_intent("function-investigation", "Investigate function", "Rename, type and trace a selected function across callers, callees, data references and memory.", "binary-analysis", "Program database, function/address selection and behavior hypothesis.", &["typed function", "cross-reference graph", "behavior report"], &[], &["Ghidra"], &["analyze-functions", "decompile-type", "validate-behavior"], "function-evidence", "Names and types remain reviewable and linked to original addresses.", true),
+            workbench_intent("binary-comparison", "Compare binary revisions", "Compare functions, symbols and control-flow evidence across two authorized binaries.", "verification", "Baseline/candidate binaries, matching policy, function scope and expected change.", &["function matches", "structural diff", "comparison report"], &[], &["Ghidra"], &["import-binary", "analyze-functions", "validate-behavior"], "binary-diff", "Matches and differences retain both binary identities and address mappings.", true),
         ],
         "hpc" => vec![
             workbench_intent("gpu-profile-study", "Profile CPU / GPU workload", "Analyze a real Nsight trace or profile with synchronized kernels, transfers, counters and environment evidence.", "profiling", "Selected report/workload, hardware/driver manifest, launch command, inputs and baseline.", &["timeline/profile summary", "hotspot table", "bottleneck report"], &["nsys-stats", "ncu-import"], &["Nsight Systems", "Nsight Compute"], &["hpc-baseline", "profile-hpc", "analyze-hpc", "benchmark-hpc"], "profile-report", "Profiler overhead is known and bottleneck claims map to measured timelines/counters.", true),
@@ -1784,16 +1794,293 @@ fn intents_for(domain: &str) -> Vec<DomainIntentDescriptor> {
             workbench_intent("mpi-scaling-study", "Run MPI / scaling study", "Plan and execute a reproducible rank/node scaling matrix and analyze communication imbalance.", "hpc", "Workload, problem sizes, rank/node matrix, scheduler/affinity, correctness and variance policy.", &["run matrix", "communication/profile evidence", "scaling report"], &["nsys-stats"], &["Nsight Systems", "MPI"], &["hpc-baseline", "profile-hpc", "analyze-hpc", "benchmark-hpc"], "scaling-report", "Every run passes correctness and scaling claims include variance and environment metadata.", false),
         ],
         "distributed-systems" => vec![
-            workbench_intent("cluster-diagnosis", "Diagnose cluster / service", "Snapshot a real Kubernetes context and correlate workloads, services and events around an incident or SLO symptom.", "distributed", "Cluster context, namespace, service scope, time window, SLO and symptom.", &["cluster snapshot", "ordered event evidence", "service/topology diagnosis"], &["cluster-snapshot", "cluster-events"], &["Kubernetes"], &["topology-contract", "collect-spans", "analyze-distributed", "verify-resilience"], "cluster-event", "Context/namespace are explicit and diagnosis links to real resource revisions and events.", false),
-            workbench_intent("request-consensus-analysis", "Trace request / consensus behavior", "Correlate real request traces or consensus/replication events across nodes and services.", "observability", "Telemetry/cluster evidence, selected request or term, time range, topology and expected invariant.", &["request or consensus timeline", "replication/service graph", "causal analysis"], &["cluster-snapshot", "cluster-events"], &["Kubernetes"], &["topology-contract", "collect-spans", "analyze-distributed"], "distributed-trace", "Clock/signal quality is measured and causal claims hold across available telemetry.", false),
-            workbench_intent("resilience-experiment", "Plan bounded resilience experiment", "Create a safe failure scenario, execute only inside the authorized cluster scope and verify recovery/correctness/SLO impact.", "reliability", "Authorized cluster scope, failure hypothesis, safety limits, recovery invariant and rollback plan.", &["experiment plan", "before/during/after snapshots", "recovery report"], &["cluster-snapshot", "cluster-events"], &["Kubernetes"], &["topology-contract", "collect-spans", "analyze-distributed", "verify-resilience"], "resilience-report", "Safety limits hold, rollback succeeds and recovery/correctness gates pass.", false),
+            workbench_intent("container-runtime-inspection", "Inspect container runtime", "Snapshot containers and images, correlate lifecycle, health, mounts, ports and log evidence.", "runtime", "Docker engine context, container/service scope and time window.", &["container snapshot", "image manifest", "runtime diagnosis"], &["container-snapshot", "image-snapshot"], &["Docker Engine API"], &["define-compose", "build-images", "run-containers", "preserve-state"], "container-runtime-snapshot", "Every runtime object resolves to an Engine identity and image digest.", false),
+            workbench_intent("compose-application", "Create Compose application", "Turn a service specification into a native Atlas Compose object and review its runtime plan.", "container", "Services, images/build contexts, networks, volumes, ports, environment and health contracts.", &["Compose specification", "dependency graph", "runtime plan"], &["container-snapshot", "image-snapshot"], &["Docker Engine API", "Docker Compose"], &["define-compose", "build-images", "run-containers"], "compose-runtime", "Compose configuration is valid and every service resolves to bounded resources.", false),
+            workbench_intent("container-log-diagnosis", "Diagnose container logs", "Correlate ordered logs, health transitions and runtime events for selected containers.", "observability", "Container/service selection, time range, symptom and expected health contract.", &["log stream", "lifecycle timeline", "diagnosis report"], &["container-snapshot"], &["Docker Engine API"], &["run-containers", "preserve-state"], "container-log-trace", "Diagnosis links to exact container IDs and timestamps.", false),
         ],
         "scientific-computing" => vec![
-            workbench_intent("equation-to-simulation", "Build & solve numerical model", "Turn equations and boundary conditions into a reviewable numerical model, run a real solver and retain convergence/results.", "simulation", "Equations, units, domain, initial/boundary conditions, solver/tolerance and reference case.", &["problem specification", "solver configuration", "field/array outputs", "convergence and validation report"], &["inspect-array", "inspect-vtk", "cmake-project"], &["NumPy", "SciPy", "VTK"], &["numerical-contract", "discretize", "simulate", "validate-science"], "simulation-result", "Units and assumptions are explicit, solver converges and error/conservation gates pass.", false),
-            workbench_intent("parameter-sweep-study", "Run parameter / optimization study", "Execute a reproducible parameter matrix on the installed model and compare convergence, objective and sensitivity.", "numerical", "Model revision, parameter ranges, sampling/optimization method, solver gate and reference baseline.", &["parameter manifest", "run/result matrix", "sensitivity or optimization report"], &["inspect-array", "cmake-project"], &["NumPy", "SciPy"], &["numerical-contract", "discretize", "simulate", "validate-science"], "parameter-study", "Every result maps to a parameter set and failed/non-converged runs are not silently discarded.", false),
-            workbench_intent("field-mesh-validation", "Validate fields, arrays & mesh", "Inspect real NumPy/VTK data for dimensions, finite ranges, topology, units and numerical invariants.", "scientific", "Selected array/field/mesh, expected dimensions/units, invariants and comparison reference.", &["array or mesh profile", "field/geometry diagnostics", "validation report"], &["inspect-array", "inspect-vtk"], &["NumPy", "VTK"], &["discretize", "validate-science"], "field-validation", "All displayed values derive from the selected data and declared numerical/mesh invariants pass.", true),
+            workbench_intent("scientific-visualization-pipeline", "Build visualization pipeline", "Load simulation results, compose VTK filters and publish a reviewable volume/surface/slice view.", "visualization", "VTK-compatible dataset, array/field selection, filters, representation and time range.", &["pipeline graph", "render state", "published scientific view"], &["inspect-vtk"], &["ParaView", "VTK"], &["load-vtk-data", "build-viz-pipeline", "map-render-fields", "publish-view"], "scientific-visualization-state", "Every displayed value retains dataset, array, pipeline and rendering provenance.", true),
+            workbench_intent("volume-slice-study", "Explore volume & slices", "Configure transfer functions and interactive slice/contour probes over a real field.", "scientific", "Volume dataset, scalar/vector array, transfer function, slice/contour parameters and time step.", &["volume view", "slice/contour extracts", "probe evidence"], &["inspect-vtk"], &["ParaView", "VTK"], &["load-vtk-data", "build-viz-pipeline", "map-render-fields", "publish-view"], "volume-slice-view", "Extracts and colors map to declared field ranges and associations.", true),
+            workbench_intent("simulation-result-review", "Review simulation results", "Inspect topology and arrays, scrub time and compare derived scientific views without inventing values.", "verification", "Simulation result set, expected topology/arrays, time range and review invariants.", &["dataset profile", "time-aware views", "validation report"], &["inspect-array", "inspect-vtk"], &["VTK"], &["load-vtk-data", "map-render-fields", "publish-view"], "simulation-review", "All reviewed values derive from selected result artifacts.", true),
         ],
         _ => Vec::new(),
+    }
+}
+
+fn professional_contract(
+    domain: &str,
+) -> (
+    &'static [&'static str],
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
+    match domain {
+        "ai-ml" => (
+            &[
+                "Experiment",
+                "Run",
+                "Checkpoint",
+                "Registered Model",
+                "Model Version",
+                "Artifact",
+            ],
+            "experiment -> run -> step -> checkpoint -> model version",
+            "run parameters, metrics, artifacts and lineage",
+            "run comparison matrix with experiment lifecycle",
+            "Atlas experiment tracking and registry runtime",
+            "model-registry-release",
+        ),
+        "computer-vision" => (
+            &[
+                "Media",
+                "Frame",
+                "Feature",
+                "Calibration",
+                "Detection",
+                "Track",
+                "Point Cloud",
+            ],
+            "media -> frame -> pixel/region -> feature/track",
+            "pixel coordinates, channels, calibration and overlay provenance",
+            "visual media canvas with processing layers and frame transport",
+            "Atlas OpenCV capability runtime",
+            "visual-analysis-result",
+        ),
+        "nlp" => (
+            &[
+                "Model Card",
+                "Tokenizer",
+                "Dataset",
+                "Prompt",
+                "Pipeline",
+                "Embedding",
+                "Inference Trace",
+            ],
+            "pipeline -> prompt -> message -> span -> token/evidence",
+            "token offsets, retrieved knowledge, inference parameters and grounding",
+            "prompt pipeline with token ribbon and embedding neighborhood",
+            "Atlas Hugging Face capability runtime",
+            "grounded-inference-trace",
+        ),
+        "computer-graphics" => (
+            &[
+                "Scene",
+                "Object",
+                "Mesh",
+                "Material",
+                "Light",
+                "Camera",
+                "Animation",
+            ],
+            "scene -> object -> component -> material/keyframe",
+            "transform, topology, material, light and render state",
+            "always-on 3D scene viewport with shader and animation docks",
+            "Atlas scene graph and Blender Python provider runtime",
+            "rendered-scene-frame",
+        ),
+        "cad" => (
+            &[
+                "Document",
+                "Sketch",
+                "Constraint",
+                "Feature",
+                "Body",
+                "Assembly",
+                "Exchange Model",
+            ],
+            "document -> feature -> sketch entity -> constraint/parameter",
+            "degrees of freedom, dimensions, topology and recompute diagnostics",
+            "editable parametric viewport with feature rollback",
+            "Atlas OpenCascade geometry-kernel runtime",
+            "editable-cad-release",
+        ),
+        "robotics" => (
+            &[
+                "World",
+                "Robot",
+                "Link",
+                "Joint",
+                "Collision Shape",
+                "Sensor",
+                "Trajectory",
+            ],
+            "world -> robot -> link/joint -> control target -> simulation step",
+            "joint limits, collision contacts, sensor values and controller state",
+            "interactive physics viewport with synchronized joint and trajectory controls",
+            "Atlas PyBullet physics runtime",
+            "robot-simulation-run",
+        ),
+        "computer-networks" => (
+            &[
+                "Capture",
+                "Packet",
+                "Protocol Field",
+                "Byte Range",
+                "Flow",
+                "Conversation",
+                "Endpoint",
+            ],
+            "capture -> time range -> conversation -> packet -> field -> bytes",
+            "decoded fields, byte offsets, reassembly and expert diagnostics",
+            "packet timeline correlated with protocol tree and hex bytes",
+            "Atlas packet decode and capture runtime",
+            "packet-evidence-trace",
+        ),
+        "operating-systems" => (
+            &[
+                "Trace",
+                "Process",
+                "Thread",
+                "CPU",
+                "Memory Event",
+                "Disk Event",
+                "Stack",
+            ],
+            "trace -> time range -> process -> thread -> event/stack",
+            "ETW event payload, stack, symbol and resource attribution",
+            "zoomable CPU/thread/memory/disk lane timeline",
+            "Atlas Windows ETW trace runtime",
+            "system-performance-trace",
+        ),
+        "compiler" => (
+            &[
+                "Translation Unit",
+                "AST Node",
+                "IR Module",
+                "Basic Block",
+                "SSA Value",
+                "Pass",
+                "Assembly",
+            ],
+            "source range -> AST -> IR stage -> block/instruction -> assembly",
+            "types, uses, dominance, pass remarks and source correlation",
+            "stepwise source-AST-IR-CFG-SSA-assembly correlation",
+            "Atlas LLVM compilation runtime",
+            "compiler-stage-diff",
+        ),
+        "database" => (
+            &[
+                "Database",
+                "Schema",
+                "Table",
+                "Column",
+                "Query",
+                "Plan Operator",
+                "Storage Segment",
+            ],
+            "database -> schema object -> query -> plan operator -> vector/row",
+            "cardinality, timing, memory, statistics and storage evidence",
+            "operator execution plan with result and storage drill-down",
+            "Atlas DuckDB analytical runtime",
+            "analytical-query-evidence",
+        ),
+        "software-engineering" => (
+            &[
+                "Repository",
+                "Commit",
+                "Branch",
+                "Tag",
+                "Diff Hunk",
+                "Merge",
+                "Reference",
+            ],
+            "repository -> reference -> commit -> file -> diff hunk",
+            "author, parents, tree, patch, conflicts and history",
+            "commit DAG correlated with diff and merge state",
+            "Atlas libgit2 repository runtime",
+            "change-set-review",
+        ),
+        "program-analysis" => (
+            &[
+                "Code Database",
+                "Query",
+                "Predicate",
+                "Call",
+                "Data Flow Node",
+                "Path",
+                "Finding",
+            ],
+            "database -> query -> result -> path -> source location",
+            "semantic types, call/data-flow steps, query provenance and confidence",
+            "semantic query results with call and data-flow path explorer",
+            "Atlas CodeQL semantic-analysis runtime",
+            "semantic-finding-evidence",
+        ),
+        "cyber-security" => (
+            &[
+                "Binary",
+                "Memory Block",
+                "Symbol",
+                "Function",
+                "Instruction",
+                "Data Type",
+                "Reference",
+            ],
+            "binary -> address space -> function -> block -> instruction/reference",
+            "bytes, symbols, calling convention, decompiler variables and xrefs",
+            "linked disassembly, decompiler and function graph",
+            "Atlas Ghidra reverse-engineering runtime",
+            "reverse-engineering-finding",
+        ),
+        "hpc" => (
+            &[
+                "Profile",
+                "GPU",
+                "Stream",
+                "Kernel Launch",
+                "Transfer",
+                "Memory Region",
+                "Counter",
+            ],
+            "profile -> device -> stream -> time range -> kernel/counter",
+            "launch geometry, occupancy, bandwidth, stalls and source correlation",
+            "synchronized GPU stream and memory timeline",
+            "Atlas CUDA profiling runtime",
+            "gpu-performance-report",
+        ),
+        "distributed-systems" => (
+            &[
+                "Compose Project",
+                "Container",
+                "Image",
+                "Volume",
+                "Network",
+                "Log Stream",
+                "Runtime Event",
+            ],
+            "project -> service -> container -> process/log/event",
+            "image layers, mounts, ports, health, resource limits and logs",
+            "container runtime topology with lifecycle and log streams",
+            "Atlas Docker Engine API runtime",
+            "container-runtime-snapshot",
+        ),
+        "scientific-computing" => (
+            &[
+                "Pipeline",
+                "Data Source",
+                "VTK Dataset",
+                "Array",
+                "Surface",
+                "Slice",
+                "Volume",
+            ],
+            "pipeline -> dataset -> block -> cell/point -> field sample",
+            "array association, range, units, transfer function and provenance",
+            "3D volume/surface/slice visualization pipeline",
+            "Atlas ParaView and VTK runtime",
+            "scientific-visualization-state",
+        ),
+        _ => (
+            &["Research Object"],
+            "workspace -> object -> evidence",
+            "object provenance and evidence",
+            "research evidence view",
+            "Atlas research runtime",
+            "research-result",
+        ),
     }
 }
 
@@ -2101,47 +2388,47 @@ fn workbench_for(domain: &str) -> DomainWorkbenchDescriptor {
         ),
         "software-engineering" => (
             "repository",
-            "Repository & Modules",
-            "Architecture & Change Workbench",
-            "Module / Change Inspector",
-            "Build, Test & Review",
+            "References & Trees",
+            "Commit Graph & Diff",
+            "Commit / Hunk / Conflict Inspector",
+            "History & Merge State",
             vec![
                 workbench_tool(
-                    "build",
-                    "Build",
-                    "execute",
-                    "Run the repository's detected build system.",
-                    "Cargo",
-                ),
-                workbench_tool(
-                    "test",
-                    "Test",
-                    "execute",
-                    "Run the detected test targets and retain results.",
-                    "npm",
-                ),
-                workbench_tool(
-                    "dependencies",
-                    "Audit Dependencies",
+                    "commit-graph",
+                    "Refresh Commit Graph",
                     "inspect",
-                    "Inspect declared and resolved dependency data.",
-                    "Cargo",
+                    "Read commits, parents, references and trees through the repository provider.",
+                    "libgit2",
+                ),
+                workbench_tool(
+                    "revision-diff",
+                    "Compare Revisions",
+                    "inspect",
+                    "Produce a structured patch between selected revisions.",
+                    "libgit2",
+                ),
+                workbench_tool(
+                    "merge",
+                    "Prepare Merge",
+                    "execute",
+                    "Compute merge state and conflicts without leaving Atlas Core.",
+                    "libgit2",
                 ),
             ],
         ),
         "program-analysis" => (
             "analysis",
-            "Targets, Facts & Traces",
-            "Program Analysis Workbench",
-            "Fact / Finding Inspector",
-            "Analysis Queries",
+            "Code Databases & Queries",
+            "Semantic Query & Path Explorer",
+            "Predicate / Path Inspector",
+            "Call Graph & Data Flow",
             vec![
                 workbench_tool(
                     "callgraph",
                     "Build Call Graph",
                     "execute",
-                    "Generate calls from the selected real analysis target.",
-                    "LLVM",
+                    "Generate calls from the selected CodeQL database.",
+                    "CodeQL",
                 ),
                 workbench_tool(
                     "dataflow",
@@ -2155,37 +2442,37 @@ fn workbench_for(domain: &str) -> DomainWorkbenchDescriptor {
                     "Run Taint Query",
                     "execute",
                     "Trace selected sources to sinks with real analysis facts.",
-                    "Joern",
+                    "CodeQL",
                 ),
             ],
         ),
         "cyber-security" => (
             "security",
-            "Targets, Scans & Findings",
-            "Security Analysis Workbench",
-            "Finding / Evidence Inspector",
-            "Scan & Triage",
+            "Programs, Symbols & Functions",
+            "Decompiler & Disassembly",
+            "Function / Reference Inspector",
+            "Function Graph & Memory Map",
             vec![
                 workbench_tool(
-                    "scan",
-                    "Run Scan",
+                    "analyze-program",
+                    "Analyze Program",
                     "execute",
-                    "Run the configured static or dynamic scanner.",
-                    "Semgrep",
+                    "Run binary analysis and recover functions, symbols and references.",
+                    "Ghidra",
                 ),
                 workbench_tool(
-                    "query",
-                    "Run Security Query",
-                    "execute",
-                    "Execute security queries against the selected target.",
-                    "CodeQL",
-                ),
-                workbench_tool(
-                    "triage",
-                    "Triage Finding",
+                    "decompile",
+                    "Decompile Function",
                     "inspect",
-                    "Inspect evidence, path, severity, and remediation state.",
-                    "OWASP ZAP",
+                    "Recover structured pseudocode for the active function.",
+                    "Ghidra",
+                ),
+                workbench_tool(
+                    "cross-references",
+                    "Trace References",
+                    "inspect",
+                    "Navigate calls, data references and address-space evidence.",
+                    "Ghidra",
                 ),
             ],
         ),
@@ -2221,61 +2508,61 @@ fn workbench_for(domain: &str) -> DomainWorkbenchDescriptor {
         ),
         "distributed-systems" => (
             "distributed",
-            "Services, Traces & State",
-            "Distributed Systems Workbench",
-            "Span / Replica Inspector",
-            "Operations & Reliability",
+            "Compose, Containers & Images",
+            "Container Runtime Topology",
+            "Container / Mount / Health Inspector",
+            "Logs & Runtime Events",
             vec![
                 workbench_tool(
-                    "collect-trace",
-                    "Collect Trace",
+                    "compose-up",
+                    "Compose Up",
                     "execute",
-                    "Collect real distributed spans from configured telemetry.",
-                    "OpenTelemetry",
+                    "Create and start the selected Compose application through Atlas Core.",
+                    "Docker Engine API",
                 ),
                 workbench_tool(
-                    "inspect-rpc",
-                    "Inspect RPC",
+                    "inspect-container",
+                    "Inspect Container",
                     "inspect",
-                    "Inspect RPC metadata, latency, retries, and status.",
-                    "gRPC",
+                    "Inspect image, mounts, ports, health and resource limits.",
+                    "Docker Engine API",
                 ),
                 workbench_tool(
-                    "inspect-cluster",
-                    "Inspect Cluster",
+                    "follow-logs",
+                    "Follow Logs",
                     "inspect",
-                    "Read current workload, replica, and service state.",
-                    "Kubernetes",
+                    "Stream timestamped container logs and runtime events.",
+                    "Docker Engine API",
                 ),
             ],
         ),
         "scientific-computing" => (
             "scientific",
-            "Arrays, Simulations & Meshes",
-            "Numerical Computing Workbench",
-            "Variable / Cell Inspector",
-            "Run & Convergence",
+            "Pipeline, Datasets & Arrays",
+            "Volume / Surface / Slice View",
+            "Field / Cell / Transfer Inspector",
+            "Simulation Time & Pipeline State",
             vec![
                 workbench_tool(
-                    "run-simulation",
-                    "Run Simulation",
-                    "execute",
-                    "Run the selected numerical model with workspace inputs.",
-                    "SciPy",
+                    "volume-render",
+                    "Volume Render",
+                    "view",
+                    "Render the selected VTK field with an editable transfer function.",
+                    "ParaView / VTK",
                 ),
                 workbench_tool(
                     "inspect-array",
                     "Inspect Array",
                     "inspect",
-                    "Inspect shape, dtype, ranges, and slices.",
-                    "NumPy",
+                    "Inspect point/cell association, dimensions, components and ranges.",
+                    "VTK",
                 ),
                 workbench_tool(
-                    "export-vtk",
-                    "Export VTK",
+                    "slice",
+                    "Create Slice",
                     "execute",
-                    "Export real fields and meshes for downstream analysis.",
-                    "VTK",
+                    "Add an editable slice filter to the native visualization pipeline.",
+                    "ParaView / VTK",
                 ),
             ],
         ),
@@ -2288,6 +2575,14 @@ fn workbench_for(domain: &str) -> DomainWorkbenchDescriptor {
             Vec::new(),
         ),
     };
+    let (
+        object_model,
+        interaction_model,
+        inspector_model,
+        visualization_model,
+        runtime,
+        preview_kind,
+    ) = professional_contract(domain);
     DomainWorkbenchDescriptor {
         layout: layout.to_string(),
         explorer_label: explorer.to_string(),
@@ -2297,6 +2592,15 @@ fn workbench_for(domain: &str) -> DomainWorkbenchDescriptor {
         tools,
         workflow: workflow_for(domain),
         intents: intents_for(domain),
+        object_model: object_model
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+        interaction_model: interaction_model.to_string(),
+        inspector_model: inspector_model.to_string(),
+        visualization_model: visualization_model.to_string(),
+        runtime: runtime.to_string(),
+        preview_kind: preview_kind.to_string(),
     }
 }
 
@@ -2597,25 +2901,25 @@ fn builtin_plugins() -> Vec<DeclarativeDomainPlugin> {
         plugin(
             "software-engineering",
             "Software Engineering",
-            "Repositories, modules, builds, tests, dependencies, architecture, and change history.",
-            &["Repository", "Module", "Build", "Test", "Dependency", "Architecture", "Change"],
+            "Repository history, commit graphs, branches, diffs, merges, tags, and references.",
+            &["Repository", "Commit", "Branch", "Diff", "Merge", "Tag", "History"],
             &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "kt", "c", "cpp", "h", "hpp", "cs", "toml", "yaml", "yml", "json", "xml"],
             vec![
-                visualization("architecture", "Architecture Graph", "graph", &[]),
-                visualization("dependency", "Dependency Graph", "graph", &[]),
-                visualization("pipeline", "Build Pipeline", "pipeline", &["yaml", "yml", "toml", "json", "xml"]),
-                visualization("code", "Code Viewer", "code", &[]),
+                visualization("commit-graph", "Commit Graph", "graph", &[]),
+                visualization("revision-diff", "Revision Diff", "code", &[]),
+                visualization("merge-graph", "Merge Graph", "graph", &[]),
+                visualization("branch-history", "Branch History", "timeline", &[]),
             ],
-            &["coding", "testing", "review", "architecture"],
-            &["Cargo", "npm", "Maven", "Gradle", ".NET", "CMake"],
-            &["software", "repository", "dependency", "build", "test", "architecture", "module"],
-            &["package", "dependency", "module", "test", "build", "workspace"],
+            &["repository", "review", "merge", "history"],
+            &["libgit2"],
+            &["repository", "commit", "branch", "diff", "merge", "history", "git"],
+            &["commit", "branch", "merge", "diff", "refs/", "repository"],
         ),
         plugin(
             "program-analysis",
             "Program Analysis",
-            "Static and dynamic program evidence including calls, dependencies, data flow, taint, and traces.",
-            &["Call Graph", "Dependency Graph", "DFG", "Taint Flow", "Execution Trace"],
+            "Semantic code databases, queries, call graphs, data flow, path explanations, and security findings.",
+            &["Code Database", "Query", "Call Graph", "Data Flow", "Path", "Security Finding"],
             &["sarif", "dot", "graphml", "gexf", "cfg", "dfg", "trace", "log", "json", "jsonl", "rs", "py", "c", "cpp", "java", "js", "ts"],
             vec![
                 visualization("call-graph", "Call Graph", "graph", &[]),
@@ -2625,26 +2929,26 @@ fn builtin_plugins() -> Vec<DeclarativeDomainPlugin> {
                 visualization("execution-trace", "Execution Trace", "trace", &["trace", "log", "jsonl", "json"]),
             ],
             &["analysis", "security", "verification"],
-            &["LLVM", "CodeQL", "Semgrep", "Joern", "Valgrind"],
+            &["CodeQL"],
             &["program analysis", "call graph", "data flow", "taint", "execution trace", "dependency graph"],
             &["callgraph", "dataflow", "taint", "cfg", "static analysis", "dynamic analysis"],
         ),
         plugin(
             "cyber-security",
             "Cyber Security",
-            "Findings, attack paths, vulnerabilities, taint evidence, packet data, and security telemetry.",
-            &["Finding", "Vulnerability", "Attack Path", "Taint", "Packet", "Security Trace"],
-            &["sarif", "yara", "nessus", "pcap", "pcapng", "har", "log", "json", "jsonl", "csv"],
+            "Binary analysis, decompilation, disassembly, symbols, references, data types, and function graphs.",
+            &["Binary", "Decompiler", "Disassembly", "Symbol", "Function Graph", "Cross Reference"],
+            &["exe", "dll", "elf", "so", "dylib", "bin", "o", "obj", "lib", "a", "wasm", "pdb"],
             vec![
-                visualization("attack-graph", "Attack Graph", "graph", &["sarif", "json", "jsonl", "yara", "nessus"]),
-                visualization("taint-flow", "Taint Flow", "trace", &["sarif", "json", "jsonl"]),
-                visualization("packet-flow", "Packet Flow", "timeline", &["pcap", "pcapng", "har", "log"]),
-                visualization("findings", "Findings", "table", &["sarif", "nessus", "json", "csv"]),
+                visualization("decompiler", "Decompiler", "code", &[]),
+                visualization("disassembly", "Disassembly", "code", &[]),
+                visualization("function-graph", "Function Graph", "graph", &[]),
+                visualization("memory-map", "Memory Map", "topology", &[]),
             ],
-            &["security", "audit", "threat-model"],
-            &["Semgrep", "CodeQL", "YARA", "Wireshark", "OWASP ZAP"],
-            &["security", "vulnerability", "attack", "taint", "sarif", "yara", "threat"],
-            &["vulnerability", "cve", "taint", "security", "semgrep", "codeql", "yara"],
+            &["reverse-engineering", "binary-analysis", "verification"],
+            &["Ghidra"],
+            &["binary", "decompiler", "disassembly", "symbol", "function", "reverse engineering"],
+            &["elf header", "portable executable", "pdb", "symbol table", "disassembly", "decompile"],
         ),
         plugin(
             "hpc",
@@ -2667,35 +2971,34 @@ fn builtin_plugins() -> Vec<DeclarativeDomainPlugin> {
         plugin(
             "distributed-systems",
             "Distributed Systems",
-            "Services, RPCs, traces, consensus, queues, replicas, and distributed state transitions.",
-            &["Service", "RPC", "Trace", "Consensus", "Queue", "Replica", "Distributed State"],
-            &["proto", "har", "trace", "log", "json", "jsonl", "yaml", "yml", "dot", "graphml"],
+            "Containers, images, volumes, Compose applications, logs, networks, and runtime events.",
+            &["Container", "Image", "Volume", "Compose", "Logs", "Network", "Runtime"],
+            &["dockerfile", "yaml", "yml", "json", "log", "tar"],
             vec![
-                visualization("service-topology", "Service Topology", "topology", &[]),
-                visualization("request-trace", "Request Trace", "trace", &["har", "trace", "log", "json", "jsonl"]),
-                visualization("communication", "Distributed Communication", "graph", &["proto", "trace", "json", "jsonl", "dot", "graphml"]),
-                visualization("state-lifecycle", "State Lifecycle", "timeline", &["trace", "log", "json", "jsonl"]),
+                visualization("container-topology", "Container Topology", "topology", &[]),
+                visualization("image-layers", "Image Layers", "tree", &["json", "tar"]),
+                visualization("runtime-lifecycle", "Runtime Lifecycle", "timeline", &["log", "json"]),
+                visualization("log-streams", "Log Streams", "trace", &["log", "json"]),
             ],
-            &["distributed", "observability", "reliability"],
-            &["OpenTelemetry", "gRPC", "Jaeger", "Kubernetes", "etcd"],
-            &["distributed", "service", "rpc", "consensus", "replica", "trace", "microservice"],
-            &["grpc", "opentelemetry", "jaeger", "kubernetes", "raft", "consensus", "replica"],
+            &["container", "runtime", "compose", "observability"],
+            &["Docker Engine API", "Docker Compose"],
+            &["container", "docker", "image", "volume", "compose", "runtime", "logs"],
+            &["dockerfile", "services:", "image:", "volumes:", "container"],
         ),
         plugin(
             "scientific-computing",
             "Scientific Computing",
-            "Numerical models, arrays, simulations, equations, fields, meshes, and measured results.",
-            &["Array", "Simulation", "Equation", "Field", "Mesh", "Experiment", "Numerical Method"],
+            "Scientific visualization pipelines, VTK datasets, volume rendering, surfaces, slices, and simulation results.",
+            &["Pipeline", "VTK Dataset", "Volume", "Surface", "Slice", "Field", "Simulation Result"],
             &["npy", "npz", "mat", "h5", "hdf5", "nc", "vtk", "vtu", "csv", "json", "jsonl", "m", "jl", "py", "ipynb", "md"],
             vec![
-                visualization("array", "Array", "tensor", &["npy", "npz", "mat", "h5", "hdf5", "nc"]),
-                visualization("field", "Field", "heatmap", &["npy", "npz", "mat", "h5", "hdf5", "nc", "vtk", "vtu"]),
-                visualization("mesh", "Scientific Mesh", "mesh", &["vtk", "vtu"]),
-                visualization("result-chart", "Result Chart", "chart", &["csv", "json", "jsonl"]),
-                visualization("equation", "Equation", "equation", &["m", "jl", "py", "ipynb", "md"]),
+                visualization("volume", "Volume Rendering", "volume", &["vtk", "vtu", "vti", "vtr", "vts", "h5", "hdf5", "nc"]),
+                visualization("surface", "Surface", "mesh", &["vtk", "vtu", "vtp", "ply", "obj"]),
+                visualization("slice", "Slice", "2d", &["vtk", "vtu", "vti", "h5", "hdf5", "nc"]),
+                visualization("pipeline", "Visualization Pipeline", "pipeline", &[]),
             ],
-            &["scientific", "simulation", "numerical"],
-            &["NumPy", "SciPy", "Julia", "MATLAB", "PETSc", "VTK"],
+            &["scientific", "visualization", "vtk"],
+            &["ParaView", "VTK"],
             &["scientific", "simulation", "numerical", "equation", "matrix", "pde", "ode", "field"],
             &["numpy", "scipy", "differentialequations", "petsc", "vtk", "finite element", "simulation"],
         ),
@@ -2727,6 +3030,12 @@ mod tests {
                 && plugin.workbench.tools.len() == 3
                 && plugin.workbench.workflow.len() == 4
                 && plugin.workbench.intents.len() == 3
+                && plugin.workbench.object_model.len() >= 6
+                && !plugin.workbench.interaction_model.is_empty()
+                && !plugin.workbench.inspector_model.is_empty()
+                && !plugin.workbench.visualization_model.is_empty()
+                && !plugin.workbench.runtime.is_empty()
+                && !plugin.workbench.preview_kind.is_empty()
                 && plugin.workbench.intents.iter().all(|intent| {
                     !intent.agent.is_empty()
                         && !intent.input_contract.is_empty()
@@ -2740,6 +3049,21 @@ mod tests {
                     .iter()
                     .all(|stage| !stage.agent.is_empty() && !stage.gate.is_empty())
         }));
+        let unique_contract_fields: [fn(&DomainPluginDescriptor) -> &str; 5] = [
+            |plugin: &DomainPluginDescriptor| plugin.workbench.layout.as_str(),
+            |plugin: &DomainPluginDescriptor| plugin.workbench.interaction_model.as_str(),
+            |plugin: &DomainPluginDescriptor| plugin.workbench.visualization_model.as_str(),
+            |plugin: &DomainPluginDescriptor| plugin.workbench.runtime.as_str(),
+            |plugin: &DomainPluginDescriptor| plugin.workbench.preview_kind.as_str(),
+        ];
+        for field in unique_contract_fields {
+            let values = catalog.plugins.iter().map(field).collect::<HashSet<_>>();
+            assert_eq!(
+                values.len(),
+                16,
+                "professional environment contracts must be unique"
+            );
+        }
         assert_eq!(catalog.active_domain.unwrap().domain_id, "ai-ml");
         assert!(catalog
             .renderers

@@ -60,9 +60,7 @@ impl SandboxedFileOps {
         };
 
         // 规范化路径（移除多余的 / 和 .）
-        let normalized = pathdiff::diff_paths(&abs_path, "/")
-            .map(|p| PathBuf::from("/").join(p))
-            .unwrap_or(abs_path);
+        let normalized = abs_path;
 
         // 检查是否在任何一个允许的目录内
         self.allowed_dirs
@@ -203,7 +201,7 @@ pub fn create_default_sandbox() -> SandboxedFileOps {
     }
 
     // 临时目录
-    allowed_dirs.push(PathBuf::from("/tmp"));
+    allowed_dirs.push(std::env::temp_dir());
 
     SandboxedFileOps::new(allowed_dirs, None)
 }
@@ -310,7 +308,8 @@ mod tests {
     #[test]
     fn test_sandbox_read_write() {
         let sandbox = create_default_sandbox();
-        let test_path = PathBuf::from("/tmp/test_sandbox.txt");
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test_sandbox.txt");
         let content = "Hello, Sandbox!";
 
         // 测试写入

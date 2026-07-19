@@ -1,6 +1,6 @@
 use crate::process_window::CommandWindowExt;
 use anyhow::{anyhow, Result};
-use axum::body::{Body, Bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::{Query, State};
 use axum::http::header;
@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
-use chrono::Local;
+use chrono::{DateTime, Local, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use futures::{FutureExt, StreamExt};
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -24,12 +24,15 @@ use std::net::SocketAddr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
+use tower::ServiceExt;
 use tower_http::services::ServeDir;
+use walkdir::WalkDir;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -54,8 +57,10 @@ use crate::image_generation::{
 };
 use crate::llm::providers::OpenAIProvider;
 use crate::llm::{ChatRequest, LLMProvider, Message};
+use crate::notebook::{AtlasNotebook, NotebookCore};
 use crate::project_index;
 use crate::provider_config::ProviderManager;
+use crate::remote_ssh::{ForwardKind, RemoteHostConfig, RemoteSshCore};
 use crate::research_domains::model::DomainWorkspace;
 use crate::research_domains::{
     begin_task as begin_domain_task, intent_catalog as domain_intent_catalog,
@@ -73,6 +78,9 @@ use crate::research_os::{
     list_publications, list_timeline_events,
 };
 use crate::sandbox::initialize_app_sandbox;
+use crate::scientific_infrastructure::{
+    ScientificEventCenter, WorkspaceSnapshotType, WorkspaceTimeMachine,
+};
 use crate::scientist::tools::data::{extract_paper_dataset_hints_from_value, DataTools};
 use crate::scientist::tools::github::{
     detect_github_api_base_public, detect_github_token, GitHubTools,
@@ -109,8 +117,11 @@ pub struct WebAppState {
     base_security_config: SecurityConfig,
     run_debug_runtime: Arc<Mutex<RunDebugRuntime>>,
     terminal_runtime: Arc<Mutex<TerminalRuntime>>,
+    remote_ssh: Arc<Mutex<RemoteSshCore>>,
     task_queues: Arc<Mutex<HashMap<String, TaskQueue>>>,
     stream_runtime: Arc<Mutex<HashMap<String, StreamSessionRuntime>>>,
+    scheduled_tasks: Arc<Mutex<Vec<ScheduledAgentTask>>>,
+    scheduler_started: Arc<AtomicBool>,
     paper_workflow_inflight: Arc<Mutex<HashSet<String>>>,
     visualization_registry: Arc<VisualizationRegistry>,
     research_domain_registry: Arc<ResearchDomainRegistry>,
@@ -278,6 +289,36 @@ struct WebBootstrap {
     current_session_id: Option<String>,
     branches: Vec<SessionBranch>,
     messages: Vec<WebMessage>,
+    scheduled_tasks: Vec<ScheduledAgentTask>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScheduledAgentTask {
+    id: String,
+    session_id: String,
+    prompt: String,
+    next_run_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    interval_seconds: Option<u64>,
+    #[serde(default)]
+    status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_run_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScheduleManageRequest {
+    command: String,
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ScheduleManageResponse {
+    message: String,
+    tasks: Vec<ScheduledAgentTask>,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -1838,10 +1879,28 @@ struct ParallelAnalysisProgress {
 #[derive(Debug, Deserialize)]
 struct SendMessageRequest {
     content: String,
+    #[serde(default)]
+    session_id: Option<String>,
     mode: Option<String>,
     language: Option<String>,
     #[serde(default)]
+    personalization: Option<ChatPersonalization>,
+    #[serde(default)]
     attachments: Vec<ChatAttachment>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ChatPersonalization {
+    #[serde(default)]
+    personality: String,
+    #[serde(default)]
+    custom_instructions: String,
+    #[serde(default)]
+    memory_enabled: bool,
+    #[serde(default)]
+    tool_memory_enabled: bool,
+    #[serde(default)]
+    memories: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2434,6 +2493,11 @@ struct TerminalInputRequest {
     input: String,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct TerminalCreateRequest {
+    shell: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct TerminalCloseRequest {
     terminal_id: String,
@@ -2442,6 +2506,117 @@ struct TerminalCloseRequest {
 #[derive(Debug, Serialize)]
 struct TerminalEnvelope {
     terminals: WebTerminalPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct SshHostDeleteRequest {
+    host_id: String,
+}
+#[derive(Debug, Default, Deserialize)]
+struct SshConfigImportRequest {
+    path: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct SshConnectRequest {
+    host_id: String,
+    password: Option<String>,
+    #[serde(default)]
+    agent_authorized: bool,
+}
+#[derive(Debug, Deserialize)]
+struct SshHostRequest {
+    host_id: String,
+}
+#[derive(Debug, Deserialize)]
+struct SshExecuteRequest {
+    host_id: String,
+    command: String,
+    operation: Option<String>,
+    #[serde(default)]
+    agent: bool,
+}
+#[derive(Debug, Deserialize)]
+struct SshFilesRequest {
+    host_id: String,
+    path: String,
+    #[serde(default)]
+    agent: bool,
+}
+#[derive(Debug, Deserialize)]
+struct SshTransferRequest {
+    host_id: String,
+    direction: String,
+    local_path: String,
+    remote_path: String,
+    #[serde(default)]
+    agent: bool,
+}
+#[derive(Debug, Deserialize)]
+struct SshTerminalCreateRequest {
+    host_id: String,
+    title: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct SshTerminalInputRequest {
+    terminal_id: String,
+    input: String,
+}
+#[derive(Debug, Deserialize)]
+struct SshResourceRequest {
+    id: String,
+}
+#[derive(Debug, Deserialize)]
+struct SshForwardStartRequest {
+    host_id: String,
+    kind: ForwardKind,
+    bind: String,
+    target: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EventCenterQuery {
+    query: Option<String>,
+    category: Option<String>,
+    include_archived: Option<bool>,
+}
+#[derive(Debug, Deserialize)]
+struct EventCenterMutation {
+    id: String,
+    operation: String,
+    priority: Option<i32>,
+}
+#[derive(Debug, Deserialize)]
+struct UniversalSearchRequest {
+    query: String,
+    categories: Option<Vec<String>>,
+    limit: Option<usize>,
+}
+#[derive(Debug, Deserialize)]
+struct SnapshotCreateRequest {
+    name: Option<String>,
+    snapshot_type: Option<WorkspaceSnapshotType>,
+    #[serde(default)]
+    state: Value,
+    parent_id: Option<String>,
+    tags: Option<BTreeSet<String>>,
+}
+#[derive(Debug, Deserialize)]
+struct SnapshotActionRequest {
+    operation: String,
+    id: Option<String>,
+    left_id: Option<String>,
+    right_id: Option<String>,
+    name: Option<String>,
+    archived: Option<bool>,
+}
+#[derive(Debug, Default, Deserialize)]
+struct NotebookCreateRequest {
+    title: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct NotebookExecuteRequest {
+    notebook_id: String,
+    cell_id: String,
 }
 
 #[derive(Debug, Default)]
@@ -2467,6 +2642,8 @@ struct TerminalSessionRuntime {
 #[derive(Debug)]
 struct StreamSessionRuntime {
     task_handle: Arc<tokio::task::JoinHandle<()>>,
+    worker_abort: tokio::task::AbortHandle,
+    terminal_emitted: Arc<AtomicBool>,
     event_tx: tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
     pending_approvals: HashMap<String, PendingApprovalRuntime>,
     latest_activity: Option<WebActivityEvent>,
@@ -2519,6 +2696,23 @@ struct StreamEnvelope {
     auto_skills: Option<Vec<WebAutoSkill>>,
 }
 
+#[derive(Debug, Deserialize)]
+struct NativeApiRequest {
+    method: String,
+    path: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    #[serde(default)]
+    body_base64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NativeApiResponse {
+    status: u16,
+    headers: HashMap<String, String>,
+    body_base64: String,
+}
+
 #[derive(Debug, Serialize, Clone, Default)]
 struct WebSessionRuntimeSnapshot {
     session_id: String,
@@ -2547,10 +2741,348 @@ fn clear_stream_runtime_session(state: &WebAppState, session_id: &str) {
     }
 }
 
-fn prune_completed_stream_runtime_sessions(state: &WebAppState) {
-    if let Ok(mut runtime) = lock_stream_runtime(state) {
-        runtime.retain(|_, session| !session.task_handle.is_finished());
+fn mark_stream_terminal_emitted(state: &WebAppState, session_id: &str) {
+    if let Ok(runtime) = lock_stream_runtime(state) {
+        if let Some(session) = runtime.get(session_id) {
+            session.terminal_emitted.store(true, Ordering::Release);
+        }
     }
+}
+
+fn prune_completed_stream_runtime_sessions(state: &WebAppState) {
+    let silently_finished = lock_stream_runtime(state)
+        .map(|runtime| {
+            runtime
+                .iter()
+                .filter_map(|(id, session)| {
+                    (session.task_handle.is_finished()
+                        && !session.terminal_emitted.load(Ordering::Acquire))
+                    .then(|| id.clone())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for session_id in silently_finished {
+        let tx = lock_stream_runtime(state).ok().and_then(|runtime| {
+            runtime
+                .get(&session_id)
+                .map(|session| session.event_tx.clone())
+        });
+        if let Some(tx) = tx {
+            finalize_stream_failure(
+                &tx,
+                state,
+                &session_id,
+                TurnLanguage::Zh,
+                "Agent task exited without a terminal event; the interrupted turn was preserved",
+            );
+        }
+    }
+}
+
+fn schedules_path(state: &WebAppState) -> PathBuf {
+    state.host.paths.state_dir().join("schedules.json")
+}
+
+fn load_scheduled_tasks(path: &Path) -> Vec<ScheduledAgentTask> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn persist_scheduled_tasks(state: &WebAppState) -> Result<()> {
+    let tasks = state
+        .scheduled_tasks
+        .lock()
+        .map_err(|_| anyhow!("scheduled task lock poisoned"))?;
+    let path = schedules_path(state);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_vec_pretty(&*tasks)?)?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn schedule_help() -> String {
+    "用法：/schedule in 10m <任务>；/schedule at 2026-07-20 09:00 <任务>；/schedule daily 09:00 <任务>；/schedule list；/schedule cancel <id>".to_string()
+}
+
+fn next_local_daily(time: NaiveTime) -> DateTime<Utc> {
+    let now = Local::now();
+    let today = now.date_naive().and_time(time);
+    let candidate = Local.from_local_datetime(&today).single().unwrap_or(now);
+    if candidate > now {
+        candidate.with_timezone(&Utc)
+    } else {
+        (candidate + chrono::Duration::days(1)).with_timezone(&Utc)
+    }
+}
+
+fn parse_schedule_creation(command: &str, session_id: &str) -> Result<ScheduledAgentTask> {
+    let command = command.trim();
+    let in_pattern = Regex::new(r"(?i)^in\s+(\d+)([smhd])\s+(.+)$")?;
+    let daily_pattern = Regex::new(r"(?i)^daily\s+(\d{1,2}:\d{2})\s+(.+)$")?;
+    let at_pattern = Regex::new(r"(?i)^at\s+(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})\s+(.+)$")?;
+    let (next_run_at, interval_seconds, prompt) =
+        if let Some(captures) = in_pattern.captures(command) {
+            let amount = captures[1].parse::<u64>()?;
+            let multiplier = match &captures[2].to_ascii_lowercase()[..] {
+                "s" => 1,
+                "m" => 60,
+                "h" => 3600,
+                "d" => 86400,
+                _ => unreachable!(),
+            };
+            let seconds = amount.saturating_mul(multiplier);
+            if seconds == 0 {
+                return Err(anyhow!("schedule delay must be greater than zero"));
+            }
+            (
+                Utc::now() + chrono::Duration::seconds(seconds as i64),
+                None,
+                captures[3].trim().to_string(),
+            )
+        } else if let Some(captures) = daily_pattern.captures(command) {
+            let time = NaiveTime::parse_from_str(&captures[1], "%H:%M")?;
+            (
+                next_local_daily(time),
+                Some(86_400),
+                captures[2].trim().to_string(),
+            )
+        } else if let Some(captures) = at_pattern.captures(command) {
+            let local = NaiveDateTime::parse_from_str(
+                &format!("{} {}", &captures[1], &captures[2]),
+                "%Y-%m-%d %H:%M",
+            )?;
+            let at = Local
+                .from_local_datetime(&local)
+                .single()
+                .ok_or_else(|| anyhow!("scheduled local time is ambiguous or invalid"))?
+                .with_timezone(&Utc);
+            if at <= Utc::now() {
+                return Err(anyhow!("scheduled time must be in the future"));
+            }
+            (at, None, captures[3].trim().to_string())
+        } else {
+            return Err(anyhow!(schedule_help()));
+        };
+    if prompt.is_empty() {
+        return Err(anyhow!("scheduled task prompt is empty"));
+    }
+    Ok(ScheduledAgentTask {
+        id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
+        session_id: session_id.to_string(),
+        prompt,
+        next_run_at,
+        interval_seconds,
+        status: "scheduled".to_string(),
+        last_run_at: None,
+        last_error: None,
+        created_at: Utc::now(),
+    })
+}
+
+fn record_schedule_message(
+    state: &WebAppState,
+    session_id: &str,
+    command: &str,
+    reply: &str,
+) -> Result<()> {
+    let mut manager = lock_session_manager(state)?;
+    let mut messages = manager.load_messages(session_id).unwrap_or_default();
+    messages.push(MessageBlock::User {
+        content: format!("/schedule {}", command.trim()),
+        branch_id: "main".to_string(),
+    });
+    push_assistant_message_blocks(&mut messages, reply.to_string());
+    manager.save_messages_for(session_id, &messages)
+}
+
+fn manage_schedule(
+    state: &WebAppState,
+    request: ScheduleManageRequest,
+) -> Result<ScheduleManageResponse> {
+    let session_id = match request.session_id.filter(|value| !value.trim().is_empty()) {
+        Some(session_id) => session_id,
+        None => ensure_current_session(state)?,
+    };
+    let command = request.command.trim();
+    let message = if command.is_empty() || command.eq_ignore_ascii_case("help") {
+        schedule_help()
+    } else if command.eq_ignore_ascii_case("list") {
+        let tasks = state
+            .scheduled_tasks
+            .lock()
+            .map_err(|_| anyhow!("scheduled task lock poisoned"))?;
+        if tasks.is_empty() {
+            "当前没有定时任务。".to_string()
+        } else {
+            tasks
+                .iter()
+                .map(|task| {
+                    format!(
+                        "{} · {} · {} · {}",
+                        task.id,
+                        task.status,
+                        task.next_run_at
+                            .with_timezone(&Local)
+                            .format("%Y-%m-%d %H:%M:%S"),
+                        task.prompt
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    } else if command.to_ascii_lowercase().starts_with("cancel ") {
+        let id = command[7..].trim();
+        let mut tasks = state
+            .scheduled_tasks
+            .lock()
+            .map_err(|_| anyhow!("scheduled task lock poisoned"))?;
+        let before = tasks.len();
+        tasks.retain(|task| task.id != id);
+        if tasks.len() == before {
+            return Err(anyhow!("scheduled task '{}' was not found", id));
+        }
+        drop(tasks);
+        persist_scheduled_tasks(state)?;
+        format!("已取消定时任务 {}。", id)
+    } else {
+        let task = parse_schedule_creation(command, &session_id)?;
+        let message = format!(
+            "已创建定时任务 {}，将在 {} 运行。",
+            task.id,
+            task.next_run_at
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+        );
+        state
+            .scheduled_tasks
+            .lock()
+            .map_err(|_| anyhow!("scheduled task lock poisoned"))?
+            .push(task);
+        persist_scheduled_tasks(state)?;
+        message
+    };
+    record_schedule_message(state, &session_id, command, &message)?;
+    let tasks = state
+        .scheduled_tasks
+        .lock()
+        .map_err(|_| anyhow!("scheduled task lock poisoned"))?
+        .clone();
+    Ok(ScheduleManageResponse { message, tasks })
+}
+
+fn ensure_schedule_runner(state: &WebAppState) {
+    if state.scheduler_started.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if tokio::runtime::Handle::try_current().is_err() {
+        state.scheduler_started.store(false, Ordering::Release);
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            ticker.tick().await;
+            let now = Utc::now();
+            let due = {
+                let active = lock_stream_runtime(&state)
+                    .map(|runtime| runtime.keys().cloned().collect::<HashSet<_>>())
+                    .unwrap_or_default();
+                let mut tasks = match state.scheduled_tasks.lock() {
+                    Ok(tasks) => tasks,
+                    Err(_) => continue,
+                };
+                let mut due = Vec::new();
+                for task in tasks.iter_mut() {
+                    if task.status == "scheduled" && task.next_run_at <= now {
+                        if active.contains(&task.session_id) {
+                            task.next_run_at = now + chrono::Duration::seconds(30);
+                            continue;
+                        }
+                        task.status = "running".to_string();
+                        task.last_error = None;
+                        due.push(task.clone());
+                    }
+                }
+                due
+            };
+            if !due.is_empty() {
+                let _ = persist_scheduled_tasks(&state);
+            }
+            for task in due {
+                let payload = json!({
+                    "content": task.prompt,
+                    "session_id": task.session_id,
+                    "mode": "agent",
+                    "language": "zh",
+                    "attachments": []
+                });
+                let result = match dispatch_bridge_stream(state.clone(), "chat.stream", payload) {
+                    Ok(mut stream) => {
+                        let mut error = None;
+                        let mut terminal = false;
+                        while let Some(event) = stream.receiver.recv().await {
+                            match event.get("type").and_then(Value::as_str) {
+                                Some("complete") => {
+                                    terminal = true;
+                                    break;
+                                }
+                                Some("error") => {
+                                    terminal = true;
+                                    error = event
+                                        .get("error")
+                                        .and_then(Value::as_str)
+                                        .map(str::to_string);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !terminal {
+                            Err("scheduled Agent stream closed without a terminal event"
+                                .to_string())
+                        } else if let Some(error) = error {
+                            Err(error)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    Err(error) => Err(error.to_string()),
+                };
+                if let Ok(mut tasks) = state.scheduled_tasks.lock() {
+                    if let Some(saved) = tasks.iter_mut().find(|saved| saved.id == task.id) {
+                        saved.last_run_at = Some(Utc::now());
+                        match result {
+                            Ok(()) => {
+                                saved.last_error = None;
+                                if let Some(seconds) = saved.interval_seconds {
+                                    saved.status = "scheduled".to_string();
+                                    saved.next_run_at =
+                                        Utc::now() + chrono::Duration::seconds(seconds as i64);
+                                } else {
+                                    saved.status = "completed".to_string();
+                                }
+                            }
+                            Err(error) => {
+                                saved.status = "failed".to_string();
+                                saved.last_error = Some(error);
+                            }
+                        }
+                    }
+                }
+                let _ = persist_scheduled_tasks(&state);
+            }
+        }
+    });
 }
 
 fn sync_stream_runtime_messages(
@@ -2603,6 +3135,7 @@ pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
         .route("/api/prompt/optimize", post(api_prompt_optimize))
         .route("/api/send-stream", post(api_send_message_stream))
         .route("/api/send-stop", post(api_stop_message_stream))
+        .route("/api/schedule", post(api_schedule_manage))
         .route("/api/tool/approve", post(api_approve_tool_call))
         .route("/api/tool/deny", post(api_deny_tool_call))
         .route("/api/workspace/pick", post(api_pick_workspace))
@@ -2742,6 +3275,39 @@ pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
         .route("/api/terminals/create", post(api_create_terminal))
         .route("/api/terminals/input", post(api_terminal_input))
         .route("/api/terminals/close", post(api_close_terminal))
+        .route("/api/ssh", get(api_ssh_state))
+        .route("/api/ssh/hosts/save", post(api_ssh_host_save))
+        .route("/api/ssh/hosts/delete", post(api_ssh_host_delete))
+        .route("/api/ssh/config/import", post(api_ssh_config_import))
+        .route("/api/ssh/connect", post(api_ssh_connect))
+        .route("/api/ssh/disconnect", post(api_ssh_disconnect))
+        .route("/api/ssh/reconnect", post(api_ssh_reconnect))
+        .route("/api/ssh/heartbeat", post(api_ssh_heartbeat))
+        .route("/api/ssh/execute", post(api_ssh_execute))
+        .route("/api/ssh/detect", post(api_ssh_detect))
+        .route("/api/ssh/files", post(api_ssh_files))
+        .route("/api/ssh/transfer", post(api_ssh_transfer))
+        .route("/api/ssh/terminals/create", post(api_ssh_terminal_create))
+        .route("/api/ssh/terminals/input", post(api_ssh_terminal_input))
+        .route("/api/ssh/terminals/close", post(api_ssh_terminal_close))
+        .route("/api/ssh/forwards/start", post(api_ssh_forward_start))
+        .route("/api/ssh/forwards/stop", post(api_ssh_forward_stop))
+        .route("/api/event-center", get(api_event_center))
+        .route("/api/event-center/mutate", post(api_event_center_mutate))
+        .route("/api/universal-search", post(api_universal_search))
+        .route("/api/workspace-snapshots", get(api_workspace_snapshots))
+        .route(
+            "/api/workspace-snapshots/create",
+            post(api_workspace_snapshot_create),
+        )
+        .route(
+            "/api/workspace-snapshots/action",
+            post(api_workspace_snapshot_action),
+        )
+        .route("/api/notebooks", get(api_notebooks))
+        .route("/api/notebooks/create", post(api_notebook_create))
+        .route("/api/notebooks/save", post(api_notebook_save))
+        .route("/api/notebooks/execute", post(api_notebook_execute))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .nest_service("/", ServeDir::new(frontend_dir))
         .with_state(state)
@@ -2788,6 +3354,8 @@ pub fn build_web_app_state(
         &host.paths,
     );
 
+    let remote_ssh = RemoteSshCore::open(PathBuf::from(&runtime_settings.workspace_root))?;
+    let scheduled_tasks = load_scheduled_tasks(&host.paths.state_dir().join("schedules.json"));
     let state = WebAppState {
         assistant: Arc::new(Mutex::new(None)),
         assistant_api_url: assistant_config.api_url.clone(),
@@ -2798,8 +3366,11 @@ pub fn build_web_app_state(
         base_security_config: security_config,
         run_debug_runtime: Arc::new(Mutex::new(RunDebugRuntime::default())),
         terminal_runtime: Arc::new(Mutex::new(TerminalRuntime::default())),
+        remote_ssh: Arc::new(Mutex::new(remote_ssh)),
         task_queues: Arc::new(Mutex::new(HashMap::new())),
         stream_runtime: Arc::new(Mutex::new(HashMap::new())),
+        scheduled_tasks: Arc::new(Mutex::new(scheduled_tasks)),
+        scheduler_started: Arc::new(AtomicBool::new(false)),
         paper_workflow_inflight: Arc::new(Mutex::new(HashSet::new())),
         visualization_registry: Arc::new(VisualizationRegistry::default()),
         research_domain_registry: Arc::new(ResearchDomainRegistry::default()),
@@ -3054,6 +3625,20 @@ pub async fn dispatch_bridge_command(
                 .map(|value| json!({ "ok": true, "data": value })),
             Err(err) => Err(err),
         },
+        HostCommand::ScheduleManage => {
+            match parse_bridge_payload::<ScheduleManageRequest>(payload) {
+                Ok(req) => {
+                    manage_schedule(&state, req).map(|value| json!({ "ok": true, "data": value }))
+                }
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::NativeRequest => match parse_bridge_payload::<NativeApiRequest>(payload) {
+            Ok(req) => bridge_native_api_request(&state, req)
+                .await
+                .map(|value| json!({ "ok": true, "data": value })),
+            Err(err) => Err(err),
+        },
         HostCommand::ToolApprovalApprove => {
             match parse_bridge_payload::<ToolApprovalRequest>(payload) {
                 Ok(req) => bridge_tool_approval(&state, req, true)
@@ -3091,9 +3676,14 @@ pub async fn dispatch_bridge_command(
         HostCommand::TerminalsState => {
             bridge_terminals_state(&state).map(|value| json!({ "ok": true, "data": value }))
         }
-        HostCommand::TerminalsCreate => bridge_terminals_create(&state)
-            .await
-            .map(|value| json!({ "ok": true, "data": value })),
+        HostCommand::TerminalsCreate => {
+            match parse_bridge_payload::<TerminalCreateRequest>(payload) {
+                Ok(req) => bridge_terminals_create(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(err) => Err(err),
+            }
+        }
         HostCommand::TerminalsInput => {
             match parse_bridge_payload::<TerminalInputRequest>(payload) {
                 Ok(req) => bridge_terminals_input(&state, req)
@@ -3157,7 +3747,15 @@ pub fn dispatch_bridge_stream(
     }
 
     let request = parse_bridge_payload::<SendMessageRequest>(payload)?;
-    let session_id = ensure_current_session(&state)?;
+    let session_id = match request
+        .session_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(session_id) => session_id,
+        None => ensure_current_session(&state)?,
+    };
+    ensure_schedule_runner(&state);
     let turn_model = lock_runtime_settings(&state)?.model.clone();
     let runtime_model = turn_model.clone();
     let (tx_json, rx_json) = tokio::sync::mpsc::unbounded_channel::<Value>();
@@ -3178,6 +3776,7 @@ pub fn dispatch_bridge_stream(
     let mode = request.mode;
     let language = request.language;
     let attachments = request.attachments;
+    let personalization = request.personalization;
     let recovery_user_content = content.clone();
     let recovery_mode = mode.clone();
     let recovery_language = language.clone();
@@ -3185,7 +3784,14 @@ pub fn dispatch_bridge_stream(
     let tx_stream_for_runtime = tx_stream.clone();
     let state_for_cleanup = state_for_task.clone();
     let (runtime_ready_tx, runtime_ready_rx) = oneshot::channel::<()>();
-    let handle = Arc::new(tokio::spawn(async move {
+    let terminal_emitted = Arc::new(AtomicBool::new(false));
+    let terminal_for_task = terminal_emitted.clone();
+    let supervisor_language = turn_language_from_option(recovery_language.as_deref());
+    let terminal_for_supervisor = terminal_emitted.clone();
+    let state_for_supervisor = state.clone();
+    let session_for_supervisor = session_id.clone();
+    let tx_for_supervisor = tx_stream.clone();
+    let worker = tokio::spawn(async move {
         if runtime_ready_rx.await.is_err() {
             return;
         }
@@ -3196,6 +3802,7 @@ pub fn dispatch_bridge_stream(
             mode,
             language,
             attachments,
+            personalization,
             turn_model,
             tx_stream.clone(),
         ))
@@ -3203,7 +3810,17 @@ pub fn dispatch_bridge_stream(
         .await;
 
         match result {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                if !terminal_for_task.load(Ordering::Acquire) {
+                    finalize_stream_failure(
+                        &tx_stream,
+                        &state_for_cleanup,
+                        &session_id_for_task,
+                        turn_language_from_option(recovery_language.as_deref()),
+                        "Agent task returned without completing its stream",
+                    );
+                }
+            }
             Ok(Err(err)) => {
                 if let Ok((runtime, persisted_blocks)) =
                     recover_stream_finalize_context(&state_for_cleanup, &session_id_for_task)
@@ -3337,6 +3954,27 @@ pub fn dispatch_bridge_stream(
                 );
             }
         }
+    });
+    let worker_abort = worker.abort_handle();
+    let handle = Arc::new(tokio::spawn(async move {
+        let outcome = worker.await;
+        if terminal_for_supervisor.load(Ordering::Acquire) {
+            return;
+        }
+        let error = match outcome {
+            Ok(()) => "Agent task exited without a terminal event".to_string(),
+            Err(error) if error.is_cancelled() => {
+                "Agent task was cancelled unexpectedly".to_string()
+            }
+            Err(error) => format!("Agent task supervisor observed a failure: {}", error),
+        };
+        finalize_stream_failure(
+            &tx_for_supervisor,
+            &state_for_supervisor,
+            &session_for_supervisor,
+            supervisor_language,
+            &error,
+        );
     }));
 
     {
@@ -3345,6 +3983,8 @@ pub fn dispatch_bridge_stream(
             session_id.clone(),
             StreamSessionRuntime {
                 task_handle: handle.clone(),
+                worker_abort,
+                terminal_emitted,
                 event_tx: tx_stream_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -5223,12 +5863,13 @@ async fn api_terminals(
 
 async fn api_create_terminal(
     State(state): State<WebAppState>,
+    Json(payload): Json<TerminalCreateRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let workspace_root = {
         let runtime = lock_runtime_settings(&state).map_err(internal_error)?;
         runtime.workspace_root.clone()
     };
-    create_terminal_session(&state, &workspace_root)
+    create_terminal_session_with_shell(&state, &workspace_root, payload.shell.as_deref())
         .await
         .map_err(internal_error)?;
     let terminals = build_terminal_payload(&state).map_err(internal_error)?;
@@ -5266,6 +5907,698 @@ async fn api_close_terminal(
     }))
 }
 
+fn lock_remote_ssh(state: &WebAppState) -> Result<std::sync::MutexGuard<'_, RemoteSshCore>> {
+    state
+        .remote_ssh
+        .lock()
+        .map_err(|_| anyhow!("remote SSH state lock poisoned"))
+}
+
+async fn api_ssh_state(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state).map_err(internal_error)?.snapshot();
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_host_save(
+    State(state): State<WebAppState>,
+    Json(payload): Json<RemoteHostConfig>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .save_host(payload)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_host_delete(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshHostDeleteRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .delete_host(&payload.host_id)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, json!({"host_id": payload.host_id})))
+}
+
+async fn api_ssh_config_import(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshConfigImportRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .import_ssh_config(payload.path.as_deref())
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_connect(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshConnectRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .connect(&payload.host_id, payload.password, payload.agent_authorized)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_disconnect(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshHostRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .disconnect(&payload.host_id)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, json!({"host_id": payload.host_id})))
+}
+
+async fn api_ssh_reconnect(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshConnectRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut ssh = lock_remote_ssh(&state).map_err(internal_error)?;
+    let _ = ssh.disconnect(&payload.host_id);
+    let data = ssh
+        .connect(&payload.host_id, payload.password, payload.agent_authorized)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_heartbeat(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshHostRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .heartbeat(&payload.host_id)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_execute(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshExecuteRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let ssh = lock_remote_ssh(&state).map_err(internal_error)?;
+    let output = ssh
+        .execute(&payload.host_id, &payload.command, payload.agent)
+        .map_err(internal_error)?;
+    ssh.sync_operation_object(
+        &payload.host_id,
+        payload.operation.as_deref().unwrap_or("command"),
+        &payload.command,
+        &output,
+    )
+    .map_err(internal_error)?;
+    Ok(json_api_response(
+        true,
+        json!({"host_id": payload.host_id, "output": output}),
+    ))
+}
+
+async fn api_ssh_detect(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshHostRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .detect_environment(&payload.host_id, false)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_files(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshFilesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .list_files(&payload.host_id, &payload.path, payload.agent)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_transfer(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshTransferRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .transfer(
+            &payload.host_id,
+            &payload.direction,
+            &payload.local_path,
+            &payload.remote_path,
+            payload.agent,
+        )
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_terminal_create(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshTerminalCreateRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .create_terminal(&payload.host_id, payload.title)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_terminal_input(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshTerminalInputRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .terminal_input(&payload.terminal_id, &payload.input)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_terminal_close(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshResourceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .close_terminal(&payload.id)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, json!({"id": payload.id})))
+}
+
+async fn api_ssh_forward_start(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshForwardStartRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let data = lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .start_forward(&payload.host_id, payload.kind, payload.bind, payload.target)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_ssh_forward_stop(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SshResourceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    lock_remote_ssh(&state)
+        .map_err(internal_error)?
+        .stop_forward(&payload.id)
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, json!({"id": payload.id})))
+}
+
+async fn api_event_center(
+    State(state): State<WebAppState>,
+    Query(query): Query<EventCenterQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let center = ScientificEventCenter::open(&workspace).map_err(internal_error)?;
+    let notifications = center
+        .list(
+            query.query.as_deref(),
+            query.category.as_deref(),
+            query.include_archived.unwrap_or(false),
+        )
+        .map_err(internal_error)?;
+    let unread = notifications.iter().filter(|item| !item.read).count();
+    let pinned = notifications.iter().filter(|item| item.pinned).count();
+    Ok(json_api_response(
+        true,
+        json!({"notifications":notifications,"unread":unread,"pinned":pinned,"generated_at":Utc::now().to_rfc3339()}),
+    ))
+}
+
+async fn api_event_center_mutate(
+    State(state): State<WebAppState>,
+    Json(payload): Json<EventCenterMutation>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let data = ScientificEventCenter::open(&workspace)
+        .and_then(|center| center.mutate(&payload.id, &payload.operation, payload.priority))
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+
+async fn api_universal_search(
+    State(state): State<WebAppState>,
+    Json(payload): Json<UniversalSearchRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let query = payload.query.trim();
+    if query.is_empty() {
+        return Ok(json_api_response(
+            true,
+            json!({"query":query,"results":[],"groups":{}}),
+        ));
+    }
+    let limit = payload.limit.unwrap_or(80).clamp(1, 200);
+    let categories = payload.categories.unwrap_or_default();
+    let accepts = |category: &str| {
+        categories.is_empty()
+            || categories
+                .iter()
+                .any(|value| value == "all" || value == category)
+    };
+    let mut results = Vec::<Value>::new();
+    let core = AtlasCore::open(&workspace).map_err(internal_error)?;
+    if accepts("objects") || accepts("scientific_objects") {
+        for object in core
+            .search(query)
+            .unwrap_or_default()
+            .into_iter()
+            .take(limit)
+        {
+            results.push(universal_object_result(&workspace, &object));
+        }
+    }
+    if accepts("files") || accepts("code") {
+        for hit in project_index::search(&workspace, query, limit, None).unwrap_or_default() {
+            results.push(json!({"id":format!("file:{}:{}",hit.path,hit.location),"category":if hit.kind=="code"{"code"}else{"files"},"result_type":"preview_card","title":hit.path,"summary":hit.snippet,"meta":hit.location,"score":hit.score,"navigation":{"workspace":workspace,"artifact_path":hit.path,"highlight":query}}));
+        }
+    }
+    if accepts("notifications") {
+        for item in ScientificEventCenter::open(&workspace)
+            .and_then(|center| center.list(Some(query), None, true))
+            .unwrap_or_default()
+            .into_iter()
+            .take(limit)
+        {
+            results.push(json!({"id":format!("notification:{}",item.id),"category":"notifications","result_type":"timeline","title":item.title,"summary":item.summary,"meta":item.timestamp,"score":if item.pinned{90}else{60}+item.priority,"navigation":item.navigation,"payload":item}));
+        }
+    }
+    if accepts("knowledge") || accepts("knowledge_graph") {
+        if let Ok((nodes, edges)) = get_knowledge_graph(&workspace) {
+            for node in nodes
+                .into_iter()
+                .filter(|n| {
+                    serde_json::to_string(n)
+                        .unwrap_or_default()
+                        .to_ascii_lowercase()
+                        .contains(&query.to_ascii_lowercase())
+                })
+                .take(limit)
+            {
+                results.push(json!({"id":format!("kg:{}",node.id),"category":"knowledge_graph","result_type":"knowledge_graph","title":node.label,"summary":node.node_type,"score":70,"navigation":{"workspace":workspace,"object_id":node.id,"highlight":query},"payload":{"node":node,"relations":edges.iter().filter(|e|e.from_id==node.id||e.to_id==node.id).collect::<Vec<_>>()}}));
+            }
+        }
+    }
+    if accepts("memory") || accepts("research_memory") {
+        for memory in crate::research_os::search_memory(&workspace, query)
+            .unwrap_or_default()
+            .into_iter()
+            .take(limit)
+        {
+            results.push(json!({"id":format!("memory:{}",memory.id),"category":"research_memory","result_type":"object_card","title":"Research Memory","summary":memory.content,"meta":memory.created_at,"score":65,"navigation":{"workspace":workspace,"object_id":memory.id,"highlight":query}}));
+        }
+    }
+    let query_lower = query.to_ascii_lowercase();
+    if accepts("experiments") {
+        for item in list_experiments(&workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| {
+                serde_json::to_string(v)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("experiment:{}",item.id),"category":"experiments","result_type":"object_card","title":item.title,"summary":format!("{} · {}",item.domain_id,item.status),"meta":item.updated_at,"score":78,"navigation":{"workspace":workspace,"object_id":item.id},"payload":item}));
+        }
+    }
+    if accepts("hypotheses") {
+        for item in list_hypotheses(&workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| {
+                serde_json::to_string(v)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("hypothesis:{}",item.id),"category":"hypotheses","result_type":"knowledge_graph","title":item.title,"summary":item.description,"meta":item.updated_at,"score":76,"navigation":{"workspace":workspace,"object_id":item.id},"payload":item}));
+        }
+    }
+    if accepts("evidence") {
+        for item in list_evidence(&workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| {
+                serde_json::to_string(v)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("evidence:{}",item.id),"category":"evidence","result_type":"table","title":item.kind,"summary":item.summary,"meta":format!("strength {:.2}",item.strength),"score":74,"navigation":{"workspace":workspace,"object_id":item.id,"artifact_path":item.source_path},"payload":item}));
+        }
+    }
+    if accepts("papers") {
+        for item in list_publications(&workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| {
+                serde_json::to_string(v)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("paper:{}",item.id),"category":"papers","result_type":"preview_card","title":item.title,"summary":format!("Publication · {}",item.status),"meta":item.updated_at,"score":73,"navigation":{"workspace":workspace,"object_id":item.id,"artifact_path":item.artifact_paths.first()},"payload":item}));
+        }
+    }
+    if accepts("logs") || accepts("terminal_history") {
+        for task in TaskQueue::open(&workspace)
+            .map(|q| q.list())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| {
+                serde_json::to_string(v)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("log:{}",task.id),"category":"logs","result_type":"timeline","title":task.title,"summary":task.command,"meta":format!("{:?} · {}",task.status,task.log_path),"score":64,"navigation":{"workspace":workspace,"artifact_path":task.log_path},"payload":task}));
+        }
+        let terminals = build_terminal_payload(&state).unwrap_or_default();
+        for terminal in terminals.sessions.into_iter().filter(|v| {
+            serde_json::to_string(v)
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains(&query_lower)
+        }) {
+            results.push(json!({"id":format!("terminal:{}",terminal.id),"category":"terminal_history","result_type":"preview_card","title":terminal.title,"summary":terminal.buffer,"meta":terminal.cwd,"score":62,"navigation":{"workspace":workspace,"restore_context":{"terminal_id":terminal.id}}}));
+        }
+    }
+    if accepts("commands") || accepts("settings") || accepts("plugins") {
+        let catalog = [
+            ("commands", "Open Scientific Event Center", "events"),
+            ("commands", "Open Workspace Time Machine", "snapshots"),
+            ("commands", "Open SSH Remote Development", "ssh"),
+            ("settings", "Atlas runtime and model settings", "settings"),
+            ("plugins", "Research Domain capability providers", "domains"),
+        ];
+        for (category, title, target) in catalog
+            .into_iter()
+            .filter(|(_, title, _)| title.to_ascii_lowercase().contains(&query_lower))
+        {
+            if accepts(category) {
+                results.push(json!({"id":format!("{}:{}",category,target),"category":category,"result_type":"workspace","title":title,"summary":"Atlas platform command","score":58,"navigation":{"workspace":workspace,"environment_id":target}}));
+            }
+        }
+    }
+    if accepts("ssh") || accepts("ssh_hosts") || accepts("docker") || accepts("runtime") {
+        let mut ssh = lock_remote_ssh(&state).map_err(internal_error)?;
+        let snapshot = ssh.snapshot();
+        for host in snapshot.hosts.into_iter().filter(|h| {
+            serde_json::to_string(h)
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains(&query.to_ascii_lowercase())
+        }) {
+            results.push(json!({"id":format!("ssh:{}",host.id),"category":"ssh_hosts","result_type":"workspace","title":host.label,"summary":format!("{}@{}:{}",host.user,host.host,host.port),"score":75,"navigation":{"workspace":workspace,"environment_id":"ssh","object_id":format!("ssh-remote-server-{}",host.id),"restore_context":{"host_id":host.id}}}));
+        }
+        for env in snapshot.environments {
+            for container in env
+                .containers
+                .into_iter()
+                .filter(|v| v.to_ascii_lowercase().contains(&query.to_ascii_lowercase()))
+            {
+                results.push(json!({"id":format!("container:{}:{}",env.host_id,container),"category":"docker","result_type":"table","title":container,"summary":format!("Container on {}",env.host_id),"score":72,"navigation":{"workspace":workspace,"environment_id":"ssh","restore_context":{"host_id":env.host_id}}}));
+            }
+        }
+    }
+    if accepts("snapshots") || accepts("workspace") {
+        for snapshot in WorkspaceTimeMachine::open(&workspace)
+            .and_then(|tm| tm.list())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| {
+                format!(
+                    "{} {:?} {}",
+                    s.name,
+                    s.snapshot_type,
+                    s.tags.iter().cloned().collect::<Vec<_>>().join(" ")
+                )
+                .to_ascii_lowercase()
+                .contains(&query.to_ascii_lowercase())
+            })
+            .take(limit)
+        {
+            results.push(json!({"id":format!("snapshot:{}",snapshot.id),"category":"workspace","result_type":"timeline","title":snapshot.name,"summary":format!("{:?} workspace snapshot",snapshot.snapshot_type),"meta":snapshot.created_at,"score":68,"navigation":{"workspace":workspace,"restore_context":{"snapshot_id":snapshot.id}},"payload":snapshot}));
+        }
+    }
+    results.sort_by(|a, b| {
+        b.get("score")
+            .and_then(Value::as_i64)
+            .cmp(&a.get("score").and_then(Value::as_i64))
+    });
+    results.truncate(limit);
+    let mut groups = BTreeMap::<String, usize>::new();
+    for result in &results {
+        if let Some(category) = result.get("category").and_then(Value::as_str) {
+            *groups.entry(category.into()).or_default() += 1;
+        }
+    }
+    Ok(json_api_response(
+        true,
+        json!({"query":query,"interpretation":interpret_universal_query(query),"results":results,"groups":groups,"generated_at":Utc::now().to_rfc3339()}),
+    ))
+}
+
+fn universal_object_result(workspace: &Path, object: &ScientificObject) -> Value {
+    json!({"id":format!("object:{}",object.id),"category":object.object_type.0,"result_type":"object_card","title":object.display_name,"summary":object.description,"meta":format!("{} · v{} · {:?}",object.object_type.0,object.version,object.lifecycle),"score":80,"navigation":{"workspace":workspace,"object_id":object.id,"runtime_id":object.runtime.runtime_object_id,"artifact_path":object.artifacts.first().map(|a|a.path.clone()),"visualization_kind":object.visualizations.first().map(|v|v.kind.clone())},"payload":object})
+}
+fn interpret_universal_query(query: &str) -> Value {
+    let lower = query.to_ascii_lowercase();
+    json!({"natural_language":true,"failed_only":lower.contains("failed")||lower.contains("失败"),"timeline":lower.contains("yesterday")||lower.contains("today")||lower.contains("昨天")||lower.contains("今天"),"relationship":lower.contains("related")||lower.contains("using")||lower.contains("相关")||lower.contains("使用"),"size_filter":lower.contains("gb")||lower.contains("mb"),"terms":query.split_whitespace().collect::<Vec<_>>()})
+}
+
+async fn api_workspace_snapshots(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let data = WorkspaceTimeMachine::open(&workspace)
+        .and_then(|tm| tm.list())
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+async fn api_notebooks(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let data = NotebookCore::open(&workspace)
+        .and_then(|core| core.list())
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+async fn api_notebook_create(
+    State(state): State<WebAppState>,
+    Json(payload): Json<NotebookCreateRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let data = NotebookCore::open(&workspace)
+        .and_then(|core| core.create(payload.title.as_deref()))
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+async fn api_notebook_save(
+    State(state): State<WebAppState>,
+    Json(payload): Json<AtlasNotebook>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let data = NotebookCore::open(&workspace)
+        .and_then(|core| core.save(payload))
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+async fn api_notebook_execute(
+    State(state): State<WebAppState>,
+    Json(payload): Json<NotebookExecuteRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let python = {
+        let runtime = lock_runtime_settings(&state).map_err(internal_error)?;
+        runtime
+            .toolchains
+            .get("python")
+            .cloned()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "python".into())
+    };
+    let data = NotebookCore::open(&workspace)
+        .and_then(|core| core.execute_cell(&payload.notebook_id, &payload.cell_id, &python))
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, data))
+}
+async fn api_workspace_snapshot_create(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SnapshotCreateRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let enriched =
+        enrich_snapshot_state(&state, &workspace, payload.state).map_err(internal_error)?;
+    let snapshot = WorkspaceTimeMachine::open(&workspace)
+        .and_then(|tm| {
+            tm.create(
+                payload.name.as_deref().unwrap_or("Workspace snapshot"),
+                payload
+                    .snapshot_type
+                    .unwrap_or(WorkspaceSnapshotType::Manual),
+                enriched,
+                payload.parent_id,
+                payload.tags.unwrap_or_default(),
+            )
+        })
+        .map_err(internal_error)?;
+    Ok(json_api_response(true, snapshot))
+}
+async fn api_workspace_snapshot_action(
+    State(state): State<WebAppState>,
+    Json(payload): Json<SnapshotActionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let workspace = current_workspace(&state).map_err(internal_error)?;
+    let tm = WorkspaceTimeMachine::open(&workspace).map_err(internal_error)?;
+    let value = match payload.operation.as_str() {
+        "restore" => {
+            let snapshot = tm
+                .get(
+                    payload
+                        .id
+                        .as_deref()
+                        .ok_or_else(|| internal_error(anyhow!("restore requires id")))?,
+                )
+                .map_err(internal_error)?;
+            let objects = tm
+                .restore_object_versions(&snapshot)
+                .map_err(internal_error)?;
+            let ssh_hosts: Vec<String> = snapshot
+                .state
+                .pointer("/providers/ssh/connections")
+                .and_then(Value::as_array)
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|x| {
+                            x.get("host_id").and_then(Value::as_str).map(str::to_string)
+                        })
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
+            let remote_sessions = snapshot
+                .state
+                .pointer("/providers/ssh/terminals")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let local_count = snapshot
+                .state
+                .pointer("/providers/terminal/sessions")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+            let existing_local = build_terminal_payload(&state)
+                .map_err(internal_error)?
+                .sessions
+                .len();
+            for _ in existing_local..local_count {
+                create_terminal_session(&state, &workspace.to_string_lossy())
+                    .await
+                    .map_err(internal_error)?;
+            }
+            let mut ssh_core = lock_remote_ssh(&state).map_err(internal_error)?;
+            let ssh = ssh_core.restore_connections(&ssh_hosts);
+            let mut restored_remote = Vec::new();
+            for session in remote_sessions {
+                if let Some(host_id) = session.get("host_id").and_then(Value::as_str) {
+                    if ssh_core.connections_ready_for_restore(host_id) {
+                        match ssh_core.create_terminal(
+                            host_id,
+                            session
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                        ) {
+                            Ok(view) => restored_remote.push(view.id),
+                            Err(_) => {}
+                        }
+                    }
+                }
+            }
+            drop(ssh_core);
+            tm.record_restore(&snapshot).map_err(internal_error)?;
+            json!({"snapshot":snapshot,"restore_report":{"scientific_objects":objects,"ssh":ssh,"local_terminals":local_count,"remote_terminals":restored_remote,"client_state_available":true,"providers":["editor","layout","professional_environments","research_os","knowledge_graph","research_memory","terminal","ssh","docker","runtime","execution","debug","simulation","visualization","agent"]}})
+        }
+        "diff" => tm
+            .diff(
+                payload
+                    .left_id
+                    .as_deref()
+                    .ok_or_else(|| internal_error(anyhow!("diff requires left_id")))?,
+                payload
+                    .right_id
+                    .as_deref()
+                    .ok_or_else(|| internal_error(anyhow!("diff requires right_id")))?,
+            )
+            .map_err(internal_error)?,
+        "fork" => json!(tm
+            .fork(
+                payload
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| internal_error(anyhow!("fork requires id")))?,
+                payload.name.as_deref()
+            )
+            .map_err(internal_error)?),
+        "rename" => json!(tm
+            .rename(
+                payload
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| internal_error(anyhow!("rename requires id")))?,
+                payload.name.as_deref().unwrap_or("Snapshot")
+            )
+            .map_err(internal_error)?),
+        "archive" => json!(tm
+            .archive(
+                payload
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| internal_error(anyhow!("archive requires id")))?,
+                payload.archived.unwrap_or(true)
+            )
+            .map_err(internal_error)?),
+        _ => return Err(internal_error(anyhow!("unknown snapshot action"))),
+    };
+    Ok(json_api_response(true, value))
+}
+
+fn enrich_snapshot_state(state: &WebAppState, workspace: &Path, client: Value) -> Result<Value> {
+    let core = AtlasCore::open(workspace)?;
+    let objects = core.list()?;
+    let graph = core.graph()?;
+    let research = research_os_snapshot_value(workspace).unwrap_or_else(|_| json!({}));
+    let terminals = build_terminal_payload(state)?;
+    let run_debug = build_run_debug_payload(state, &workspace.to_string_lossy())?;
+    let ssh = lock_remote_ssh(state)?.snapshot();
+    Ok(
+        json!({"schema":"atlas.workspace-snapshot.v1","client":client,"providers":{"atlas_core":{"selected_objects":client.get("selected_scientific_objects").cloned().unwrap_or(json!([])),"objects":objects,"relationships":graph.relationships},"research_os":research,"terminal":terminals,"ssh":ssh,"debug":run_debug,"execution":{"tasks":TaskQueue::open(workspace)?.list()},"visualization":client.get("visualization").cloned().unwrap_or(Value::Null),"professional_environments":client.get("professional_environments").cloned().unwrap_or(Value::Null),"agent":client.get("agent_context").cloned().unwrap_or(Value::Null),"docker":client.get("docker").cloned().unwrap_or(Value::Null),"simulation":client.get("simulation").cloned().unwrap_or(Value::Null)}}),
+    )
+}
+
 async fn api_send_message(
     State(state): State<WebAppState>,
     Json(payload): Json<SendMessageRequest>,
@@ -5275,6 +6608,7 @@ async fn api_send_message(
         payload.content.clone(),
         payload.mode.clone(),
         payload.language.clone(),
+        payload.personalization.clone(),
     )
     .await
     .map_err(internal_error)?;
@@ -5317,6 +6651,7 @@ async fn api_send_message_stream(
     let mode = payload.mode;
     let language = payload.language;
     let attachments = payload.attachments;
+    let personalization = payload.personalization;
     let recovery_user_content = content.clone();
     let recovery_mode = mode.clone();
     let recovery_language = language.clone();
@@ -5324,7 +6659,14 @@ async fn api_send_message_stream(
     let tx_for_runtime = tx.clone();
     let state_for_cleanup = state_for_task.clone();
     let (runtime_ready_tx, runtime_ready_rx) = oneshot::channel::<()>();
-    let handle = Arc::new(tokio::spawn(async move {
+    let terminal_emitted = Arc::new(AtomicBool::new(false));
+    let terminal_for_task = terminal_emitted.clone();
+    let supervisor_language = turn_language_from_option(recovery_language.as_deref());
+    let terminal_for_supervisor = terminal_emitted.clone();
+    let state_for_supervisor = state.clone();
+    let session_for_supervisor = session_id.clone();
+    let tx_for_supervisor = tx.clone();
+    let worker = tokio::spawn(async move {
         if runtime_ready_rx.await.is_err() {
             return;
         }
@@ -5335,6 +6677,7 @@ async fn api_send_message_stream(
             mode,
             language,
             attachments,
+            personalization,
             turn_model,
             tx.clone(),
         ))
@@ -5342,7 +6685,17 @@ async fn api_send_message_stream(
         .await;
 
         match result {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                if !terminal_for_task.load(Ordering::Acquire) {
+                    finalize_stream_failure(
+                        &tx,
+                        &state_for_cleanup,
+                        &session_id_for_task,
+                        turn_language_from_option(recovery_language.as_deref()),
+                        "Agent task returned without completing its stream",
+                    );
+                }
+            }
             Ok(Err(err)) => {
                 if let Ok((runtime, persisted_blocks)) =
                     recover_stream_finalize_context(&state_for_cleanup, &session_id_for_task)
@@ -5476,6 +6829,27 @@ async fn api_send_message_stream(
                 );
             }
         }
+    });
+    let worker_abort = worker.abort_handle();
+    let handle = Arc::new(tokio::spawn(async move {
+        let outcome = worker.await;
+        if terminal_for_supervisor.load(Ordering::Acquire) {
+            return;
+        }
+        let error = match outcome {
+            Ok(()) => "Agent task exited without a terminal event".to_string(),
+            Err(error) if error.is_cancelled() => {
+                "Agent task was cancelled unexpectedly".to_string()
+            }
+            Err(error) => format!("Agent task supervisor observed a failure: {}", error),
+        };
+        finalize_stream_failure(
+            &tx_for_supervisor,
+            &state_for_supervisor,
+            &session_for_supervisor,
+            supervisor_language,
+            &error,
+        );
     }));
 
     {
@@ -5484,6 +6858,8 @@ async fn api_send_message_stream(
             session_id.clone(),
             StreamSessionRuntime {
                 task_handle: handle.clone(),
+                worker_abort,
+                terminal_emitted,
                 event_tx: tx_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -5544,6 +6920,14 @@ async fn api_stop_message_stream(
             session_id: Some(session_id),
         },
     }))
+}
+
+async fn api_schedule_manage(
+    State(state): State<WebAppState>,
+    Json(payload): Json<ScheduleManageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let response = manage_schedule(&state, payload).map_err(internal_error)?;
+    Ok(json_api_response(true, response))
 }
 
 async fn api_approve_tool_call(
@@ -5817,6 +7201,7 @@ async fn bridge_chat_send(
         payload.content.clone(),
         payload.mode.clone(),
         payload.language.clone(),
+        payload.personalization.clone(),
     )
     .await?;
 
@@ -5887,6 +7272,64 @@ fn bridge_stop_message_stream(
     stop_stream_session(state, &session_id)?;
     Ok(SessionMutationResponse {
         session_id: Some(session_id),
+    })
+}
+
+async fn bridge_native_api_request(
+    state: &WebAppState,
+    request: NativeApiRequest,
+) -> Result<NativeApiResponse> {
+    let path = request.path.trim();
+    let route_path = path.split('?').next().unwrap_or(path);
+    if !route_path.starts_with("/api/")
+        || route_path.split('/').any(|segment| segment == "..")
+        || route_path.contains('\\')
+    {
+        return Err(anyhow!("native request path must be an /api/ route"));
+    }
+    if path == "/api/send-stream" {
+        return Err(anyhow!(
+            "chat streaming must use the native chat.stream channel"
+        ));
+    }
+
+    let method = request
+        .method
+        .parse::<axum::http::Method>()
+        .map_err(|_| anyhow!("invalid native request method"))?;
+    let body = if request.body_base64.is_empty() {
+        Vec::new()
+    } else {
+        BASE64_STANDARD
+            .decode(request.body_base64.as_bytes())
+            .map_err(|err| anyhow!("invalid native request body: {}", err))?
+    };
+    let mut builder = axum::http::Request::builder().method(method).uri(path);
+    for (name, value) in request.headers {
+        if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("content-length") {
+            continue;
+        }
+        builder = builder.header(name, value);
+    }
+    let request = builder.body(Body::from(body))?;
+    let router = build_web_router(state.clone(), state.host.frontend_dir().to_path_buf());
+    let response = router.oneshot(request).await?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect();
+    let bytes = to_bytes(response.into_body(), 64 * 1024 * 1024).await?;
+    Ok(NativeApiResponse {
+        status,
+        headers,
+        body_base64: BASE64_STANDARD.encode(bytes),
     })
 }
 
@@ -5963,12 +7406,15 @@ fn bridge_terminals_state(state: &WebAppState) -> Result<TerminalEnvelope> {
     })
 }
 
-async fn bridge_terminals_create(state: &WebAppState) -> Result<TerminalEnvelope> {
+async fn bridge_terminals_create(
+    state: &WebAppState,
+    payload: TerminalCreateRequest,
+) -> Result<TerminalEnvelope> {
     let workspace_root = {
         let runtime = lock_runtime_settings(state)?;
         runtime.workspace_root.clone()
     };
-    create_terminal_session(state, &workspace_root).await?;
+    create_terminal_session_with_shell(state, &workspace_root, payload.shell.as_deref()).await?;
     Ok(TerminalEnvelope {
         terminals: build_terminal_payload(state)?,
     })
@@ -7379,11 +8825,58 @@ fn bridge_reviewer_feedback_resolve(
     bridge_reviewer_feedback_state(state)
 }
 
+fn append_chat_personalization(prompt: &mut String, personalization: Option<&ChatPersonalization>) {
+    let Some(personalization) = personalization else {
+        return;
+    };
+    let tone = match personalization
+        .personality
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "concise" => "Use a concise, compact tone and prioritize the outcome.",
+        "professional" => "Use a professional, precise, and evidence-oriented tone.",
+        "direct" => "Use a direct, candid tone without unnecessary preamble.",
+        _ => "Use a friendly, collaborative, and calm tone.",
+    };
+    prompt.push_str("\n\nUser personalization (follow when it does not conflict with higher-priority instructions):\n- ");
+    prompt.push_str(tone);
+    let custom = personalization.custom_instructions.trim();
+    if !custom.is_empty() {
+        prompt.push_str("\n- Custom instructions:\n");
+        prompt.push_str(&custom.chars().take(8_000).collect::<String>());
+    }
+    if personalization.memory_enabled {
+        let memories = personalization
+            .memories
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .take(20)
+            .collect::<Vec<_>>();
+        if !memories.is_empty() {
+            prompt.push_str("\n- Remembered preferences:\n");
+            for memory in memories {
+                prompt.push_str("  - ");
+                prompt.push_str(&memory.chars().take(500).collect::<String>());
+                prompt.push('\n');
+            }
+        }
+        if !personalization.tool_memory_enabled {
+            prompt.push_str(
+                "\n- Do not infer new lasting preferences from tool or web-search results.",
+            );
+        }
+    }
+}
+
 async fn run_chat_request(
     state: &WebAppState,
     content: String,
     mode: Option<String>,
     language: Option<String>,
+    personalization: Option<ChatPersonalization>,
 ) -> Result<(String, Vec<MessageBlock>)> {
     let current_id = ensure_current_session(state)?;
 
@@ -7403,6 +8896,7 @@ async fn run_chat_request(
         turn_language_name(turn_language),
         turn_language_name(turn_language),
     );
+    append_chat_personalization(&mut system_prompt, personalization.as_ref());
     append_research_domain_context_prompt(state, &runtime_for_chat, &mut system_prompt, &content);
     append_research_os_context_prompt(state, &runtime_for_chat, &mut system_prompt, &content);
     let mut llm_messages = vec![json!({
@@ -7645,6 +9139,7 @@ async fn run_chat_request_stream(
     mode: Option<String>,
     language: Option<String>,
     attachments: Vec<ChatAttachment>,
+    personalization: Option<ChatPersonalization>,
     turn_model: String,
     tx: tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<()> {
@@ -7701,6 +9196,7 @@ async fn run_chat_request_stream(
         turn_language_name(turn_language),
     );
     let mut dynamic_system_prompt = base_system_prompt.clone();
+    append_chat_personalization(&mut dynamic_system_prompt, personalization.as_ref());
     if tool_definitions.len() >= 10 {
         dynamic_system_prompt.push_str(&localized_text(
             turn_language,
@@ -7733,10 +9229,18 @@ async fn run_chat_request_stream(
     let mut repair_attempts = 0usize;
     let mut pseudo_tool_repair_attempts = 0usize;
 
+    let readonly_workspace_analysis = is_readonly_workspace_analysis_request(&user_content);
     let structured_workflow = should_run_structured_workflow(stream_mode, &user_content);
-    let lightweight_tool_reasoning =
-        should_use_lightweight_tool_reasoning(&user_content, structured_workflow);
-    let max_repair_attempts = if structured_workflow {
+    let lightweight_tool_reasoning = readonly_workspace_analysis
+        || should_use_lightweight_tool_reasoning(&user_content, structured_workflow);
+    if readonly_workspace_analysis {
+        dynamic_system_prompt.push_str(
+            "\n\nRead-only workspace analysis fast path:\n- Call workspace_overview first. It returns a bounded native project map, file-type counts, manifests, representative source previews, and Git metadata in one call.\n- Use direct read_file_head/read_file_range only for a small number of files that need deeper inspection.\n- Do not use terminal commands to enumerate the workspace, and do not run planner/reviewer/verifier subagents for a read-only overview.\n- Stop after enough evidence exists to give a concrete architecture and code-quality summary.",
+        );
+    }
+    let max_repair_attempts = if readonly_workspace_analysis {
+        3usize
+    } else if structured_workflow {
         18usize
     } else {
         10usize
@@ -7952,13 +9456,29 @@ async fn run_chat_request_stream(
         dynamic_system_prompt.push_str(&research_execution_contract_prompt(turn_language));
     }
 
-    let max_turn_rounds = dynamic_turn_round_limit(plan.as_ref(), structured_workflow);
+    let max_turn_rounds = if readonly_workspace_analysis {
+        8usize
+    } else {
+        dynamic_turn_round_limit(plan.as_ref(), structured_workflow)
+    };
     let mut stagnant_rounds = 0usize;
     let mut rounds_with_real_progress = 0usize;
     let mut missing_workspace_progress_repair_attempts = 0usize;
     let mut premature_finish_repair_attempts = 0usize;
-    let max_protocol_repair_attempts = if structured_workflow { 12usize } else { 6usize };
-    let max_workspace_recovery_attempts = if structured_workflow { 16usize } else { 8usize };
+    let max_protocol_repair_attempts = if readonly_workspace_analysis {
+        2usize
+    } else if structured_workflow {
+        12usize
+    } else {
+        6usize
+    };
+    let max_workspace_recovery_attempts = if readonly_workspace_analysis {
+        2usize
+    } else if structured_workflow {
+        16usize
+    } else {
+        8usize
+    };
     let mut multimodal_sent = false;
     let mut context_compaction_announced = false;
     for _ in 0..max_turn_rounds {
@@ -9295,6 +10815,7 @@ fn finalize_stream_success(
     language: TurnLanguage,
     completion_detail: &str,
 ) -> Result<()> {
+    mark_stream_terminal_emitted(state, session_id);
     let runtime_files = lock_stream_runtime(state)
         .ok()
         .and_then(|sessions| {
@@ -9530,6 +11051,7 @@ fn finalize_stream_failure(
     language: TurnLanguage,
     err: &str,
 ) {
+    mark_stream_terminal_emitted(state, session_id);
     let mut final_messages = None;
     if let Ok((runtime, persisted_blocks)) = recover_stream_finalize_context(state, session_id) {
         let runtime_files = lock_stream_runtime(state)
@@ -10417,7 +11939,7 @@ fn summary_points_with_anchor(points: &[String], limit: usize) -> Vec<String> {
 }
 
 fn compact_recent_context(messages: &[MessageBlock]) -> Vec<MessageBlock> {
-    const LARGE_TOOL_RESULT_CHARS: usize = 2_400;
+    const LARGE_TOOL_RESULT_CHARS: usize = 10_000;
     const LARGE_REASONING_CHARS: usize = 1_600;
     const LARGE_ASSISTANT_CHARS: usize = 4_000;
 
@@ -10454,7 +11976,7 @@ fn compact_recent_context(messages: &[MessageBlock]) -> Vec<MessageBlock> {
                     _ => None,
                 });
                 let compacted = tool_name
-                    .map(|name| summarize_tool_result_for_provider_memory(name, result, *success))
+                    .map(|name| compact_tool_result_for_request(name, result, *success))
                     .filter(|summary| !summary.trim().is_empty())
                     .unwrap_or_else(|| tail_string(result, LARGE_TOOL_RESULT_CHARS));
                 Some(MessageBlock::ToolResult {
@@ -11168,6 +12690,10 @@ fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
         return true;
     }
 
+    if is_readonly_workspace_analysis_request(content) {
+        return false;
+    }
+
     let normalized_mode = workflow_mode(mode);
     if matches!(normalized_mode, "agent" | "research") {
         return true;
@@ -11176,8 +12702,64 @@ fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
     false
 }
 
+fn is_readonly_workspace_analysis_request(content: &str) -> bool {
+    let trimmed = content.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 240 {
+        return false;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let asks_for_workspace = [
+        "workspace",
+        "repository",
+        "repo",
+        "codebase",
+        "project files",
+        "project code",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || [
+            "工作区",
+            "代码库",
+            "仓库",
+            "项目文件",
+            "项目代码",
+            "当前项目",
+        ]
+        .iter()
+        .any(|needle| trimmed.contains(needle));
+    let asks_for_analysis = [
+        "analyze",
+        "analyse",
+        "inspect",
+        "overview",
+        "understand",
+        "review structure",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || ["分析", "检查", "概览", "了解", "结构", "梳理"]
+            .iter()
+            .any(|needle| trimmed.contains(needle));
+    let asks_for_mutation = [
+        "edit",
+        "change",
+        "modify",
+        "fix",
+        "implement",
+        "write",
+        "delete",
+        "refactor",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || ["修改", "修复", "实现", "编写", "删除", "重构", "创建"]
+            .iter()
+            .any(|needle| trimmed.contains(needle));
+    asks_for_workspace && asks_for_analysis && !asks_for_mutation
+}
+
 fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchState {
-    let mut latest_user_content: Option<String> = None;
     for message in messages.iter().rev() {
         match message {
             MessageBlock::User { content, .. } => {
@@ -11185,7 +12767,6 @@ fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchSta
                 if trimmed.is_empty() {
                     continue;
                 }
-                latest_user_content = Some(trimmed.to_string());
                 if trimmed.to_ascii_lowercase().starts_with("/spec") {
                     return SessionResearchState::Research;
                 }
@@ -11202,22 +12783,7 @@ fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchSta
                 }
                 return SessionResearchState::Agent;
             }
-            MessageBlock::Thinking { content, .. } | MessageBlock::Assistant { content } => {
-                if latest_user_content.is_some() {
-                    let lowered = content.to_ascii_lowercase();
-                    if lowered.contains("verification target")
-                        || lowered.contains("planner subagent")
-                        || lowered.contains("hard verifier")
-                        || lowered.contains("research workflow")
-                        || content.contains("验证目标")
-                        || content.contains("规划子代理")
-                        || content.contains("硬验证器")
-                        || content.contains("研究流程")
-                    {
-                        return SessionResearchState::Research;
-                    }
-                }
-            }
+            MessageBlock::Thinking { .. } | MessageBlock::Assistant { .. } => {}
             _ => {}
         }
     }
@@ -13645,11 +15211,7 @@ fn summarize_profile_runtime_from_messages(
 fn is_dataset_driven_workflow_profile(workflow_profile: &str) -> bool {
     matches!(
         workflow_profile,
-        "classical_ml"
-            | "deep_learning"
-            | "systems_evaluation"
-            | "agent_evaluation"
-            | "security_analysis"
+        "classical_ml" | "deep_learning" | "agent_evaluation"
     )
 }
 
@@ -14775,9 +16337,7 @@ fn build_hard_verifier_report(
         }
     }
 
-    if is_dataset_driven_workflow_profile(&workflow_profile)
-        && dataset_closure_signal_present(plan, messages)
-    {
+    if dataset_closure_signal_present(plan, messages) {
         let missing_dataset_acquisition =
             profile_runtime_field_pending(&profile_runtime, "dataset_acquisition");
         let missing_dataset_manifest =
@@ -16648,7 +18208,35 @@ async fn stream_provider_turn(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<StreamTurnResult> {
     let request_model = request.model.clone();
-    let mut stream = provider.chat_stream(request).await?;
+    let mut last_connect_error = None;
+    let mut opened_stream = None;
+    for attempt in 0..2 {
+        match tokio::time::timeout(
+            Duration::from_secs(45),
+            provider.chat_stream(request.clone()),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => {
+                opened_stream = Some(stream);
+                break;
+            }
+            Ok(Err(error)) => last_connect_error = Some(error.to_string()),
+            Err(_) => {
+                last_connect_error =
+                    Some("model stream connection timed out after 45 seconds".to_string())
+            }
+        }
+        if attempt == 0 {
+            tokio::time::sleep(Duration::from_millis(750)).await;
+        }
+    }
+    let mut stream = opened_stream.ok_or_else(|| {
+        anyhow!(
+            "failed to open model stream after 2 attempts: {}",
+            last_connect_error.unwrap_or_else(|| "unknown transport error".to_string())
+        )
+    })?;
     let mut raw_text = String::new();
     let mut text = String::new();
     let mut thinking = String::new();
@@ -16659,7 +18247,11 @@ async fn stream_provider_turn(
     let mut announced_tool_names = BTreeSet::new();
     let mut pseudo_tool_names = Vec::new();
 
-    while let Some(chunk_result) = stream.next().await {
+    loop {
+        let next = tokio::time::timeout(Duration::from_secs(120), stream.next())
+            .await
+            .map_err(|_| anyhow!("model stream was idle for 120 seconds"))?;
+        let Some(chunk_result) = next else { break };
         let chunk = chunk_result?;
         if let Some(usage) = chunk.usage.as_ref() {
             let context_window = model_context_window(&request_model);
@@ -16831,6 +18423,8 @@ async fn stream_provider_turn(
         }
     }
 
+    validate_stream_finish_reason(finish_reason.as_deref())?;
+
     if tool_calls.as_ref().is_none_or(|calls| calls.is_empty()) {
         let dsml_tool_calls = extract_dsml_tool_calls(&raw_text);
         if !dsml_tool_calls.is_empty() {
@@ -16948,7 +18542,23 @@ fn should_use_lightweight_tool_reasoning(content: &str, structured_workflow: boo
     let lowered = trimmed.to_ascii_lowercase();
     is_image_generation_request(trimmed)
         || [
-            "write", "create", "edit", "update", "read", "list", "check", "run", "file", "document",
+            "write",
+            "create",
+            "edit",
+            "update",
+            "read",
+            "list",
+            "check",
+            "run",
+            "file",
+            "document",
+            "analyze",
+            "analyse",
+            "inspect",
+            "overview",
+            "workspace",
+            "repository",
+            "codebase",
         ]
         .iter()
         .any(|needle| lowered.contains(needle))
@@ -16964,6 +18574,8 @@ fn should_use_lightweight_tool_reasoning(content: &str, structured_workflow: boo
             "\u{6587}\u{4ef6}",
             "\u{6587}\u{6863}",
             "\u{8be6}\u{7ec6}\u{4e00}\u{70b9}",
+            "\u{5206}\u{6790}",
+            "\u{5de5}\u{4f5c}\u{533a}",
         ]
         .iter()
         .any(|needle| trimmed.contains(needle))
@@ -18343,8 +19955,19 @@ fn adapt_bash_command_for_powershell(command: &str) -> String {
     if normalized == "ls" {
         return "Get-ChildItem -Force".to_string();
     }
+    if matches!(normalized.as_str(), "ls -a" | "ls -l" | "ls -la" | "ls -al") {
+        return "Get-ChildItem -Force".to_string();
+    }
     if let Some(path) = normalized.strip_prefix("ls ") {
-        let path = normalize_powershell_path_arg(path);
+        let path = path
+            .split_whitespace()
+            .filter(|token| !token.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if path.trim().is_empty() {
+            return "Get-ChildItem -Force".to_string();
+        }
+        let path = normalize_powershell_path_arg(&path);
         return format!("Get-ChildItem -Force {}", powershell_single_quote(&path));
     }
     if let Some(path) = normalized.strip_prefix("cat ") {
@@ -18563,6 +20186,8 @@ async fn assistant_tool_definitions(
         tools.extend(research_domain_tool_definitions());
         tools.extend(research_os_tool_definitions());
         tools.extend(atlas_object_tool_definitions());
+        tools.extend(remote_ssh_tool_definitions());
+        tools.extend(scientific_infrastructure_tool_definitions());
         tools.push(wan_image_tool_definition());
         tools.push(browser_computer_tool_definition());
         Ok(tools)
@@ -18571,8 +20196,28 @@ async fn assistant_tool_definitions(
     .map_err(|err| anyhow!("assistant tool definition task failed: {}", err))?
 }
 
+fn scientific_infrastructure_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({"type":"function","function":{"name":"atlas_event_center","description":"Read or manage the Atlas Event Bus projection for actionable scientific notifications. Returns related Scientific Objects, runtimes, workspaces and navigation actions.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["list","read","unread","pin","unpin","archive","restore","priority"]},"id":{"type":"string"},"query":{"type":"string"},"category":{"type":"string"},"priority":{"type":"integer"}},"required":["operation"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"atlas_universal_search","description":"Search the entire scientific platform using natural language: code, files, Scientific Objects, experiments, papers, hypotheses, evidence, memory, knowledge graph, runtimes, SSH, Docker, logs, notifications and snapshots.","parameters":{"type":"object","properties":{"query":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"atlas_workspace_snapshot","description":"Create, list, compare, fork, rename, archive or restore complete scientific workspace snapshots. Use before large refactors, long training, remote execution and other high-impact work.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["list","create","diff","fork","rename","archive","restore"]},"id":{"type":"string"},"left_id":{"type":"string"},"right_id":{"type":"string"},"name":{"type":"string"},"snapshot_type":{"type":"string","enum":["manual","auto","milestone","experiment","before_agent","before_execution"]},"state":{"type":"object"}},"required":["operation"],"additionalProperties":false}}}),
+    ]
+}
+
+fn remote_ssh_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({"type":"function","function":{"name":"remote_ssh_context","description":"Read Atlas Remote Development hosts, connection health, environments, GPU resources, terminals and port forwards. If host_id is omitted, Atlas selects the lowest-latency connected host authorized by the user for Agent access.","parameters":{"type":"object","properties":{"host_id":{"type":"string"}},"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"remote_ssh_connect","description":"Connect a saved SSH host through Atlas Core. Password connections must be initiated by the user in the SSH workspace; Agent never receives or stores passwords.","parameters":{"type":"object","properties":{"host_id":{"type":"string"}},"required":["host_id"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"remote_ssh_execute","description":"Execute an authorized command on a connected Atlas remote server. Supports Python/Conda/uv/Poetry management, Git, Docker, GPU queries, training submission and log retrieval. Requires per-connection Agent authorization.","parameters":{"type":"object","properties":{"host_id":{"type":"string"},"command":{"type":"string"},"operation":{"type":"string","enum":["command","git","docker","gpu","python","training","logs"]}},"required":["command"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"remote_ssh_transfer","description":"Upload, download or synchronize research files between the Atlas workspace and an Agent-authorized remote host. Local paths are constrained to the workspace.","parameters":{"type":"object","properties":{"host_id":{"type":"string"},"direction":{"type":"string","enum":["upload","download","sync"]},"local_path":{"type":"string"},"remote_path":{"type":"string"}},"required":["direction","local_path","remote_path"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"remote_ssh_environment","description":"Detect remote OS, Python, Conda/uv/Poetry, Git, Docker, GPU and scheduler capabilities and register them as Scientific Objects.","parameters":{"type":"object","properties":{"host_id":{"type":"string"}},"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"remote_ssh_forward","description":"Start or stop an Atlas-managed SSH local, remote or dynamic port forward on an Agent-authorized connection.","parameters":{"type":"object","properties":{"operation":{"type":"string","enum":["start","stop"]},"host_id":{"type":"string"},"kind":{"type":"string","enum":["local","remote","dynamic"]},"bind":{"type":"string"},"target":{"type":"string"},"id":{"type":"string"}},"required":["operation"],"additionalProperties":false}}}),
+    ]
+}
+
 fn project_knowledge_tool_definitions() -> Vec<Value> {
     vec![
+        json!({"type":"function","function":{"name":"workspace_overview","description":"Return one bounded, native, read-only overview of the current workspace: filtered project tree, file-type counts, key manifests, representative source previews, and Git metadata. Use this first when the user asks to analyze or understand the workspace; do not replace it with shell directory enumeration.","parameters":{"type":"object","properties":{"max_depth":{"type":"integer","minimum":1,"maximum":6},"max_files":{"type":"integer","minimum":20,"maximum":800},"preview_files":{"type":"integer","minimum":0,"maximum":12},"preview_chars":{"type":"integer","minimum":200,"maximum":1600}},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"index_workspace","description":"Incrementally parse and index supported local PDF, DOCX, spreadsheet, document, and code files. Unchanged files are reused.","parameters":{"type":"object","properties":{},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"search_workspace_index","description":"Search the durable local project index before loading many uploaded files or scanning the whole repository.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"kind":{"type":"string","enum":["pdf","docx","spreadsheet","code","document"]}},"required":["query"],"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"enqueue_background_task","description":"Queue a long experiment, training, or batch command with persistent logs and manual crash recovery.","parameters":{"type":"object","properties":{"title":{"type":"string"},"kind":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"},"start":{"type":"boolean"}},"required":["title","command"],"additionalProperties":false}}}),
@@ -19483,7 +21128,26 @@ fn normalize_web_tool_args(tool_name: &str, args: Value) -> Value {
         }
     }
 
-    if tool_name == "terminal_run" {
+    for key in [
+        "max_depth",
+        "max_results",
+        "max_lines",
+        "start_line",
+        "line_count",
+        "timeout_ms",
+        "timeout_secs",
+        "limit",
+    ] {
+        if let Some(number) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+        {
+            object.insert(key.to_string(), Value::Number(number.into()));
+        }
+    }
+
+    if matches!(tool_name, "terminal_run" | "terminal_run_structured") {
         if let Some(command) = object
             .get("command")
             .and_then(|value| value.as_str())
@@ -19550,6 +21214,15 @@ async fn assistant_call_tool(
     name: &str,
     args: Value,
 ) -> Result<String> {
+    if name.starts_with("remote_ssh_") {
+        return execute_remote_ssh_tool(state, name, &args);
+    }
+    if matches!(
+        name,
+        "atlas_event_center" | "atlas_universal_search" | "atlas_workspace_snapshot"
+    ) {
+        return execute_scientific_infrastructure_tool(state, name, &args);
+    }
     if matches!(
         name,
         "research_domain_context"
@@ -19582,6 +21255,9 @@ async fn assistant_call_tool(
     }
     if name == "browser_computer" {
         return execute_browser_computer_tool(state, session_id, call_id, &args).await;
+    }
+    if name == "workspace_overview" {
+        return workspace_overview_tool_result(state.host.base_dir(), runtime, &args);
     }
     if name == "index_workspace" {
         let workspace =
@@ -19670,6 +21346,231 @@ async fn assistant_call_tool(
     })
     .await
     .map_err(|err| anyhow!("assistant tool call task failed: {}", err))?
+}
+
+fn execute_scientific_infrastructure_tool(
+    state: &WebAppState,
+    name: &str,
+    args: &Value,
+) -> Result<String> {
+    let workspace = current_workspace(state)?;
+    let value = match name {
+        "atlas_event_center" => {
+            let operation = args
+                .get("operation")
+                .and_then(Value::as_str)
+                .unwrap_or("list");
+            let center = ScientificEventCenter::open(&workspace)?;
+            if operation == "list" {
+                json!(center.list(
+                    args.get("query").and_then(Value::as_str),
+                    args.get("category").and_then(Value::as_str),
+                    false
+                )?)
+            } else {
+                let id = args
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("event mutation requires id"))?;
+                json!(center.mutate(
+                    id,
+                    operation,
+                    args.get("priority")
+                        .and_then(Value::as_i64)
+                        .map(|v| v as i32)
+                )?)
+            }
+        }
+        "atlas_universal_search" => {
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("universal search requires query"))?;
+            let core = AtlasCore::open(&workspace)?;
+            let objects = core.search(query)?;
+            let events = ScientificEventCenter::open(&workspace)?.list(Some(query), None, true)?;
+            let files = project_index::search(
+                &workspace,
+                query,
+                args.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize,
+                None,
+            )
+            .unwrap_or_default();
+            json!({"query":query,"objects":objects,"events":events,"files":files,"knowledge_graph":get_knowledge_graph(&workspace).ok(),"research_memory":crate::research_os::search_memory(&workspace,query).unwrap_or_default()})
+        }
+        "atlas_workspace_snapshot" => {
+            let tm = WorkspaceTimeMachine::open(&workspace)?;
+            match args
+                .get("operation")
+                .and_then(Value::as_str)
+                .unwrap_or("list")
+            {
+                "list" => json!(tm.list()?),
+                "create" => {
+                    let snapshot_type: WorkspaceSnapshotType = serde_json::from_value(
+                        args.get("snapshot_type")
+                            .cloned()
+                            .unwrap_or(json!("manual")),
+                    )?;
+                    json!(tm.create(
+                        args.get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Agent snapshot"),
+                        snapshot_type,
+                        enrich_snapshot_state(
+                            state,
+                            &workspace,
+                            args.get("state").cloned().unwrap_or(json!({}))
+                        )?,
+                        None,
+                        BTreeSet::new()
+                    )?)
+                }
+                "diff" => tm.diff(
+                    args.get("left_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("diff requires left_id"))?,
+                    args.get("right_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("diff requires right_id"))?,
+                )?,
+                "fork" => json!(tm.fork(
+                    args.get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("fork requires id"))?,
+                    args.get("name").and_then(Value::as_str)
+                )?),
+                "rename" => json!(tm.rename(
+                    args.get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("rename requires id"))?,
+                    args.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Snapshot")
+                )?),
+                "archive" => json!(tm.archive(
+                    args.get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("archive requires id"))?,
+                    true
+                )?),
+                "restore" => {
+                    let s = tm.get(
+                        args.get("id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| anyhow!("restore requires id"))?,
+                    )?;
+                    tm.record_restore(&s)?;
+                    json!({"snapshot":s,"client_restore_required":true})
+                }
+                _ => return Err(anyhow!("unknown snapshot operation")),
+            }
+        }
+        _ => return Err(anyhow!("unknown scientific infrastructure tool")),
+    };
+    Ok(serde_json::to_string(&value)?)
+}
+
+fn execute_remote_ssh_tool(state: &WebAppState, name: &str, args: &Value) -> Result<String> {
+    let mut ssh = lock_remote_ssh(state)?;
+    let selected = || -> Result<String> {
+        args.get("host_id")
+            .and_then(Value::as_str)
+            .filter(|v| !v.trim().is_empty())
+            .map(str::to_string)
+            .map(Ok)
+            .unwrap_or_else(|| ssh.auto_select_host())
+    };
+    let value = match name {
+        "remote_ssh_context" => {
+            let selected_host_id = selected().ok();
+            json!({"selected_host_id": selected_host_id, "remote_development": ssh.snapshot(), "integration": ["Scientific Object", "Research OS", "Scientific Runtime", "Execution Engine", "Research Memory", "Knowledge Graph", "Professional Environments"]})
+        }
+        "remote_ssh_connect" => {
+            let host_id = args
+                .get("host_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("remote_ssh_connect requires host_id"))?;
+            let snapshot = ssh.snapshot();
+            let authorized = snapshot
+                .connections
+                .iter()
+                .any(|connection| connection.host_id == host_id && connection.agent_authorized);
+            if !authorized {
+                return Err(anyhow!("open the SSH workspace and explicitly authorize Agent access before Agent connects or reconnects this host"));
+            }
+            json!(ssh.heartbeat(host_id)?)
+        }
+        "remote_ssh_execute" => {
+            let host_id = selected()?;
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("remote_ssh_execute requires command"))?;
+            let operation = args
+                .get("operation")
+                .and_then(Value::as_str)
+                .unwrap_or("command");
+            let output = ssh.execute(&host_id, command, true)?;
+            ssh.sync_operation_object(&host_id, operation, command, &output)?;
+            json!({"host_id": host_id, "operation": operation, "output": output})
+        }
+        "remote_ssh_transfer" => {
+            let host_id = selected()?;
+            let direction = args
+                .get("direction")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("remote_ssh_transfer requires direction"))?;
+            let local = args
+                .get("local_path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("remote_ssh_transfer requires local_path"))?;
+            let remote = args
+                .get("remote_path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("remote_ssh_transfer requires remote_path"))?;
+            ssh.transfer(&host_id, direction, local, remote, true)?
+        }
+        "remote_ssh_environment" => {
+            let host_id = selected()?;
+            json!(ssh.detect_environment(&host_id, true)?)
+        }
+        "remote_ssh_forward" => match args.get("operation").and_then(Value::as_str).unwrap_or("") {
+            "start" => {
+                let host_id = selected()?;
+                let kind: ForwardKind =
+                    serde_json::from_value(args.get("kind").cloned().unwrap_or(json!("local")))?;
+                let bind = args
+                    .get("bind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("remote_ssh_forward start requires bind"))?
+                    .to_string();
+                json!(ssh.start_forward(
+                    &host_id,
+                    kind,
+                    bind,
+                    args.get("target")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                )?)
+            }
+            "stop" => {
+                let id = args
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("remote_ssh_forward stop requires id"))?;
+                ssh.stop_forward(id)?;
+                json!({"id": id, "stopped": true})
+            }
+            _ => {
+                return Err(anyhow!(
+                    "remote_ssh_forward operation must be start or stop"
+                ))
+            }
+        },
+        _ => return Err(anyhow!("unknown Atlas Remote SSH tool")),
+    };
+    Ok(serde_json::to_string(&value)?)
 }
 
 fn execute_atlas_intelligence_tool(
@@ -20235,6 +22136,205 @@ fn gather_context_tool_result(
     serde_json::to_string_pretty(&payload).map_err(Into::into)
 }
 
+fn workspace_overview_tool_result(
+    base_dir: &Path,
+    runtime: &RuntimeSettings,
+    args: &Value,
+) -> Result<String> {
+    let workspace = canonical_workspace_dir_from(base_dir, &runtime.workspace_root)?;
+    let numeric_arg = |key: &str, fallback: u64| {
+        args.get(key)
+            .and_then(|value| {
+                value
+                    .as_u64()
+                    .or_else(|| value.as_str().and_then(|raw| raw.parse::<u64>().ok()))
+            })
+            .unwrap_or(fallback)
+    };
+    let max_depth = numeric_arg("max_depth", 4).clamp(1, 6) as usize;
+    let max_files = numeric_arg("max_files", 260).clamp(20, 800) as usize;
+    let preview_files = numeric_arg("preview_files", 6).clamp(0, 12) as usize;
+    let preview_chars = numeric_arg("preview_chars", 900).clamp(200, 1_600) as usize;
+
+    let ignored_dirs: HashSet<&'static str> = [
+        ".git",
+        ".atlas",
+        ".idea",
+        ".vscode",
+        ".next",
+        ".nuxt",
+        ".venv",
+        "venv",
+        "node_modules",
+        "target",
+        "build",
+        "dist",
+        "out",
+        "coverage",
+        "__pycache__",
+        "WebView2",
+        "bin",
+        "obj",
+    ]
+    .into_iter()
+    .collect();
+    let should_descend = |entry: &walkdir::DirEntry| {
+        entry.depth() == 0
+            || !entry.file_type().is_dir()
+            || !ignored_dirs.contains(entry.file_name().to_string_lossy().as_ref())
+    };
+    let source_extensions: HashSet<&'static str> = [
+        "rs", "py", "js", "ts", "tsx", "jsx", "c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx",
+        "cu", "cuh", "go", "java", "kt", "swift", "cs", "rb", "php", "scala", "sh", "ps1", "sql",
+        "vue", "svelte",
+    ]
+    .into_iter()
+    .collect();
+    let manifest_names: HashSet<&'static str> = [
+        "cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "cmakelists.txt",
+        "makefile",
+        "dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "readme.md",
+        "readme",
+        "justfile",
+        "taskfile.yml",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut tree = Vec::new();
+    let mut file_types: BTreeMap<String, usize> = BTreeMap::new();
+    let mut manifests = Vec::new();
+    let mut source_candidates: Vec<(usize, u64, PathBuf, String)> = Vec::new();
+    let mut total_files = 0usize;
+    let mut total_dirs = 0usize;
+    let mut truncated = false;
+
+    for entry in WalkDir::new(&workspace)
+        .max_depth(max_depth)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(should_descend)
+        .filter_map(Result::ok)
+        .skip(1)
+    {
+        if tree.len() >= max_files {
+            truncated = true;
+            break;
+        }
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(&workspace)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if entry.file_type().is_dir() {
+            total_dirs += 1;
+            tree.push(json!({"path": relative, "kind": "directory"}));
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        total_files += 1;
+        let bytes = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        let lower_name = file_name.to_ascii_lowercase();
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "[no extension]".to_string());
+        *file_types.entry(extension.clone()).or_default() += 1;
+        if manifest_names.contains(lower_name.as_str()) {
+            manifests.push(relative.clone());
+        }
+        if bytes <= 768 * 1024 && source_extensions.contains(extension.as_str()) {
+            let priority = match path
+                .components()
+                .filter_map(|component| component.as_os_str().to_str())
+                .any(|part| {
+                    matches!(
+                        part.to_ascii_lowercase().as_str(),
+                        "src" | "app" | "lib" | "include"
+                    )
+                }) {
+                true => 0,
+                false => 1,
+            };
+            source_candidates.push((priority, bytes, path.to_path_buf(), relative.clone()));
+        }
+        tree.push(json!({"path": relative, "kind": "file", "bytes": bytes}));
+    }
+
+    manifests.sort();
+    manifests.truncate(24);
+    source_candidates.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.3.cmp(&right.3))
+    });
+    let mut previews = Vec::new();
+    for (_, bytes, path, relative) in source_candidates.into_iter().take(preview_files) {
+        let mut file = match File::open(&path) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        let mut buffer = Vec::new();
+        if std::io::Read::by_ref(&mut file)
+            .take((preview_chars.saturating_mul(4).saturating_add(4)) as u64)
+            .read_to_end(&mut buffer)
+            .is_err()
+        {
+            continue;
+        }
+        let content = decode_bytes(&buffer);
+        previews.push(json!({
+            "path": relative,
+            "bytes": bytes,
+            "preview": bounded_text_excerpt(&content, preview_chars),
+        }));
+    }
+
+    let git = if workspace.join(".git").exists() {
+        let branch = run_git_capture_allow_failure(&workspace, &["branch", "--show-current"])?
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let status =
+            run_git_capture_allow_failure(&workspace, &["status", "--short"])?.unwrap_or_default();
+        let changed = status.lines().take(40).collect::<Vec<_>>();
+        json!({"is_repository": true, "branch": branch, "changed_paths": changed, "changed_truncated": status.lines().count() > 40})
+    } else {
+        json!({"is_repository": false})
+    };
+
+    serde_json::to_string_pretty(&json!({
+        "workspace": display_workspace_path(&workspace),
+        "scan": {"max_depth": max_depth, "max_entries": max_files, "truncated": truncated},
+        "counts": {"files": total_files, "directories": total_dirs, "file_types": file_types},
+        "manifests": manifests,
+        "tree": tree,
+        "representative_sources": previews,
+        "git": git,
+    }))
+    .map_err(Into::into)
+}
+
 fn gather_context_directory_entries(path: &Path, max_entries: usize) -> Result<Vec<Value>> {
     let mut entries: Vec<_> = fs::read_dir(path)
         .map_err(|err| {
@@ -20489,6 +22589,26 @@ fn tail_string(input: &str, max_chars: usize) -> String {
     input.chars().skip(skip).collect()
 }
 
+fn bounded_text_excerpt(input: &str, max_chars: usize) -> String {
+    let total = input.chars().count();
+    if total <= max_chars {
+        return input.to_string();
+    }
+    let head_chars = max_chars.saturating_mul(3) / 4;
+    let tail_chars = max_chars.saturating_sub(head_chars);
+    let head = input.chars().take(head_chars).collect::<String>();
+    let tail = input
+        .chars()
+        .skip(total.saturating_sub(tail_chars))
+        .collect::<String>();
+    format!(
+        "{}\n...[{} chars omitted]...\n{}",
+        head,
+        total.saturating_sub(max_chars),
+        tail
+    )
+}
+
 fn structured_shell_command(command: &str) -> (String, Vec<String>, String) {
     #[cfg(windows)]
     {
@@ -20539,6 +22659,36 @@ fn interactive_shell_command() -> (String, Vec<String>, String) {
             "export PYTHONUTF8=1 PYTHONIOENCODING=utf-8\n".to_string(),
         )
     }
+}
+
+fn interactive_shell_command_for(preference: Option<&str>) -> (String, Vec<String>, String) {
+    #[cfg(windows)]
+    {
+        match preference
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "cmd" => {
+                return (
+                    "cmd.exe".to_string(),
+                    vec!["/Q".into()],
+                    "chcp 65001>nul\r\n".to_string(),
+                )
+            }
+            "bash" => {
+                return (
+                    "bash.exe".to_string(),
+                    vec!["--noprofile".into(), "--norc".into(), "-i".into()],
+                    "export PYTHONUTF8=1 PYTHONIOENCODING=utf-8\n".to_string(),
+                )
+            }
+            _ => {}
+        }
+    }
+    let _ = preference;
+    interactive_shell_command()
 }
 
 pub(crate) fn run_terminal_command_structured(
@@ -21117,12 +23267,85 @@ fn summarize_tool_result_for_provider_memory(tool_name: &str, raw: &str, success
     tail_string(raw, 220)
 }
 
+fn compact_tool_result_for_request(tool_name: &str, raw: &str, success: bool) -> String {
+    const MAX_EVIDENCE_CHARS: usize = 8_000;
+    if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        if matches!(
+            tool_name,
+            "read_file" | "read_file_head" | "read_file_range"
+        ) {
+            let path = value
+                .pointer("/data/path")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("path").and_then(Value::as_str))
+                .unwrap_or("unknown");
+            if let Some(content) = value
+                .pointer("/data/content")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("content").and_then(Value::as_str))
+            {
+                return format!(
+                    "{} {} path={}\n{}",
+                    tool_name,
+                    if success { "ok" } else { "failed" },
+                    path.replace('\\', "/"),
+                    bounded_text_excerpt(content, MAX_EVIDENCE_CHARS),
+                );
+            }
+        }
+        if matches!(
+            tool_name,
+            "terminal_run_structured" | "run_command" | "run_safe_command"
+        ) {
+            let stdout = value
+                .get("stdout")
+                .and_then(Value::as_str)
+                .or_else(|| value.pointer("/result/stdout").and_then(Value::as_str))
+                .unwrap_or_default();
+            let stderr = value
+                .get("stderr")
+                .and_then(Value::as_str)
+                .or_else(|| value.pointer("/result/stderr").and_then(Value::as_str))
+                .unwrap_or_default();
+            let exit_code = value
+                .get("exit_code")
+                .and_then(Value::as_i64)
+                .or_else(|| value.pointer("/result/exit_code").and_then(Value::as_i64));
+            return format!(
+                "{} {} exit_code={:?}\nstdout:\n{}\nstderr:\n{}",
+                tool_name,
+                if success { "ok" } else { "failed" },
+                exit_code,
+                bounded_text_excerpt(stdout, 6_000),
+                bounded_text_excerpt(stderr, 1_600),
+            );
+        }
+        if tool_name == "workspace_overview" {
+            return bounded_text_excerpt(raw, 12_000);
+        }
+    }
+    let summary = summarize_tool_result_for_provider_memory(tool_name, raw, success);
+    if summary.trim().is_empty() {
+        bounded_text_excerpt(raw, MAX_EVIDENCE_CHARS)
+    } else {
+        summary
+    }
+}
+
 fn combine_assistant_segments(existing: &str, next: &str) -> String {
     if existing.is_empty() {
         return next.to_string();
     }
     if next.is_empty() {
         return existing.to_string();
+    }
+    let existing_trimmed = existing.trim();
+    let next_trimmed = next.trim();
+    if existing_trimmed == next_trimmed || existing_trimmed.ends_with(next_trimmed) {
+        return existing.to_string();
+    }
+    if next_trimmed.starts_with(existing_trimmed) {
+        return next.to_string();
     }
 
     let mut combined = existing.to_string();
@@ -21170,6 +23393,26 @@ fn merge_stream_text(existing: &str, incoming: &str) -> String {
     let mut merged = existing.to_string();
     merged.push_str(incoming);
     merged
+}
+
+fn validate_stream_finish_reason(finish_reason: Option<&str>) -> Result<()> {
+    let reason = finish_reason
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(reason) = reason else {
+        return Err(anyhow!(
+            "model stream ended unexpectedly without a finish reason"
+        ));
+    };
+    match reason.to_ascii_lowercase().as_str() {
+        "length" | "max_tokens" | "max_output_tokens" => Err(anyhow!(
+            "model output was truncated because it reached the output token limit"
+        )),
+        "content_filter" | "content_filtered" | "safety" => Err(anyhow!(
+            "model output was stopped by the provider content filter"
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn capture_pending_file_snapshot(
@@ -21322,12 +23565,53 @@ fn tool_call_is_allowed(
     tool_name: &str,
     risk: &RiskLevel,
 ) -> bool {
+    if is_native_readonly_workspace_tool(tool_name) {
+        return true;
+    }
     let security = runtime_security_config(&state.base_security_config, runtime);
     if security.auto_approve_tools {
         risk <= &security.max_auto_approve_risk
     } else {
         false
     }
+}
+
+fn is_native_readonly_workspace_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "workspace_overview"
+            | "gather_context"
+            | "inspect_path"
+            | "list_dir"
+            | "find_files"
+            | "count_file_types"
+            | "find_large_files"
+            | "tree_dir"
+            | "get_file_info"
+            | "read_file"
+            | "read_file_head"
+            | "read_file_range"
+            | "grep"
+            | "search_content"
+            | "search_files"
+            | "search_workspace_text"
+            | "symbol_search"
+            | "document_symbols"
+            | "workspace_symbols"
+            | "references_search"
+            | "diagnostics"
+            | "diagnostic_summary"
+            | "file_complexity"
+            | "import_map"
+            | "api_surface"
+            | "project_dependency_graph"
+            | "git_status"
+            | "git_log"
+            | "git_diff"
+            | "git_diff_file"
+            | "git_branch"
+            | "git_remote"
+    )
 }
 
 async fn wait_for_tool_approval(
@@ -21394,6 +23678,7 @@ struct StreamTurnResult {
 }
 
 async fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
+    ensure_schedule_runner(state);
     prune_completed_stream_runtime_sessions(state);
     let runtime = {
         let runtime = lock_runtime_settings(state)?;
@@ -21599,6 +23884,11 @@ async fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
         current_session_id: current_id.clone(),
         branches,
         messages: messages_to_web(&messages),
+        scheduled_tasks: state
+            .scheduled_tasks
+            .lock()
+            .map_err(|_| anyhow!("scheduled task lock poisoned"))?
+            .clone(),
     })
 }
 
@@ -25000,9 +27290,17 @@ fn prune_terminal_sessions(runtime: &mut TerminalRuntime) {
 }
 
 async fn create_terminal_session(state: &WebAppState, workspace_root: &str) -> Result<String> {
+    create_terminal_session_with_shell(state, workspace_root, None).await
+}
+
+async fn create_terminal_session_with_shell(
+    state: &WebAppState,
+    workspace_root: &str,
+    shell_preference: Option<&str>,
+) -> Result<String> {
     let workspace = canonical_workspace_dir_from(state.host.base_dir(), workspace_root)?;
 
-    let (shell, shell_args, initialization) = interactive_shell_command();
+    let (shell, shell_args, initialization) = interactive_shell_command_for(shell_preference);
     let mut command = Command::new(&shell);
     command
         .current_dir(&workspace)
@@ -27636,7 +29934,9 @@ fn stop_stream_session(state: &WebAppState, session_id: &str) -> Result<()> {
     };
     let mut runtime = lock_stream_runtime(state)?;
     if let Some(session) = runtime.remove(session_id) {
-        session.task_handle.abort();
+        session.terminal_emitted.store(true, Ordering::Release);
+        session.worker_abort.abort();
+        let event_tx = session.event_tx.clone();
         let pending_approval_count = session.pending_approvals.len();
         for (_, pending) in session.pending_approvals {
             let _ = pending.sender.send(false);
@@ -27725,8 +30025,28 @@ fn stop_stream_session(state: &WebAppState, session_id: &str) -> Result<()> {
         merged_messages =
             ensure_final_turn_assistant_summary(&merged_messages, inferred_mode, inferred_language);
 
+        let final_messages = messages_to_web(&merged_messages);
         let mut session_manager = lock_session_manager(state)?;
         session_manager.save_messages_for(session_id, &merged_messages)?;
+        let _ = event_tx.send(StreamEnvelope {
+            r#type: "complete".to_string(),
+            session_id: Some(session_id.to_string()),
+            messages: Some(final_messages),
+            delta: None,
+            thinking_delta: None,
+            error: None,
+            activity: Some(activity_event(
+                "stopped",
+                Some("Stopped by user".to_string()),
+            )),
+            tool: None,
+            permission: None,
+            edited_files: None,
+            research: None,
+            subagents: None,
+            verifier: None,
+            auto_skills: None,
+        });
     }
     Ok(())
 }
@@ -29104,6 +31424,144 @@ mod tests {
     }
 
     #[test]
+    fn stream_text_merge_is_idempotent_for_repeated_and_cumulative_chunks() {
+        assert_eq!(merge_stream_text("hello", "hello"), "hello");
+        assert_eq!(merge_stream_text("hello", "hello world"), "hello world");
+        assert_eq!(merge_stream_text("hello wor", "world"), "hello world");
+    }
+
+    #[test]
+    fn assistant_segment_merge_does_not_repeat_a_cumulative_round() {
+        assert_eq!(combine_assistant_segments("hello", "hello"), "hello");
+        assert_eq!(
+            combine_assistant_segments("hello", "hello world"),
+            "hello world"
+        );
+        assert_eq!(
+            combine_assistant_segments("first\n\nsecond", "second"),
+            "first\n\nsecond"
+        );
+    }
+
+    #[test]
+    fn schedule_parser_supports_delay_absolute_and_daily_forms() {
+        let delayed = parse_schedule_creation("in 10m inspect the workspace", "session").unwrap();
+        assert_eq!(delayed.prompt, "inspect the workspace");
+        assert!(delayed.interval_seconds.is_none());
+        assert!(delayed.next_run_at > Utc::now());
+
+        let daily = parse_schedule_creation("daily 09:30 run tests", "session").unwrap();
+        assert_eq!(daily.prompt, "run tests");
+        assert_eq!(daily.interval_seconds, Some(86_400));
+
+        let future = (Local::now() + chrono::Duration::days(2))
+            .format("%Y-%m-%d %H:%M")
+            .to_string();
+        let absolute =
+            parse_schedule_creation(&format!("at {} review changes", future), "session").unwrap();
+        assert_eq!(absolute.prompt, "review changes");
+    }
+
+    #[test]
+    fn schedule_parser_rejects_incomplete_or_past_requests() {
+        assert!(parse_schedule_creation("in 0m noop", "session").is_err());
+        assert!(parse_schedule_creation("daily 25:00 noop", "session").is_err());
+        assert!(parse_schedule_creation("at 2000-01-01 00:00 noop", "session").is_err());
+        assert!(parse_schedule_creation("tomorrow noop", "session").is_err());
+    }
+
+    #[test]
+    fn schedule_management_persists_lists_and_cancels_tasks() {
+        let (state, temp_dir) = test_web_state("schedule_management");
+        let session_id = {
+            let mut manager = lock_session_manager(&state).unwrap();
+            let id = manager.create_session("test-model").unwrap().id.clone();
+            manager.current_id = Some(id.clone());
+            id
+        };
+        let created = manage_schedule(
+            &state,
+            ScheduleManageRequest {
+                command: "in 5m inspect the workspace".to_string(),
+                session_id: Some(session_id.clone()),
+            },
+        )
+        .unwrap();
+        assert_eq!(created.tasks.len(), 1);
+        let task_id = created.tasks[0].id.clone();
+        let persisted = load_scheduled_tasks(&schedules_path(&state));
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].prompt, "inspect the workspace");
+
+        let listed = manage_schedule(
+            &state,
+            ScheduleManageRequest {
+                command: "list".to_string(),
+                session_id: Some(session_id.clone()),
+            },
+        )
+        .unwrap();
+        assert!(listed.message.contains(&task_id));
+
+        let cancelled = manage_schedule(
+            &state,
+            ScheduleManageRequest {
+                command: format!("cancel {}", task_id),
+                session_id: Some(session_id),
+            },
+        )
+        .unwrap();
+        assert!(cancelled.tasks.is_empty());
+        assert!(load_scheduled_tasks(&schedules_path(&state)).is_empty());
+        drop(state);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn native_api_bridge_dispatches_without_loopback_http() {
+        let (state, temp_dir) = test_web_state("native_api_bridge");
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let response = runtime
+            .block_on(bridge_native_api_request(
+                &state,
+                NativeApiRequest {
+                    method: "GET".to_string(),
+                    path: "/api/bootstrap".to_string(),
+                    headers: HashMap::new(),
+                    body_base64: String::new(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(response.status, 200);
+        let body = BASE64_STANDARD.decode(response.body_base64).unwrap();
+        assert!(serde_json::from_slice::<Value>(&body).is_ok());
+        assert!(runtime
+            .block_on(bridge_native_api_request(
+                &state,
+                NativeApiRequest {
+                    method: "GET".to_string(),
+                    path: "/api/../index.html".to_string(),
+                    headers: HashMap::new(),
+                    body_base64: String::new(),
+                },
+            ))
+            .is_err());
+        drop(state);
+        drop(runtime);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn stream_finish_reason_rejects_truncation_and_missing_terminal_state() {
+        assert!(validate_stream_finish_reason(None).is_err());
+        assert!(validate_stream_finish_reason(Some("length")).is_err());
+        assert!(validate_stream_finish_reason(Some("max_tokens")).is_err());
+        assert!(validate_stream_finish_reason(Some("content_filter")).is_err());
+        assert!(validate_stream_finish_reason(Some("stop")).is_ok());
+        assert!(validate_stream_finish_reason(Some("tool_calls")).is_ok());
+    }
+
+    #[test]
     fn oversized_recent_tool_result_is_compacted_without_losing_identity() {
         let messages = vec![
             user(&format!("inspect {}", "x".repeat(80_000))),
@@ -29684,12 +32142,15 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<StreamEnvelope>();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let task_handle = Arc::new(runtime.spawn(async {}));
+        let worker_abort = task_handle.abort_handle();
         {
             let mut runtime = lock_stream_runtime(&state).unwrap();
             runtime.insert(
                 session_id.clone(),
                 StreamSessionRuntime {
                     task_handle,
+                    worker_abort,
+                    terminal_emitted: Arc::new(AtomicBool::new(false)),
                     event_tx: tx,
                     pending_approvals: HashMap::new(),
                     latest_activity: None,
@@ -30193,6 +32654,86 @@ mod tests {
     }
 
     #[test]
+    fn adapt_bash_command_rewrites_ls_flags_without_treating_them_as_paths() {
+        assert_eq!(
+            adapt_bash_command_for_powershell("ls -la"),
+            "Get-ChildItem -Force"
+        );
+        assert_eq!(
+            adapt_bash_command_for_powershell("ls -la src"),
+            "Get-ChildItem -Force 'src'"
+        );
+    }
+
+    #[test]
+    fn readonly_workspace_analysis_uses_fast_path_in_agent_mode() {
+        let content = "分析当前工作区代码";
+        assert!(is_readonly_workspace_analysis_request(content));
+        assert!(!should_run_structured_workflow(Some("agent"), content));
+        assert!(should_use_lightweight_tool_reasoning(content, false));
+        assert!(!is_readonly_workspace_analysis_request(
+            "分析并修改当前工作区代码"
+        ));
+    }
+
+    #[test]
+    fn native_readonly_workspace_tools_bypass_manual_approval_gate() {
+        for name in [
+            "workspace_overview",
+            "tree_dir",
+            "count_file_types",
+            "read_file",
+            "git_status",
+        ] {
+            assert!(is_native_readonly_workspace_tool(name), "{name}");
+        }
+        assert!(!is_native_readonly_workspace_tool("write_file"));
+        assert!(!is_native_readonly_workspace_tool(
+            "terminal_run_structured"
+        ));
+    }
+
+    #[test]
+    fn workspace_overview_is_bounded_and_ignores_build_directories() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "atlas_workspace_overview_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_dir.join("src")).unwrap();
+        fs::create_dir_all(temp_dir.join("node_modules/pkg")).unwrap();
+        fs::write(temp_dir.join("Cargo.toml"), "[package]\nname='demo'\n").unwrap();
+        fs::write(
+            temp_dir.join("src/main.rs"),
+            "fn main() { println!(\"ok\"); }\n",
+        )
+        .unwrap();
+        fs::write(temp_dir.join("node_modules/pkg/index.js"), "ignored\n").unwrap();
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let raw = workspace_overview_tool_result(
+            Path::new("."),
+            &runtime,
+            &json!({"max_depth": 4, "max_files": 100, "preview_files": 3}),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let tree = value["tree"].as_array().unwrap();
+        assert!(tree.iter().any(|item| item["path"] == "src/main.rs"));
+        assert!(!tree.iter().any(|item| item["path"]
+            .as_str()
+            .is_some_and(|path| path.contains("node_modules"))));
+        assert!(value["manifests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "Cargo.toml"));
+        assert!(value["representative_sources"].as_array().unwrap().len() <= 3);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn adapt_bash_command_strips_wrapped_quotes_from_windows_paths() {
         let adapted = adapt_bash_command_for_powershell(
             r#"cd /d "\"D:\Project Testing\experiments\ml_probe_5min_r5\"" && python train_and_eval.py"#,
@@ -30427,7 +32968,10 @@ mod tests {
                 "status": "success",
                 "exit_code": 0,
                 "timed_out": false,
-                "stdout": format!("Saved artifact to {}", artifact_rel),
+                "stdout": format!(
+                    "environment manifest: OS=Windows; python version=3.12; requirements.txt; CPU model=test; reproduction command=python experiment.py\nrandom_state=42; train_test_split stratified; split manifest saved\nbaseline accuracy=0.90; current accuracy=0.97; compare vs baseline; error analysis complete; rerun succeeded\nSaved artifact to {}",
+                    artifact_rel
+                ),
                 "stderr": ""
             }
         })
@@ -30463,7 +33007,7 @@ mod tests {
             &[],
             TurnLanguage::En,
         );
-        assert_eq!(report.status, "pass");
+        assert_eq!(report.status, "pass", "{report:#?}");
         assert!(report.summary.contains("classical ML workflow"));
         assert!(report.checks.iter().any(|check| {
             check.title == artifact_rel
@@ -31219,7 +33763,7 @@ mod tests {
                         "status": "success",
                         "exit_code": 0,
                         "timed_out": false,
-                        "stdout": "workload: cache-serving\nrun_id: sys-run-2\nparent_run_id: sys-run-1\nlatency_ms=11.2\nthroughput_qps=1900\nmemory_mb=700\ncompare vs baseline\nsaved report to runs/systems/report.json",
+                        "stdout": "environment manifest: OS=Windows; python version=3.12; requirements.txt; CPU model=test; memory=16GB; reproduction command=python benchmark.py\nworkload: cache-serving\nrun_id: sys-run-2\nparent_run_id: sys-run-1\nlatency_ms=11.2\nthroughput_qps=1900\nmemory_mb=700\ncompare vs baseline\nsaved report to runs/systems/report.json",
                         "stderr": ""
                     }
                 })
@@ -31237,7 +33781,7 @@ mod tests {
             TurnLanguage::En,
         );
 
-        assert_eq!(report.status, "pass");
+        assert_eq!(report.status, "pass", "{report:#?}");
         assert!(report
             .evidence
             .iter()
@@ -31444,7 +33988,7 @@ mod tests {
                         "status": "success",
                         "exit_code": 0,
                         "timed_out": false,
-                        "stdout": format!("saved checkpoint to {checkpoint_rel}\nval_accuracy=0.92"),
+                        "stdout": format!("environment manifest: OS=Windows; python version=3.12; requirements.txt; GPU model=test; reproduction command=python train.py\nrandom seed=42; train/validation/test split manifest\nbaseline val_accuracy=0.88; current val_accuracy=0.92; compare vs baseline\nsaved checkpoint to {checkpoint_rel}\nval_accuracy=0.92"),
                         "stderr": ""
                     }
                 })
@@ -31462,7 +34006,7 @@ mod tests {
             TurnLanguage::En,
         );
 
-        assert_eq!(report.status, "pass");
+        assert_eq!(report.status, "pass", "{report:#?}");
         assert!(report.summary.contains("deep learning workflow"));
         assert!(report
             .checks

@@ -62,6 +62,7 @@ cargo build --release --bin desktop_wry --features desktop-shell
 ```
 
 Platform-specific desktop notes are in [docs/DESKTOP_PLATFORMS.md](docs/DESKTOP_PLATFORMS.md).
+Extension authors should use the comprehensive [Atlas IDE SDK reference](docs/SDK.md).
 
 ## Repository layout
 

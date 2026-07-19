@@ -28,4 +28,9 @@ interface AtlasDesktopBridge {
 
 interface Window {
   __ATLAS_DESKTOP_BRIDGE__?: AtlasDesktopBridge | null;
+  __ATLAS_REQUEST_CLOSE__?: () => void;
+  __ATLAS_HOST__?: {
+    restoreState?: { client?: Record<string, unknown> } | null;
+    [key: string]: unknown;
+  };
 }

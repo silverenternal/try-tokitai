@@ -63,6 +63,7 @@ futures = "0.3"
 async-trait = "0.1"
 async-stream = "0.3"
 axum = "0.7"
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 
 # HTTP client

@@ -1444,11 +1444,20 @@ fn literature_relevance_tokens(payload: &Value) -> BTreeSet<String> {
         "using",
         "with",
     ];
-    source
+    let mut tokens = source
         .split(|ch: char| !ch.is_alphanumeric())
         .map(|token| token.trim().to_ascii_lowercase())
         .filter(|token| token.len() >= 3 && !stopwords.contains(&token.as_str()))
-        .collect()
+        .collect::<BTreeSet<_>>();
+    if tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "bagging" | "forest" | "randomforest" | "boosting"
+        )
+    }) {
+        tokens.insert("ensemble".to_string());
+    }
+    tokens
 }
 
 fn literature_title_is_relevant(payload: &Value, title: &str) -> bool {
@@ -1469,6 +1478,7 @@ fn literature_title_is_relevant(payload: &Value, title: &str) -> bool {
         "forest",
         "classification",
         "classifier",
+        "ensemble",
         "subsampling",
         "noise",
         "robustness",

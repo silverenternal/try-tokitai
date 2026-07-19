@@ -279,9 +279,6 @@ impl SessionManager {
 
     /// Create a brand-new session and add it to the index.
     pub fn create_session(&mut self, model: &str) -> Result<&SessionMeta> {
-        let id = uuid_v4();
-        let now = now_iso();
-
         let sid = uuid_v4();
         let now = now_iso();
 

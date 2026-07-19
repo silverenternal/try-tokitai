@@ -219,7 +219,7 @@ impl ScriptWrapper {
         let config = self.config();
 
         // Determine interpreter
-        let interpreter = config
+        let mut interpreter = config
             .interpreter
             .clone()
             .or_else(|| Self::detect_interpreter(&config.script_path))
@@ -229,6 +229,10 @@ impl ScriptWrapper {
                     config.script_path
                 )
             })?;
+        #[cfg(windows)]
+        if interpreter.eq_ignore_ascii_case("python3") {
+            interpreter = "python".to_string();
+        }
 
         // Verify script exists
         if !config.script_path.exists() {
@@ -240,6 +244,10 @@ impl ScriptWrapper {
         cmd.hide_window();
 
         // Add script path as first argument
+        #[cfg(windows)]
+        if interpreter.eq_ignore_ascii_case("cmd") {
+            cmd.args(["/D", "/C"]);
+        }
         cmd.arg(&config.script_path);
 
         // Substitute and add additional arguments
@@ -652,12 +660,18 @@ mod tests {
     #[tokio::test]
     async fn test_script_wrapper_echo() {
         let temp_dir = TempDir::new().unwrap();
+        #[cfg(unix)]
         let script_path = temp_dir.path().join("echo.sh");
+        #[cfg(windows)]
+        let script_path = temp_dir.path().join("echo.cmd");
 
         // Create a simple echo script
+        #[cfg(unix)]
         let script_content = r#"#!/bin/bash
 echo "Message: $1"
 "#;
+        #[cfg(windows)]
+        let script_content = "@echo off\r\necho Message: %*\r\n";
         fs::write(&script_path, script_content).unwrap();
 
         // Make executable on Unix
@@ -671,8 +685,12 @@ echo "Message: $1"
 
         let wrapper = ScriptWrapperBuilder::new("echo_script", script_path)
             .description("Echo script")
-            .interpreter("bash")
-            .args(vec!["{{message}}".to_string()])
+            .interpreter(if cfg!(windows) { "cmd" } else { "bash" })
+            .args(if cfg!(windows) {
+                vec!["{{message}}".to_string()]
+            } else {
+                vec!["{{message}}".to_string()]
+            })
             .input_schema(schema_helpers::create_string_params_schema(vec![(
                 "message",
                 "Message to echo",
@@ -685,8 +703,15 @@ echo "Message: $1"
         let input = json!({"message": "Hello from script!"});
         let result = wrapper.execute(input).await.unwrap();
 
-        assert!(result.success);
-        assert!(result.stdout.unwrap().contains("Hello from script!"));
+        assert!(result.success, "{result:?}");
+        assert!(
+            result
+                .stdout
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Hello from script!"),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]

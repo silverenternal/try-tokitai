@@ -8,16 +8,16 @@
     "ai-ml": spec({
       layout: "experiment-lab",
       studio: "EXPERIMENT CENTER",
-      reference: "TensorBoard · Weights & Biases · MLflow",
-      focus: "Runs, models, checkpoints, tensors and reproducible evaluation",
-      dataObjects: ["Experiment", "Run", "Dataset", "Model", "Checkpoint", "Metric", "Tensor", "Embedding"],
+      reference: "MLflow capability model",
+      focus: "Experiments, tracked runs, checkpoints, evaluation gates, registry versions and deployment lineage",
+      dataObjects: ["Experiment", "Run", "Dataset", "Parameter", "Metric", "Artifact", "Checkpoint", "Registered Model", "Model Version", "Deployment"],
       toolbar: [
         ["new-experiment", "New Experiment", "research"], ["text-model", "Text → Model", "training"],
         ["text-training", "Text → Training", "training"], ["text-evaluation", "Text → Evaluation", "evaluation"],
         ["compare-runs", "Compare Runs", "evaluation"],
       ],
       visualizations: ["Loss Curve", "Learning Rate", "Embedding Space", "Gradient", "Tensor", "Activation", "Model Graph", "Experiment DAG"],
-      workflowNouns: ["Data contract", "Training run", "Evaluation gate", "Model release"],
+      workflowNouns: ["Experiment", "Training", "Checkpoint", "Evaluation", "Model Registry", "Deployment"],
       settings: ["seed", "device", "precision", "batch_size", "evaluation_split"],
       zones: ["run-matrix", "metric-strip", "experiment-dag", "workflow", "artifacts", "activity"],
       interaction: "Select runs for comparison; scrub steps; pin checkpoints; brush metric ranges; send a slice to Evaluation Agent.",
@@ -27,9 +27,9 @@
     "computer-vision": spec({
       layout: "vision-lab",
       studio: "VISUAL ANALYSIS LAB",
-      reference: "CVAT · Label Studio · CloudCompare",
-      focus: "Media, annotations, inference overlays, tracking and reconstruction",
-      dataObjects: ["Image", "Video", "Frame", "Annotation", "Detection", "Track", "Mask", "Calibration", "Point Cloud"],
+      reference: "OpenCV capability model",
+      focus: "Image and video processing, feature extraction, calibration, tracking, detection and 3D vision",
+      dataObjects: ["Image", "Video", "Frame", "Processing Layer", "Feature", "Calibration", "Detection", "Track", "Mask", "Point Cloud"],
       toolbar: [
         ["import-media", "Import Media", "annotation"], ["annotate", "Annotate", "annotation"],
         ["run-inference", "Run Inference", "vision"], ["track", "Track Objects", "vision"],
@@ -46,9 +46,9 @@
     nlp: spec({
       layout: "language-center",
       studio: "LANGUAGE REASONING CENTER",
-      reference: "Prompt observability · RAG evaluation · Knowledge tooling",
-      focus: "Prompts, tokens, retrieval, knowledge, memory and reasoning evidence",
-      dataObjects: ["Prompt", "Message", "Token", "Span", "Document", "Chunk", "Embedding", "Entity", "Memory", "Trace"],
+      reference: "Hugging Face capability model",
+      focus: "Model hub, tokenizers, datasets, pipelines, inference, embeddings, prompts and grounded reasoning",
+      dataObjects: ["Model Card", "Tokenizer", "Dataset", "Pipeline", "Prompt", "Message", "Token", "Document", "Chunk", "Embedding", "Inference Trace"],
       toolbar: [
         ["prompt-run", "Run Prompt", "nlp"], ["tokenize", "Tokenize", "nlp"],
         ["retrieve", "Test Retrieval", "corpus"], ["evaluate-rag", "Evaluate RAG", "evaluation"],
@@ -65,7 +65,7 @@
     "computer-graphics": spec({
       layout: "graphics-studio",
       studio: "GRAPHICS STUDIO",
-      reference: "Blender · RenderDoc",
+      reference: "Blender capability model",
       focus: "Scenes, meshes, materials, shaders, lighting and render captures",
       dataObjects: ["Scene", "Collection", "Object", "Mesh", "Material", "Texture", "Shader", "Light", "Camera", "Animation"],
       toolbar: [
@@ -84,7 +84,7 @@
     cad: spec({
       layout: "engineering-studio",
       studio: "ENGINEERING STUDIO",
-      reference: "SolidWorks · Fusion 360",
+      reference: "OpenCascade capability model",
       focus: "Parametric sketches, constraints, feature history and assemblies",
       dataObjects: ["Document", "Sketch", "Constraint", "Parameter", "Feature", "Body", "Component", "Joint", "Drawing"],
       toolbar: [
@@ -103,9 +103,9 @@
     robotics: spec({
       layout: "robotics-lab",
       studio: "ROBOTICS LAB",
-      reference: "RViz · Gazebo · Isaac Sim",
-      focus: "Robot state, sensors, TF, planning, SLAM, simulation and ROS runtime",
-      dataObjects: ["Robot", "Link", "Joint", "Frame", "Sensor", "Topic", "Bag", "Map", "Trajectory", "Planning Scene"],
+      reference: "PyBullet capability model",
+      focus: "Interactive rigid-body physics, joints, collisions, trajectories, controls and sensors",
+      dataObjects: ["World", "Robot", "Link", "Joint", "Collision Shape", "Constraint", "Sensor", "Controller", "Trajectory", "Simulation Step"],
       toolbar: [
         ["connect-ros", "Connect ROS", "robotics"], ["play-bag", "Play Bag", "control"],
         ["set-goal", "Set Goal", "planning"], ["plan-motion", "Plan Motion", "planning"],
@@ -122,7 +122,7 @@
     "computer-networks": spec({
       layout: "network-operations",
       studio: "NETWORK OPERATIONS CENTER",
-      reference: "Wireshark · Cisco Packet Tracer",
+      reference: "Wireshark capability model",
       focus: "Captures, packets, conversations, protocols, routes and network performance",
       dataObjects: ["Interface", "Capture", "Packet", "Frame", "Flow", "Conversation", "Protocol", "Route", "Endpoint", "Topology Node"],
       toolbar: [
@@ -141,7 +141,7 @@
     "operating-systems": spec({
       layout: "system-monitor",
       studio: "SYSTEM PERFORMANCE MONITOR",
-      reference: "Windows Performance Analyzer · htop",
+      reference: "Windows ETW capability model",
       focus: "Processes, threads, scheduling, memory, storage, syscalls and kernel evidence",
       dataObjects: ["Host", "Process", "Thread", "CPU", "Memory Region", "Handle", "File", "System Call", "Kernel Event", "Trace"],
       toolbar: [
@@ -160,7 +160,7 @@
     compiler: spec({
       layout: "compiler-pipeline",
       studio: "COMPILER PIPELINE",
-      reference: "Compiler Explorer · LLVM toolchain",
+      reference: "LLVM capability model",
       focus: "Source, tokens, AST, IR dialects, passes, assembly and diagnostics",
       dataObjects: ["Translation Unit", "Token", "AST Node", "Symbol", "Basic Block", "Instruction", "Pass", "Diagnostic", "Target"],
       toolbar: [
@@ -179,8 +179,8 @@
     database: spec({
       layout: "database-studio",
       studio: "DATABASE STUDIO",
-      reference: "pgAdmin · DBeaver",
-      focus: "Connections, schema, SQL, plans, transactions, indexes and storage",
+      reference: "DuckDB capability model",
+      focus: "Analytical SQL, vectorized execution plans, schemas, columnar storage and statistics",
       dataObjects: ["Connection", "Database", "Schema", "Table", "Column", "Index", "Query", "Plan", "Transaction", "Lock"],
       toolbar: [
         ["connect", "Connect", "database"], ["new-query", "New Query", "query"],
@@ -198,28 +198,28 @@
     "software-engineering": spec({
       layout: "engineering-hub",
       studio: "ENGINEERING HUB",
-      reference: "Architecture workbench · Project health · Release management",
-      focus: "Architecture, modules, dependencies, issues, milestones, releases and quality",
-      dataObjects: ["Repository", "Module", "Component", "Dependency", "Change", "Issue", "Milestone", "Build", "Release"],
+      reference: "libgit2 capability model",
+      focus: "Repositories, commit graphs, branches, diffs, merges and revision history",
+      dataObjects: ["Repository", "Commit", "Tree", "Blob", "Branch", "Tag", "Reference", "Diff Hunk", "Merge", "Conflict"],
       toolbar: [
-        ["index", "Index Repository", "architecture"], ["map-change", "Map Change", "coding"],
-        ["run-checks", "Run Checks", "testing"], ["review", "Review Change", "review"],
-        ["prepare-release", "Prepare Release", "architecture"],
+        ["refresh-graph", "Refresh Graph", "architecture"], ["new-branch", "New Branch", "coding"],
+        ["stage-hunks", "Stage Hunks", "review"], ["merge", "Merge", "review"],
+        ["compare-revisions", "Compare Revisions", "architecture"],
       ],
-      visualizations: ["Dependency Graph", "UML", "Architecture Diagram", "Project Timeline", "Burndown", "Project Health"],
-      workflowNouns: ["Scope change", "Implement", "Build & test", "Review & handoff"],
-      settings: ["architecture_scope", "test_profile", "quality_gate", "release_channel", "ownership_source"],
-      zones: ["project-nav", "architecture-map", "work-items", "quality-board", "release-train", "activity"],
-      interaction: "Traverse modules; expand dependency impact; link changes to issues; inspect quality gates; move milestones; assemble release evidence.",
+      visualizations: ["Commit DAG", "Revision Diff", "Merge Graph", "Branch Lanes", "History Timeline", "Repository Tree"],
+      workflowNouns: ["Repository", "Branch", "Change", "Review", "Merge", "History"],
+      settings: ["repository", "active_reference", "diff_algorithm", "rename_detection", "merge_strategy"],
+      zones: ["repository-tree", "commit-dag", "diff-workbench", "reference-list", "merge-state", "history"],
+      interaction: "Traverse commit ancestry; select references; stage diff hunks; compare revisions; inspect conflicts; complete a reviewed merge.",
       preview: "change-review",
       agentContext: "Expose repository revision, active module/change/issue, dependency impact, acceptance criteria, checks, ownership and release target.",
     }),
     "program-analysis": spec({
       layout: "analysis-center",
       studio: "PROGRAM ANALYSIS CENTER",
-      reference: "Ghidra · IDA Pro · Binary Ninja",
-      focus: "Static facts, runtime traces, data flow, coverage and profiling",
-      dataObjects: ["Target", "Function", "Basic Block", "Instruction", "Fact", "Query", "Finding", "Trace", "Coverage Region", "Profile Sample"],
+      reference: "CodeQL capability model",
+      focus: "Semantic code databases, queries, call graphs, data flow and security paths",
+      dataObjects: ["Code Database", "Query", "Predicate", "Result", "Call", "Data Flow Node", "Source", "Sink", "Path", "Finding"],
       toolbar: [
         ["import-target", "Import Target", "analysis"], ["analyze", "Auto Analyze", "analysis"],
         ["callgraph", "Build Call Graph", "analysis"], ["dataflow", "Run Data Flow", "verification"],
@@ -236,16 +236,16 @@
     "cyber-security": spec({
       layout: "security-operations",
       studio: "SECURITY OPERATIONS CENTER",
-      reference: "Ghidra · IDA Pro · Binary Ninja · Security telemetry",
-      focus: "Authorized targets, threats, binaries, traffic, malware evidence and audit closure",
-      dataObjects: ["Asset", "Threat", "Finding", "CVE", "Exploit Path", "Binary", "Indicator", "Packet", "Rule", "Audit Evidence"],
+      reference: "Ghidra capability model",
+      focus: "Binary analysis, decompilation, disassembly, symbols, references and function graphs",
+      dataObjects: ["Program", "Memory Block", "Symbol", "Function", "Basic Block", "Instruction", "Data Type", "Reference", "Decompiler Variable", "Bookmark"],
       toolbar: [
         ["scope", "Authorize Scope", "threat-model"], ["scan", "Run Scan", "security"],
         ["query", "Security Query", "audit"], ["triage", "Triage Finding", "audit"],
         ["retest", "Retest", "security"],
       ],
-      visualizations: ["Attack Graph", "Binary Structure", "Network Attack Flow", "Threat Timeline", "Risk Graph", "Taint Flow"],
-      workflowNouns: ["Scope & threat model", "Collect evidence", "Triage & validate", "Remediate & retest"],
+      visualizations: ["Decompiler", "Disassembly", "Function Graph", "Memory Map", "Symbol Tree", "Cross-reference Graph"],
+      workflowNouns: ["Import", "Analyze", "Name & type", "Trace references", "Validate behavior", "Export findings"],
       settings: ["authorized_scope", "scanner_profile", "severity_model", "ruleset", "evidence_retention"],
       zones: ["alert-queue", "risk-overview", "attack-graph", "evidence-pane", "binary-inspector", "threat-timeline"],
       interaction: "Filter alerts; expand attack paths; pivot across code/binary/traffic evidence; assign severity; link remediation; rerun original evidence path.",
@@ -255,7 +255,7 @@
     hpc: spec({
       layout: "compute-center",
       studio: "HIGH PERFORMANCE COMPUTE CENTER",
-      reference: "Nsight Systems · Nsight Compute",
+      reference: "CUDA Toolkit capability model",
       focus: "GPU kernels, MPI ranks, nodes, memory hierarchy, scheduling and scaling",
       dataObjects: ["Cluster", "Node", "Job", "Rank", "GPU", "Stream", "Kernel", "Transfer", "Counter", "Profile"],
       toolbar: [
@@ -274,16 +274,16 @@
     "distributed-systems": spec({
       layout: "distributed-cluster",
       studio: "DISTRIBUTED CLUSTER",
-      reference: "Kubernetes Dashboard · Grafana · Jaeger",
-      focus: "Nodes, services, consensus, replication, storage, leaders and reliability",
-      dataObjects: ["Cluster", "Node", "Namespace", "Workload", "Pod", "Service", "RPC", "Span", "Replica", "Consensus Term"],
+      reference: "Docker Engine API capability model",
+      focus: "Containers, images, volumes, compose projects, logs and runtime lifecycle",
+      dataObjects: ["Compose Project", "Service", "Container", "Image", "Layer", "Volume", "Network", "Log Stream", "Runtime Event", "Health Check"],
       toolbar: [
-        ["connect-cluster", "Connect Cluster", "distributed"], ["collect-trace", "Collect Trace", "observability"],
-        ["inspect-rpc", "Inspect RPC", "reliability"], ["failover", "Test Failover", "reliability"],
-        ["scale", "Scale Replicas", "distributed"],
+        ["compose-up", "Compose Up", "distributed"], ["create-container", "Create Container", "distributed"],
+        ["build-image", "Build Image", "reliability"], ["follow-logs", "Follow Logs", "observability"],
+        ["inspect-runtime", "Inspect Runtime", "distributed"],
       ],
-      visualizations: ["Cluster Graph", "Consensus Timeline", "Raft Animation", "Service Topology", "Replication Graph", "Request Trace"],
-      workflowNouns: ["Topology & SLO", "Collect telemetry", "Analyze behavior", "Verify resilience"],
+      visualizations: ["Container Topology", "Image Layers", "Runtime Lifecycle", "Compose Graph", "Log Streams", "Resource Timeline"],
+      workflowNouns: ["Define Compose", "Build Image", "Create", "Start & Observe", "Inspect", "Stop & Preserve"],
       settings: ["cluster_context", "namespace", "time_window", "trace_sampling", "slo_budget"],
       zones: ["cluster-nav", "service-map", "health-grid", "trace-waterfall", "consensus-strip", "event-stream"],
       interaction: "Select cluster scope; traverse service edges; inspect health and replicas; follow a request waterfall; animate terms; run bounded failures.",
@@ -293,16 +293,16 @@
     "scientific-computing": spec({
       layout: "scientific-laboratory",
       studio: "SCIENTIFIC LABORATORY",
-      reference: "MATLAB · ParaView · COMSOL",
-      focus: "Equations, numerical methods, matrices, solvers, simulations and validation",
-      dataObjects: ["Model", "Equation", "Variable", "Parameter", "Matrix", "Mesh", "Field", "Solver", "Iteration", "Study"],
+      reference: "ParaView capability model",
+      focus: "Scientific visualization pipelines, VTK datasets, volume rendering, surfaces, slices and simulation results",
+      dataObjects: ["Pipeline", "Data Source", "VTK Dataset", "Block", "Point", "Cell", "Array", "Surface", "Slice", "Volume", "Time Step"],
       toolbar: [
         ["define-model", "Define Model", "scientific"], ["mesh", "Generate Mesh", "numerical"],
         ["solve", "Solve", "simulation"], ["parameter-sweep", "Parameter Sweep", "simulation"],
         ["validate", "Validate", "scientific"],
       ],
-      visualizations: ["Equation Tree", "Matrix Viewer", "Surface Plot", "Contour Plot", "Simulation Timeline", "Iteration Curve"],
-      workflowNouns: ["Numerical contract", "Discretize & configure", "Run simulation", "Validate & quantify"],
+      visualizations: ["Volume Rendering", "Surface", "Slice", "Contour", "Streamline", "Glyph", "Simulation Time"],
+      workflowNouns: ["Load Data", "Build Pipeline", "Map Fields", "Render", "Probe & Slice", "Publish View"],
       settings: ["unit_system", "solver", "tolerance", "max_iterations", "parameter_sweep"],
       zones: ["model-tree", "equation-editor", "scientific-viewport", "variable-table", "solver-monitor", "study-timeline"],
       interaction: "Edit equations and parameters; inspect matrix blocks; select mesh/field regions; rotate surfaces; scrub simulation time; monitor convergence.",
@@ -317,15 +317,15 @@
   // without collapsing sixteen disciplines into a generic dashboard IA.
   const environmentContracts = Object.freeze({
     "ai-ml": {
-      runtime: "Torch / Lightning runtime", agentApi: "atlas.ml.experiment", selectionModel: "run -> step -> tensor",
-      previewTarget: "model / checkpoint", navigation: [
+      runtime: "Atlas MLflow tracking / registry runtime", agentApi: "atlas.ml.experiment", selectionModel: "experiment -> run -> step -> checkpoint -> model version",
+      previewTarget: "registered model / deployment candidate", navigation: [
         ["overview", "Experiments"], ["resources", "Datasets & Models"], ["visualization", "Training Lab"],
         ["artifacts", "Checkpoints"], ["history", "Run Lineage"], ["settings", "Compute Runtime"],
         ["agent-context", "Experiment Agent"], ["preview", "Model Release"],
       ],
     },
     "computer-vision": {
-      runtime: "OpenMMLab / media runtime", agentApi: "atlas.vision.annotation", selectionModel: "media -> frame -> region -> instance",
+      runtime: "Atlas OpenCV media runtime", agentApi: "atlas.vision.annotation", selectionModel: "media -> frame -> pixel / region -> feature / track",
       previewTarget: "annotated media / reconstruction", navigation: [
         ["overview", "Annotation Studio"], ["resources", "Media & Labels"], ["visualization", "Inference Overlay"],
         ["artifacts", "Masks & Tracks"], ["history", "Revision Review"], ["settings", "Camera & Classes"],
@@ -333,7 +333,7 @@
       ],
     },
     nlp: {
-      runtime: "Tokenizer / retrieval runtime", agentApi: "atlas.language.trace", selectionModel: "prompt -> message -> span -> token",
+      runtime: "Atlas Hugging Face model / tokenizer runtime", agentApi: "atlas.language.trace", selectionModel: "pipeline -> prompt -> message -> span -> token / evidence",
       previewTarget: "prompt / retrieval trace", navigation: [
         ["overview", "Prompt Studio"], ["resources", "Corpus & Memory"], ["visualization", "Retrieval Trace"],
         ["artifacts", "Prompts & Indexes"], ["history", "Evaluation Traces"], ["settings", "Model & Retrieval"],
@@ -341,7 +341,7 @@
       ],
     },
     "computer-graphics": {
-      runtime: "Scene / render runtime", agentApi: "atlas.graphics.scene", selectionModel: "scene -> object -> component -> material",
+      runtime: "Atlas scene graph / Blender Python runtime", agentApi: "atlas.graphics.scene", selectionModel: "scene -> object -> component -> material / keyframe",
       previewTarget: "render frame / scene", navigation: [
         ["overview", "Scene Editor"], ["resources", "Objects & Materials"], ["visualization", "Render View"],
         ["artifacts", "Shaders & Captures"], ["history", "Animation Takes"], ["settings", "Render Pipeline"],
@@ -349,7 +349,7 @@
       ],
     },
     cad: {
-      runtime: "Parametric CAD kernel", agentApi: "atlas.cad.document", selectionModel: "document -> feature -> sketch entity -> constraint",
+      runtime: "Atlas OpenCascade geometry-kernel runtime", agentApi: "atlas.cad.document", selectionModel: "document -> feature -> sketch entity -> constraint / parameter",
       previewTarget: "part / assembly / drawing", navigation: [
         ["overview", "Part Design"], ["resources", "Bodies & Components"], ["visualization", "Model View"],
         ["artifacts", "Drawings & Exports"], ["history", "Feature History"], ["settings", "Units & Tolerances"],
@@ -357,7 +357,7 @@
       ],
     },
     robotics: {
-      runtime: "ROS / simulation runtime", agentApi: "atlas.robotics.runtime", selectionModel: "frame -> robot -> link -> joint / sensor",
+      runtime: "Atlas PyBullet physics runtime", agentApi: "atlas.robotics.runtime", selectionModel: "world -> robot -> link / joint -> control target -> simulation step",
       previewTarget: "robot run / trajectory", navigation: [
         ["overview", "Robot Scene"], ["resources", "Robot & Sensors"], ["visualization", "Motion Planning"],
         ["artifacts", "Maps & Bags"], ["history", "ROS Timeline"], ["settings", "Frames & Planner"],
@@ -365,7 +365,7 @@
       ],
     },
     "computer-networks": {
-      runtime: "Capture / emulation runtime", agentApi: "atlas.network.capture", selectionModel: "capture -> conversation -> packet -> field -> bytes",
+      runtime: "Atlas packet capture / decode runtime", agentApi: "atlas.network.capture", selectionModel: "capture -> time range -> conversation -> packet -> field -> bytes",
       previewTarget: "packet trace / topology run", navigation: [
         ["overview", "Packet Capture"], ["resources", "Interfaces & Captures"], ["visualization", "Protocol Decode"],
         ["artifacts", "Streams & Topologies"], ["history", "Capture Sessions"], ["settings", "Capture Filters"],
@@ -373,7 +373,7 @@
       ],
     },
     "operating-systems": {
-      runtime: "Kernel trace runtime", agentApi: "atlas.system.trace", selectionModel: "trace -> process -> thread -> time range -> stack",
+      runtime: "Atlas Windows ETW trace runtime", agentApi: "atlas.system.trace", selectionModel: "trace -> time range -> process -> thread -> event / stack",
       previewTarget: "performance trace / diagnosis", navigation: [
         ["overview", "Process Explorer"], ["resources", "Processes & Traces"], ["visualization", "Scheduler Analysis"],
         ["artifacts", "Stacks & Dumps"], ["history", "Trace Sessions"], ["settings", "Symbols & Sampling"],
@@ -389,7 +389,7 @@
       ],
     },
     database: {
-      runtime: "SQL transaction runtime", agentApi: "atlas.database.session", selectionModel: "connection -> schema object -> statement -> plan node / row",
+      runtime: "Atlas DuckDB analytical runtime", agentApi: "atlas.database.session", selectionModel: "database -> schema object -> query -> plan operator -> vector / row",
       previewTarget: "query result / execution plan", navigation: [
         ["overview", "SQL Workbench"], ["resources", "Schemas & Objects"], ["visualization", "Execution Plan"],
         ["artifacts", "Results & Indexes"], ["history", "Query History"], ["settings", "Connection & Session"],
@@ -397,27 +397,27 @@
       ],
     },
     "software-engineering": {
-      runtime: "Repository / CI runtime", agentApi: "atlas.engineering.change", selectionModel: "repository -> module -> change -> issue / check",
-      previewTarget: "change review / release", navigation: [
-        ["overview", "Architecture"], ["resources", "Modules & Ownership"], ["visualization", "Dependency Impact"],
-        ["artifacts", "Changes & Releases"], ["history", "Delivery Timeline"], ["settings", "Quality Gates"],
-        ["agent-context", "Engineering Agent"], ["preview", "Change Handoff"],
+      runtime: "Atlas libgit2 repository runtime", agentApi: "atlas.engineering.change", selectionModel: "repository -> reference -> commit -> file -> diff hunk",
+      previewTarget: "commit / merge review", navigation: [
+        ["overview", "Commit Graph"], ["resources", "Trees & References"], ["visualization", "Revision Diff"],
+        ["artifacts", "Patches & Tags"], ["history", "Branch History"], ["settings", "Repository Options"],
+        ["agent-context", "Repository Agent"], ["preview", "Change-set Review"],
       ],
     },
     "program-analysis": {
-      runtime: "Static / dynamic analysis runtime", agentApi: "atlas.analysis.target", selectionModel: "target -> function -> block -> instruction -> fact",
-      previewTarget: "finding / graph / coverage", navigation: [
-        ["overview", "Code Browser"], ["resources", "Targets & Symbols"], ["visualization", "Control & Data Flow"],
-        ["artifacts", "Facts & Findings"], ["history", "Trace & Coverage"], ["settings", "Analysis Scope"],
-        ["agent-context", "Analysis Agent"], ["preview", "Finding Evidence"],
+      runtime: "Atlas CodeQL semantic-analysis runtime", agentApi: "atlas.analysis.target", selectionModel: "code database -> query -> result -> path -> source location",
+      previewTarget: "semantic finding / path", navigation: [
+        ["overview", "Query Console"], ["resources", "Databases & Libraries"], ["visualization", "Call & Data Flow"],
+        ["artifacts", "Queries & Findings"], ["history", "Query Runs"], ["settings", "Database & Suites"],
+        ["agent-context", "Analysis Agent"], ["preview", "Path Evidence"],
       ],
     },
     "cyber-security": {
-      runtime: "Authorized analysis runtime", agentApi: "atlas.security.investigation", selectionModel: "scope -> finding -> attack path -> evidence",
-      previewTarget: "validated finding / retest", navigation: [
-        ["overview", "Investigation"], ["resources", "Assets & Indicators"], ["visualization", "Attack Paths"],
-        ["artifacts", "Evidence & Rules"], ["history", "Threat Timeline"], ["settings", "Scope & Rulesets"],
-        ["agent-context", "Security Agent"], ["preview", "Validated Finding"],
+      runtime: "Atlas Ghidra reverse-engineering runtime", agentApi: "atlas.security.investigation", selectionModel: "binary -> address space -> function -> block -> instruction / reference",
+      previewTarget: "reverse-engineering finding", navigation: [
+        ["overview", "Code Browser"], ["resources", "Programs & Symbols"], ["visualization", "Decompiler & Function Graph"],
+        ["artifacts", "Types & Bookmarks"], ["history", "Analysis Revisions"], ["settings", "Language & Analysis"],
+        ["agent-context", "Reverse Engineering Agent"], ["preview", "Function Evidence"],
       ],
     },
     hpc: {
@@ -429,19 +429,19 @@
       ],
     },
     "distributed-systems": {
-      runtime: "Cluster / tracing runtime", agentApi: "atlas.distributed.cluster", selectionModel: "cluster -> service -> replica -> request span / term",
-      previewTarget: "cluster event / resilience run", navigation: [
-        ["overview", "Cluster Topology"], ["resources", "Workloads & Services"], ["visualization", "Request Traces"],
-        ["artifacts", "Snapshots & Events"], ["history", "Consensus Timeline"], ["settings", "Context & SLO"],
-        ["agent-context", "Distributed Agent"], ["preview", "Resilience Evidence"],
+      runtime: "Atlas Docker Engine API runtime", agentApi: "atlas.distributed.cluster", selectionModel: "compose project -> service -> container -> process / log / event",
+      previewTarget: "container runtime snapshot", navigation: [
+        ["overview", "Runtime Topology"], ["resources", "Containers & Images"], ["visualization", "Logs & Lifecycle"],
+        ["artifacts", "Volumes & Layers"], ["history", "Runtime Events"], ["settings", "Engine & Compose"],
+        ["agent-context", "Runtime Agent"], ["preview", "Runtime Snapshot"],
       ],
     },
     "scientific-computing": {
-      runtime: "Numerical solver runtime", agentApi: "atlas.scientific.model", selectionModel: "model -> equation -> domain / variable -> iteration",
-      previewTarget: "field / simulation result", navigation: [
-        ["overview", "Model Builder"], ["resources", "Variables & Meshes"], ["visualization", "Fields & Surfaces"],
-        ["artifacts", "Studies & Results"], ["history", "Solver Convergence"], ["settings", "Solver & Units"],
-        ["agent-context", "Scientific Agent"], ["preview", "Simulation Result"],
+      runtime: "Atlas ParaView / VTK runtime", agentApi: "atlas.scientific.model", selectionModel: "pipeline -> dataset -> block -> cell / point -> field sample",
+      previewTarget: "scientific visualization state", navigation: [
+        ["overview", "Visualization Pipeline"], ["resources", "Datasets & Arrays"], ["visualization", "Volume / Surface / Slice"],
+        ["artifacts", "Views & Extracts"], ["history", "Simulation Time"], ["settings", "Rendering & Fields"],
+        ["agent-context", "Visualization Agent"], ["preview", "Published View"],
       ],
     },
   });

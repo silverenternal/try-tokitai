@@ -54,6 +54,24 @@ pub struct DomainWorkbenchDescriptor {
     pub workflow: Vec<DomainWorkbenchStageDescriptor>,
     #[serde(default)]
     pub intents: Vec<DomainIntentDescriptor>,
+    /// Stable domain object vocabulary shared by the workspace, Agent and providers.
+    #[serde(default)]
+    pub object_model: Vec<String>,
+    /// The selection/manipulation grammar used by this environment.
+    #[serde(default)]
+    pub interaction_model: String,
+    /// The evidence the right-side inspector is responsible for.
+    #[serde(default)]
+    pub inspector_model: String,
+    /// The environment's primary visual instrument, not a generic chart type.
+    #[serde(default)]
+    pub visualization_model: String,
+    /// Atlas-owned runtime contract used to dispatch capability providers.
+    #[serde(default)]
+    pub runtime: String,
+    /// Domain-specific Research Preview card contract.
+    #[serde(default)]
+    pub preview_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

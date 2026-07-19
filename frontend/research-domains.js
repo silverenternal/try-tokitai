@@ -2413,7 +2413,28 @@
     });
   }
 
-  function renderPreviewEvidence(svgHost, documentData, spec) {
+  const DOMAIN_PREVIEW_GRAMMARS = Object.freeze({
+    "ai-ml": "experiment-lineage", "computer-vision": "media-overlay", nlp: "token-retrieval",
+    "computer-graphics": "scene-frame", cad: "feature-model", robotics: "physics-run",
+    "computer-networks": "packet-timeline", "operating-systems": "etw-lanes", compiler: "compiler-stages",
+    database: "operator-plan", "software-engineering": "commit-dag", "program-analysis": "semantic-path",
+    "cyber-security": "reverse-engineering", hpc: "gpu-streams", "distributed-systems": "container-runtime",
+    "scientific-computing": "vtk-pipeline",
+  });
+
+  function appendPreviewGrammar(svgHost, domainId, documentData) {
+    const grammar = DOMAIN_PREVIEW_GRAMMARS[domainId] || "research-evidence";
+    svgHost.dataset.previewGrammar = grammar;
+    const label = svg("text", { class: "research-domain-preview-grammar", x: 18, y: 24 });
+    label.textContent = grammar.replaceAll("-", " / ").toUpperCase();
+    svgHost.appendChild(label);
+    const count = (documentData?.nodes || []).length || (documentData?.series || []).length || 0;
+    const evidence = svg("text", { class: "research-domain-preview-evidence-count", x: 942, y: 24, "text-anchor": "end" });
+    evidence.textContent = `${count} EVIDENCE OBJECTS`;
+    svgHost.appendChild(evidence);
+  }
+
+  function renderPreviewEvidence(svgHost, documentData, spec, domainId) {
     const nodes = (documentData?.nodes || []).slice(0, 20);
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges = (documentData?.edges || [])
@@ -2424,19 +2445,27 @@
     const layout = spec.layout;
     if (Array.isArray(geometry?.points) && geometry.points.length) {
       renderGeometry(svgHost, geometry, { width: 960, height: 280 });
+      appendPreviewGrammar(svgHost, domainId, documentData);
       return null;
     }
-    if (series.length && /experiment|system|compute|scientific|network|distributed/i.test(layout)) {
+    if (series.length && ["ai-ml", "operating-systems", "hpc"].includes(domainId)) {
       renderSeries(svgHost, series, { width: 960, height: 245, top: 18 });
+      appendPreviewGrammar(svgHost, domainId, documentData);
       return null;
     }
-    if ((documentData?.metadata?.table?.rows || []).length && /database|vision|security/i.test(layout)) {
+    if ((documentData?.metadata?.table?.rows || []).length && ["computer-vision", "computer-networks", "database"].includes(domainId)) {
       renderTable(svgHost, documentData.metadata.table, nodes, { width: 960, height: 280 });
+      appendPreviewGrammar(svgHost, domainId, documentData);
       return null;
     }
-    if (nodes.length) return renderGraph(svgHost, nodes, edges, { width: 960, height: 270, top: 0, interactive: false });
+    if (nodes.length) {
+      const positions = renderGraph(svgHost, nodes, edges, { width: 960, height: 270, top: 0, interactive: false });
+      appendPreviewGrammar(svgHost, domainId, documentData);
+      return positions;
+    }
     if (series.length) {
       renderSeries(svgHost, series, { width: 960, height: 245, top: 18 });
+      appendPreviewGrammar(svgHost, domainId, documentData);
       return null;
     }
     const empty = svg("text", { class: "research-domain-mini-empty", x: 480, y: 142, "text-anchor": "middle" });
@@ -2470,7 +2499,7 @@
     status.textContent = documentData ? "VERIFIED DATA" : "AWAITING EVIDENCE";
     head.append(identity, status);
     const preview = svg("svg", { viewBox: "0 0 960 280", role: "img", "aria-label": `${asset?.name || spec.studio} research preview` });
-    const positions = renderPreviewEvidence(preview, documentData, spec);
+    const positions = renderPreviewEvidence(preview, documentData, spec, domainId);
     const summary = document.createElement("span");
     summary.className = "research-domain-preview-summary";
     const chips = [

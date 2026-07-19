@@ -106,33 +106,39 @@ pub fn contains_path_reference(input: &str) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_resolve_single_path() {
         // 创建测试文件
-        let test_file = "/tmp/test_path_resolver.txt";
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test_path_resolver.txt");
         let test_content = "Hello, World!";
-        let _ = fs::write(test_file, test_content);
+        fs::write(&test_file, test_content).unwrap();
 
-        let input = format!("读取 @{}", test_file);
+        let input = format!("读取 @{}", test_file.display());
         let (processed, contents) = resolve_paths(&input).unwrap();
 
         assert!(processed.contains(test_content));
         assert_eq!(contents.len(), 1);
 
         // 清理
-        let _ = fs::remove_file(test_file);
     }
 
     #[test]
     fn test_resolve_multiple_paths() {
         // 创建测试文件
-        let test_file1 = "/tmp/test_file1.txt";
-        let test_file2 = "/tmp/test_file2.txt";
-        let _ = fs::write(test_file1, "Content 1");
-        let _ = fs::write(test_file2, "Content 2");
+        let temp_dir = TempDir::new().unwrap();
+        let test_file1 = temp_dir.path().join("test_file1.txt");
+        let test_file2 = temp_dir.path().join("test_file2.txt");
+        fs::write(&test_file1, "Content 1").unwrap();
+        fs::write(&test_file2, "Content 2").unwrap();
 
-        let input = format!("@{} 和 @{} 的内容", test_file1, test_file2);
+        let input = format!(
+            "@{} 和 @{} 的内容",
+            test_file1.display(),
+            test_file2.display()
+        );
         let (processed, contents) = resolve_paths(&input).unwrap();
 
         assert!(processed.contains("Content 1"));
@@ -140,8 +146,6 @@ mod tests {
         assert_eq!(contents.len(), 2);
 
         // 清理
-        let _ = fs::remove_file(test_file1);
-        let _ = fs::remove_file(test_file2);
     }
 
     #[test]

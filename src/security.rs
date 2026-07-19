@@ -218,6 +218,7 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "count_file_types",
             "find_large_files",
             "tree_dir",
+            "workspace_overview",
             "get_file_info",
             "diagnostics",
             "symbol_search",

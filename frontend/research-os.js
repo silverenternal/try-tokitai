@@ -20,6 +20,7 @@
     loading: false,
     pollTimer: null,
     graphTransform: { x: 0, y: 0, scale: 1 },
+    cardDrag: null,
   };
 
   function el(tag, className = "", text = "") {
@@ -78,6 +79,7 @@
   }
 
   function openPanel() {
+    window.AtlasWorkspaceBridge?.openMainView?.("chat");
     state.open = true;
     elements.panel.hidden = false;
     elements.toggle.classList.add("is-active");
@@ -95,6 +97,32 @@
     document.querySelector(".app-shell")?.classList.remove("has-research-os");
     window.clearTimeout(state.pollTimer);
     state.pollTimer = null;
+  }
+
+  function startCardDrag(event) {
+    if (event.button !== 0 || event.target.closest("button, input, nav")) return;
+    const rect = elements.panel.getBoundingClientRect();
+    state.cardDrag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    elements.panel.classList.add("is-dragging");
+    elements.panel.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveCardDrag(event) {
+    if (!state.cardDrag || event.pointerId !== state.cardDrag.pointerId) return;
+    const width = elements.panel.offsetWidth;
+    const height = elements.panel.offsetHeight;
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - state.cardDrag.offsetX));
+    const top = Math.max(52, Math.min(window.innerHeight - height - 8, event.clientY - state.cardDrag.offsetY));
+    elements.panel.style.setProperty("--research-card-x", `${left}px`);
+    elements.panel.style.setProperty("--research-card-y", `${top}px`);
+  }
+
+  function endCardDrag(event) {
+    if (!state.cardDrag || (event?.pointerId != null && event.pointerId !== state.cardDrag.pointerId)) return;
+    elements.panel.releasePointerCapture?.(state.cardDrag.pointerId);
+    state.cardDrag = null;
+    elements.panel.classList.remove("is-dragging");
   }
 
   function schedulePolling() {
@@ -793,6 +821,10 @@
     elements.prev = document.getElementById("research-os-prev");
     elements.next = document.getElementById("research-os-next");
     if (!elements.panel || !elements.toggle) return;
+    elements.panel.querySelector(".research-os-header")?.addEventListener("pointerdown", startCardDrag);
+    document.addEventListener("pointermove", moveCardDrag);
+    document.addEventListener("pointerup", endCardDrag);
+    document.addEventListener("pointercancel", endCardDrag);
     elements.toggle.addEventListener("click", () => state.open ? closePanel() : openPanel());
     elements.close?.addEventListener("click", closePanel);
     elements.refresh?.addEventListener("click", () => requestSnapshot());
