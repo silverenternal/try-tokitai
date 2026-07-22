@@ -7,6 +7,7 @@ This directory contains documentation for the current Atlas product.
 | [QUICKSTART.md](QUICKSTART.md) | Configure and run Atlas |
 | [USER_GUIDE.md](USER_GUIDE.md) | Desktop IDE workflows and common operations |
 | [ATLAS_CORE_ARCHITECTURE.md](ATLAS_CORE_ARCHITECTURE.md) | Atlas Core and Research Intelligence Engine |
+| [PROJECT_TECHNICAL_BOOK.md](PROJECT_TECHNICAL_BOOK.md) | Full project technical book: architecture, runtime, RAG, governance, data, APIs, delivery, and maintenance |
 | [SDK.md](SDK.md) | Host bridge, tools, plugins, domains, visualization, Core, RIE, MCP, and security SDK |
 | [DESKTOP_PLATFORMS.md](DESKTOP_PLATFORMS.md) | Windows, macOS, and Linux requirements |
 | [interactive-visualization.md](interactive-visualization.md) | Interactive visualization architecture |

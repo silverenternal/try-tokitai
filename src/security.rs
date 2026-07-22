@@ -241,6 +241,12 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "sympy_matrix",
             "terminal_create",
             "terminal_read",
+            "search_workspace_index",
+            "search_knowledge_base",
+            "research_os_snapshot",
+            "research_domain_context",
+            "research_domain_workspace",
+            "remote_ssh_context",
         ];
         for name in safe_tools {
             map.insert(name.to_string(), RiskLevel::Safe);
@@ -286,6 +292,10 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "terminal_run",
             "terminal_run_structured",
             "browser_computer",
+            "index_workspace",
+            "enqueue_background_task",
+            "research_os_mutate",
+            "atlas_workspace_snapshot",
         ];
         for name in moderate_tools {
             map.insert(name.to_string(), RiskLevel::Moderate);
@@ -311,6 +321,9 @@ pub fn default_tool_risk_map() -> &'static HashMap<String, RiskLevel> {
             "port_scan",
             "kill_process",
             "stop_process",
+            "remote_ssh_execute",
+            "remote_ssh_transfer",
+            "remote_ssh_forward",
         ];
         for name in low_risk_tools {
             map.insert(name.to_string(), RiskLevel::Low);

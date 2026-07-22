@@ -148,6 +148,9 @@
               <path d="M5.5 19.5h13"></path>
             </svg>
           </button>
+          <button class="activity-rail-button" type="button" data-activity-panel="knowledge" id="knowledge-rail-button" aria-label="Knowledge base" title="Knowledge base">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h9l3 3v12H6z"></path><path d="M15 4.5v3h3M9 12h6M9 15h4"></path></svg>
+          </button>
           <button class="activity-rail-button" type="button" data-activity-panel="notebook" id="notebook-rail-button" aria-label="Atlas Notebook" title="Atlas Notebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v15H6zM9 4.5v15"></path><path d="M12 9h3M12 13h3M12 17h2"></path></svg></button>
           <button class="activity-rail-button" type="button" data-activity-panel="ssh" id="ssh-rail-button" aria-label="SSH Remote Development" title="SSH Remote Development">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8.5V6a5 5 0 0 1 10 0v2.5"></path><path d="M5 8.5h14v10H5z"></path><path d="m8.5 12 2 1.5-2 1.5M12.5 15h3"></path></svg>
@@ -370,6 +373,24 @@
             <div id="project-task-list" class="project-task-list"></div>
           </section>
         </section>
+        <section class="activity-panel knowledge-activity-panel" id="activity-panel-knowledge" data-activity-panel-id="knowledge">
+          <div class="activity-panel-head">
+            <div class="activity-panel-title-group"><div class="activity-panel-eyebrow">Retrieval</div><div class="activity-panel-title">Knowledge base</div></div>
+            <button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar" title="Collapse sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6.5 9 12l6 5.5"></path></svg></button>
+          </div>
+          <div class="knowledge-workspace">
+            <div class="knowledge-upload-card">
+              <strong>Upload source documents</strong><span>PDF, DOCX, PPTX, XLSX, CSV, Markdown, text, structured data, and code.</span>
+              <div class="knowledge-metadata"><input id="knowledge-owner" type="text" placeholder="Owner (optional)" /><input id="knowledge-tags" type="text" placeholder="Tags, comma-separated" /></div>
+              <input id="knowledge-file-input" type="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.tsv,.md,.txt,.rst,.html,.xml,.json,.yaml,.yml,.toml,.tex,.bib,.sql,.rs,.py,.js,.ts" hidden />
+              <button class="git-action-button git-action-button-primary" type="button" id="knowledge-upload-button">Choose documents</button>
+            </div>
+            <div class="knowledge-health" id="knowledge-health">Loading knowledge base…</div>
+            <div class="knowledge-search-row"><input id="knowledge-search-input" type="search" placeholder="Search with hybrid retrieval" /><button type="button" id="knowledge-search-button">Search</button></div>
+            <div class="knowledge-section-title">Documents</div><div id="knowledge-document-list" class="knowledge-document-list"></div>
+            <div class="knowledge-section-title">Evidence</div><div id="knowledge-search-results" class="knowledge-search-results"></div>
+          </div>
+        </section>
         <section class="activity-panel ssh-activity-panel" id="activity-panel-ssh" data-activity-panel-id="ssh">
           <div class="activity-panel-head"><div class="activity-panel-title-group"><div class="activity-panel-eyebrow">Atlas Core</div><div class="activity-panel-title">Remote Development</div></div><div class="activity-panel-actions"><button class="sidebar-action" type="button" id="ssh-import-config">Import Config</button><button class="activity-panel-close" type="button" data-collapse-activity aria-label="Collapse sidebar"><svg viewBox="0 0 24 24"><path d="M15 6.5 9 12l6 5.5"></path></svg></button></div></div>
           <div class="ssh-control-deck"><div class="ssh-host-toolbar"><button type="button" id="ssh-add-host">+ Host</button><button type="button" id="ssh-refresh">Refresh</button><span id="ssh-transport-state">transport</span></div><div class="ssh-host-list" id="ssh-host-list"></div></div>
@@ -490,6 +511,12 @@
 
                   <div class="composer-attachments" id="composer-attachments" hidden></div>
 
+                  <section class="slash-command-menu" id="slash-command-menu" role="listbox" aria-label="Agent commands" hidden>
+                    <div class="slash-command-menu-head"><strong>Agent commands</strong><span>↑↓ 选择 · Enter 应用 · Esc 关闭</span></div>
+                    <div class="slash-command-list" id="slash-command-list"></div>
+                    <div class="slash-command-safety">命令不会绕过权限：破坏性、外部副作用、凭据和高风险操作仍受审批与速率限制。</div>
+                  </section>
+
                   <label class="composer-field" for="message-input">
                     <textarea
                       id="message-input"
@@ -510,6 +537,10 @@
                             <path d="m12 3 1.25 4.05L17 8.5l-3.75 1.45L12 14l-1.25-4.05L7 8.5l3.75-1.45z"></path>
                             <path d="m18.25 14 .72 2.28L21 17l-2.03.72L18.25 20l-.72-2.28L15.5 17l2.03-.72z"></path>
                           </svg>
+                        </button>
+                        <button class="composer-rag-toggle" type="button" id="rag-toggle" aria-pressed="false" title="使用知识库增强本轮回答">
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="6.5" ry="2.75"></ellipse><path d="M5.5 6v5c0 1.52 2.91 2.75 6.5 2.75s6.5-1.23 6.5-2.75V6"></path><path d="M5.5 11v5c0 1.52 2.91 2.75 6.5 2.75 1.44 0 2.77-.2 3.84-.55"></path><path d="m18.2 15 .55 1.55L20.3 17l-1.55.55L18.2 19.1l-.55-1.55L16.1 17l1.55-.45z"></path></svg>
+                          <span>知识库</span><i aria-hidden="true"></i>
                         </button>
                         <input id="file-input" type="file" multiple hidden />
                       </div>
@@ -576,9 +607,11 @@
                             <button class="settings-tab" type="button" data-settings-tab="personalization"><span class="settings-nav-icon">◉</span><span>个性化</span></button>
                             <button class="settings-tab" type="button" data-settings-tab="model"><span class="settings-nav-icon">✦</span><span>模型</span></button>
                             <button class="settings-tab" type="button" data-settings-tab="security"><span class="settings-nav-icon">◇</span><span>权限</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="agents"><span class="settings-nav-icon">◌</span><span>子 Agent</span></button>
                             <button class="settings-tab" type="button" data-settings-tab="shortcuts"><span class="settings-nav-icon">⌨</span><span>键盘快捷键</span></button>
                             <span class="settings-nav-heading">集成</span>
                             <button class="settings-tab" type="button" data-settings-tab="providers"><span class="settings-nav-icon">⌘</span><span>提供商</span></button>
+                            <button class="settings-tab" type="button" data-settings-tab="mcp"><span class="settings-nav-icon">⇄</span><span>MCP</span></button>
                             <span class="settings-nav-heading">编码</span>
                             <button class="settings-tab" type="button" data-settings-tab="runtime"><span class="settings-nav-icon">›_</span><span>运行环境</span></button>
                           </nav>
@@ -659,13 +692,18 @@
                               <label class="settings-row"><span><strong>允许工具辅助任务生成记忆</strong><small>使用工具或网页搜索的任务也可以更新偏好记忆。</small></span><input data-client-pref="toolMemoryEnabled" type="checkbox" /></label>
                               <div class="settings-row"><span><strong>重置记忆</strong><small>删除 Atlas 在本机保存的所有偏好记忆。</small></span><button class="settings-danger-button" type="button" id="settings-reset-memory">重置</button></div>
                             </div></section>
+                            <section class="settings-section" data-settings-searchable>
+                              <div class="settings-section-head"><span><h2>Agent 总结的记忆</h2><small>来自当前工作区的研究结论、决策与经验，以 Markdown 呈现。</small></span><button class="settings-inline-button" type="button" id="settings-memory-refresh">刷新</button></div>
+                              <div class="settings-memory-viewer" id="settings-memory-viewer"><div class="settings-memory-empty">打开此页面时将读取工作区记忆。</div></div>
+                            </section>
                           </div>
 
                           <div class="settings-tab-panel" data-settings-tab-panel="model">
-                            <header class="settings-content-head"><h1>模型</h1><p>Atlas 仅支持 Qwen 系列模型。</p></header>
+                            <header class="settings-content-head"><h1>模型</h1><p>主模型仅支持 Qwen 3.6 及以上；审查模型独立固定。</p></header>
                             <section class="settings-section" data-settings-searchable><h2>Qwen</h2><div class="settings-card">
-                              <label class="settings-row"><span><strong>主模型</strong><small>用于对话、代码编辑和代理任务。</small></span><select id="primary-model"><option value="qwen3.7-plus">Qwen 3.7 Plus</option><option value="qwen3.7-max">Qwen 3.7 Max</option><option value="qwen3.6-plus">Qwen 3.6 Plus</option><option value="qwen3.6-max-preview">Qwen 3.6 Max Preview</option><option value="qwen3.6-flash">Qwen 3.6 Flash</option><option value="qwen3.5-plus">Qwen 3.5 Plus</option><option value="qwen3.5-flash">Qwen 3.5 Flash</option><option value="qwq-plus">QwQ Plus</option></select></label>
-                              <label class="settings-row"><span><strong>深度思考</strong><small>启用 Qwen 的 thinking/reasoning 输出。</small></span><input id="deep-think" type="checkbox" /></label>
+                              <label class="settings-row"><span><strong>主模型</strong><small>用于对话、规划、代码编辑和代理任务。</small></span><select id="primary-model"><option value="qwen3.7-plus">Qwen 3.7 Plus</option><option value="qwen3.7-max">Qwen 3.7 Max</option><option value="qwen3.6-plus">Qwen 3.6 Plus</option><option value="qwen3.6-max-preview">Qwen 3.6 Max Preview</option><option value="qwen3.6-flash">Qwen 3.6 Flash</option></select></label>
+                              <div class="settings-row"><span><strong>审查模型</strong><small>与主模型隔离，用于结果审查；不可修改。</small></span><code id="review-model">qwen3-max</code></div>
+                              <label class="settings-row"><span><strong>深度思考</strong><small id="deep-think-description">控制当前主模型支持的 thinking/reasoning 输出。</small></span><input id="deep-think" type="checkbox" /></label>
                               <label class="settings-row settings-row-stack"><span><strong>API Key</strong><small>密钥只保存在本机配置中。</small></span><input id="runtime-api-key" type="password" autocomplete="off" placeholder="输入 Qwen API Key" /></label>
                             </div></section>
                           </div>
@@ -694,11 +732,42 @@
                             <section class="settings-section" data-settings-searchable><h2>已配置</h2><div class="provider-list settings-card" id="provider-list"></div></section>
                           </div>
 
+                          <div class="settings-tab-panel" data-settings-tab-panel="mcp">
+                            <header class="settings-content-head"><h1>MCP</h1><p>连接 Streamable HTTP MCP 服务器，并把发现的工具提供给 Agent。</p></header>
+                            <section class="settings-section" data-settings-searchable>
+                              <div class="settings-section-head"><span><h2>服务器</h2><small>配置会随设置保存在本机；工具使用 mcp__服务器__工具 命名空间。</small></span><button class="settings-inline-button" type="button" id="mcp-add-server">添加服务器</button></div>
+                              <div class="mcp-server-list" id="mcp-server-list"></div>
+                              <div class="settings-card mcp-empty-state" id="mcp-empty-state">尚未配置 MCP 服务器。</div>
+                            </section>
+                          </div>
+
                           <div class="settings-tab-panel" data-settings-tab-panel="runtime">
                             <header class="settings-content-head"><h1>运行环境</h1><p>设置工作区和本机工具链。</p></header>
                             <section class="settings-section" data-settings-searchable><h2>工作区</h2><div class="settings-card"><label class="settings-row settings-row-stack"><span><strong>工作区根目录</strong><small>Atlas 读取、编辑和运行代码的默认位置。</small></span><input id="runtime-workspace-root" type="text" /></label></div></section>
                             <section class="settings-section" data-settings-searchable><h2>工具链</h2><div class="settings-card runtime-toolchain-grid" id="runtime-toolchain-grid">
                               <label class="settings-row"><span><strong>Cargo</strong></span><input data-toolchain-key="cargo" type="text" /></label><label class="settings-row"><span><strong>NPM</strong></span><input data-toolchain-key="npm" type="text" /></label><label class="settings-row"><span><strong>Python</strong></span><input data-toolchain-key="python" type="text" /></label><label class="settings-row"><span><strong>Java</strong></span><input data-toolchain-key="java" type="text" /></label><label class="settings-row"><span><strong>Javac</strong></span><input data-toolchain-key="javac" type="text" /></label><label class="settings-row"><span><strong>C 编译器</strong></span><input data-toolchain-key="c" type="text" /></label><label class="settings-row"><span><strong>C++ 编译器</strong></span><input data-toolchain-key="cpp" type="text" /></label><label class="settings-row"><span><strong>Go</strong></span><input data-toolchain-key="go" type="text" /></label><label class="settings-row"><span><strong>.NET</strong></span><input data-toolchain-key="dotnet" type="text" /></label><label class="settings-row"><span><strong>Julia</strong></span><input data-toolchain-key="julia" type="text" /></label><label class="settings-row"><span><strong>Rscript</strong></span><input data-toolchain-key="rscript" type="text" /></label><label class="settings-row"><span><strong>Tectonic</strong></span><input data-toolchain-key="tectonic" type="text" /></label><label class="settings-row"><span><strong>PDFLaTeX</strong></span><input data-toolchain-key="pdflatex" type="text" /></label>
+                            </div></section>
+                          </div>
+                          <div class="settings-tab-panel" data-settings-tab-panel="agents">
+                            <header class="settings-content-head"><h1>Agent 运行</h1><p>配置子 Agent 信息边界，以及长任务如何自动迭代、恢复并完成研究交付。</p></header>
+                            <section class="settings-section" data-settings-searchable><div class="settings-section-head"><span><h2>子 Agent 上下文</h2><small id="subagent-context-description">系统自动筛选用户基本信息、最近对话与相关工具结果。</small></span></div>
+                              <select id="subagent-context-mode" class="subagent-mode-select" aria-label="子 Agent 上下文模式"><option value="minimal">最小化传递</option><option value="manual">手动筛选传递</option><option value="automatic">自动裁剪传递</option><option value="llm_generated">LLM 生成上下文</option></select>
+                              <div class="subagent-mode-grid" id="subagent-mode-grid">
+                                <button type="button" data-subagent-mode="minimal"><strong>最小化</strong><small>仅调用参数</small></button>
+                                <button type="button" data-subagent-mode="manual"><strong>手动筛选</strong><small>显式共享事实</small></button>
+                                <button type="button" data-subagent-mode="automatic"><strong>自动裁剪</strong><small>规则化上下文</small></button>
+                                <button type="button" data-subagent-mode="llm_generated"><strong>LLM 生成</strong><small>动态结构化</small></button>
+                              </div>
+                              <div class="settings-card settings-card-compact">
+                                <label class="settings-row settings-row-stack" id="subagent-manual-context-row"><span><strong>手动共享上下文</strong><small>只填写子 Agent 确实需要知道的事实或摘要。</small></span><textarea id="subagent-manual-context" rows="2" placeholder="例如：用户所在地区、已确认规则、任务摘要"></textarea></label>
+                                <label class="settings-row" id="subagent-recent-turns-row"><span><strong>保留最近对话</strong><small>自动模式保留 1–10 轮。</small></span><span class="settings-number-control"><input id="subagent-recent-turns" type="number" min="1" max="10" value="3" /><em>轮</em></span></label>
+                                <label class="settings-row settings-row-stack" id="subagent-privacy-rules-row"><span><strong>隐私与压缩规则</strong><small>在裁剪或生成上下文时强制应用。</small></span><textarea id="subagent-privacy-rules" rows="2" placeholder="不传递凭据、支付信息；超过 10 轮仅传摘要"></textarea></label>
+                              </div>
+                            </section>
+                            <section class="settings-section" data-settings-searchable><div class="settings-section-head"><span><h2>长任务与研究闭环</h2><small>任务会在同一轮持续规划、执行、验证和修复，无需反复输入“继续”。</small></span></div><div class="settings-card settings-card-compact">
+                              <label class="settings-row"><span><strong>持续完成长任务</strong><small>启用检查点、停滞换路、多轮自动修复与可恢复执行。</small></span><input id="long-task-enabled" type="checkbox" checked /></label>
+                              <label class="settings-row"><span><strong>单任务自治轮次上限</strong><small>研究任务推荐 180；系统仍会在无进展时提前安全停止。</small></span><span class="settings-number-control"><input id="max-autonomous-rounds" type="number" min="16" max="360" value="180" /><em>轮</em></span></label>
+                              <label class="settings-row"><span><strong>研究完成后自动生成论文</strong><small>仅在 reviewer 与硬验证通过后触发；自动生成论文、附录与结果包。</small></span><input id="auto-generate-paper" type="checkbox" checked /></label>
                             </div></section>
                           </div>
                           <div class="settings-save-bar"><span id="settings-save-state">更改将在保存后应用</span><button class="settings-save settings-save-wide" type="button" id="settings-save">保存设置</button></div>
@@ -1204,7 +1273,7 @@
     <script src="./research-workbenches.js?v=20260716b"></script>
     <script src="./research-domains.js?v=20260716b"></script>
     <script src="./research-os.js?v=20260716d"></script>
-    <script src="./app.js?v=20260718q"></script>
+    <script src="./app.js?v=20260722-model-mcp1"></script>
     <script src="./ssh-remote.js?v=20260717a"></script>
     <script src="./scientific-infrastructure.js?v=20260718c"></script>
     <script src="./notebook.js?v=20260717a"></script>

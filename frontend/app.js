@@ -464,6 +464,7 @@ function apiUrl(path) {
 const BRIDGE_COMMANDS = {
   bootstrap: "bootstrap.load",
   settingsUpdate: "settings.update",
+  ollamaModels: "ollama.models",
   workspacePick: "workspace.pick",
   workspaceOpenFile: "workspace.file.open",
   workspaceSaveFile: "workspace.file.save",
@@ -473,6 +474,10 @@ const BRIDGE_COMMANDS = {
   workspaceIndexState: "workspace.index.state",
   workspaceIndexUpdate: "workspace.index.update",
   workspaceIndexSearch: "workspace.index.search",
+  knowledgeBaseState: "knowledge_base.state",
+  knowledgeBaseUpload: "knowledge_base.upload",
+  knowledgeBaseSearch: "knowledge_base.search",
+  knowledgeBaseGovern: "knowledge_base.govern",
   tasksState: "tasks.state",
   tasksEnqueue: "tasks.enqueue",
   tasksStart: "tasks.start",
@@ -626,6 +631,18 @@ function createHostClient(meta) {
         });
       },
     },
+    mcp: {
+      state() {
+        return fetch(apiUrl("/api/mcp"));
+      },
+      test(server) {
+        return fetch(apiUrl("/api/mcp/test"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ server }),
+        });
+      },
+    },
     workspace: {
       pick() {
         return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspacePick : "/api/workspace/pick", {
@@ -682,6 +699,12 @@ function createHostClient(meta) {
       indexState() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexState : "/api/workspace/index"); },
       indexUpdate() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexUpdate : "/api/workspace/index/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); },
       indexSearch(query, limit = 20, kind = null) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.workspaceIndexSearch : "/api/workspace/index/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, limit, kind }) }); },
+    },
+    knowledge: {
+      state() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.knowledgeBaseState : "/api/knowledge-base"); },
+      upload(payload) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.knowledgeBaseUpload : "/api/knowledge-base/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); },
+      search(query, limit = 8) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.knowledgeBaseSearch : "/api/knowledge-base/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, limit }) }); },
+      govern(payload) { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.knowledgeBaseGovern : "/api/knowledge-base/govern", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); },
     },
     tasks: {
       state() { return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.tasksState : "/api/tasks"); },
@@ -834,6 +857,15 @@ function createHostClient(meta) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content, language }),
+        });
+      },
+    },
+    ollama: {
+      models(apiUrlValue = "") {
+        return request(resolved.transport === "bridge" ? BRIDGE_COMMANDS.ollamaModels : "/api/ollama/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_url: apiUrlValue }),
         });
       },
     },
@@ -1001,6 +1033,7 @@ const undoSnapshotCache = new Map();
 const diffReviewState = new Map();
 let undoSnapshotSequence = 0;
 let currentWorkspaceMode = "chat";
+let slashCommandSelection = 0;
 let currentMainView = "chat";
 let visualizationReturnView = "chat";
 let currentGitView = "overview";
@@ -1330,6 +1363,7 @@ let pendingAssistantStatusFrame = null;
 let pendingAssistantBubbleFrame = null;
 let messageStreamFollowFrame = null;
 let messageStreamFollowTarget = 0;
+let messageStreamFollowBlocked = false;
 let pendingBootstrapRefreshPromise = null;
 let suppressVisibleStreamBootstrap = false;
 let lastVisibleCompletionSignature = "";
@@ -1372,6 +1406,20 @@ const branchList = document.querySelector(".branch-list");
 const messageStream = document.querySelector(".message-stream");
 const messageJumpRail = document.getElementById("message-jump-rail");
 messageStream?.addEventListener("scroll", scheduleMessageJumpRailSync, { passive: true });
+function stopMessageStreamAutoFollow() {
+  messageStreamFollowBlocked = true;
+  if (messageStreamFollowFrame != null) {
+    window.cancelAnimationFrame(messageStreamFollowFrame);
+    messageStreamFollowFrame = null;
+  }
+}
+messageStream?.addEventListener("wheel", (event) => {
+  if (event.deltaY < 0 || !isNearMessageStreamBottom()) stopMessageStreamAutoFollow();
+}, { passive: true });
+messageStream?.addEventListener("touchstart", stopMessageStreamAutoFollow, { passive: true });
+messageStream?.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch" || event.pointerType === "pen") stopMessageStreamAutoFollow();
+}, { passive: true });
 const messageJumpRailObserver = messageStream && typeof MutationObserver === "function"
   ? new MutationObserver(scheduleMessageJumpRailSync)
   : null;
@@ -1432,8 +1480,11 @@ const appShell = document.querySelector(".app-shell");
 const shellTopbar = document.querySelector(".shell-topbar");
 const desktopWindowControls = document.getElementById("desktop-window-controls");
 const messageInput = document.getElementById("message-input");
+const slashCommandMenu = document.getElementById("slash-command-menu");
+const slashCommandList = document.getElementById("slash-command-list");
 const attachButton = document.getElementById("attach-button");
 const promptOptimizeButton = document.getElementById("prompt-optimize-button");
+const ragToggle = document.getElementById("rag-toggle");
 const fileInput = document.getElementById("file-input");
 const composerAttachments = document.getElementById("composer-attachments");
 const langToggle = document.getElementById("lang-toggle");
@@ -1446,9 +1497,12 @@ const riskPill = document.getElementById("risk-pill");
 const primaryModel = document.getElementById("primary-model");
 const QWEN_MODEL_IDS = new Set([
   "qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.6-max-preview",
-  "qwen3.6-flash", "qwen3.5-plus", "qwen3.5-flash", "qwq-plus",
+  "qwen3.6-flash",
 ]);
+const QWEN_API_URL = "https://llm-fnab949h4etu47rc.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions";
 const primaryApiUrl = document.getElementById("primary-api-url");
+const reviewModel = document.getElementById("review-model");
+const deepThinkDescription = document.getElementById("deep-think-description");
 const competitionMode = document.getElementById("competition-mode");
 const privacyMode = document.getElementById("privacy-mode");
 const deepThinkToggle = document.getElementById("deep-think");
@@ -1459,6 +1513,23 @@ const burstLimit = document.getElementById("burst-limit");
 const runtimeWorkspaceRoot = document.getElementById("runtime-workspace-root");
 const runtimeApiKey = document.getElementById("runtime-api-key");
 const runtimeToolchainInputs = document.querySelectorAll("[data-toolchain-key]");
+const subagentContextMode = document.getElementById("subagent-context-mode");
+const subagentManualContext = document.getElementById("subagent-manual-context");
+const subagentRecentTurns = document.getElementById("subagent-recent-turns");
+const subagentPrivacyRules = document.getElementById("subagent-privacy-rules");
+const subagentContextDescription = document.getElementById("subagent-context-description");
+const subagentManualContextRow = document.getElementById("subagent-manual-context-row");
+const subagentRecentTurnsRow = document.getElementById("subagent-recent-turns-row");
+const subagentPrivacyRulesRow = document.getElementById("subagent-privacy-rules-row");
+const subagentModeButtons = document.querySelectorAll("[data-subagent-mode]");
+const longTaskEnabled = document.getElementById("long-task-enabled");
+const maxAutonomousRounds = document.getElementById("max-autonomous-rounds");
+const autoGeneratePaper = document.getElementById("auto-generate-paper");
+const mcpServerList = document.getElementById("mcp-server-list");
+const mcpEmptyState = document.getElementById("mcp-empty-state");
+const mcpAddServer = document.getElementById("mcp-add-server");
+const settingsMemoryViewer = document.getElementById("settings-memory-viewer");
+const settingsMemoryRefresh = document.getElementById("settings-memory-refresh");
 const providerList = document.getElementById("provider-list");
 const workspacePickerToggle = document.getElementById("workspace-picker-toggle");
 const activityRail = document.getElementById("activity-rail");
@@ -1466,6 +1537,15 @@ const activityFlyout = document.getElementById("activity-flyout");
 const activityFlyoutResizer = document.getElementById("activity-flyout-resizer");
 const activityRailButtons = document.querySelectorAll("[data-activity-panel]");
 const activityPanels = document.querySelectorAll("[data-activity-panel-id]");
+const knowledgeUploadButton = document.getElementById("knowledge-upload-button");
+const knowledgeFileInput = document.getElementById("knowledge-file-input");
+const knowledgeOwner = document.getElementById("knowledge-owner");
+const knowledgeTags = document.getElementById("knowledge-tags");
+const knowledgeHealth = document.getElementById("knowledge-health");
+const knowledgeDocumentList = document.getElementById("knowledge-document-list");
+const knowledgeSearchInput = document.getElementById("knowledge-search-input");
+const knowledgeSearchButton = document.getElementById("knowledge-search-button");
+const knowledgeSearchResults = document.getElementById("knowledge-search-results");
 const searchModeSwitch = document.getElementById("search-mode-switch");
 const searchQueryInput = document.getElementById("search-query-input");
 const searchRunButton = document.getElementById("search-run-button");
@@ -1632,10 +1712,11 @@ const DEFAULT_CLIENT_PREFERENCES = Object.freeze({
   memoryEnabled: false,
   toolMemoryEnabled: true,
   memories: [],
+  ragEnabled: false,
 });
 let clientPreferences = loadClientPreferences();
 const PANEL_IDS = ["sidebar", "chat", "research", "code", "tree"];
-const LEFT_ACTIVITY_ORDER = ["nav", "git", "run", "notebook", "ssh", "events", "snapshots"];
+const LEFT_ACTIVITY_ORDER = ["nav", "git", "run", "knowledge", "notebook", "ssh", "events", "snapshots"];
 const RIGHT_DOCK_PANEL_IDS = ["tree", "code", "research"];
 const DEFAULT_DOCK_LAYOUT = {
   order: ["sidebar", "chat", "code", "tree", "research"],
@@ -1740,7 +1821,75 @@ function clientPersonalizationPayload() {
     memory_enabled: Boolean(clientPreferences.memoryEnabled),
     tool_memory_enabled: Boolean(clientPreferences.toolMemoryEnabled),
     memories: Array.isArray(clientPreferences.memories) ? clientPreferences.memories.slice(-20) : [],
+    rag_enabled: Boolean(clientPreferences.ragEnabled),
   };
+}
+
+function syncRagToggle() {
+  if (!ragToggle) return;
+  const enabled = Boolean(clientPreferences.ragEnabled);
+  ragToggle.classList.toggle("is-active", enabled);
+  ragToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+  ragToggle.title = enabled
+    ? "RAG enabled: use active knowledge-base evidence for this turn"
+    : "Enable RAG for this turn";
+}
+
+function syncSubagentContextControls() {
+  const mode = String(subagentContextMode?.value || "automatic").toLowerCase();
+  const description = {
+    minimal: "子 Agent 只接收调用参数，不知道此前对话历史。适合隐私优先的请求。",
+    manual: "主 Agent 仅共享下方手动指定的事实或摘要，灵活但需要你维护上下文。",
+    automatic: "系统共享最近对话、相关工具结果与差异，并按隐私规则裁剪。",
+    llm_generated: "先用已裁剪内容额外调用一次 LLM，生成结构化、可压缩且受隐私规则约束的上下文。",
+  };
+  if (subagentContextDescription) subagentContextDescription.textContent = description[mode] || description.automatic;
+  if (subagentManualContextRow) subagentManualContextRow.hidden = mode !== "manual";
+  if (subagentRecentTurnsRow) subagentRecentTurnsRow.hidden = !["automatic", "llm_generated"].includes(mode);
+  if (subagentPrivacyRulesRow) subagentPrivacyRulesRow.hidden = mode === "minimal";
+  subagentModeButtons.forEach((button) => {
+    const active = button.getAttribute("data-subagent-mode") === mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+async function refreshSettingsMemory() {
+  if (!settingsMemoryViewer) return;
+  settingsMemoryViewer.innerHTML = `<div class="settings-memory-empty">${currentLanguage === "zh" ? "正在读取工作区记忆…" : "Loading workspace memory…"}</div>`;
+  if (settingsMemoryRefresh) settingsMemoryRefresh.disabled = true;
+  try {
+    const response = await fetch(apiUrl("/api/research-os/memory"));
+    if (!response.ok) throw new Error(await response.text());
+    const payload = await response.json();
+    const entries = Array.isArray(payload?.data?.memory) ? payload.data.memory : [];
+    const localMemories = Array.isArray(clientPreferences.memories) ? clientPreferences.memories : [];
+    const sections = [];
+    if (entries.length) {
+      sections.push(currentLanguage === "zh" ? "# 工作区研究记忆" : "# Workspace research memory");
+      entries.forEach((entry) => {
+        const content = String(entry?.content || "").trim();
+        if (!content) return;
+        const importance = Number(entry?.importance || 0).toFixed(2);
+        const accessed = Number(entry?.accessed_count || 0);
+        sections.push(`## ${currentLanguage === "zh" ? "记忆" : "Memory"} · ${importance}\n\n${content}\n\n> ${currentLanguage === "zh" ? "调用次数" : "Recalls"}: ${accessed}`);
+      });
+    }
+    if (localMemories.length) {
+      sections.push(currentLanguage === "zh" ? "# 本机偏好记忆" : "# Local preference memory");
+      localMemories.forEach((memory) => sections.push(`- ${String(memory || "").trim()}`));
+    }
+    if (!sections.length) {
+      settingsMemoryViewer.innerHTML = `<div class="settings-memory-empty">${currentLanguage === "zh" ? "尚无 Agent 总结的记忆。完成包含结论、决策或经验的任务后会显示在这里。" : "No agent-summarized memory yet. Conclusions, decisions, and lessons will appear here."}</div>`;
+      return;
+    }
+    settingsMemoryViewer.innerHTML = `<div class="settings-memory-meta">${entries.length} workspace · ${localMemories.length} local</div><div class="markdown-body">${renderMarkdown(sections.join("\n\n"))}</div>`;
+  } catch (error) {
+    console.error("Settings memory", error);
+    settingsMemoryViewer.innerHTML = `<div class="settings-memory-empty">${currentLanguage === "zh" ? "无法读取工作区记忆，请稍后刷新。" : "Workspace memory is unavailable. Try refreshing."}</div>`;
+  } finally {
+    if (settingsMemoryRefresh) settingsMemoryRefresh.disabled = false;
+  }
 }
 
 function showAtlasNotification(title, body, preference = true) {
@@ -4044,6 +4193,7 @@ function setSegmentedValue(element, value) {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
+  renderSlashCommandMenu();
 }
 
 function getSegmentedValue(element, fallback) {
@@ -4463,9 +4613,33 @@ function looksLikeToolPayloadDump(value) {
   return false;
 }
 
+function looksLikeAssistantReportLayout(value) {
+  const raw = sanitizeMessageContent(String(value || "")).trim();
+  if (raw.length < 120 || /^[\[{]/.test(raw)) return false;
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const headingCount = lines.filter((line) => /^#{1,6}\s+\S/.test(line)).length;
+  const tableDividerCount = lines.filter((line) => (
+    /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/.test(line)
+  )).length;
+  const proseCount = lines.filter((line) => (
+    line.length >= 48
+    && !/^#{1,6}\s/.test(line)
+    && !/^\s*(?:[-*+] |\d+[.)]\s)/.test(line)
+    && !/^\|.*\|$/.test(line)
+    && !/^[`{}[\]]/.test(line)
+  )).length;
+  return Boolean(
+    (headingCount >= 2 && proseCount >= 1)
+    || (headingCount >= 1 && tableDividerCount >= 1 && proseCount >= 1)
+  );
+}
+
 function looksLikeDirectoryTreeDump(value) {
   const raw = sanitizeMessageContent(String(value || "")).trim();
   if (!raw) return false;
+  // Code reviews and workspace analyses routinely contain several real paths in
+  // Markdown tables. They are user-facing reports, not leaked directory output.
+  if (looksLikeAssistantReportLayout(raw)) return false;
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length < 3) return false;
 
@@ -4488,8 +4662,11 @@ function looksLikeDirectoryTreeDump(value) {
 function looksLikeOperationalContentDump(value) {
   const raw = sanitizeMessageContent(String(value || "")).trim();
   if (!raw) return false;
+  if (isAssistantFailureSummaryText(raw)) return false;
   if (isAssistantCompletionSummaryText(raw)) return false;
-  if (looksLikeToolPayloadDump(raw) || looksLikeDirectoryTreeDump(raw)) return true;
+  if (looksLikeToolPayloadDump(raw)) return true;
+  if (looksLikeAssistantReportLayout(raw)) return false;
+  if (looksLikeDirectoryTreeDump(raw)) return true;
   if (/^<(?:tool_call|function=|function\s|function_)/i.test(raw)) return true;
 
   const normalized = raw.toLowerCase();
@@ -4538,7 +4715,7 @@ function looksLikeStructuredAssistantReport(value) {
 function isAssistantFailureSummaryText(value) {
   const text = sanitizeMessageContent(String(value || "")).trim();
   if (!text) return false;
-  return /research turn stopped because verification did not pass|verification did not pass|resumable checkpoint|safe checkpoint/i.test(text);
+  return /\[completion-gate\]|research turn stopped because verification did not pass|verification did not pass|resumable checkpoint|safe checkpoint|(?:本轮|这轮).*(?:中断|打断|失败|停止|未完成)|工具执行已经结束.*仍未给出|(?:turn|agent).*(?:stopped early|interrupted|failed|did not produce a complete user-facing answer)|internal execution component failed/i.test(text);
 }
 
 function isAssistantVerificationAppendixText(value) {
@@ -4624,10 +4801,16 @@ function preferAssistantMessageContent(existing, next) {
   const leftCore = assistantPrimaryReplyCore(left);
   const rightCore = assistantPrimaryReplyCore(right);
 
-  if ((rightFailure || rightAppendix) && leftPrimary) {
+  if (rightFailure) {
+    return combineAssistantSegments(left, right);
+  }
+  if (leftFailure) {
+    return combineAssistantSegments(left, right);
+  }
+  if (rightAppendix && leftPrimary) {
     return left;
   }
-  if ((leftFailure || leftAppendix) && rightPrimary) {
+  if (leftAppendix && rightPrimary) {
     return right;
   }
 
@@ -4649,15 +4832,9 @@ function preferAssistantMessageContent(existing, next) {
     }
   }
   if (leftSubstantive && rightSubstantive && leftSubstantive !== rightSubstantive) {
-    const rightPrefersReplace =
-      /(?:^|\n)(?:#{1,6}\s|\|.+\|)/m.test(rightSubstantive)
-      && rightSubstantive.length >= Math.max(120, Math.floor(leftSubstantive.length * 0.7));
-    if (rightPrefersReplace && !leftSubstantive.includes(rightSubstantive)) {
-      return right;
-    }
-    if (looksLikeStructuredAssistantReport(left) && looksLikeStructuredAssistantReport(right)) {
-      return right;
-    }
+    // A terminal snapshot is allowed to extend an answer, never to shrink one
+    // that was already visible during streaming. Divergent substantive blocks
+    // are therefore retained and de-duplicated by paragraph below.
   }
   return combineAssistantSegments(left, right);
 }
@@ -4725,6 +4902,32 @@ function visibleMessagesSignature(messages) {
     const content = sanitizeMessageContent(String(message?.content || "")).trim();
     return `${kind}|${role}|${callId}|${content}`;
   }).join("\n");
+}
+
+function visibleMessagesCoverAssistantCompletion(incomingMessages, referenceMessages) {
+  const incoming = Array.isArray(incomingMessages) ? incomingMessages : [];
+  const reference = Array.isArray(referenceMessages) ? referenceMessages : [];
+  const referenceIndex = latestAssistantCompletionMessageIndex(reference);
+  if (referenceIndex < 0) return true;
+  const incomingIndex = latestAssistantCompletionMessageIndex(incoming);
+  if (incomingIndex < 0) return false;
+
+  const referenceMessage = reference[referenceIndex] || {};
+  const incomingMessage = incoming[incomingIndex] || {};
+  const referenceText = sanitizeMessageContent(String(referenceMessage.content || "")).trim();
+  const incomingText = sanitizeMessageContent(String(incomingMessage.content || "")).trim();
+  if (referenceText) {
+    if (!incomingText) return false;
+    if (mergeAssistantCompletionText(incomingText, referenceText) !== incomingText) return false;
+  }
+
+  const referenceChoices = isExplicitAssistantDecisionPayload(referenceMessage.assistant_choices)
+    ? referenceMessage.assistant_choices
+    : null;
+  if (referenceChoices && !isExplicitAssistantDecisionPayload(incomingMessage.assistant_choices)) {
+    return false;
+  }
+  return true;
 }
 
 function displayMarkdownText(value, fallback = corruptedTextFallback()) {
@@ -5831,72 +6034,41 @@ function renderOperationSection(title, bodyMarkup) {
   `;
 }
 
-function extractAssistantDecisionCard(text) {
-  const source = cleanDisplayText(String(text || ""), "");
-  if (!source) return { body: "", card: null };
-  const normalized = source.replace(/\r\n/g, "\n");
-  const lines = normalized.split("\n").map((line) => line.trim());
-  const highLevelContext = /\b(?:please confirm|which direction do you prefer|which direction you prefer|if you agree|choose next step|pick one|select one|which option|confirm your choice)\b/i;
-  const strategicOptionLine = /^(?:#{2,3}\s*)?(?:direction|approach|strategy|option)\b|^(?:\d+\.\s*)(?:direction|approach|strategy|option)\b/i;
-  const lowLevelExecution = /\b(?:file|folder|directory|script|path|create|add|generate|modify|edit|rename|delete|write)\b|\.(?:rs|py|js|ts|tsx|jsx|toml|json|yaml|yml|md)\b/i;
-  if (!highLevelContext.test(normalized)) {
-    return { body: normalized, card: null };
+function assistantDecisionOptionHasExplicitMarker(value) {
+  const option = cleanDisplayText(String(value || ""), "").trim();
+  if (!option) return false;
+  return /^(?:方向|方案|选项|路线|数据集|语料|指标|基线)(?:\s|[A-Z0-9一二三四五六七八九十甲乙丙丁：:.-]|$)/i.test(option)
+    || /^(?:direction|approach|strategy|option|dataset|corpus|metric|baseline)(?:\s|[A-Z0-9:.-]|$)/i.test(option);
+}
+
+function isExplicitAssistantDecisionPayload(value) {
+  const title = String(value?.title || "").trim();
+  const options = Array.isArray(value?.options)
+    ? value.options.map((item) => cleanDisplayText(item || "", "")).filter(Boolean)
+    : [];
+  if (options.length < 2) return false;
+  if (title === "explicit_decision_v2") return true;
+  if (title !== "explicit_decision") return false;
+  return options.filter((option) => assistantDecisionOptionHasExplicitMarker(option)).length >= 2;
+}
+
+function assistantDecisionDisplayTitle(value) {
+  const title = cleanDisplayText(String(value || ""), "").trim();
+  if (!title || ["explicit_decision", "explicit_decision_v2"].includes(title)) {
+    return zhLabel("选择下一步", "Choose next step");
   }
-  const alternativeOptionLines = [];
-  const bodyLines = [];
+  return title;
+}
 
-  for (const line of lines) {
-    if (!line) {
-      continue;
-    }
-
-    if (/^please confirm[:?]?$/i.test(line) || /^preparing final message payload/i.test(line)) {
-      continue;
-    }
-
-    if (strategicOptionLine.test(line) || /^(?:[-*+]\s+|\d+\.\s+)/.test(line)) {
-      const cleaned = cleanDisplayText(
-        line
-          .replace(/^#{2,3}\s*/, "")
-          .replace(/^(?:\d+\.\s*|[-*+]\s*)/, "")
-          .replace(/[:：]\s*$/, ""),
-        "",
-      );
-      if (
-        cleaned &&
-        !lowLevelExecution.test(cleaned) &&
-        /\b(?:direction|approach|strategy|option)\b/i.test(cleaned) &&
-        !/\b(?:summary|comparison|compare)\b/i.test(cleaned)
-      ) {
-        alternativeOptionLines.push(cleaned);
-        continue;
-      }
-    }
-
-    bodyLines.push(line);
-  }
-
-  const options = alternativeOptionLines
-    .map((line) => cleanDisplayText(line, ""))
-    .filter((line, index, array) => line && array.indexOf(line) === index);
-
-  if (options.length < 2) {
-    return { body: normalized, card: null };
-  }
-
-  return {
-    body: bodyLines.join("\n").trim(),
-    card: {
-      title: currentLanguage === "zh" ? "选择下一步" : "Choose next step",
-      options,
-    },
-  };
+function assistantChoicesAsMarkdown(value) {
+  const options = Array.isArray(value?.options)
+    ? value.options.map((item) => cleanDisplayText(item || "", "")).filter(Boolean)
+    : [];
+  return options.map((option) => `- ${option}`).join("\n");
 }
 
 function shouldRenderAssistantDecisionCard(turn, cleanedText) {
-  const options = Array.isArray(turn?.assistantChoices?.options) ? turn.assistantChoices.options : [];
-  if (!options.length) return false;
-  return String(turn?.assistantChoices?.title || "").trim() === "explicit_decision";
+  return isExplicitAssistantDecisionPayload(turn?.assistantChoices);
 }
 
 function renderAssistantDecisionCard(card) {
@@ -6479,10 +6651,92 @@ function formatRunDependencyMessage(config) {
   return `${prefix} ${items.join(", ")}`;
 }
 
+const AGENT_SLASH_COMMANDS = Object.freeze([
+  { name: "goal", usage: "/goal <目标>", title: "持续完成目标", description: "持续规划、执行、验证和修复，直到目标通过验证或遇到真实阻塞。", kind: "严格" },
+  { name: "plan", usage: "/plan <任务>", title: "规划后执行", description: "先生成可验证计划，再按计划实施并检查结果。", kind: "工作流" },
+  { name: "review", usage: "/review <范围>", title: "审查工作区", description: "审查代码、变更或研究证据，并给出带依据的问题清单。", kind: "只读优先" },
+  { name: "status", usage: "/status", title: "任务状态", description: "汇总当前目标、已完成步骤、证据、阻塞和下一步。", kind: "状态" },
+  { name: "compact", usage: "/compact", title: "压缩上下文", description: "把长对话压缩为目标、约束、进度、证据和未完成事项。", kind: "上下文" },
+  { name: "resume", usage: "/resume", title: "恢复未完成任务", description: "从已落盘的工具结果、差异和验证检查点继续。", kind: "恢复" },
+  { name: "spec", usage: "/spec <研究课题>", title: "研究工作流", description: "启动严格科研闭环；完成后可自动生成论文与结果包。", kind: "研究" },
+  { name: "schedule", usage: "/schedule <规则> <任务>", title: "安排后台任务", description: "按时间运行任务；输入 /schedule help 查看格式。", kind: "调度" },
+  { name: "model", usage: "/model", title: "模型设置", description: "打开模型提供商、推理和 API 设置。", kind: "本地" },
+  { name: "permissions", usage: "/permissions", title: "权限与风险边界", description: "打开审批边界、速率限制和工具权限设置。", kind: "本地" },
+  { name: "new", usage: "/new", title: "新建会话", description: "创建一个新的 Agent 会话；当前后台任务不会被取消。", kind: "本地" },
+  { name: "help", usage: "/help", title: "命令帮助", description: "显示所有 Agent 模式斜杠命令及安全说明。", kind: "帮助" },
+]);
+
+function slashCommandQuery() {
+  const value = String(messageInput?.value || "");
+  if (!value.trimStart().startsWith("/") || /\s/.test(value.trimStart().slice(1))) return null;
+  return value.trimStart().slice(1).toLowerCase();
+}
+
+function visibleSlashCommands() {
+  const query = slashCommandQuery();
+  if (query == null) return [];
+  return AGENT_SLASH_COMMANDS.filter((command) => (
+    !query || command.name.startsWith(query) || command.title.toLowerCase().includes(query)
+  ));
+}
+
+function closeSlashCommandMenu() {
+  if (slashCommandMenu) slashCommandMenu.hidden = true;
+  slashCommandMenu?.closest(".composer-shell")?.classList.remove("has-slash-menu");
+  slashCommandSelection = 0;
+}
+
+function applySlashCommand(command) {
+  if (!messageInput || !command || currentWorkspaceMode !== "research") return;
+  const needsArgument = /<[^>]+>/.test(command.usage);
+  messageInput.value = needsArgument ? `/${command.name} ` : `/${command.name}`;
+  messageInput.dispatchEvent(new Event("input", { bubbles: true }));
+  messageInput.focus();
+  messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+  if (!needsArgument) closeSlashCommandMenu();
+}
+
+function renderSlashCommandMenu(forceHelp = false) {
+  if (!slashCommandMenu || !slashCommandList) return;
+  const query = slashCommandQuery();
+  if (query == null && !forceHelp) {
+    closeSlashCommandMenu();
+    return;
+  }
+  slashCommandMenu.hidden = false;
+  slashCommandMenu.closest(".composer-shell")?.classList.add("has-slash-menu");
+  if (currentWorkspaceMode !== "research") {
+    slashCommandList.innerHTML = `<div class="slash-command-disabled">${currentLanguage === "zh" ? "斜杠命令仅在 Agent 模式启用。请先切换顶部的 Agent。" : "Slash commands are available only in Agent mode."}</div>`;
+    return;
+  }
+  const commands = forceHelp ? [...AGENT_SLASH_COMMANDS] : visibleSlashCommands();
+  slashCommandSelection = Math.max(0, Math.min(slashCommandSelection, commands.length - 1));
+  slashCommandList.innerHTML = commands.length
+    ? commands.map((command, index) => `<button class="slash-command-item${index === slashCommandSelection ? " is-active" : ""}" type="button" role="option" aria-selected="${index === slashCommandSelection ? "true" : "false"}" data-slash-command="${escapeHtml(command.name)}"><code>${escapeHtml(command.usage)}</code><span class="slash-command-copy"><strong>${escapeHtml(command.title)}</strong><small>${escapeHtml(command.description)}</small></span><span class="slash-command-kind">${escapeHtml(command.kind)}</span></button>`).join("")
+    : `<div class="slash-command-disabled">${currentLanguage === "zh" ? "没有匹配的命令" : "No matching command"}</div>`;
+  slashCommandList.querySelectorAll("[data-slash-command]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => applySlashCommand(AGENT_SLASH_COMMANDS.find((item) => item.name === button.dataset.slashCommand)));
+  });
+  slashCommandList.querySelector(".slash-command-item.is-active")?.scrollIntoView({ block: "nearest" });
+}
+
 function parseAgentInputProtocol(rawContent) {
   const content = String(rawContent || "");
   const trimmed = content.trim();
   const inAgentMode = currentWorkspaceMode === "research";
+  const commandMatch = trimmed.match(/^\/([a-z-]+)(?:\s+([\s\S]*))?$/i);
+  const commandName = String(commandMatch?.[1] || "").toLowerCase();
+  const commandArgs = String(commandMatch?.[2] || "").trim();
+  if (commandName && !inAgentMode) {
+    return { outbound: "", display: trimmed, mode: "chat", forceResearch: false, commandError: currentLanguage === "zh" ? "斜杠命令仅在 Agent 模式启用。" : "Slash commands are available only in Agent mode." };
+  }
+  if (commandName && !AGENT_SLASH_COMMANDS.some((command) => command.name === commandName)) {
+    return { outbound: "", display: trimmed, mode: "agent", forceResearch: false, commandError: currentLanguage === "zh" ? `未知命令 /${commandName}，输入 / 查看可用命令。` : `Unknown command /${commandName}. Type / to see available commands.` };
+  }
+  if (["model", "permissions", "new", "help"].includes(commandName)) {
+    return { outbound: "", display: trimmed, mode: "agent", forceResearch: false, localCommand: commandName };
+  }
   const scheduleMatch = trimmed.match(/^\/schedule(?:\s+([\s\S]*))?$/i);
   if (scheduleMatch) {
     return {
@@ -6502,6 +6756,28 @@ function parseAgentInputProtocol(rawContent) {
       mode: "research",
       forceResearch: true,
     };
+  }
+  const goalMatch = trimmed.match(/^\/goal(?:\s+([\s\S]*))?$/i);
+  if (goalMatch) {
+    return { outbound: String(goalMatch[1] || "").trim(), display: trimmed, mode: "goal", forceResearch: false, requiresArgument: "goal" };
+  }
+  const planMatch = trimmed.match(/^\/plan(?:\s+([\s\S]*))?$/i);
+  if (planMatch) {
+    return { outbound: String(planMatch[1] || "").trim(), display: trimmed, mode: "plan", forceResearch: false, requiresArgument: "plan" };
+  }
+  const reviewMatch = trimmed.match(/^\/review(?:\s+([\s\S]*))?$/i);
+  if (reviewMatch) {
+    const scope = String(reviewMatch[1] || "current workspace changes").trim();
+    return { outbound: `Review ${scope}. Prefer read-only inspection. Report findings by severity with file/evidence references; do not modify anything unless explicitly asked.`, display: trimmed, mode: "review", forceResearch: false };
+  }
+  if (commandName === "status") {
+    return { outbound: "Report the current task status: active goal, completed work, verification evidence, blockers, safety approvals waiting, and the exact next step. Do not mutate the workspace.", display: trimmed, mode: "status", forceResearch: false };
+  }
+  if (commandName === "compact") {
+    return { outbound: "Compact the conversation into a durable continuation summary containing the goal, constraints, decisions, completed work, tool evidence, changed files, failures, safety boundaries, and remaining steps. Do not mutate the workspace.", display: trimmed, mode: "compact", forceResearch: false };
+  }
+  if (commandName === "resume") {
+    return { outbound: "Continue the most recent unfinished goal from its persisted checkpoints. Reuse successful evidence, do not repeat failed calls unchanged, and proceed through verification before finalizing.", display: trimmed, mode: "goal", forceResearch: false };
   }
   if (!inAgentMode) {
     return {
@@ -6566,6 +6842,10 @@ function isNearMessageStreamBottom(threshold = 72) {
 
 function scrollMessageStreamToBottom(force = false) {
   if (!messageStream) return;
+  if (messageStreamFollowBlocked) {
+    if (!isNearMessageStreamBottom()) return;
+    messageStreamFollowBlocked = false;
+  }
   if (!force && !isNearMessageStreamBottom()) return;
   const target = Math.max(0, messageStream.scrollHeight - messageStream.clientHeight);
   const distance = target - messageStream.scrollTop;
@@ -6610,8 +6890,18 @@ function scrollMessageStreamToBottom(force = false) {
 
 function waitForNextBrowserPaint() {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(fallback);
+      resolve();
+    };
+    // WebView rendering can pause while a native window is restored, resized, or
+    // occluded. Painting is cosmetic and must never block the chat transport.
+    const fallback = window.setTimeout(finish, 100);
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(resolve);
+      window.requestAnimationFrame(finish);
     });
   });
 }
@@ -7167,51 +7457,44 @@ function pushTurnStreamMoment(turn, moment) {
   const isOperationMoment = operationKinds.has(kind);
   const incomingState = String(moment.state || "").trim().toLowerCase();
 
-  // The conversation surface has one stable operation slot. A tool lifecycle
-  // updates this object in place instead of appending run/done/fail pills. Keep
-  // the source key separately so a late completion from an older parallel tool
-  // cannot replace the operation the user is currently watching.
+  // Keep each semantic operation as its own timeline entry. A lifecycle update
+  // mutates only the matching call/file entry; starting another file must not
+  // replace a completed edit that is already visible in the conversation.
   if (isOperationMoment) {
     const sourceOperationKey = operationKey || dedupeKey;
-    const current = [...items].reverse().find((item) => (
-      item?.operationSlot === "current-operation"
-      || operationKinds.has(String(item?.kind || "").trim().toLowerCase())
+    const exact = [...items].reverse().find((item) => (
+      sourceOperationKey
+      && [item?.sourceOperationKey, item?.operationKey, item?.dedupeKey]
+        .some((key) => String(key || "").trim() === sourceOperationKey)
     )) || null;
-    const currentSourceKey = String(current?.sourceOperationKey || current?.operationKey || current?.dedupeKey || "").trim();
-    const sameSource = Boolean(sourceOperationKey && currentSourceKey && sourceOperationKey === currentSourceKey);
-    const sameFile = Boolean(
-      semanticFilePath
-      && current?.filePath
-      && sameMomentFile(current.filePath, semanticFilePath),
-    );
-    const sameSemanticEdit = sameFile
-      && kind === "edit"
-      && String(current?.kind || "").trim().toLowerCase() === "edit";
-    if (current && incomingState !== "run" && !sameSource && !sameSemanticEdit) {
+    const semanticEdit = kind === "edit" && semanticFilePath
+      ? [...items].reverse().find((item) => (
+          String(item?.kind || "").trim().toLowerCase() === "edit"
+          && item?.filePath
+          && sameMomentFile(item.filePath, semanticFilePath)
+        )) || null
+      : null;
+    const current = exact || semanticEdit;
+    if (!current && incomingState !== "run") {
       return;
     }
 
     const stable = current || {
-      id: "current-operation",
-      operationSlot: "current-operation",
+      id: `${nextTimestamp}-${Math.random().toString(36).slice(2, 8)}`,
     };
     stable.timestamp = nextTimestamp;
     stable.text = text;
     stable.kind = kind;
     stable.detail = cleanDisplayText(moment.detail || stable.detail || "", "");
     stable.dedupeKey = dedupeKey;
-    stable.operationKey = "current-operation";
+    stable.operationKey = sourceOperationKey;
     stable.sourceOperationKey = sourceOperationKey;
     stable.state = String(moment.state || stable.state || "").trim();
     stable.filePath = cleanDisplayText(moment.filePath || stable.filePath || "", "");
     stable.added = Number(moment.added ?? stable.added ?? 0) || 0;
     stable.removed = Number(moment.removed ?? stable.removed ?? 0) || 0;
-    items = items.filter((item) => (
-      item === current
-      || !operationKinds.has(String(item?.kind || "").trim().toLowerCase())
-    ));
     if (!current) items.push(stable);
-    turn.streamMoments = items.slice(-12);
+    turn.streamMoments = items.slice(-24);
     turn.lastStreamEventKind = kind;
     return;
   }
@@ -7389,10 +7672,16 @@ function completeContextCompactionMoment() {
 
 function pushTurnTextSegment(turn, text, options = {}) {
   if (!turn) return;
-  const cleanText = sanitizeMessageContent(String(text || ""));
-  if (!cleanText.trim()) return false;
   const forceNew = Boolean(options.forceNew);
   const appendToLast = Boolean(options.appendToLast);
+  const rawDelta = Boolean(options.rawDelta);
+  // Ordered assistant deltas were already sanitized cumulatively by the backend.
+  // Preserve them byte-for-byte here: trimming an isolated " " chunk, or the
+  // leading space in " world", corrupts the final answer.
+  const cleanText = rawDelta
+    ? String(text || "")
+    : sanitizeMessageContent(String(text || ""));
+  if (rawDelta ? !cleanText : !cleanText.trim()) return false;
   const nextTimestamp = Number(options.timestamp) || Date.now();
   const items = Array.isArray(turn.textSegments) ? turn.textSegments.slice() : [];
   const last = items[items.length - 1] || null;
@@ -7400,7 +7689,9 @@ function pushTurnTextSegment(turn, text, options = {}) {
     .map((item) => String(item?.text || "").trim())
     .filter(Boolean)
     .join("\n\n");
-  const mergedCombined = mergeStreamingTextDelta(existingCombined, cleanText);
+  const mergedCombined = rawDelta
+    ? `${existingCombined}${cleanText}`
+    : mergeStreamingTextDelta(existingCombined, cleanText);
   if (mergedCombined === existingCombined) {
     turn.lastStreamEventKind = "text";
     return false;
@@ -7408,14 +7699,18 @@ function pushTurnTextSegment(turn, text, options = {}) {
   if (last && (appendToLast || (!forceNew && turn.lastStreamEventKind === "text"))) {
     const previousCumulativeText = String(options.previousCumulativeText || "");
     const cumulativeText = String(options.cumulativeText || "");
-    const fragment = appendToLast
+    const fragment = rawDelta
+      ? cleanText
+      : appendToLast
       && previousCumulativeText
       && cumulativeText.startsWith(previousCumulativeText)
       ? cumulativeText.slice(previousCumulativeText.length)
       : cleanText;
-    last.text = mergeStreamingTextDelta(String(last.text || ""), fragment);
+    last.text = rawDelta
+      ? `${String(last.text || "")}${fragment}`
+      : mergeStreamingTextDelta(String(last.text || ""), fragment);
     last.timestamp = nextTimestamp;
-    turn.textSegments = items.slice(-10);
+    turn.textSegments = items;
     turn.textUpdatedAt = nextTimestamp;
     turn.lastStreamEventKind = "text";
     turn.text = turn.textSegments.map((item) => String(item?.text || "").trim()).filter(Boolean).join("\n\n");
@@ -7424,14 +7719,14 @@ function pushTurnTextSegment(turn, text, options = {}) {
   let uniqueText = cleanText;
   const previousCumulativeText = String(options.previousCumulativeText || "");
   const cumulativeText = String(options.cumulativeText || "");
-  if (previousCumulativeText && cumulativeText === previousCumulativeText) {
+  if (!rawDelta && previousCumulativeText && cumulativeText === previousCumulativeText) {
     turn.lastStreamEventKind = "text";
     return false;
   }
-  if (previousCumulativeText && cumulativeText.startsWith(previousCumulativeText)) {
+  if (!rawDelta && previousCumulativeText && cumulativeText.startsWith(previousCumulativeText)) {
     uniqueText = cumulativeText.slice(previousCumulativeText.length);
   }
-  if (existingCombined && mergedCombined.startsWith(existingCombined)) {
+  if (!rawDelta && existingCombined && mergedCombined.startsWith(existingCombined)) {
     uniqueText = mergedCombined.slice(existingCombined.length);
   }
   if (!uniqueText.trim()) {
@@ -7443,7 +7738,7 @@ function pushTurnTextSegment(turn, text, options = {}) {
     text: uniqueText,
     timestamp: nextTimestamp,
   });
-  turn.textSegments = items.slice(-10);
+  turn.textSegments = items;
   turn.textUpdatedAt = nextTimestamp;
   turn.lastStreamEventKind = "text";
   turn.text = turn.textSegments.map((item) => String(item?.text || "").trim()).filter(Boolean).join("\n\n");
@@ -9530,6 +9825,7 @@ function setSettingsTab(tab) {
     panel.classList.toggle("is-active", panel.dataset.settingsTabPanel === activeSettingsTab);
   });
   settingsPanel?.querySelector(".settings-panel-body")?.scrollTo({ top: 0, behavior: "auto" });
+  if (activeSettingsTab === "personalization") refreshSettingsMemory();
 }
 
 function filterSettings(query = "") {
@@ -9796,6 +10092,28 @@ function richerAssistantCollection(baseValue, liveValue) {
   return (live.length >= base.length ? live : base).map((item) => ({ ...item }));
 }
 
+function mergeAssistantCollectionByKey(baseValue, liveValue, identity) {
+  const merged = [];
+  const indexes = new Map();
+  const append = (value, preferIncoming) => {
+    if (!value || typeof value !== "object") return;
+    const item = { ...value };
+    const key = cleanDisplayText(identity?.(item) || "", "");
+    if (!key || !indexes.has(key)) {
+      if (key) indexes.set(key, merged.length);
+      merged.push(item);
+      return;
+    }
+    const index = indexes.get(key);
+    merged[index] = preferIncoming
+      ? { ...merged[index], ...item }
+      : { ...item, ...merged[index] };
+  };
+  (Array.isArray(baseValue) ? baseValue : []).forEach((item) => append(item, false));
+  (Array.isArray(liveValue) ? liveValue : []).forEach((item) => append(item, true));
+  return merged;
+}
+
 function richerStringList(baseValue, liveValue) {
   const base = Array.isArray(baseValue) ? baseValue : [];
   const live = Array.isArray(liveValue) ? liveValue : [];
@@ -9818,7 +10136,11 @@ function mergeAssistantTurnData(baseTurn, liveTurn, options = {}) {
     text: mergeAssistantText(base.text, live.text, options),
     thinking: richerAssistantCollection(base.thinking, live.thinking),
     textSegments: richerAssistantCollection(base.textSegments, live.textSegments),
-    streamMoments: richerAssistantCollection(base.streamMoments, live.streamMoments),
+    streamMoments: mergeAssistantCollectionByKey(
+      base.streamMoments,
+      live.streamMoments,
+      (item) => item.sourceOperationKey || item.operationKey || item.dedupeKey || item.id,
+    ).slice(-24),
     process: richerAssistantCollection(base.process, live.process),
     worklog: richerAssistantCollection(base.worklog, live.worklog),
     processDelegates: richerAssistantCollection(base.processDelegates, live.processDelegates),
@@ -9827,8 +10149,16 @@ function mergeAssistantTurnData(baseTurn, liveTurn, options = {}) {
     runtimeCheckpoints: richerStringList(base.runtimeCheckpoints, live.runtimeCheckpoints),
     branchNotes: richerStringList(base.branchNotes, live.branchNotes),
     timeline: richerAssistantCollection(base.timeline, live.timeline),
-    tools: richerAssistantCollection(base.tools, live.tools),
-    diffs: richerAssistantCollection(base.diffs, live.diffs),
+    tools: mergeAssistantCollectionByKey(
+      base.tools,
+      live.tools,
+      (item) => item.call_id || `${item.name || "tool"}:${item.file_path || ""}`,
+    ),
+    diffs: mergeAssistantCollectionByKey(
+      base.diffs,
+      live.diffs,
+      (item) => String(item.path || "").replace(/\\/g, "/").toLowerCase(),
+    ),
     permission: live.permission || base.permission,
     activity: String(live.activity || base.activity || ""),
     startedAt: live.startedAt || base.startedAt || Date.now(),
@@ -10097,6 +10427,7 @@ function getSessionRunState(sessionId) {
 function beginSessionRun(sessionId) {
   const state = getSessionRunState(sessionId);
   if (!state) return null;
+  lastVisibleCompletionSignature = "";
   state.generation += 1;
   state.running = true;
   state.waitingApproval = false;
@@ -10449,27 +10780,18 @@ function persistConversationMessages(messages, { sessionId = null } = {}) {
 }
 
 function commitStreamFailure(error) {
-  const nextMessages = [...visibleConversationMessages(bootstrapData?.messages || [])];
+  let nextMessages = ensureVisibleAssistantCompletionMessage(
+    visibleConversationMessages(bootstrapData?.messages || []),
+    activeAssistantTurn,
+  );
   const lastPersistedAssistant = [...nextMessages]
     .reverse()
-    .find((message) => message?.kind === "message" && message?.role === "assistant");
+    .find((message) => message?.kind === "message" && (message?.role === "assistant" || message?.role === "error"));
   if (
-    /(?:\u672c\u8f6e|\u8fd9\u8f6e).*(?:\u4e2d\u65ad|\u5931\u8d25|\u505c\u6b62|\u6682\u505c)|(?:interrupted|stopped early|internal execution component failed)/i
-      .test(String(lastPersistedAssistant?.content || ""))
+    isAssistantFailureSummaryText(lastPersistedAssistant?.content || "")
   ) {
     persistConversationMessages(nextMessages, { sessionId: currentStreamingSessionId });
     return;
-  }
-  const partialText = String(activeAssistantTurn?.text || "").trim();
-  if (partialText) {
-    const lastMessage = nextMessages[nextMessages.length - 1] || null;
-    if (!(lastMessage && lastMessage.kind === "message" && lastMessage.role === "assistant" && String(lastMessage.content || "").trim() === partialText)) {
-      nextMessages.push({
-        kind: "message",
-        role: "assistant",
-        content: partialText,
-      });
-    }
   }
 
   const classified = classifyAppError(error, "send");
@@ -10478,53 +10800,17 @@ function commitStreamFailure(error) {
     : `This turn stopped early: ${classified.message || "Send failed."}`;
   nextMessages.push({
     kind: "message",
-    role: "assistant",
+    role: "error",
     content: failureText,
   });
   persistConversationMessages(nextMessages, { sessionId: currentStreamingSessionId });
 }
 
 function materializePendingConversationMessages({ sessionId = null } = {}) {
-  const visibleMessages = [...visibleConversationMessages(bootstrapData?.messages || [])];
-  const content = completionFallbackAssistantContent(activeAssistantTurn);
-  const fallbackChoices = activeAssistantTurn?.assistantChoices
-    && Array.isArray(activeAssistantTurn.assistantChoices.options)
-    && activeAssistantTurn.assistantChoices.options.length
-      ? {
-          title: cleanDisplayText(activeAssistantTurn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")),
-          options: activeAssistantTurn.assistantChoices.options
-            .map((item) => cleanDisplayText(item || "", ""))
-            .filter(Boolean),
-        }
-      : null;
-  if (content || fallbackChoices) {
-    const contentCore = cleanDisplayText(assistantPrimaryReplyCore(content), "");
-    const alreadyPresent = visibleMessages.some((message) =>
-      messageHasAssistantChoices(message)
-      || (message
-        && message.kind === "message"
-        && message.role === "assistant"
-        && (() => {
-          const messageText = cleanDisplayText(String(message.content || "").trim(), "");
-          const messageCore = cleanDisplayText(assistantPrimaryReplyCore(messageText), "");
-          return messageText === content
-            || messageText.includes(content)
-            || content.includes(messageText)
-            || (contentCore && messageCore && (contentCore === messageCore || contentCore.includes(messageCore) || messageCore.includes(contentCore)));
-        })()),
-    );
-    if (!alreadyPresent) {
-      const message = {
-        kind: "message",
-        role: "assistant",
-        content: content || "",
-      };
-      if (fallbackChoices) {
-        message.assistant_choices = fallbackChoices;
-      }
-      visibleMessages.push(message);
-    }
-  }
+  const visibleMessages = ensureVisibleAssistantCompletionMessage(
+    visibleConversationMessages(bootstrapData?.messages || []),
+    activeAssistantTurn,
+  );
   bootstrapData = {
     ...(bootstrapData || {}),
     messages: visibleMessages,
@@ -10985,47 +11271,93 @@ function inlineStreamingNarrationText(turn, explicitContent = "") {
 function composeStreamingAssistantVisibleContent(turn) {
   if (!turn) return "";
   const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments : [];
-  if (textSegments.length) {
-    const combined = textSegments
-      .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
-      .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
-      .join("\n\n")
-      .trim();
-    if (combined) return combined;
-  }
+  const combined = textSegments
+    .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
+    .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
+    .join("\n\n")
+    .trim();
   const anchored = sanitizeMessageContent(String(turn?.streamingAnchorText || "")).trim();
-  if (
+  const visibleAnchor = (
     anchored
     && !looksLikeOperationalContentDump(anchored)
     && !assistantTextLooksLikeProcessNarration(anchored)
     && !shouldSuppressInlineAssistantCode(anchored, turn?.diffs || [])
-  ) {
-    return anchored;
-  }
+  ) ? anchored : "";
   const explicitContent = String(turn.text || "");
   const cleaned = cleanDisplayText(explicitContent, "").trim();
-  if (!cleaned) return "";
-  if (looksLikeOperationalContentDump(cleaned)) return "";
-  if (assistantTextLooksLikeProcessNarration(cleaned)) return "";
-  if (shouldSuppressInlineAssistantCode(cleaned, turn?.diffs || [])) return "";
-  return explicitContent;
+  const visibleExplicit = (
+    cleaned
+    && !looksLikeOperationalContentDump(cleaned)
+    && !assistantTextLooksLikeProcessNarration(cleaned)
+    && !shouldSuppressInlineAssistantCode(cleaned, turn?.diffs || [])
+  ) ? explicitContent : "";
+  return [combined, visibleAnchor, visibleExplicit].reduce(
+    (selected, candidate) => mergeAssistantCompletionText(selected, candidate),
+    "",
+  );
 }
 
 function completionFallbackAssistantContent(turn) {
   const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments : [];
-  if (textSegments.length) {
-    return textSegments
-      .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
-      .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
-      .join("\n\n")
-      .trim();
-  }
+  const segments = textSegments
+    .map((item) => sanitizeMessageContent(String(item?.text || "")).trim())
+    .filter((item) => item && !looksLikeOperationalContentDump(item) && !shouldSuppressInlineAssistantCode(item, turn?.diffs || []))
+    .filter((item) => isAssistantFailureSummaryText(item) || !assistantTextLooksLikeProcessNarration(item))
+    .filter(Boolean);
+  const segmentText = segments.reduce(
+    (combined, segment) => combineAssistantSegments(combined, segment),
+    "",
+  ).trim();
   const assistantText = sanitizeMessageContent(String(turn?.text || "")).trim();
-  if (!assistantText) return "";
-  if (looksLikeOperationalContentDump(assistantText)) return "";
-  if (assistantTextLooksLikeProcessNarration(assistantText)) return "";
-  if (shouldSuppressInlineAssistantCode(assistantText, turn?.diffs || [])) return "";
-  return assistantText;
+  const visibleAssistantText = (
+    assistantText
+    && !looksLikeOperationalContentDump(assistantText)
+    && (isAssistantFailureSummaryText(assistantText) || !assistantTextLooksLikeProcessNarration(assistantText))
+    && !shouldSuppressInlineAssistantCode(assistantText, turn?.diffs || [])
+  ) ? assistantText : "";
+  return mergeAssistantCompletionText(segmentText, visibleAssistantText);
+}
+
+// Completion payloads are snapshots, not authoritative replacements for text that
+// has already been shown while streaming.  Keep this merge monotonic: a terminal
+// snapshot may extend the answer or add a failure appendix, but it must never make
+// the visible answer shorter.
+function mergeAssistantCompletionText(existing, incoming) {
+  const left = cleanDisplayText(String(existing || "").trim(), "");
+  const right = cleanDisplayText(String(incoming || "").trim(), "");
+  if (!left) return right;
+  if (!right) return left;
+  if (left === right) return left;
+  if (left.includes(right)) return left;
+  if (right.includes(left)) return right;
+  const merged = preferAssistantMessageContent(left, right);
+  const longestLength = Math.max(left.length, right.length);
+  if (merged.length >= longestLength) return merged;
+  return combineAssistantSegments(left, right);
+}
+
+function latestAssistantCompletionMessageIndex(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let lastUserIndex = -1;
+  list.forEach((message, index) => {
+    if (message?.kind === "message" && message?.role === "user") {
+      lastUserIndex = index;
+    }
+  });
+  let lastToolIndex = lastUserIndex;
+  for (let index = lastUserIndex + 1; index < list.length; index += 1) {
+    const message = list[index];
+    if (message?.kind === "tool" || message?.kind === "tool_result" || message?.kind === "diff") {
+      lastToolIndex = index;
+    }
+  }
+  for (let index = list.length - 1; index > lastToolIndex; index -= 1) {
+    const message = list[index];
+    if (message?.kind === "message" && message?.role === "assistant") {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function hasRenderableAssistantText(turn) {
@@ -11037,51 +11369,38 @@ function messageHasAssistantChoices(message) {
     message
     && message.kind === "message"
     && message.role === "assistant"
-    && message.assistant_choices
-    && Array.isArray(message.assistant_choices.options)
-    && message.assistant_choices.options.some((item) => cleanDisplayText(item || "", "")),
+    && isExplicitAssistantDecisionPayload(message.assistant_choices),
   );
 }
 
 function turnHasRenderableAssistantContent(turn) {
   if (!turn) return false;
   if (hasRenderableAssistantText(turn)) return true;
-  return Boolean(
-    turn.assistantChoices
-    && Array.isArray(turn.assistantChoices.options)
-    && turn.assistantChoices.options.some((item) => cleanDisplayText(item || "", "")),
-  );
+  return isExplicitAssistantDecisionPayload(turn.assistantChoices);
 }
 
 function latestVisibleAssistantTurn(messages) {
   const turns = groupMessagesIntoTurns(visibleConversationMessages(messages || []));
-  return [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data)?.data || null;
+  const lastUserIndex = turns.map((turn) => turn?.kind).lastIndexOf("user");
+  if (lastUserIndex < 0) {
+    return [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data)?.data || null;
+  }
+  return turns
+    .slice(lastUserIndex + 1)
+    .reverse()
+    .find((turn) => turn?.kind === "assistant_turn" && turn?.data)?.data || null;
 }
 
 function shouldPreferPersistedAssistantTurn(messages, fallbackTurn = activeAssistantTurn) {
   const fallbackText = cleanDisplayText(completionFallbackAssistantContent(fallbackTurn), "");
-  const fallbackCore = cleanDisplayText(assistantPrimaryReplyCore(fallbackText), "");
   const persistedTurn = latestVisibleAssistantTurn(messages);
   const persistedText = cleanDisplayText(completionFallbackAssistantContent(persistedTurn), "");
-  const persistedCore = cleanDisplayText(assistantPrimaryReplyCore(persistedText), "");
   if (!turnHasRenderableAssistantContent(persistedTurn)) return false;
   if (!persistedText) {
-    return Boolean(
-      persistedTurn?.assistantChoices
-      && Array.isArray(persistedTurn.assistantChoices.options)
-      && persistedTurn.assistantChoices.options.length,
-    );
+    return isExplicitAssistantDecisionPayload(persistedTurn?.assistantChoices);
   }
   if (!fallbackText) return true;
-  if (persistedText === fallbackText) return true;
-  if (persistedText.includes(fallbackText)) return true;
-  if (fallbackCore && persistedCore && (persistedCore === fallbackCore || persistedCore.includes(fallbackCore) || fallbackCore.includes(persistedCore))) {
-    return true;
-  }
-  if (looksLikeStructuredAssistantReport(persistedText) && !looksLikeStructuredAssistantReport(fallbackText)) {
-    return true;
-  }
-  return false;
+  return mergeAssistantCompletionText(persistedText, fallbackText) === persistedText;
 }
 
 function reconcileVisibleSessionCompletion(nextData, { sessionId = null, preserveScroll = true } = {}) {
@@ -11099,8 +11418,11 @@ function reconcileVisibleSessionCompletion(nextData, { sessionId = null, preserv
     return false;
   }
 
-  const incomingMessages = visibleConversationMessages(nextData?.messages || []);
-  const preferPersistedAssistant = shouldPreferPersistedAssistantTurn(incomingMessages);
+  const completionTurn = cloneAssistantTurnState(activeAssistantTurn);
+  const incomingMessages = ensureVisibleAssistantCompletionMessage(
+    visibleConversationMessages(nextData?.messages || []),
+    completionTurn,
+  );
   endSessionRun(targetSessionId);
 
   if (incomingMessages.length) {
@@ -11110,20 +11432,17 @@ function reconcileVisibleSessionCompletion(nextData, { sessionId = null, preserv
       messages: incomingMessages,
       current_session_id: targetSessionId,
     };
+    lastVisibleCompletionSignature = visibleMessagesSignature(incomingMessages);
     renderReview(buildReviewFromMessages(incomingMessages));
     syncAgentPreludeBackground(incomingMessages);
     if (pendingAssistantBubble) {
-      const finalizedInPlace = finalizeVisibleAssistantBubble(incomingMessages);
+      const finalizedInPlace = finalizeVisibleAssistantBubble(incomingMessages, completionTurn);
       if (!finalizedInPlace) {
         renderMessages(incomingMessages, { preserveScroll });
       }
     } else {
       renderMessages(incomingMessages, { preserveScroll });
     }
-  }
-
-  if (!preferPersistedAssistant && turnHasRenderableAssistantContent(activeAssistantTurn)) {
-    materializePendingConversationMessages({ sessionId: targetSessionId });
   }
 
   finalizeActiveAssistantTurn();
@@ -11633,7 +11952,7 @@ function renderStreamMoment(moment) {
 function buildTurnStoryEntries(turn, options = {}) {
   const fallbackText = sanitizeMessageContent(String(options.fallbackText || "")).trim();
   const overrideText = sanitizeMessageContent(String(options.overrideText || "")).trim();
-  const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments.slice(-10) : [];
+  const textSegments = Array.isArray(turn?.textSegments) ? turn.textSegments.slice() : [];
   const entries = [];
 
   if (overrideText) {
@@ -11709,7 +12028,7 @@ function buildTurnStoryEntries(turn, options = {}) {
       }
     }
 
-    const streamMoments = Array.isArray(turn?.streamMoments) ? turn.streamMoments.slice(-12) : [];
+    const streamMoments = Array.isArray(turn?.streamMoments) ? turn.streamMoments.slice(-24) : [];
     streamMoments.forEach((moment, index) => {
       if (!cleanDisplayText(moment?.text || "", "") || looksLikeOperationalContentDump(moment?.text || "")) return;
       entries.push({
@@ -11739,23 +12058,8 @@ function buildTurnStoryEntries(turn, options = {}) {
     && String(entry.moment?.kind || "").toLowerCase() === "edit"
     && cleanDisplayText(entry.moment?.filePath || "", "")
   ));
-  const operationKinds = new Set(["activity", "stage", "inspection", "edit", "check", "command", "tool"]);
-  let latestOperationIndex = -1;
-  sorted.forEach((entry, index) => {
-    if (
-      entry.kind === "moment"
-      && operationKinds.has(String(entry.moment?.kind || "").toLowerCase())
-    ) {
-      latestOperationIndex = index;
-    }
-  });
   let keptRunningEdit = false;
   return sorted.filter((entry, index) => {
-    if (
-      entry.kind === "moment"
-      && operationKinds.has(String(entry.moment?.kind || "").toLowerCase())
-      && index !== latestOperationIndex
-    ) return false;
     const operationKey = entry.kind === "moment" ? String(entry.moment?.operationKey || "") : "";
     if (operationKey && latestByOperation.get(operationKey) !== index) return false;
     if (entry.kind !== "moment" || String(entry.moment?.kind || "").toLowerCase() !== "edit") return true;
@@ -12016,7 +12320,7 @@ function renderAssistantTurn(turn, options = {}) {
         ? {
             body: cleanedText,
             card: {
-              title: cleanDisplayText(turn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")) || zhLabel("选择下一步", "Choose next step"),
+              title: assistantDecisionDisplayTitle(turn.assistantChoices.title),
               options: turn.assistantChoices.options.slice(),
             },
           }
@@ -12431,6 +12735,7 @@ function renderAssistantTurn(turn, options = {}) {
 
 function appendUserBubble(content) {
   if (!messageStream) return null;
+  messageStreamFollowBlocked = false;
   messageStream.classList.remove("is-empty");
   messageStream.querySelector(".empty-state")?.remove();
   const row = document.createElement("article");
@@ -12494,20 +12799,21 @@ function updateAssistantBubble(content) {
   }
   if (!activeAssistantTurn) resetActiveAssistantTurn();
   const keepBottom = isNearMessageStreamBottom();
-  const deltaContent = sanitizeMessageContent(String(content || ""));
+  const deltaContent = String(content || "");
+  const visibleDeltaContent = sanitizeMessageContent(deltaContent);
   activeAssistantTurn.receivedDelta = true;
-  if (deltaContent.trim()) {
+  if (visibleDeltaContent.trim()) {
     completeRunningStreamMoments(activeAssistantTurn);
     pendingAssistantStoryDirty = true;
   }
-  if (deltaContent.trim()) {
+  if (visibleDeltaContent.trim()) {
     activeAssistantTurn.runtimeNarration = "";
   }
   const derivedMoment = corroborateAssistantOperationalMoment(
-    extractAssistantOperationalMoment(deltaContent),
+    extractAssistantOperationalMoment(visibleDeltaContent),
     activeAssistantTurn,
   );
-  const suppressInlineDump = !derivedMoment && shouldSuppressInlineAssistantCode(deltaContent, activeAssistantTurn?.diffs || []);
+  const suppressInlineDump = !derivedMoment && shouldSuppressInlineAssistantCode(visibleDeltaContent, activeAssistantTurn?.diffs || []);
   let createdNewSegment = false;
   if (derivedMoment) {
     pushAssistantStreamMoment(derivedMoment);
@@ -12518,26 +12824,24 @@ function updateAssistantBubble(content) {
   } else {
     activeAssistantTurn.suppressedInlineContent = false;
     const previousStreamingText = String(activeAssistantTurn.streamingAnchorText || "");
-    activeAssistantTurn.streamingAnchorText = mergeStreamingTextDelta(
-      previousStreamingText,
-      deltaContent,
-    );
+    // assistant_delta is an ordered transport delta, not a cumulative snapshot.
+    // Preserve equal adjacent chunks; de-duplication belongs at the event layer.
+    activeAssistantTurn.streamingAnchorText = `${previousStreamingText}${deltaContent}`;
     createdNewSegment = pushTurnTextSegment(activeAssistantTurn, deltaContent, {
       forceNew: activeAssistantTurn.lastStreamEventKind !== "text",
-      appendToLast: Boolean(previousStreamingText && deltaContent.startsWith(previousStreamingText)),
-      previousCumulativeText: previousStreamingText,
-      cumulativeText: activeAssistantTurn.streamingAnchorText,
+      appendToLast: true,
+      rawDelta: true,
     });
     if (createdNewSegment) {
       pendingAssistantStoryDirty = true;
     }
   }
-  captureAssistantOperationNarration(deltaContent);
-  if (activeAssistantTurn && assistantTextLooksLikeProcessNarration(deltaContent) && !derivedMoment) {
+  captureAssistantOperationNarration(visibleDeltaContent);
+  if (activeAssistantTurn && assistantTextLooksLikeProcessNarration(visibleDeltaContent) && !derivedMoment) {
     pushAssistantWorklog({
       kind: "progress",
-      text: deltaContent,
-      dedupeKey: `delta-progress:${normalizeText(deltaContent)}`,
+      text: visibleDeltaContent,
+      dedupeKey: `delta-progress:${normalizeText(visibleDeltaContent)}`,
     });
   }
   ensurePendingAssistantBubbleForRuntime();
@@ -12549,6 +12853,20 @@ function updateAssistantBubble(content) {
     return;
   }
   schedulePendingAssistantTextSync({ keepBottom });
+}
+
+function replaceAssistantBubbleSnapshot(content) {
+  const snapshotText = sanitizeMessageContent(String(content || ""));
+  if (!snapshotText.trim()) return;
+  if (!activeAssistantTurn) resetActiveAssistantTurn();
+  const keepBottom = isNearMessageStreamBottom();
+  activeAssistantTurn.receivedDelta = true;
+  activeAssistantTurn.suppressedInlineContent = false;
+  activeAssistantTurn.streamingAnchorText = snapshotText;
+  replaceTurnTextSegments(activeAssistantTurn, snapshotText, { timestamp: Date.now() });
+  ensurePendingAssistantBubbleForRuntime();
+  refreshPendingAssistantBubble();
+  if (keepBottom) scrollMessageStreamToBottom(true);
 }
 
 function updateRuntimeNarration(text) {
@@ -12579,35 +12897,44 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
   if (!pendingAssistantBubble) return false;
   const turns = groupMessagesIntoTurns(visibleConversationMessages(messages || []));
   const finalAssistantTurn = [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data);
-  if (!finalAssistantTurn?.data) return false;
-  const finalData = runtimeTurn
-      ? (() => {
-        const persistedText = cleanDisplayText(completionFallbackAssistantContent(finalAssistantTurn.data), "");
-        const runtimeText = cleanDisplayText(completionFallbackAssistantContent(runtimeTurn), "");
-        const merged = mergeAssistantTurnData(finalAssistantTurn.data, runtimeTurn, {
-          preferLiveText: !persistedText,
-        });
-        const mergedRenderableText = cleanDisplayText(completionFallbackAssistantContent(merged), "");
-        const selectedText = String(persistedText || mergedRenderableText || runtimeText || "");
-        // Force thinking from global cache — the single source of truth
-        if (preservedThinking.length) {
-          merged.thinking = preservedThinking.map((item) => ({ ...item }));
-        } else {
-          const liveThinking = Array.isArray(runtimeTurn?.thinking) ? runtimeTurn.thinking : [];
-          const persistedThinking = Array.isArray(finalAssistantTurn?.data?.thinking)
-            ? finalAssistantTurn.data.thinking : [];
-          merged.thinking = liveThinking.length >= persistedThinking.length
-            ? liveThinking.map((item) => ({ ...item }))
-            : persistedThinking.map((item) => ({ ...item }));
-        }
-        return {
-          ...merged,
-          text: selectedText,
-          receivedDelta: false,
-        };
-      })()
-    : finalAssistantTurn.data;
+  const persistedTurn = finalAssistantTurn?.data || null;
+  const liveTurn = runtimeTurn || activeAssistantTurn || null;
+  if (!persistedTurn && !liveTurn) return false;
+  const merged = mergeAssistantTurnData(
+    persistedTurn || createEmptyAssistantTurn(),
+    liveTurn,
+    { preferLiveText: true },
+  );
+  const selectedText = [
+    composeStreamingAssistantVisibleContent(liveTurn),
+    completionFallbackAssistantContent(liveTurn),
+    completionFallbackAssistantContent(persistedTurn),
+    completionFallbackAssistantContent(merged),
+  ].reduce(
+    (combined, candidate) => mergeAssistantCompletionText(combined, candidate),
+    "",
+  );
+  // Force thinking from global cache — the single source of truth.
+  if (preservedThinking.length) {
+    merged.thinking = preservedThinking.map((item) => ({ ...item }));
+  } else {
+    const liveThinking = Array.isArray(liveTurn?.thinking) ? liveTurn.thinking : [];
+    const persistedThinking = Array.isArray(persistedTurn?.thinking) ? persistedTurn.thinking : [];
+    merged.thinking = liveThinking.length >= persistedThinking.length
+      ? liveThinking.map((item) => ({ ...item }))
+      : persistedThinking.map((item) => ({ ...item }));
+  }
+  if (selectedText) {
+    replaceTurnTextSegments(merged, selectedText, { timestamp: Date.now() });
+  }
+  const finalData = {
+    ...merged,
+    text: selectedText,
+    receivedDelta: false,
+    isThinkingPhase: false,
+  };
   const keepBottom = isNearMessageStreamBottom();
+  clearPendingAssistantFrames();
   pendingAssistantBubble.innerHTML = renderAssistantTurn(finalData, { streaming: false });
   scheduleMessageJumpRailSync();
   bindTurnInteractionHandlers(pendingAssistantBubble);
@@ -12633,37 +12960,35 @@ function finalizeVisibleAssistantBubble(messages, runtimeTurn = null) {
 
 function ensureVisibleAssistantCompletionMessage(messages, fallbackTurn = activeAssistantTurn) {
   const nextMessages = Array.isArray(messages) ? messages.slice() : [];
-  const fallbackText = completionFallbackAssistantContent(fallbackTurn);
-  const fallbackChoices = fallbackTurn?.assistantChoices
-    && Array.isArray(fallbackTurn.assistantChoices.options)
-    && fallbackTurn.assistantChoices.options.length
+  const pendingChoices = fallbackTurn?.assistantChoices || null;
+  const choicesAreExplicit = isExplicitAssistantDecisionPayload(pendingChoices);
+  const fallbackText = mergeAssistantCompletionText(
+    completionFallbackAssistantContent(fallbackTurn),
+    choicesAreExplicit ? "" : assistantChoicesAsMarkdown(pendingChoices),
+  );
+  const fallbackChoices = choicesAreExplicit
       ? {
-          title: cleanDisplayText(fallbackTurn.assistantChoices.title || "", zhLabel("选择下一步", "Choose next step")),
-          options: fallbackTurn.assistantChoices.options
+          title: pendingChoices.title,
+          options: pendingChoices.options
             .map((item) => cleanDisplayText(item || "", ""))
             .filter(Boolean),
         }
       : null;
   if (!fallbackText && !fallbackChoices) return nextMessages;
-  const fallbackCore = cleanDisplayText(assistantPrimaryReplyCore(fallbackText), "");
-
-  const turns = groupMessagesIntoTurns(visibleConversationMessages(nextMessages));
-  const lastAssistantTurn = [...turns].reverse().find((turn) => turn?.kind === "assistant_turn" && turn?.data);
-  const lastAssistantText = cleanDisplayText(completionFallbackAssistantContent(lastAssistantTurn?.data), "");
-  const lastAssistantCore = cleanDisplayText(assistantPrimaryReplyCore(lastAssistantText), "");
-  const lastAssistantHasChoices = Boolean(
-    lastAssistantTurn?.data?.assistantChoices
-    && Array.isArray(lastAssistantTurn.data.assistantChoices.options)
-    && lastAssistantTurn.data.assistantChoices.options.length,
-  );
-  if (
-    (lastAssistantHasChoices && fallbackChoices)
-    || (lastAssistantText &&
-    (lastAssistantText === fallbackText
-      || lastAssistantText.includes(fallbackText)
-      || fallbackText.includes(lastAssistantText)
-      || (fallbackCore && lastAssistantCore && (lastAssistantCore === fallbackCore || lastAssistantCore.includes(fallbackCore) || fallbackCore.includes(lastAssistantCore)))))
-  ) {
+  const completionIndex = latestAssistantCompletionMessageIndex(nextMessages);
+  if (completionIndex >= 0) {
+    const current = nextMessages[completionIndex] || {};
+    const mergedText = mergeAssistantCompletionText(current.content || "", fallbackText);
+    const currentChoices = isExplicitAssistantDecisionPayload(current.assistant_choices)
+      ? current.assistant_choices
+      : null;
+    nextMessages[completionIndex] = {
+      ...current,
+      content: mergedText,
+      ...(currentChoices || fallbackChoices
+        ? { assistant_choices: currentChoices || fallbackChoices }
+        : {}),
+    };
     return nextMessages;
   }
 
@@ -12675,8 +13000,46 @@ function ensureVisibleAssistantCompletionMessage(messages, fallbackTurn = active
   if (fallbackChoices) {
     fallbackMessage.assistant_choices = fallbackChoices;
   }
-  nextMessages.push(fallbackMessage);
+  const lastUserIndex = nextMessages
+    .map((message) => (message?.kind === "message" && message?.role === "user" ? "user" : ""))
+    .lastIndexOf("user");
+  const terminalErrorIndex = nextMessages.findIndex((message, index) => (
+    index > lastUserIndex
+    && message?.kind === "message"
+    && message?.role === "error"
+  ));
+  if (terminalErrorIndex >= 0) {
+    nextMessages.splice(terminalErrorIndex, 0, fallbackMessage);
+  } else {
+    nextMessages.push(fallbackMessage);
+  }
   return nextMessages;
+}
+
+function hasAssistantCompletionAfterLastTool(messages) {
+  const visibleMessages = visibleConversationMessages(messages || []);
+  const currentTurnStart = visibleMessages
+    .map((message) => (message?.kind === "message" && message?.role === "user" ? "user" : ""))
+    .lastIndexOf("user");
+  const currentTurnMessages = visibleMessages.slice(currentTurnStart + 1);
+  let lastToolIndex = -1;
+  currentTurnMessages.forEach((message, index) => {
+    if (message?.kind === "tool" || message?.kind === "tool_result" || message?.kind === "diff") {
+      lastToolIndex = index;
+    }
+  });
+  return currentTurnMessages.slice(lastToolIndex + 1).some((message) => {
+    if (messageHasAssistantChoices(message)) return true;
+    if (!(message && message.kind === "message" && message.role === "assistant")) return false;
+    const content = cleanDisplayText(String(message.content || "").trim(), "");
+    return Boolean(content && !assistantTextLooksLikeProcessNarration(content) && !looksLikeOperationalContentDump(content));
+  });
+}
+
+function shouldReplaceAssistantMessageWithStructuredToolResult(nextContent) {
+  if (isAssistantFailureSummaryText(nextContent)) return false;
+  const normalizedNext = normalizedAssistantSubstantiveContent(nextContent);
+  return !normalizedNext || assistantTextLooksLikeProcessNarration(nextContent);
 }
 
 function createMessageRow(message) {
@@ -12741,13 +13104,15 @@ function groupMessagesIntoTurns(messages) {
     }
 
     if (message.kind === "message" && (message.role === "assistant" || message.role === "system" || message.role === "error")) {
-      if (message.assistant_choices && Array.isArray(message.assistant_choices.options) && message.assistant_choices.options.length) {
+      const choicesAreExplicit = isExplicitAssistantDecisionPayload(message.assistant_choices);
+      if (choicesAreExplicit) {
         currentAssistant.assistantChoices = {
-          title: cleanDisplayText(message.assistant_choices.title || "", zhLabel("选择下一步", "Choose next step")),
+          title: message.assistant_choices.title,
           options: message.assistant_choices.options.map((item) => cleanDisplayText(item || "", "")).filter(Boolean),
         };
       }
-      const nextContent = displayMarkdownText(message.content || "");
+      const recoveredChoices = choicesAreExplicit ? "" : assistantChoicesAsMarkdown(message.assistant_choices);
+      const nextContent = displayMarkdownText(preferAssistantMessageContent(message.content || "", recoveredChoices));
       const nextRenderableText = sanitizeMessageContent(String(nextContent || "")).trim();
       const operationalMoment = extractAssistantOperationalMoment(nextRenderableText);
       const shouldKeepAsVisibleText = Boolean(
@@ -12775,17 +13140,13 @@ function groupMessagesIntoTurns(messages) {
         });
       }
       const hasPrimaryAssistantText = isAssistantPrimaryReplyText(currentAssistant.text || "");
-      const nextLooksAncillary = isAssistantFailureSummaryText(nextContent) || isAssistantVerificationAppendixText(nextContent);
+      const nextLooksAncillary = isAssistantVerificationAppendixText(nextContent);
       if (hasPrimaryAssistantText && nextLooksAncillary) {
         lastStructuredToolResultContent = "";
         return;
       }
       if (lastStructuredToolResultContent) {
-        const normalizedNext = normalizedAssistantSubstantiveContent(nextContent);
-        const shouldReplaceWithToolResult =
-          !normalizedNext
-          || assistantTextLooksLikeProcessNarration(nextContent)
-          || isAssistantFailureSummaryText(nextContent);
+        const shouldReplaceWithToolResult = shouldReplaceAssistantMessageWithStructuredToolResult(nextContent);
         if (shouldReplaceWithToolResult) {
           currentAssistant.text = preferAssistantMessageContent(
             currentAssistant.text || "",
@@ -15805,6 +16166,100 @@ function renderProviderList(providers, primaryModel) {
   });
 }
 
+function updateModelProviderUI() {
+  if (primaryModel) primaryModel.setAttribute("aria-label", "Qwen 3.6 or newer primary model");
+  if (deepThinkDescription) {
+    deepThinkDescription.textContent = currentLanguage === "zh"
+      ? "控制当前主模型支持的 thinking/reasoning 输出。"
+      : "Controls thinking/reasoning output for the active primary model.";
+  }
+}
+
+function ensureModelOption(value, label = value) {
+  if (!primaryModel || !value) return;
+  const exists = [...primaryModel.options].some((option) => option.value === value);
+  if (exists) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  primaryModel.appendChild(option);
+}
+
+function createMcpServerId(name = "server") {
+  const base = String(name || "server").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "server";
+  return `${base}_${Date.now().toString(36)}`;
+}
+
+function mcpStatusFor(snapshot, id) {
+  return (snapshot?.statuses || []).find((status) => String(status?.id || "") === String(id || "")) || null;
+}
+
+function renderMcpServers(snapshot = bootstrapData?.config?.mcp || {}) {
+  if (!mcpServerList) return;
+  const servers = Array.isArray(snapshot?.servers) ? snapshot.servers : [];
+  mcpServerList.innerHTML = "";
+  if (mcpEmptyState) mcpEmptyState.hidden = servers.length > 0;
+  servers.forEach((server) => {
+    const status = mcpStatusFor(snapshot, server.id);
+    const statusText = status?.connected
+      ? `${status.tool_count || 0} 个工具已连接`
+      : (status?.error || (server.enabled ? "等待连接测试" : "已禁用"));
+    const card = document.createElement("div");
+    card.className = "settings-card mcp-server-card";
+    card.dataset.mcpServerId = String(server.id || createMcpServerId(server.name));
+    card.innerHTML = `
+      <div class="mcp-server-head">
+        <label><input data-mcp-field="enabled" type="checkbox" ${server.enabled ? "checked" : ""} /> 启用</label>
+        <button type="button" class="settings-danger-button" data-mcp-action="remove">删除</button>
+      </div>
+      <div class="mcp-server-grid">
+        <label>名称<input data-mcp-field="name" type="text" value="${escapeHtml(server.name || "")}" placeholder="例如 Files" /></label>
+        <label>Streamable HTTP 地址<input data-mcp-field="endpoint" type="url" value="${escapeHtml(server.endpoint || "")}" placeholder="https://example.com/mcp" /></label>
+        <label class="mcp-server-token">Bearer Token（可选）<input data-mcp-field="bearer_token" type="password" value="${escapeHtml(server.bearer_token || "")}" autocomplete="off" /></label>
+      </div>
+      <div class="mcp-server-actions">
+        <span class="mcp-server-status ${status?.connected ? "is-ready" : (status?.error ? "is-error" : "")}">${escapeHtml(statusText)}</span>
+        <button type="button" class="settings-inline-button" data-mcp-action="test">测试连接</button>
+      </div>`;
+    mcpServerList.appendChild(card);
+  });
+}
+
+function collectMcpServers() {
+  if (!mcpServerList) return [];
+  return [...mcpServerList.querySelectorAll("[data-mcp-server-id]")].map((card) => ({
+    id: String(card.dataset.mcpServerId || "").trim() || createMcpServerId(),
+    name: String(card.querySelector('[data-mcp-field="name"]')?.value || "").trim(),
+    description: "",
+    endpoint: String(card.querySelector('[data-mcp-field="endpoint"]')?.value || "").trim(),
+    transport: "streamable_http",
+    enabled: Boolean(card.querySelector('[data-mcp-field="enabled"]')?.checked),
+    bearer_token: String(card.querySelector('[data-mcp-field="bearer_token"]')?.value || "").trim() || null,
+  }));
+}
+
+function mcpServerFromCard(card) {
+  return collectMcpServers().find((server) => server.id === card?.dataset?.mcpServerId) || null;
+}
+
+async function testMcpServer(card) {
+  const server = mcpServerFromCard(card);
+  if (!server?.name || !server?.endpoint) throw new Error("请先填写 MCP 服务器名称和地址");
+  const status = card.querySelector(".mcp-server-status");
+  if (status) {
+    status.className = "mcp-server-status";
+    status.textContent = "正在连接…";
+  }
+  const response = await hostClient.mcp.test(server);
+  if (!response.ok) throw new Error(await response.text() || "MCP 连接失败");
+  const payload = await response.json();
+  const tools = payload?.data?.tools || payload?.tools || [];
+  if (status) {
+    status.className = "mcp-server-status is-ready";
+    status.textContent = `连接成功，发现 ${tools.length} 个工具`;
+  }
+}
+
 function collectSettingsPayload() {
   const config = bootstrapData?.config || {};
   const parseLimitValue = (element, fallback) => {
@@ -15823,7 +16278,7 @@ function collectSettingsPayload() {
   const requestedModel = String(primaryModel?.value || config.model || "").trim();
   return {
     model: QWEN_MODEL_IDS.has(requestedModel) ? requestedModel : "qwen3.7-plus",
-    api_url: "https://llm-fnab949h4etu47rc.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+    api_url: QWEN_API_URL,
     deep_think: Boolean(deepThinkToggle?.checked ?? true),
     reasoning_effort: currentEffort,
     competition_mode: Boolean(competitionMode?.checked),
@@ -15835,12 +16290,23 @@ function collectSettingsPayload() {
     max_tool_calls_per_minute: parseLimitValue(maxToolCalls, "unlimited"),
     burst_limit: parseLimitValue(burstLimit, "unlimited"),
     toolchains,
+    subagent_context_mode: String(subagentContextMode?.value || config.subagent_context_mode || "automatic"),
+    subagent_manual_context: String(subagentManualContext?.value || "").slice(0, 12000),
+    subagent_recent_turns: Math.max(1, Math.min(10, Number(subagentRecentTurns?.value || config.subagent_recent_turns || 3) || 3)),
+    subagent_privacy_rules: String(subagentPrivacyRules?.value || "").slice(0, 4000),
+    long_task_enabled: Boolean(longTaskEnabled?.checked ?? config.long_task_enabled ?? true),
+    max_autonomous_rounds: Math.max(16, Math.min(360, Number(maxAutonomousRounds?.value || config.max_autonomous_rounds || 180) || 180)),
+    auto_generate_paper: Boolean(autoGeneratePaper?.checked ?? config.auto_generate_paper ?? true),
+    mcp_servers: collectMcpServers(),
   };
 }
 
 function syncSettingsFromConfig(config) {
   if (!config) return;
   if (primaryModel) primaryModel.value = QWEN_MODEL_IDS.has(config.model) ? config.model : "qwen3.7-plus";
+  if (reviewModel) reviewModel.textContent = config.review_model || "qwen3-max";
+  updateModelProviderUI();
+  renderMcpServers(config.mcp || { servers: [], statuses: [], tools: [] });
   if (competitionMode) competitionMode.checked = Boolean(config.competition_mode);
   if (privacyMode) privacyMode.checked = Boolean(config.privacy_mode);
   if (autoApproveTools) autoApproveTools.checked = Boolean(config.auto_approve_tools);
@@ -15872,6 +16338,14 @@ function syncSettingsFromConfig(config) {
     const key = input.getAttribute("data-toolchain-key") || "";
     input.value = config.toolchains?.[key] || "";
   });
+  if (subagentContextMode) subagentContextMode.value = String(config.subagent_context_mode || "automatic");
+  if (subagentManualContext) subagentManualContext.value = String(config.subagent_manual_context || "");
+  if (subagentRecentTurns) subagentRecentTurns.value = String(config.subagent_recent_turns || 3);
+  if (subagentPrivacyRules) subagentPrivacyRules.value = String(config.subagent_privacy_rules || "");
+  if (longTaskEnabled) longTaskEnabled.checked = Boolean(config.long_task_enabled ?? true);
+  if (maxAutonomousRounds) maxAutonomousRounds.value = String(config.max_autonomous_rounds || 180);
+  if (autoGeneratePaper) autoGeneratePaper.checked = Boolean(config.auto_generate_paper ?? true);
+  syncSubagentContextControls();
   currentEffort = String(config.reasoning_effort || currentEffort || "medium").toLowerCase();
   updateEffortUI();
   syncAutoApproveUI();
@@ -16703,22 +17177,27 @@ function applyBootstrap(data) {
   const showSandboxNotice = shouldShowSandboxNotice(data?.sandbox);
   const incomingVisibleMessages = visibleConversationMessages(data?.messages || []);
   const incomingSignature = visibleMessagesSignature(incomingVisibleMessages);
+  const completionGuardActive = Boolean(
+    lastVisibleCompletionSignature
+    && previousSessionId
+    && previousSessionId === nextSessionId
+    && !isVisibleSessionRunning()
+  );
+  const incomingCoversVisibleCompletion = !completionGuardActive
+    || visibleMessagesCoverAssistantCompletion(incomingVisibleMessages, previousMessages);
   const preserveCompletedVisibleMessages =
-    Boolean(
-      lastVisibleCompletionSignature &&
-      previousSessionId &&
-      previousSessionId === nextSessionId &&
-      !isVisibleSessionRunning() &&
-      incomingSignature &&
-      incomingSignature !== lastVisibleCompletionSignature,
-    );
+    completionGuardActive && !incomingCoversVisibleCompletion;
   bootstrapData = preserveCompletedVisibleMessages
     ? {
         ...data,
         messages: previousMessages,
       }
     : data;
-  if (lastVisibleCompletionSignature && incomingSignature === lastVisibleCompletionSignature) {
+  if (
+    completionGuardActive
+    && incomingCoversVisibleCompletion
+    && incomingSignature
+  ) {
     lastVisibleCompletionSignature = "";
   }
   if (previousSessionId !== nextSessionId || !data?.research?.paper_workflow) {
@@ -17092,6 +17571,104 @@ projectTaskAdd?.addEventListener("click", async () => { const title = await atla
 projectTaskList?.addEventListener("click", async (event) => { const start = event.target.closest("[data-task-start]")?.dataset.taskStart; const cancel = event.target.closest("[data-task-cancel]")?.dataset.taskCancel; const log = event.target.closest("[data-task-log]")?.dataset.taskLog; if (start) await hostClient.tasks.start(start); if (cancel) await hostClient.tasks.cancel(cancel); if (log) { const response = await hostClient.tasks.log(log); const payload = await response.json(); await atlasConfirm(payload?.data?.log || payload?.log || "No output", { title: "Task log", confirmLabel: "Close" }); } await loadProjectOperations(); });
 projectWindowOpen?.addEventListener("click", () => sendNativeWindowAction("new_project_window", { workspace: "" }));
 
+function unwrapApiData(payload) {
+  return payload?.data ?? payload ?? {};
+}
+
+function renderKnowledgeState(state) {
+  if (!knowledgeHealth || !knowledgeDocumentList) return;
+  const documents = Array.isArray(state?.documents) ? state.documents : [];
+  knowledgeHealth.textContent = `${Number(state?.active || 0)} active · ${Number(state?.stale || 0)} stale · ${Number(state?.expired || 0)} expired · ${Number(state?.archived || 0)} archived · ${Number(state?.chunks || 0)} semantic chunks`;
+  knowledgeDocumentList.innerHTML = documents.length
+    ? documents.map((document) => {
+      const id = escapeHtml(document.id || "");
+      const status = escapeHtml(String(document.status || "active"));
+      const metadata = [document.owner, Array.isArray(document.tags) ? document.tags.join(", ") : ""]
+        .filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
+      const actions = status === "archived"
+        ? `<button data-knowledge-govern="restore" data-knowledge-id="${id}">Restore</button>`
+        : `<button data-knowledge-govern="verify" data-knowledge-id="${id}">Verify</button><button data-knowledge-govern="archive" data-knowledge-id="${id}">Archive</button>`;
+      return `<article class="knowledge-document-card"><div><strong>${escapeHtml(document.name || "document")}</strong><span class="knowledge-status knowledge-status-${status}">${status}</span></div><small>${escapeHtml(document.format || "file").toUpperCase()} · v${Number(document.version || 1)} · ${Number(document.chunk_count || 0)} chunks</small><small>${metadata || "workspace knowledge"}</small><div class="knowledge-document-actions">${actions}</div></article>`;
+    }).join("")
+    : `<div class="knowledge-empty">No documents yet. Upload a source to create versioned, governed knowledge.</div>`;
+}
+
+function renderKnowledgeSearch(payload) {
+  if (!knowledgeSearchResults) return;
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  knowledgeSearchResults.innerHTML = results.length
+    ? results.map((hit) => `<article class="knowledge-result-card"><strong>${escapeHtml(hit.document_name || "document")} <small>v${Number(hit.version || 1)}</small></strong><span>${escapeHtml(hit.location || "")}${hit.heading_path?.length ? ` · ${escapeHtml(hit.heading_path.join(" > "))}` : ""}</span><p>${escapeHtml(String(hit.text || "").slice(0, 700))}</p><small>hybrid score ${Number(hit.score || 0).toFixed(3)} · freshness ${Number(hit.freshness_score || 0).toFixed(2)}</small></article>`).join("")
+    : `<div class="knowledge-empty">No relevant active knowledge found.</div>`;
+}
+
+async function loadKnowledgeBase() {
+  if (!knowledgeHealth) return;
+  knowledgeHealth.textContent = "Loading knowledge base…";
+  const response = await hostClient.knowledge.state();
+  if (!response.ok) throw new Error(await response.text());
+  renderKnowledgeState(unwrapApiData(await response.json()));
+}
+
+async function searchKnowledgeBase() {
+  const query = String(knowledgeSearchInput?.value || "").trim();
+  if (!query) return;
+  if (knowledgeSearchButton) knowledgeSearchButton.disabled = true;
+  try {
+    const response = await hostClient.knowledge.search(query);
+    if (!response.ok) throw new Error(await response.text());
+    renderKnowledgeSearch(unwrapApiData(await response.json()));
+  } finally {
+    if (knowledgeSearchButton) knowledgeSearchButton.disabled = false;
+  }
+}
+
+async function uploadKnowledgeFiles(files) {
+  const selected = Array.from(files || []).filter((file) => file instanceof File);
+  if (!selected.length) return;
+  if (knowledgeUploadButton) knowledgeUploadButton.disabled = true;
+  try {
+    for (const file of selected) {
+      const dataUrl = await readFileAsDataUrl(file);
+      const contentBase64 = String(dataUrl).split(",", 2)[1] || "";
+      const response = await hostClient.knowledge.upload({
+        filename: file.name,
+        content_base64: contentBase64,
+        metadata: {
+          owner: String(knowledgeOwner?.value || "").trim(),
+          tags: String(knowledgeTags?.value || "").split(",").map((item) => item.trim()).filter(Boolean),
+        },
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const payload = unwrapApiData(await response.json());
+      if (payload?.state) renderKnowledgeState(payload.state);
+    }
+    showToast(currentLanguage === "zh" ? "知识库文档已处理" : "Knowledge-base document(s) processed");
+  } finally {
+    if (knowledgeFileInput) knowledgeFileInput.value = "";
+    if (knowledgeUploadButton) knowledgeUploadButton.disabled = false;
+  }
+}
+
+knowledgeUploadButton?.addEventListener("click", () => knowledgeFileInput?.click());
+knowledgeFileInput?.addEventListener("change", () => uploadKnowledgeFiles(knowledgeFileInput.files).catch((error) => showToast(error?.message || "Knowledge upload failed")));
+knowledgeSearchButton?.addEventListener("click", () => searchKnowledgeBase().catch((error) => showToast(error?.message || "Knowledge search failed")));
+knowledgeSearchInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") searchKnowledgeBase().catch((error) => showToast(error?.message || "Knowledge search failed"));
+});
+knowledgeDocumentList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-knowledge-govern]");
+  if (!button) return;
+  const documentId = String(button.dataset.knowledgeId || "");
+  const action = String(button.dataset.knowledgeGovern || "");
+  hostClient.knowledge.govern({ document_id: documentId, action })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(await response.text());
+      const payload = unwrapApiData(await response.json());
+      if (payload?.state) renderKnowledgeState(payload.state);
+    })
+    .catch((error) => showToast(error?.message || "Knowledge governance failed"));
+});
+
 async function loadTerminalState() {
   const response = await hostClient.terminals.state();
   if (!response.ok) {
@@ -17459,26 +18036,53 @@ async function consumeStream(response, sessionId) {
   }
 }
 
-async function reconcileSuccessfulStreamAfterError(sessionId) {
-  try {
-    const response = await hostClient.bootstrap();
-    if (!response.ok) return false;
-    const payload = await response.json();
-    const data = payload?.data || null;
-    if (!data || String(data.current_session_id || "") !== String(sessionId || "")) return false;
-    syncActiveSessionsFromBootstrap(data);
-    if (bootstrapHasLiveSession(data, sessionId)) return false;
-    const messages = visibleConversationMessages(data.messages || []);
-    const hasAssistantResponse = [...messages].reverse().some((message) =>
-      message?.kind === "message" && message?.role === "assistant" && String(message.content || "").trim(),
-    );
-    if (!hasAssistantResponse) return false;
-    applyBootstrap(data);
-    endSessionRun(sessionId);
-    return true;
-  } catch (_error) {
-    return false;
+function waitForStreamRecoveryPoll(delayMs = 1200) {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
+
+async function reconcileStreamAfterTransportFailure(sessionId) {
+  const targetSessionId = String(sessionId || "").trim();
+  if (!targetSessionId) return false;
+  const state = getSessionRunState(targetSessionId);
+  const expectedGeneration = state?.generation;
+  const deadline = Date.now() + (15 * 60 * 1000);
+  let consecutiveBootstrapFailures = 0;
+
+  while (Date.now() < deadline) {
+    const currentState = getSessionRunState(targetSessionId);
+    if (!currentState || (expectedGeneration != null && currentState.generation !== expectedGeneration)) {
+      return true;
+    }
+    try {
+      const response = await hostClient.bootstrap();
+      if (!response.ok) throw new Error(`bootstrap failed: ${response.status}`);
+      const payload = await response.json();
+      const data = payload?.data || null;
+      if (!data || String(data.current_session_id || "") !== targetSessionId) return false;
+      consecutiveBootstrapFailures = 0;
+      syncActiveSessionsFromBootstrap(data, { preserveRunningSessionId: targetSessionId });
+      if (bootstrapHasLiveSession(data, targetSessionId)) {
+        currentStreamingSessionId = targetSessionId;
+        setStopButtonVisible(true);
+        renderActivity();
+        hydrateVisibleRuntimeSnapshot();
+        await waitForStreamRecoveryPoll();
+        continue;
+      }
+
+      const messages = visibleConversationMessages(data.messages || []);
+      if (!messages.length) return false;
+      applyBootstrap(data);
+      materializePendingConversationMessages({ sessionId: targetSessionId });
+      endSessionRun(targetSessionId);
+      return true;
+    } catch (_error) {
+      consecutiveBootstrapFailures += 1;
+      if (consecutiveBootstrapFailures >= 8) return false;
+      await waitForStreamRecoveryPoll(Math.min(5000, 800 * consecutiveBootstrapFailures));
+    }
   }
+  return false;
 }
 
 function handleStreamEvent(event, expectedSessionId = null) {
@@ -17532,6 +18136,12 @@ function handleStreamEvent(event, expectedSessionId = null) {
     return;
   }
 
+  if (event.type === "assistant_snapshot") {
+    if (!isVisibleSession) return;
+    replaceAssistantBubbleSnapshot(event.delta || "");
+    return;
+  }
+
   if (event.type === "assistant_progress") {
     if (!isVisibleSession) return;
     if (!activeAssistantTurn) {
@@ -17564,16 +18174,21 @@ function handleStreamEvent(event, expectedSessionId = null) {
       if (event.research?.runtime) {
         syncActiveTurnRuntime(event.research.runtime);
       }
-      const mergedRuntimeTurn = mergeAssistantTurnData(activeAssistantTurn, finalizedRuntimeTurn, {
+      const liveRuntimeTurn = mergeAssistantTurnData(activeAssistantTurn, finalizedRuntimeTurn, {
         preferLiveText: true,
       });
-      const hasAssistantMessageInPayload = rawVisibleMessages.some((message) =>
-        (message && message.kind === "message" && message.role === "assistant" && cleanDisplayText(String(message.content || "").trim(), ""))
-        || messageHasAssistantChoices(message)
+      const alreadyVisibleTurn = latestVisibleAssistantTurn(bootstrapData?.messages || []);
+      const mergedRuntimeTurn = mergeAssistantTurnData(alreadyVisibleTurn, liveRuntimeTurn, {
+        preferLiveText: true,
+      });
+      // Keep this signal for diagnostics and completion-gate telemetry.  It must
+      // never bypass the monotonic merge below: even a seemingly complete payload
+      // can contain a shorter snapshot than the text already shown live.
+      const hasFinalAssistantMessageInPayload = hasAssistantCompletionAfterLastTool(rawVisibleMessages);
+      const visibleMessages = ensureVisibleAssistantCompletionMessage(
+        rawVisibleMessages,
+        mergedRuntimeTurn,
       );
-      const visibleMessages = hasAssistantMessageInPayload
-        ? rawVisibleMessages
-        : ensureVisibleAssistantCompletionMessage(rawVisibleMessages, mergedRuntimeTurn);
       if (sessionId) {
         const targetSession = (bootstrapData?.sessions || []).find((session) => session.id === sessionId);
         if (targetSession) {
@@ -17594,9 +18209,9 @@ function handleStreamEvent(event, expectedSessionId = null) {
         messages: visibleMessages,
         current_session_id: event.session_id || bootstrapData?.current_session_id || null,
       };
+      lastVisibleCompletionSignature = visibleMessagesSignature(visibleMessages);
       syncAcceptedDiffStatuses(mergedRuntimeTurn);
       clearVisibleRuntimeSnapshot(sessionId);
-      finalizeActiveAssistantTurn();
       pendingPermissionRequest = null;
       liveToolEvents = [];
       liveEditedFiles = [];
@@ -17610,6 +18225,7 @@ function handleStreamEvent(event, expectedSessionId = null) {
       if (!finalizedInPlace) {
         renderMessages(visibleMessages);
       }
+      finalizeActiveAssistantTurn();
       const completionPreference = String(clientPreferences.completionNotifications || "unfocused");
       if (completionPreference === "always" || (completionPreference === "unfocused" && !document.hasFocus())) {
         showAtlasNotification("Atlas 已完成", latestConversationSummary(visibleMessages, 90) || "任务已完成。", true);
@@ -17872,13 +18488,54 @@ function handleStreamEvent(event, expectedSessionId = null) {
   }
 
   if (event.type === "error") {
-    if (Array.isArray(event.messages) && event.messages.length) {
-      persistConversationMessages(event.messages, { sessionId });
+    const rawVisibleMessages = visibleConversationMessages(event.messages || []);
+    const failureText = cleanDisplayText(String(event.error || "").trim(), "");
+    const alreadyVisibleTurn = latestVisibleAssistantTurn(bootstrapData?.messages || []);
+    const failureRuntimeTurn = mergeAssistantTurnData(alreadyVisibleTurn, activeAssistantTurn, {
+      preferLiveText: true,
+    });
+    let visibleMessages = ensureVisibleAssistantCompletionMessage(
+      rawVisibleMessages,
+      failureRuntimeTurn,
+    );
+    if (!visibleMessages.some((message) => (
+      message?.kind === "message"
+      && (message?.role === "error" || message?.role === "assistant")
+      && isAssistantFailureSummaryText(message?.content || "")
+    )) && failureText) {
+      visibleMessages = [
+        ...visibleMessages,
+        { kind: "message", role: "error", content: failureText },
+      ];
     }
     if (sessionId) {
       endSessionRun(sessionId);
     }
-    throw new Error(event.error || "stream failed");
+    if (!isVisibleSession) return;
+    bootstrapData = {
+      ...(bootstrapData || {}),
+      messages: visibleMessages,
+      current_session_id: sessionId || bootstrapData?.current_session_id || null,
+    };
+    lastVisibleCompletionSignature = visibleMessagesSignature(visibleMessages);
+    suppressVisibleStreamBootstrap = false;
+    clearVisibleRuntimeSnapshot(sessionId);
+    pendingPermissionRequest = null;
+    renderReview(buildReviewFromMessages(visibleMessages));
+    syncAgentPreludeBackground(visibleMessages);
+    const finalizedInPlace = finalizeVisibleAssistantBubble(visibleMessages, failureRuntimeTurn);
+    if (!finalizedInPlace) {
+      renderMessages(visibleMessages);
+    }
+    finalizeActiveAssistantTurn();
+    liveToolEvents = [];
+    liveEditedFiles = [];
+    liveProcessEvents = [];
+    renderAgentRuntimeStrip();
+    renderAgentProcessStrip();
+    renderPermissionStrip();
+    showToast(classifyAppError(new Error(event.error || "stream failed"), "send").message);
+    return;
   }
 }
 
@@ -17945,6 +18602,32 @@ async function sendMessage() {
   const content = String(messageInput?.value || "").trim();
   if ((!content && !pendingFiles.length) || isSending) return;
   const parsedInput = parseAgentInputProtocol(content);
+  if (parsedInput.commandError) {
+    showToast(parsedInput.commandError);
+    renderSlashCommandMenu(true);
+    return;
+  }
+  if (parsedInput.requiresArgument && !parsedInput.outbound) {
+    showToast(currentLanguage === "zh" ? `请在 /${parsedInput.requiresArgument} 后填写任务目标。` : `Add a task after /${parsedInput.requiresArgument}.`);
+    return;
+  }
+  if (parsedInput.localCommand) {
+    const command = parsedInput.localCommand;
+    if (messageInput) messageInput.value = "";
+    closeSlashCommandMenu();
+    if (command === "new") {
+      try { await createSession(); } catch (error) { console.error(error); showToast(t("toastSendFailed")); }
+    } else if (command === "model" || command === "permissions") {
+      openSettingsPanel("settings-panel");
+      setSettingsTab(command === "model" ? "model" : "security");
+      filterSettings("");
+    } else if (command === "help") {
+      if (messageInput) messageInput.value = "/";
+      renderSlashCommandMenu(true);
+      messageInput?.focus();
+    }
+    return;
+  }
   const targetSessionId = await ensureSessionReady();
   if (!targetSessionId) {
     showToast(classifyAppError(new Error("session not ready"), "send").message);
@@ -17970,6 +18653,7 @@ async function sendMessage() {
   isSending = true;
   composerSendSessionId = targetSessionId;
   suppressVisibleStreamBootstrap = true;
+  let streamTransportOpened = false;
   if (messageInput) messageInput.disabled = true;
   setStopButtonVisible(true);
   startActivity("Thinking");
@@ -17980,12 +18664,6 @@ async function sendMessage() {
   renderAgentRuntimeStrip();
   renderAgentProcessStrip();
   renderPermissionStrip();
-
-  // Snapshotting a large workspace can be expensive. It must never delay the visible send
-  // transition or the model request; capture it independently from the conversation path.
-  window.setTimeout(() => {
-    window.AtlasScientificInfrastructure?.captureSnapshot?.("before_agent").catch(() => null);
-  }, 0);
 
   try {
     if (!parsedInput.outbound) {
@@ -18034,6 +18712,21 @@ async function sendMessage() {
     activeStreamGeneration = streamGeneration || activeStreamGeneration + 1;
     currentStreamingSessionId = targetSessionId;
     const response = await hostClient.chat.stream({ content: outbound, mode, language: currentLanguage, attachments, personalization: clientPersonalizationPayload() });
+    streamTransportOpened = true;
+
+    // Snapshotting can traverse a large workspace and briefly occupy the WebView thread.
+    // Start it only after the native stream is open so it cannot prevent the message from
+    // reaching the desktop host. Promise.resolve also covers implementations that return
+    // synchronously instead of returning a Promise.
+    window.setTimeout(() => {
+      try {
+        Promise.resolve(
+          window.AtlasScientificInfrastructure?.captureSnapshot?.("before_agent"),
+        ).catch(() => null);
+      } catch (_error) {
+        // Snapshot failures must not affect an already-open chat stream.
+      }
+    }, 0);
 
     if (messageInput && composerSendSessionId === targetSessionId) {
       messageInput.value = "";
@@ -18063,8 +18756,8 @@ async function sendMessage() {
     const targetIsVisible = String(bootstrapData?.current_session_id || "").trim() === targetSessionId;
     if (error?.message === "empty outbound content") {
       // Input protocol validation already showed a toast.
-    } else if (targetIsVisible && await reconcileSuccessfulStreamAfterError(targetSessionId)) {
-      // A completed response was already persisted; ignore a late transport/render failure.
+    } else if (streamTransportOpened && targetIsVisible && await reconcileStreamAfterTransportFailure(targetSessionId)) {
+      // The native transport disconnected, but the background Agent was recovered from persisted state.
     } else if (targetIsVisible) {
       const classified = classifyAppError(error, "send");
       commitStreamFailure(error);
@@ -18158,6 +18851,50 @@ settingsPanel?.addEventListener("change", () => {
   if (settingsSaveState) settingsSaveState.textContent = "有未保存的更改";
 });
 
+mcpAddServer?.addEventListener("click", () => {
+  const current = collectMcpServers();
+  current.push({
+    id: createMcpServerId(),
+    name: "",
+    description: "",
+    endpoint: "",
+    transport: "streamable_http",
+    enabled: true,
+    bearer_token: null,
+  });
+  renderMcpServers({ servers: current, statuses: [], tools: [] });
+  mcpServerList?.querySelector("[data-mcp-server-id]:last-child input[data-mcp-field='name']")?.focus();
+  if (settingsSaveState) settingsSaveState.textContent = "有未保存的更改";
+});
+
+mcpServerList?.addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-mcp-action]")?.dataset.mcpAction;
+  const card = event.target.closest("[data-mcp-server-id]");
+  if (!action || !card) return;
+  if (action === "remove") {
+    card.remove();
+    if (mcpEmptyState) mcpEmptyState.hidden = mcpServerList.children.length > 0;
+    if (settingsSaveState) settingsSaveState.textContent = "有未保存的更改";
+    return;
+  }
+  if (action === "test") {
+    const button = event.target.closest("button");
+    try {
+      if (button) button.disabled = true;
+      await testMcpServer(card);
+    } catch (error) {
+      const status = card.querySelector(".mcp-server-status");
+      if (status) {
+        status.className = "mcp-server-status is-error";
+        status.textContent = error?.message || "连接失败";
+      }
+      showToast(error?.message || "MCP 连接失败");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+});
+
 settingsPanel?.querySelectorAll("[data-client-pref]").forEach((control) => {
   const updatePreference = () => {
     const key = control.getAttribute("data-client-pref") || "";
@@ -18185,6 +18922,34 @@ document.getElementById("settings-reset-memory")?.addEventListener("click", () =
   clientPreferences = { ...clientPreferences, memories: [] };
   persistClientPreferences();
   showToast(currentLanguage === "zh" ? "本机偏好记忆已重置" : "Local preference memory was reset");
+  refreshSettingsMemory();
+});
+
+settingsMemoryRefresh?.addEventListener("click", refreshSettingsMemory);
+
+ragToggle?.addEventListener("click", () => {
+  clientPreferences = { ...clientPreferences, ragEnabled: !clientPreferences.ragEnabled };
+  persistClientPreferences();
+  syncRagToggle();
+  showToast(clientPreferences.ragEnabled
+    ? (currentLanguage === "zh" ? "本轮将使用知识库 RAG" : "RAG enabled for this conversation")
+    : (currentLanguage === "zh" ? "已关闭知识库 RAG" : "RAG disabled"));
+});
+
+subagentContextMode?.addEventListener("change", syncSubagentContextControls);
+subagentModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!subagentContextMode) return;
+    subagentContextMode.value = button.getAttribute("data-subagent-mode") || "automatic";
+    syncSubagentContextControls();
+    subagentContextMode.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+});
+subagentRecentTurns?.addEventListener("change", () => {
+  subagentRecentTurns.value = String(Math.max(1, Math.min(10, Number(subagentRecentTurns.value || 3) || 3)));
+});
+maxAutonomousRounds?.addEventListener("change", () => {
+  maxAutonomousRounds.value = String(Math.max(16, Math.min(360, Number(maxAutonomousRounds.value || 180) || 180)));
 });
 
 effortButtons.forEach((button) => {
@@ -18544,6 +19309,15 @@ activityRailButtons.forEach((button) => {
       } catch (error) {
         console.error(error);
         showToast(error?.message || t("toastSendFailed"));
+      }
+    }
+    if (panel === "knowledge") {
+      try {
+        await loadKnowledgeBase();
+      } catch (error) {
+        console.error(error);
+        if (knowledgeHealth) knowledgeHealth.textContent = error?.message || "Knowledge base unavailable";
+        showToast(error?.message || "Knowledge base unavailable");
       }
     }
   });
@@ -19200,6 +19974,40 @@ document.addEventListener("keydown", (event) => {
 });
 
 messageInput?.addEventListener("keydown", (event) => {
+  if (slashCommandMenu && !slashCommandMenu.hidden) {
+    const commands = visibleSlashCommands();
+    if (event.key === "ArrowDown" && commands.length) {
+      event.preventDefault();
+      slashCommandSelection = (slashCommandSelection + 1) % commands.length;
+      renderSlashCommandMenu();
+      return;
+    }
+    if (event.key === "ArrowUp" && commands.length) {
+      event.preventDefault();
+      slashCommandSelection = (slashCommandSelection - 1 + commands.length) % commands.length;
+      renderSlashCommandMenu();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSlashCommandMenu();
+      return;
+    }
+    if (event.key === "Tab" && commands.length) {
+      event.preventDefault();
+      applySlashCommand(commands[slashCommandSelection] || commands[0]);
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey && commands.length && slashCommandQuery() != null) {
+      const selected = commands[slashCommandSelection] || commands[0];
+      const exact = String(messageInput.value || "").trim().toLowerCase() === `/${selected.name}`;
+      if (!exact || /<[^>]+>/.test(selected.usage)) {
+        event.preventDefault();
+        applySlashCommand(selected);
+        return;
+      }
+    }
+  }
   const sendsWithCtrl = clientPreferences.sendShortcut === "ctrl-enter";
   const shouldSend = event.key === "Enter"
     && !event.shiftKey
@@ -19208,6 +20016,11 @@ messageInput?.addEventListener("keydown", (event) => {
     event.preventDefault();
     sendMessage();
   }
+});
+
+messageInput?.addEventListener("input", () => {
+  slashCommandSelection = 0;
+  renderSlashCommandMenu();
 });
 
 function sendNativeWindowAction(action, payload = {}) {
@@ -19245,6 +20058,8 @@ window.__ATLAS_WINDOW_STATE__ = (maximized) => {
 
 applyTranslations();
 syncClientPreferenceControls();
+syncRagToggle();
+syncSubagentContextControls();
 restoreColorTheme();
 updateEffortUI();
 setActivityPanel("nav", { preserveMainView: true });

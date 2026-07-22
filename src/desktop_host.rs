@@ -93,6 +93,39 @@ mod tests {
     }
 
     #[test]
+    fn desktop_runtime_preserves_ollama_models_payload_shape() {
+        let root = PathBuf::from(".");
+        let host = WebHostConfig::for_local_dev(root);
+        let runtime = DesktopHostRuntime::new(
+            host,
+            AssistantConfig::new(
+                "http://127.0.0.1:11434/v1".to_string(),
+                None,
+                "test-model".to_string(),
+            ),
+            Config::default(),
+            SecurityConfig::default(),
+        )
+        .expect("desktop runtime");
+
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let response = rt.block_on(runtime.invoke(
+            "ollama.models",
+            json!({ "api_url": "http://127.0.0.1:11434/v1" }),
+        ));
+        assert!(response.ok, "{:?}", response.error);
+        let outer = response.data.expect("bridge payload");
+        let payload = outer.get("data").expect("inner API payload");
+        assert_eq!(payload.get("available").and_then(|value| value.as_bool()), Some(true));
+        assert!(payload
+            .get("models")
+            .and_then(|value| value.as_array())
+            .is_some_and(|models| models.iter().any(|model| {
+                model.get("name").and_then(|value| value.as_str()) == Some("qwen3.5:9b")
+            })));
+    }
+
+    #[test]
     fn desktop_runtime_exposes_frontend_meta() {
         let root = PathBuf::from(".");
         let host = WebHostConfig::for_local_dev(root);

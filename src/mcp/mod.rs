@@ -11,5 +11,8 @@
 pub mod client;
 pub mod server;
 
-pub use client::{DiscoveredTool, McpClient, McpClientManager, McpServerDescription};
+pub use client::{
+    DiscoveredTool, McpClient, McpClientManager, McpServerDescription, McpServerStatus,
+    McpSnapshot,
+};
 pub use server::start_mcp_mode;
