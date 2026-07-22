@@ -37,6 +37,7 @@ enum DesktopEvent {
     },
     StreamClosed {
         stream_id: String,
+        events: Vec<Value>,
         error: Option<String>,
     },
     NativeBrowserCommand(NativeBrowserRequest),
@@ -317,14 +318,19 @@ fn main() -> Result<()> {
                     eprintln!("desktop bridge stream push error: {}", err);
                 }
             }
-            Event::UserEvent(DesktopEvent::StreamClosed { stream_id, error }) => {
+            Event::UserEvent(DesktopEvent::StreamClosed {
+                stream_id,
+                events,
+                error,
+            }) => {
+                let events_json = serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string());
                 let payload = match error {
                     Some(message) => json!({ "message": message }),
                     None => Value::Null,
                 };
                 let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "null".to_string());
                 let script = format!(
-                    "window.__ATLAS_BRIDGE_STREAM_CLOSE__ && window.__ATLAS_BRIDGE_STREAM_CLOSE__({stream_id:?}, {payload_json});",
+                    "window.__ATLAS_BRIDGE_STREAM_FINISH__ && window.__ATLAS_BRIDGE_STREAM_FINISH__({stream_id:?}, {events_json}, {payload_json});",
                 );
                 if let Err(err) = webview.evaluate_script(&script) {
                     eprintln!("desktop bridge stream close error: {}", err);
@@ -680,6 +686,7 @@ fn handle_ipc_message(
                 Err(err) => {
                     let _ = event_proxy.send_event(DesktopEvent::StreamClosed {
                         stream_id: request.id,
+                        events: Vec::new(),
                         error: Some(err.to_string()),
                     });
                 }
@@ -708,12 +715,20 @@ fn forward_stream(
 ) {
     async_runtime.spawn(async move {
         let mut saw_terminal_event = false;
+        let mut pending_events: Option<Vec<Value>> = None;
         while let Some(first_event) = receiver.recv().await {
             let mut events = vec![first_event];
             tokio::time::sleep(Duration::from_millis(12)).await;
-            while events.len() < 128 {
+            let mut serialized_chars = events
+                .first()
+                .map(|event| event.to_string().len())
+                .unwrap_or_default();
+            while events.len() < 128 && serialized_chars < 192_000 {
                 match receiver.try_recv() {
-                    Ok(event) => events.push(event),
+                    Ok(event) => {
+                        serialized_chars = serialized_chars.saturating_add(event.to_string().len());
+                        events.push(event);
+                    }
                     Err(_) => break,
                 }
             }
@@ -723,19 +738,22 @@ fn forward_stream(
                     .and_then(Value::as_str)
                     .is_some_and(|kind| matches!(kind, "complete" | "error"))
             });
-            if event_proxy
-                .send_event(DesktopEvent::StreamEvents {
-                    stream_id: stream_id.clone(),
-                    events,
-                })
-                .is_err()
-            {
-                return;
+            if let Some(previous_events) = pending_events.replace(events) {
+                if event_proxy
+                    .send_event(DesktopEvent::StreamEvents {
+                        stream_id: stream_id.clone(),
+                        events: previous_events,
+                    })
+                    .is_err()
+                {
+                    return;
+                }
             }
         }
 
         let _ = event_proxy.send_event(DesktopEvent::StreamClosed {
             stream_id,
+            events: pending_events.unwrap_or_default(),
             error: (!saw_terminal_event).then(|| {
                 "desktop agent stream closed before a complete or error event".to_string()
             }),
@@ -777,8 +795,12 @@ fn build_initialization_script(host_meta: &Value) -> String {
   window.__ATLAS_BRIDGE_STREAM_PUSH__ = (id, event) => {{
     const controller = streams.get(id);
     if (!controller) return;
-    const chunk = controller.encoder.encode(`${{JSON.stringify(event)}}\n`);
-    controller.streamController.enqueue(chunk);
+    try {{
+      const chunk = controller.encoder.encode(`${{JSON.stringify(event)}}\n`);
+      controller.streamController.enqueue(chunk);
+    }} catch (error) {{
+      console.warn("Atlas desktop stream event delivery failed", error);
+    }}
   }};
 
   window.__ATLAS_BRIDGE_STREAM_CLOSE__ = (id, error) => {{
@@ -852,6 +874,10 @@ fn build_initialization_script(host_meta: &Value) -> String {
     for (const event of events) {{
       window.__ATLAS_BRIDGE_STREAM_PUSH__(id, event);
     }}
+  }};
+  window.__ATLAS_BRIDGE_STREAM_FINISH__ = (id, events, error) => {{
+    window.__ATLAS_BRIDGE_STREAM_PUSH_BATCH__(id, events);
+    window.__ATLAS_BRIDGE_STREAM_CLOSE__(id, error);
   }};
   let closeRequested = false;
   window.__ATLAS_REQUEST_CLOSE__ = () => {{

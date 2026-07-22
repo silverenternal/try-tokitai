@@ -1,5 +1,5 @@
 use crate::process_window::CommandWindowExt;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::{Query, State};
@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, RwLock as AsyncRwLock};
 use tokio::task::JoinSet;
 use tower::ServiceExt;
 use tower_http::services::ServeDir;
@@ -38,6 +38,10 @@ use walkdir::WalkDir;
 use std::os::windows::process::CommandExt;
 
 use crate::agent_skills::{AgentSkillCatalog, AgentSkillMatch, SkillKind};
+use crate::agent_context::{
+    deterministic_context, parse_llm_context, SubagentContextConfig, SubagentContextMode,
+    SubagentContextObject,
+};
 use crate::app_paths::AppPaths;
 use crate::assistant_common::AssistantConfig;
 use crate::atlas_core::{
@@ -55,8 +59,10 @@ use crate::host::{
 use crate::image_generation::{
     ensure_png_path, generate_wan_image, image_api_key, WanImageRequest,
 };
+use crate::knowledge_base::{self, KnowledgeMetadataInput};
 use crate::llm::providers::OpenAIProvider;
 use crate::llm::{ChatRequest, LLMProvider, Message};
+use crate::mcp::{McpClient, McpServerDescription, McpSnapshot};
 use crate::notebook::{AtlasNotebook, NotebookCore};
 use crate::project_index;
 use crate::provider_config::ProviderManager;
@@ -98,6 +104,7 @@ use crate::toolchain::{
     auto_detect_toolchain_paths, command_is_available, default_toolchain_command,
     normalize_toolchain_paths, resolve_toolchain_value,
 };
+use crate::tool_governance;
 use crate::tui::components::diff_viewer::{DiffLine, FileDiff};
 use crate::tui::components::message_block::{
     AgentSubagentRecord, AgentVerifierCheck, AgentVerifierReport, MessageBlock, ToolCallStatus,
@@ -106,12 +113,26 @@ use crate::tui::session::{SessionBranch, SessionManager, SessionMeta};
 use crate::tui::streaming::{build_conversation, is_tool_call_finish};
 use crate::visualization::{VisualizationContext, VisualizationRegistry};
 
+const REVIEW_MODEL: &str = "qwen3-max";
+const DEFAULT_PRIMARY_MODEL: &str = "qwen3.7-plus";
+const QWEN_API_URL: &str = "https://llm-fnab949h4etu47rc.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions";
+const PRIMARY_MODEL_IDS: &[&str] = &[
+    "qwen3.7-plus",
+    "qwen3.7-max",
+    "qwen3.6-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-flash",
+];
+
+/// 审查模型必须与实验主模型隔离，避免同一模型自审造成盲区。
+
 #[derive(Clone)]
 pub struct WebAppState {
     assistant: Arc<Mutex<Option<CliAssistant>>>,
     assistant_api_url: String,
     assistant_api_key: Option<String>,
     runtime_settings: Arc<Mutex<RuntimeSettings>>,
+    mcp_client: Arc<AsyncRwLock<McpClient>>,
     persisted_state_path: PathBuf,
     session_manager: Arc<Mutex<SessionManager>>,
     base_security_config: SecurityConfig,
@@ -120,6 +141,7 @@ pub struct WebAppState {
     remote_ssh: Arc<Mutex<RemoteSshCore>>,
     task_queues: Arc<Mutex<HashMap<String, TaskQueue>>>,
     stream_runtime: Arc<Mutex<HashMap<String, StreamSessionRuntime>>>,
+    sync_chat_runtime: Arc<Mutex<HashMap<String, SyncChatRuntime>>>,
     scheduled_tasks: Arc<Mutex<Vec<ScheduledAgentTask>>>,
     scheduler_started: Arc<AtomicBool>,
     paper_workflow_inflight: Arc<Mutex<HashSet<String>>>,
@@ -240,6 +262,11 @@ struct RuntimeSettings {
     max_tool_calls_per_minute: u32,
     burst_limit: u32,
     toolchains: BTreeMap<String, String>,
+    subagent_context: SubagentContextConfig,
+    long_task_enabled: bool,
+    max_autonomous_rounds: usize,
+    auto_generate_paper: bool,
+    mcp_servers: Vec<McpServerDescription>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -255,6 +282,15 @@ struct PersistedWebState {
     max_tool_calls_per_minute: Option<u32>,
     burst_limit: Option<u32>,
     toolchains: Option<BTreeMap<String, String>>,
+    subagent_context_mode: Option<String>,
+    subagent_manual_context: Option<String>,
+    subagent_recent_turns: Option<usize>,
+    subagent_privacy_rules: Option<String>,
+    long_task_enabled: Option<bool>,
+    max_autonomous_rounds: Option<usize>,
+    auto_generate_paper: Option<bool>,
+    #[serde(default)]
+    mcp_servers: Option<Vec<McpServerDescription>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -350,6 +386,9 @@ struct WebSandboxBootstrapPayload {
 struct WebConfigPayload {
     api_url: String,
     model: String,
+    review_model: String,
+    primary_model_minimum: String,
+    primary_model_ids: Vec<String>,
     deep_think: bool,
     reasoning_effort: String,
     competition_mode: bool,
@@ -362,6 +401,35 @@ struct WebConfigPayload {
     auto_approve_tools: bool,
     max_auto_approve_risk: String,
     toolchains: BTreeMap<String, String>,
+    subagent_context_mode: String,
+    subagent_manual_context: String,
+    subagent_recent_turns: usize,
+    subagent_privacy_rules: String,
+    long_task_enabled: bool,
+    max_autonomous_rounds: usize,
+    auto_generate_paper: bool,
+    mcp: McpSnapshot,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct OllamaModelInfo {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameter_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_length: Option<u64>,
+    capabilities: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct OllamaModelsPayload {
+    available: bool,
+    api_url: String,
+    models: Vec<OllamaModelInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1467,6 +1535,9 @@ async fn maybe_auto_run_server_side_paper_workflow_for_session(
         let runtime = lock_runtime_settings(state)?;
         runtime.clone()
     };
+    if !runtime.auto_generate_paper {
+        return Ok(None);
+    }
     let messages = {
         let session_manager = lock_session_manager(state)?;
         session_manager
@@ -1802,6 +1873,51 @@ struct AgentWorkflowPlan {
     required_paths: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnExecutionPolicy {
+    Direct,
+    Adaptive,
+    Strict,
+}
+
+impl TurnExecutionPolicy {
+    fn uses_structured_workflow(self) -> bool {
+        matches!(self, Self::Strict)
+    }
+
+    fn max_repair_attempts(self) -> usize {
+        match self {
+            Self::Direct => 1,
+            Self::Adaptive => 3,
+            Self::Strict => 6,
+        }
+    }
+
+    fn max_protocol_repair_attempts(self) -> usize {
+        match self {
+            Self::Direct => 2,
+            Self::Adaptive => 3,
+            Self::Strict => 5,
+        }
+    }
+
+    fn max_workspace_recovery_attempts(self) -> usize {
+        match self {
+            Self::Direct => 2,
+            Self::Adaptive => 4,
+            Self::Strict => 6,
+        }
+    }
+
+    fn max_hard_verifier_repair_attempts(self) -> usize {
+        match self {
+            Self::Direct => 0,
+            Self::Adaptive => 1,
+            Self::Strict => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 struct AgentWorkflowStep {
     #[serde(default)]
@@ -1901,6 +2017,8 @@ struct ChatPersonalization {
     tool_memory_enabled: bool,
     #[serde(default)]
     memories: Vec<String>,
+    #[serde(default)]
+    rag_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2183,6 +2301,54 @@ struct WebSettingsRequest {
     max_tool_calls_per_minute: u32,
     burst_limit: u32,
     toolchains: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    subagent_context_mode: Option<String>,
+    #[serde(default)]
+    subagent_manual_context: Option<String>,
+    #[serde(default)]
+    subagent_recent_turns: Option<usize>,
+    #[serde(default)]
+    subagent_privacy_rules: Option<String>,
+    #[serde(default)]
+    long_task_enabled: Option<bool>,
+    #[serde(default)]
+    max_autonomous_rounds: Option<usize>,
+    #[serde(default)]
+    auto_generate_paper: Option<bool>,
+    #[serde(default)]
+    mcp_servers: Option<Vec<McpServerDescription>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpTestRequest {
+    server: McpServerDescription,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeUploadRequest {
+    filename: String,
+    content_base64: String,
+    #[serde(default)]
+    metadata: KnowledgeMetadataInput,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeSearchRequest {
+    query: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeGovernRequest {
+    document_id: String,
+    action: String,
+    metadata: Option<KnowledgeMetadataInput>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct OllamaModelsRequest {
+    #[serde(default)]
+    api_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2644,6 +2810,7 @@ struct StreamSessionRuntime {
     task_handle: Arc<tokio::task::JoinHandle<()>>,
     worker_abort: tokio::task::AbortHandle,
     terminal_emitted: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
     event_tx: tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
     pending_approvals: HashMap<String, PendingApprovalRuntime>,
     latest_activity: Option<WebActivityEvent>,
@@ -2666,6 +2833,12 @@ struct StreamSessionRuntime {
     branch_notes: Vec<String>,
     timeline: Vec<WebTimelineEvent>,
     auto_skills: Vec<WebAutoSkill>,
+}
+
+#[derive(Debug)]
+struct SyncChatRuntime {
+    call_id: String,
+    abort: tokio::task::AbortHandle,
 }
 
 #[derive(Debug)]
@@ -3095,6 +3268,13 @@ fn sync_stream_runtime_messages(
             session.message_blocks = persisted_blocks.to_vec();
         }
     }
+    // Long-running turns checkpoint the durable conversation trace after each
+    // meaningful round. On restart, completed tool results, diffs, verifier
+    // reports, and the latest assistant progress can therefore be resumed
+    // instead of replaying the task from the beginning.
+    if let Ok(mut manager) = lock_session_manager(state) {
+        let _ = manager.save_messages_for(session_id, persisted_blocks);
+    }
 }
 
 fn load_stream_required_path_snapshots(
@@ -3131,6 +3311,9 @@ pub async fn start_web_mode(
 pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
     Router::new()
         .route("/api/bootstrap", get(api_bootstrap))
+        .route("/api/mcp", get(api_mcp_state))
+        .route("/api/mcp/test", post(api_mcp_test))
+        .route("/api/ollama/models", post(api_ollama_models))
         .route("/api/send", post(api_send_message))
         .route("/api/prompt/optimize", post(api_prompt_optimize))
         .route("/api/send-stream", post(api_send_message_stream))
@@ -3190,6 +3373,19 @@ pub fn build_web_router(state: WebAppState, frontend_dir: PathBuf) -> Router {
         .route(
             "/api/workspace/index/search",
             post(api_workspace_index_search),
+        )
+        .route("/api/knowledge-base", get(api_knowledge_base_state))
+        .route(
+            "/api/knowledge-base/upload",
+            post(api_knowledge_base_upload),
+        )
+        .route(
+            "/api/knowledge-base/search",
+            post(api_knowledge_base_search),
+        )
+        .route(
+            "/api/knowledge-base/govern",
+            post(api_knowledge_base_govern),
         )
         .route("/api/visualizations", get(api_visualization_catalog))
         .route(
@@ -3353,6 +3549,7 @@ pub fn build_web_app_state(
         &persisted_state_path,
         &host.paths,
     );
+    let initial_mcp_servers = runtime_settings.mcp_servers.clone();
 
     let remote_ssh = RemoteSshCore::open(PathBuf::from(&runtime_settings.workspace_root))?;
     let scheduled_tasks = load_scheduled_tasks(&host.paths.state_dir().join("schedules.json"));
@@ -3361,6 +3558,7 @@ pub fn build_web_app_state(
         assistant_api_url: assistant_config.api_url.clone(),
         assistant_api_key: assistant_config.api_key.clone(),
         runtime_settings: Arc::new(Mutex::new(runtime_settings)),
+        mcp_client: Arc::new(AsyncRwLock::new(McpClient::new())),
         persisted_state_path,
         session_manager: Arc::new(Mutex::new(session_manager)),
         base_security_config: security_config,
@@ -3369,6 +3567,7 @@ pub fn build_web_app_state(
         remote_ssh: Arc::new(Mutex::new(remote_ssh)),
         task_queues: Arc::new(Mutex::new(HashMap::new())),
         stream_runtime: Arc::new(Mutex::new(HashMap::new())),
+        sync_chat_runtime: Arc::new(Mutex::new(HashMap::new())),
         scheduled_tasks: Arc::new(Mutex::new(scheduled_tasks)),
         scheduler_started: Arc::new(AtomicBool::new(false)),
         paper_workflow_inflight: Arc::new(Mutex::new(HashSet::new())),
@@ -3385,6 +3584,14 @@ pub fn build_web_app_state(
             session_manager.current_id.clone()
         };
         let _ = persist_web_state(&state, &runtime, current_session_id);
+    }
+
+    if !initial_mcp_servers.is_empty() {
+        if let Ok(mut mcp_client) = state.mcp_client.try_write() {
+            if let Err(error) = mcp_client.load_servers(initial_mcp_servers) {
+                tracing::warn!("failed to load persisted MCP servers: {}", error);
+            }
+        }
     }
 
     Ok(state)
@@ -3414,6 +3621,15 @@ pub async fn dispatch_bridge_command(
                     let response = bridge_update_settings(&state, req).await;
                     response.map(|value| json!({ "ok": true, "data": value }))
                 }
+                Err(err) => Err(err),
+            }
+        }
+        HostCommand::OllamaModels => {
+            let parsed = parse_bridge_payload::<OllamaModelsRequest>(payload);
+            match parsed {
+                Ok(req) => bridge_ollama_models(&state, req)
+                    .await
+                    .map(|value| json!({ "ok": true, "data": value })),
                 Err(err) => Err(err),
             }
         }
@@ -3469,6 +3685,30 @@ pub async fn dispatch_bridge_command(
                 Ok(req) => workspace_index_search(&state, req)
                     .map(|value| json!({ "ok": true, "data": value })),
                 Err(err) => Err(err),
+            }
+        }
+        HostCommand::KnowledgeBaseState => {
+            knowledge_state(&state).map(|value| json!({ "ok": true, "data": value }))
+        }
+        HostCommand::KnowledgeBaseUpload => {
+            match parse_bridge_payload::<KnowledgeUploadRequest>(payload) {
+                Ok(request) => knowledge_upload(&state, request)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(error) => Err(error),
+            }
+        }
+        HostCommand::KnowledgeBaseSearch => {
+            match parse_bridge_payload::<KnowledgeSearchRequest>(payload) {
+                Ok(request) => knowledge_search(&state, request)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(error) => Err(error),
+            }
+        }
+        HostCommand::KnowledgeBaseGovern => {
+            match parse_bridge_payload::<KnowledgeGovernRequest>(payload) {
+                Ok(request) => knowledge_govern(&state, request)
+                    .map(|value| json!({ "ok": true, "data": value })),
+                Err(error) => Err(error),
             }
         }
         HostCommand::VisualizationCatalog => {
@@ -3785,6 +4025,7 @@ pub fn dispatch_bridge_stream(
     let state_for_cleanup = state_for_task.clone();
     let (runtime_ready_tx, runtime_ready_rx) = oneshot::channel::<()>();
     let terminal_emitted = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::new(AtomicBool::new(false));
     let terminal_for_task = terminal_emitted.clone();
     let supervisor_language = turn_language_from_option(recovery_language.as_deref());
     let terminal_for_supervisor = terminal_emitted.clone();
@@ -3861,7 +4102,7 @@ pub fn dispatch_bridge_stream(
                             );
                             let mut finalized_blocks = persisted_blocks.clone();
                             finalized_blocks.push(MessageBlock::Verification { report });
-                            let _ = finalize_stream_success(
+                            if let Err(finalize_err) = finalize_stream_success(
                                 &tx_stream,
                                 &state_for_cleanup,
                                 &session_id_for_task,
@@ -3874,7 +4115,15 @@ pub fn dispatch_bridge_stream(
                                     "本轮 Agent 已在确定性恢复后完成",
                                     "Agent turn finished after deterministic recovery",
                                 ),
-                            );
+                            ) {
+                                finalize_stream_failure(
+                                    &tx_stream,
+                                    &state_for_cleanup,
+                                    &session_id_for_task,
+                                    turn_language_from_option(recovery_language.as_deref()),
+                                    &finalize_err.to_string(),
+                                );
+                            }
                             return;
                         }
                     }
@@ -3927,7 +4176,7 @@ pub fn dispatch_bridge_stream(
                             );
                             let mut finalized_blocks = persisted_blocks.clone();
                             finalized_blocks.push(MessageBlock::Verification { report });
-                            let _ = finalize_stream_success(
+                            if let Err(finalize_err) = finalize_stream_success(
                                 &tx_stream,
                                 &state_for_cleanup,
                                 &session_id_for_task,
@@ -3940,7 +4189,15 @@ pub fn dispatch_bridge_stream(
                                     "本轮 Agent 已在确定性恢复后完成",
                                     "Agent turn finished after deterministic recovery",
                                 ),
-                            );
+                            ) {
+                                finalize_stream_failure(
+                                    &tx_stream,
+                                    &state_for_cleanup,
+                                    &session_id_for_task,
+                                    turn_language_from_option(recovery_language.as_deref()),
+                                    &finalize_err.to_string(),
+                                );
+                            }
                             return;
                         }
                     }
@@ -3985,6 +4242,7 @@ pub fn dispatch_bridge_stream(
                 task_handle: handle.clone(),
                 worker_abort,
                 terminal_emitted,
+                cancelled,
                 event_tx: tx_stream_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -4024,6 +4282,50 @@ async fn api_bootstrap(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let bootstrap = build_bootstrap(&state).await.map_err(internal_error)?;
     Ok(json_api_response(true, bootstrap))
+}
+
+async fn api_mcp_state(
+    State(state): State<WebAppState>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    Ok(json_api_response(true, state.mcp_client.read().await.snapshot()))
+}
+
+async fn api_mcp_test(
+    State(state): State<WebAppState>,
+    Json(payload): Json<McpTestRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let tools = state
+        .mcp_client
+        .read()
+        .await
+        .test_server(payload.server)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    Ok(json_api_response(true, json!({ "connected": true, "tools": tools })))
+}
+
+async fn api_ollama_models(
+    State(state): State<WebAppState>,
+    Json(payload): Json<OllamaModelsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    Ok(json_api_response(
+        true,
+        bridge_ollama_models(&state, payload)
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+async fn bridge_ollama_models(
+    state: &WebAppState,
+    payload: OllamaModelsRequest,
+) -> Result<OllamaModelsPayload> {
+    let default_url = {
+        let runtime = lock_runtime_settings(state)?;
+        runtime.api_url.clone()
+    };
+    let api_url = normalize_ollama_api_url(payload.api_url.as_deref().unwrap_or(&default_url));
+    fetch_ollama_models(&api_url).await
 }
 
 async fn api_create_session(
@@ -4409,12 +4711,15 @@ async fn api_update_settings(
     Json(payload): Json<WebSettingsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let requested_workspace_root = payload.workspace_root.trim().to_string();
-    let requested_model = payload.model.trim().to_string();
+    let requested_model = validate_primary_model(&payload.model)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    let requested_mcp_servers = normalize_mcp_servers(payload.mcp_servers.clone())
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    let updated_payload = {
+    let updated_runtime = {
         let mut runtime = lock_runtime_settings(&state).map_err(internal_error)?;
-        runtime.api_url = non_empty_or(payload.api_url.trim(), &runtime.api_url);
-        runtime.model = non_empty_or(&requested_model, &runtime.model);
+        runtime.api_url = QWEN_API_URL.to_string();
+        runtime.model = requested_model;
         runtime.deep_think = payload.deep_think;
         runtime.reasoning_effort =
             non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
@@ -4423,13 +4728,7 @@ async fn api_update_settings(
         runtime.workspace_root =
             resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)
                 .map_err(internal_error)?;
-        runtime.api_key = payload.api_key.and_then(|key| {
-            if key.trim().is_empty() {
-                None
-            } else {
-                Some(key)
-            }
-        });
+        update_provider_api_key(&mut runtime, payload.api_key);
         runtime.auto_approve_tools = payload.auto_approve_tools;
         runtime.max_auto_approve_risk =
             parse_risk_level(&payload.max_auto_approve_risk).map_err(internal_error)?;
@@ -4438,13 +4737,45 @@ async fn api_update_settings(
         if let Some(toolchains) = payload.toolchains {
             runtime.toolchains = sanitize_toolchain_paths(toolchains);
         }
+        if let Some(mode) = payload.subagent_context_mode {
+            runtime.subagent_context.mode = SubagentContextMode::parse(&mode);
+        }
+        if let Some(value) = payload.subagent_manual_context {
+            runtime.subagent_context.manual_context = value.chars().take(12_000).collect();
+        }
+        if let Some(value) = payload.subagent_recent_turns {
+            runtime.subagent_context.recent_turns = value.clamp(1, 10);
+        }
+        if let Some(value) = payload.subagent_privacy_rules {
+            runtime.subagent_context.privacy_rules = value.chars().take(4_000).collect();
+        }
+        if let Some(value) = payload.long_task_enabled {
+            runtime.long_task_enabled = value;
+        }
+        if let Some(value) = payload.max_autonomous_rounds {
+            runtime.max_autonomous_rounds = value.clamp(16, 360);
+        }
+        if let Some(value) = payload.auto_generate_paper {
+            runtime.auto_generate_paper = value;
+        }
+        if let Some(servers) = requested_mcp_servers {
+            runtime.mcp_servers = servers;
+        }
         let current_session_id = {
             let session_manager = lock_session_manager(&state).map_err(internal_error)?;
             session_manager.current_id.clone()
         };
         persist_web_state(&state, &runtime, current_session_id).map_err(internal_error)?;
-        runtime_to_payload(&runtime)
+        runtime.clone()
     };
+    let mcp = state
+        .mcp_client
+        .write()
+        .await
+        .configure(updated_runtime.mcp_servers.clone())
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    let updated_payload = runtime_to_payload(&updated_runtime, mcp);
 
     {
         let mut assistant_slot = lock_assistant_slot(&state).map_err(internal_error)?;
@@ -4778,6 +5109,50 @@ fn workspace_index_search(state: &WebAppState, req: WorkspaceIndexSearchRequest)
         req.limit.unwrap_or(20),
         req.kind.as_deref()
     )?))
+}
+
+fn knowledge_state(state: &WebAppState) -> Result<Value> {
+    Ok(json!(knowledge_base::state(&current_workspace(state)?)?))
+}
+
+fn knowledge_upload(state: &WebAppState, request: KnowledgeUploadRequest) -> Result<Value> {
+    let bytes = BASE64_STANDARD
+        .decode(request.content_base64.as_bytes())
+        .map_err(|error| anyhow!("invalid document base64: {}", error))?;
+    Ok(json!({
+        "document": knowledge_base::ingest_bytes(
+            &current_workspace(state)?,
+            &request.filename,
+            &bytes,
+            request.metadata,
+        )?,
+        "state": knowledge_base::state(&current_workspace(state)?)?,
+    }))
+}
+
+fn knowledge_search(state: &WebAppState, request: KnowledgeSearchRequest) -> Result<Value> {
+    Ok(json!({
+        "query": request.query,
+        "architecture": "bm25 + semantic feature hashing + reciprocal rank fusion + freshness",
+        "results": knowledge_base::search(
+            &current_workspace(state)?,
+            &request.query,
+            request.limit.unwrap_or(10),
+        )?,
+    }))
+}
+
+fn knowledge_govern(state: &WebAppState, request: KnowledgeGovernRequest) -> Result<Value> {
+    let document = knowledge_base::govern(
+        &current_workspace(state)?,
+        &request.document_id,
+        &request.action,
+        request.metadata,
+    )?;
+    Ok(json!({
+        "document": document,
+        "state": knowledge_base::state(&current_workspace(state)?)?,
+    }))
 }
 
 fn visualization_runtime_payload(state: &WebAppState) -> Result<Value> {
@@ -5397,6 +5772,45 @@ async fn api_workspace_index_search(
 ) -> Result<Json<Value>, (StatusCode, String)> {
     workspace_index_search(&state, req)
         .map(|v| json_api_response(true, v))
+        .map_err(internal_error)
+}
+async fn api_knowledge_base_state(
+    State(state): State<WebAppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || knowledge_state(&state))
+        .await
+        .map_err(|error| internal_error(anyhow!("knowledge state task failed: {error}")))?
+        .map(|value| json_api_response(true, value))
+        .map_err(internal_error)
+}
+async fn api_knowledge_base_upload(
+    State(state): State<WebAppState>,
+    Json(request): Json<KnowledgeUploadRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || knowledge_upload(&state, request))
+        .await
+        .map_err(|error| internal_error(anyhow!("knowledge upload task failed: {error}")))?
+        .map(|value| json_api_response(true, value))
+        .map_err(internal_error)
+}
+async fn api_knowledge_base_search(
+    State(state): State<WebAppState>,
+    Json(request): Json<KnowledgeSearchRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || knowledge_search(&state, request))
+        .await
+        .map_err(|error| internal_error(anyhow!("knowledge search task failed: {error}")))?
+        .map(|value| json_api_response(true, value))
+        .map_err(internal_error)
+}
+async fn api_knowledge_base_govern(
+    State(state): State<WebAppState>,
+    Json(request): Json<KnowledgeGovernRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || knowledge_govern(&state, request))
+        .await
+        .map_err(|error| internal_error(anyhow!("knowledge governance task failed: {error}")))?
+        .map(|value| json_api_response(true, value))
         .map_err(internal_error)
 }
 async fn api_visualization_catalog(
@@ -6603,7 +7017,7 @@ async fn api_send_message(
     State(state): State<WebAppState>,
     Json(payload): Json<SendMessageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let (current_id, next_blocks) = run_chat_request(
+    let (current_id, next_blocks) = run_chat_request_cancellable(
         &state,
         payload.content.clone(),
         payload.mode.clone(),
@@ -6660,6 +7074,7 @@ async fn api_send_message_stream(
     let state_for_cleanup = state_for_task.clone();
     let (runtime_ready_tx, runtime_ready_rx) = oneshot::channel::<()>();
     let terminal_emitted = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::new(AtomicBool::new(false));
     let terminal_for_task = terminal_emitted.clone();
     let supervisor_language = turn_language_from_option(recovery_language.as_deref());
     let terminal_for_supervisor = terminal_emitted.clone();
@@ -6736,7 +7151,7 @@ async fn api_send_message_stream(
                             );
                             let mut finalized_blocks = persisted_blocks.clone();
                             finalized_blocks.push(MessageBlock::Verification { report });
-                            let _ = finalize_stream_success(
+                            if let Err(finalize_err) = finalize_stream_success(
                                 &tx,
                                 &state_for_cleanup,
                                 &session_id_for_task,
@@ -6749,7 +7164,15 @@ async fn api_send_message_stream(
                                     "本轮 Agent 已在确定性恢复后完成",
                                     "Agent turn finished after deterministic recovery",
                                 ),
-                            );
+                            ) {
+                                finalize_stream_failure(
+                                    &tx,
+                                    &state_for_cleanup,
+                                    &session_id_for_task,
+                                    turn_language_from_option(recovery_language.as_deref()),
+                                    &finalize_err.to_string(),
+                                );
+                            }
                             return;
                         }
                     }
@@ -6802,7 +7225,7 @@ async fn api_send_message_stream(
                             );
                             let mut finalized_blocks = persisted_blocks.clone();
                             finalized_blocks.push(MessageBlock::Verification { report });
-                            let _ = finalize_stream_success(
+                            if let Err(finalize_err) = finalize_stream_success(
                                 &tx,
                                 &state_for_cleanup,
                                 &session_id_for_task,
@@ -6815,7 +7238,15 @@ async fn api_send_message_stream(
                                     "本轮 Agent 已在确定性恢复后完成",
                                     "Agent turn finished after deterministic recovery",
                                 ),
-                            );
+                            ) {
+                                finalize_stream_failure(
+                                    &tx,
+                                    &state_for_cleanup,
+                                    &session_id_for_task,
+                                    turn_language_from_option(recovery_language.as_deref()),
+                                    &finalize_err.to_string(),
+                                );
+                            }
                             return;
                         }
                     }
@@ -6860,6 +7291,7 @@ async fn api_send_message_stream(
                 task_handle: handle.clone(),
                 worker_abort,
                 terminal_emitted,
+                cancelled,
                 event_tx: tx_for_runtime,
                 pending_approvals: HashMap::new(),
                 latest_activity: None,
@@ -6971,12 +7403,13 @@ async fn bridge_update_settings(
     payload: WebSettingsRequest,
 ) -> Result<SettingsMutationResponse> {
     let requested_workspace_root = payload.workspace_root.trim().to_string();
-    let requested_model = payload.model.trim().to_string();
+    let requested_model = validate_primary_model(&payload.model)?;
+    let requested_mcp_servers = normalize_mcp_servers(payload.mcp_servers.clone())?;
 
-    let updated_payload = {
+    let updated_runtime = {
         let mut runtime = lock_runtime_settings(state)?;
-        runtime.api_url = non_empty_or(payload.api_url.trim(), &runtime.api_url);
-        runtime.model = non_empty_or(&requested_model, &runtime.model);
+        runtime.api_url = QWEN_API_URL.to_string();
+        runtime.model = requested_model;
         runtime.deep_think = payload.deep_think;
         runtime.reasoning_effort =
             non_empty_or(payload.reasoning_effort.trim(), &runtime.reasoning_effort);
@@ -6984,13 +7417,7 @@ async fn bridge_update_settings(
         runtime.privacy_mode = payload.privacy_mode;
         runtime.workspace_root =
             resolve_workspace_root(&requested_workspace_root, &runtime.workspace_root)?;
-        runtime.api_key = payload.api_key.and_then(|key| {
-            if key.trim().is_empty() {
-                None
-            } else {
-                Some(key)
-            }
-        });
+        update_provider_api_key(&mut runtime, payload.api_key);
         runtime.auto_approve_tools = payload.auto_approve_tools;
         runtime.max_auto_approve_risk = parse_risk_level(&payload.max_auto_approve_risk)?;
         runtime.max_tool_calls_per_minute = payload.max_tool_calls_per_minute;
@@ -6998,13 +7425,44 @@ async fn bridge_update_settings(
         if let Some(toolchains) = payload.toolchains {
             runtime.toolchains = sanitize_toolchain_paths(toolchains);
         }
+        if let Some(mode) = payload.subagent_context_mode {
+            runtime.subagent_context.mode = SubagentContextMode::parse(&mode);
+        }
+        if let Some(value) = payload.subagent_manual_context {
+            runtime.subagent_context.manual_context = value.chars().take(12_000).collect();
+        }
+        if let Some(value) = payload.subagent_recent_turns {
+            runtime.subagent_context.recent_turns = value.clamp(1, 10);
+        }
+        if let Some(value) = payload.subagent_privacy_rules {
+            runtime.subagent_context.privacy_rules = value.chars().take(4_000).collect();
+        }
+        if let Some(value) = payload.long_task_enabled {
+            runtime.long_task_enabled = value;
+        }
+        if let Some(value) = payload.max_autonomous_rounds {
+            runtime.max_autonomous_rounds = value.clamp(16, 360);
+        }
+        if let Some(value) = payload.auto_generate_paper {
+            runtime.auto_generate_paper = value;
+        }
+        if let Some(servers) = requested_mcp_servers {
+            runtime.mcp_servers = servers;
+        }
         let current_session_id = {
             let session_manager = lock_session_manager(state)?;
             session_manager.current_id.clone()
         };
         persist_web_state(state, &runtime, current_session_id)?;
-        runtime_to_payload(&runtime)
+        runtime.clone()
     };
+    let mcp = state
+        .mcp_client
+        .write()
+        .await
+        .configure(updated_runtime.mcp_servers.clone())
+        .await?;
+    let updated_payload = runtime_to_payload(&updated_runtime, mcp);
 
     {
         let mut assistant_slot = lock_assistant_slot(state)?;
@@ -7196,7 +7654,7 @@ async fn bridge_chat_send(
     state: &WebAppState,
     payload: SendMessageRequest,
 ) -> Result<SendMessageResponse> {
-    let (current_id, next_blocks) = run_chat_request(
+    let (current_id, next_blocks) = run_chat_request_cancellable(
         state,
         payload.content.clone(),
         payload.mode.clone(),
@@ -8825,7 +9283,11 @@ fn bridge_reviewer_feedback_resolve(
     bridge_reviewer_feedback_state(state)
 }
 
-fn append_chat_personalization(prompt: &mut String, personalization: Option<&ChatPersonalization>) {
+fn append_chat_personalization(
+    prompt: &mut String,
+    query: &str,
+    personalization: Option<&ChatPersonalization>,
+) {
     let Some(personalization) = personalization else {
         return;
     };
@@ -8848,16 +9310,10 @@ fn append_chat_personalization(prompt: &mut String, personalization: Option<&Cha
         prompt.push_str(&custom.chars().take(8_000).collect::<String>());
     }
     if personalization.memory_enabled {
-        let memories = personalization
-            .memories
-            .iter()
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .take(20)
-            .collect::<Vec<_>>();
+        let memories = knowledge_base::rank_memory_texts(query, &personalization.memories, 8);
         if !memories.is_empty() {
             prompt.push_str("\n- Remembered preferences:\n");
-            for memory in memories {
+            for memory in &memories {
                 prompt.push_str("  - ");
                 prompt.push_str(&memory.chars().take(500).collect::<String>());
                 prompt.push('\n');
@@ -8868,6 +9324,93 @@ fn append_chat_personalization(prompt: &mut String, personalization: Option<&Cha
                 "\n- Do not infer new lasting preferences from tool or web-search results.",
             );
         }
+    }
+}
+
+fn append_knowledge_base_context_prompt(
+    state: &WebAppState,
+    runtime: &RuntimeSettings,
+    prompt: &mut String,
+    query: &str,
+    personalization: Option<&ChatPersonalization>,
+) {
+    if !personalization.is_some_and(|value| value.rag_enabled) {
+        return;
+    }
+    let Ok(workspace) =
+        canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)
+    else {
+        return;
+    };
+    match knowledge_base::prompt_context(&workspace, query, 8) {
+        Ok(context) if !context.is_empty() => {
+            prompt.push_str("\n\nRAG is enabled for this conversation.\n");
+            prompt.push_str(&context);
+        }
+        Ok(_) => prompt.push_str("\n\nRAG is enabled, but the knowledge base returned no relevant active evidence."),
+        Err(error) => prompt.push_str(&format!(
+            "\n\nRAG is enabled, but local retrieval is unavailable: {}",
+            error
+        )),
+    }
+}
+
+async fn run_chat_request_cancellable(
+    state: &WebAppState,
+    content: String,
+    mode: Option<String>,
+    language: Option<String>,
+    personalization: Option<ChatPersonalization>,
+) -> Result<(String, Vec<MessageBlock>)> {
+    let session_id = ensure_current_session(state)?;
+    let call_id = format!(
+        "sync-{}-{}",
+        session_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        run_chat_request(
+            &state_for_task,
+            content,
+            mode,
+            language,
+            personalization,
+        )
+        .await
+    });
+    let abort = task.abort_handle();
+    {
+        let mut runtime = lock_sync_chat_runtime(state)?;
+        if let Some(previous) = runtime.insert(
+            session_id.clone(),
+            SyncChatRuntime {
+                call_id: call_id.clone(),
+                abort,
+            },
+        ) {
+            previous.abort.abort();
+        }
+    }
+
+    let result = task.await;
+    if let Ok(mut runtime) = lock_sync_chat_runtime(state) {
+        if runtime
+            .get(&session_id)
+            .is_some_and(|active| active.call_id == call_id)
+        {
+            runtime.remove(&session_id);
+        }
+    }
+    match result {
+        Ok(result) => result,
+        Err(error) if error.is_cancelled() => Err(anyhow!(
+            "synchronous model request was interrupted before completion"
+        )),
+        Err(error) => Err(anyhow!("synchronous model task join error: {}", error)),
     }
 }
 
@@ -8896,7 +9439,14 @@ async fn run_chat_request(
         turn_language_name(turn_language),
         turn_language_name(turn_language),
     );
-    append_chat_personalization(&mut system_prompt, personalization.as_ref());
+    append_chat_personalization(&mut system_prompt, &content, personalization.as_ref());
+    append_knowledge_base_context_prompt(
+        state,
+        &runtime_for_chat,
+        &mut system_prompt,
+        &content,
+        personalization.as_ref(),
+    );
     append_research_domain_context_prompt(state, &runtime_for_chat, &mut system_prompt, &content);
     append_research_os_context_prompt(state, &runtime_for_chat, &mut system_prompt, &content);
     let mut llm_messages = vec![json!({
@@ -8926,10 +9476,7 @@ async fn run_chat_request(
         session_manager.update_model_for(&current_id, &runtime_for_chat.model)?;
     }
     let assistant_api_url = runtime_for_chat.api_url.clone();
-    let assistant_api_key = runtime_for_chat
-        .api_key
-        .clone()
-        .or_else(|| state.assistant_api_key.clone());
+    let assistant_api_key = provider_api_key(&runtime_for_chat, state.assistant_api_key.clone());
     let assistant_state = state.assistant.clone();
     let host_base_dir = state.host.base_dir().to_path_buf();
     let base_security = state.base_security_config.clone();
@@ -9175,6 +9722,7 @@ async fn run_chat_request_stream(
     content.push_str(&prepared_attachments.prompt_suffix);
 
     let provider = build_streaming_provider(&state, &runtime)?;
+    let reviewer_provider = build_reviewer_provider(&state, &runtime)?;
     let tool_definitions = assistant_tool_definitions(&state, &runtime).await?;
     let user_content = content.clone();
     let turn_language = turn_language_from_option(language.as_deref());
@@ -9196,7 +9744,18 @@ async fn run_chat_request_stream(
         turn_language_name(turn_language),
     );
     let mut dynamic_system_prompt = base_system_prompt.clone();
-    append_chat_personalization(&mut dynamic_system_prompt, personalization.as_ref());
+    append_chat_personalization(
+        &mut dynamic_system_prompt,
+        &user_content,
+        personalization.as_ref(),
+    );
+    append_knowledge_base_context_prompt(
+        &state,
+        &runtime,
+        &mut dynamic_system_prompt,
+        &user_content,
+        personalization.as_ref(),
+    );
     if tool_definitions.len() >= 10 {
         dynamic_system_prompt.push_str(&localized_text(
             turn_language,
@@ -9230,20 +9789,31 @@ async fn run_chat_request_stream(
     let mut pseudo_tool_repair_attempts = 0usize;
 
     let readonly_workspace_analysis = is_readonly_workspace_analysis_request(&user_content);
-    let structured_workflow = should_run_structured_workflow(stream_mode, &user_content);
+    let execution_policy = turn_execution_policy(stream_mode, &user_content);
+    let structured_workflow = execution_policy.uses_structured_workflow();
     let lightweight_tool_reasoning = readonly_workspace_analysis
-        || should_use_lightweight_tool_reasoning(&user_content, structured_workflow);
+        || should_use_lightweight_tool_reasoning(
+            &user_content,
+            !matches!(execution_policy, TurnExecutionPolicy::Direct),
+        );
     if readonly_workspace_analysis {
         dynamic_system_prompt.push_str(
             "\n\nRead-only workspace analysis fast path:\n- Call workspace_overview first. It returns a bounded native project map, file-type counts, manifests, representative source previews, and Git metadata in one call.\n- Use direct read_file_head/read_file_range only for a small number of files that need deeper inspection.\n- Do not use terminal commands to enumerate the workspace, and do not run planner/reviewer/verifier subagents for a read-only overview.\n- Stop after enough evidence exists to give a concrete architecture and code-quality summary.",
         );
     }
+    match execution_policy {
+        TurnExecutionPolicy::Direct => dynamic_system_prompt.push_str(
+            "\n\nDirect execution policy:\n- This is a bounded, low-risk task. Decide the shortest useful read/edit/check sequence yourself.\n- Do not start a planner, reviewer, or hard-verifier workflow. Do not probe extra tools or repeat checks after the requested outcome is already supported.\n- Use at most one focused validation pass unless a concrete failure or newly discovered risk justifies another.\n- Once the requested change or answer is complete, return the final answer immediately.",
+        ),
+        TurnExecutionPolicy::Adaptive => dynamic_system_prompt.push_str(
+            "\n\nAdaptive execution policy:\n- Choose the implementation sequence and validation depth from the evidence you encounter; there is no mandatory planner/reviewer checklist.\n- Add tests or broader inspection only when the change scope, an observed failure, or the user's acceptance criteria make them useful.\n- Do not repeat a read, command, or verification unless it can produce materially new evidence. Stop and finalize as soon as the requested outcome is sufficiently supported.",
+        ),
+        TurnExecutionPolicy::Strict => {}
+    }
     let max_repair_attempts = if readonly_workspace_analysis {
         3usize
-    } else if structured_workflow {
-        18usize
     } else {
-        10usize
+        execution_policy.max_repair_attempts()
     };
     let plan = if structured_workflow {
         emit_activity(
@@ -9455,32 +10025,37 @@ async fn run_chat_request_stream(
         dynamic_system_prompt.push_str("\n\n");
         dynamic_system_prompt.push_str(&research_execution_contract_prompt(turn_language));
     }
+    if stream_mode.is_some_and(|mode| mode.eq_ignore_ascii_case("goal")) {
+        dynamic_system_prompt.push_str("\n\n");
+        dynamic_system_prompt.push_str(&goal_execution_contract_prompt(turn_language));
+    }
 
     let max_turn_rounds = if readonly_workspace_analysis {
         8usize
     } else {
-        dynamic_turn_round_limit(plan.as_ref(), structured_workflow)
+        dynamic_turn_round_limit(plan.as_ref(), execution_policy, &runtime)
     };
     let mut stagnant_rounds = 0usize;
     let mut rounds_with_real_progress = 0usize;
     let mut missing_workspace_progress_repair_attempts = 0usize;
     let mut premature_finish_repair_attempts = 0usize;
+    let mut missing_final_answer_repair_attempts = 0usize;
+    let mut hard_verifier_repair_attempts = 0usize;
+    let max_hard_verifier_repair_attempts =
+        execution_policy.max_hard_verifier_repair_attempts();
     let max_protocol_repair_attempts = if readonly_workspace_analysis {
         2usize
-    } else if structured_workflow {
-        12usize
     } else {
-        6usize
+        execution_policy.max_protocol_repair_attempts()
     };
     let max_workspace_recovery_attempts = if readonly_workspace_analysis {
         2usize
-    } else if structured_workflow {
-        16usize
     } else {
-        8usize
+        execution_policy.max_workspace_recovery_attempts()
     };
     let mut multimodal_sent = false;
     let mut context_compaction_announced = false;
+    let mut force_final_answer_mode = false;
     for _ in 0..max_turn_rounds {
         let turn_start = persisted_blocks.len();
         if should_compress_context(&persisted_blocks, &runtime.model)
@@ -9516,14 +10091,28 @@ async fn run_chat_request_stream(
                 auto_skills: None,
             });
         }
+        let active_tool_definitions: &[Value] = if force_final_answer_mode {
+            &[]
+        } else {
+            tool_definitions.as_slice()
+        };
         let mut request = build_stream_chat_request_with_prompt(
             &persisted_blocks,
             &runtime,
             &dynamic_system_prompt,
             turn_language,
-            &tool_definitions,
+            active_tool_definitions,
             state.host.base_dir(),
         )?;
+        if force_final_answer_mode {
+            request.tools = None;
+            request
+                .messages
+                .push(Message::user(&final_answer_only_instruction(
+                    turn_language,
+                    readonly_workspace_analysis,
+                )));
+        }
         if prepared_attachments.has_images {
             request.model = "qwen3.7-plus".to_string();
             if !multimodal_sent {
@@ -9637,6 +10226,18 @@ async fn run_chat_request_stream(
 
         if needs_tools {
             let tool_calls = turn.tool_calls.unwrap_or_default();
+            if force_final_answer_mode && !tool_calls.is_empty() {
+                if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                    missing_final_answer_repair_attempts =
+                        missing_final_answer_repair_attempts.saturating_add(1);
+                    dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                        turn_language,
+                        readonly_workspace_analysis,
+                    ));
+                    continue;
+                }
+                return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
+            }
             if tool_calls.is_empty() {
                 emit_activity(
                     &tx,
@@ -9740,6 +10341,11 @@ async fn run_chat_request_stream(
                 )
                 .await?;
                 sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
+                let readonly_successful_tool_results = if readonly_workspace_analysis {
+                    count_successful_readonly_tool_results(current_turn_messages(&persisted_blocks))
+                } else {
+                    0
+                };
                 if try_finalize_current_turn_with_hard_verifier(
                     &tx,
                     &state,
@@ -9758,6 +10364,16 @@ async fn run_chat_request_stream(
                     true,
                 )? {
                     return Ok(());
+                }
+                if readonly_workspace_analysis
+                    && readonly_workspace_evidence_is_sufficient(
+                        current_turn_messages(&persisted_blocks),
+                        readonly_successful_tool_results,
+                    )
+                {
+                    force_final_answer_mode = true;
+                    dynamic_system_prompt
+                        .push_str(&final_answer_only_system_directive(turn_language, true));
                 }
                 continue;
             }
@@ -9847,10 +10463,32 @@ async fn run_chat_request_stream(
             ));
         }
 
-        if structured_workflow
-            && !needs_tools
-            && final_turn_ends_with_unfinished_progress(&persisted_blocks[turn_start..])
+        if !needs_tools && final_turn_ends_with_unfinished_progress(&persisted_blocks[turn_start..])
         {
+            if force_final_answer_mode {
+                if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                    missing_final_answer_repair_attempts =
+                        missing_final_answer_repair_attempts.saturating_add(1);
+                    dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                        turn_language,
+                        readonly_workspace_analysis,
+                    ));
+                    continue;
+                }
+                if try_finalize_readonly_workspace_analysis_fallback(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &mut persisted_blocks,
+                    stream_mode,
+                    turn_language,
+                    readonly_workspace_analysis,
+                )? {
+                    return Ok(());
+                }
+                return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
+            }
             if premature_finish_repair_attempts < max_protocol_repair_attempts {
                 premature_finish_repair_attempts =
                     premature_finish_repair_attempts.saturating_add(1);
@@ -9880,9 +10518,93 @@ async fn run_chat_request_stream(
                 );
                 continue;
             }
+            if try_finalize_readonly_workspace_analysis_fallback(
+                &tx,
+                &state,
+                &session_id,
+                &runtime,
+                &mut persisted_blocks,
+                stream_mode,
+                turn_language,
+                readonly_workspace_analysis,
+            )? {
+                return Ok(());
+            }
             return Err(anyhow!(
                 "model repeatedly ended with unfinished progress narration"
             ));
+        }
+
+        if !needs_tools
+            && !final_turn_has_acceptable_assistant_completion(
+                current_turn_messages(&persisted_blocks),
+                turn_language,
+            )
+        {
+            if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                missing_final_answer_repair_attempts =
+                    missing_final_answer_repair_attempts.saturating_add(1);
+                dynamic_system_prompt = format!(
+                    "{}\n\nMissing-final-answer repair directive:\n- The previous model turn stopped without a substantive user-facing final answer after the available tool results.\n- Continue this same user turn immediately. Use more native tools only if evidence is still missing.\n- Otherwise provide the complete answer now, based on the tool results already present.\n- Do not repeat earlier progress narration, do not return an empty response, and do not stop after merely reporting that a tool completed.",
+                    dynamic_system_prompt
+                );
+                emit_activity(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &persisted_blocks,
+                    stream_mode,
+                    workflow_activity_event(
+                        "repair",
+                        Some(localized_text(
+                            turn_language,
+                            "工具执行后没有形成最终答复，正在同一轮自动续写",
+                            "No final answer followed the tool results; continuing automatically in the same turn",
+                        )),
+                        Some("repair".to_string()),
+                        Some("running".to_string()),
+                        Some("missing_final_answer".to_string()),
+                        Some("main".to_string()),
+                    ),
+                );
+                force_final_answer_mode =
+                    current_turn_messages(&persisted_blocks)
+                        .iter()
+                        .any(|block| {
+                            matches!(
+                                block,
+                                MessageBlock::ToolResult { .. } | MessageBlock::Diff { .. }
+                            )
+                        })
+                        && workflow_is_ready_for_forced_final_answer(
+                            plan.as_ref(),
+                            &persisted_blocks,
+                            state.host.base_dir(),
+                            &runtime,
+                            &required_path_snapshots,
+                        );
+                if force_final_answer_mode {
+                    dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                        turn_language,
+                        readonly_workspace_analysis,
+                    ));
+                }
+                continue;
+            }
+            if try_finalize_readonly_workspace_analysis_fallback(
+                &tx,
+                &state,
+                &session_id,
+                &runtime,
+                &mut persisted_blocks,
+                stream_mode,
+                turn_language,
+                readonly_workspace_analysis,
+            )? {
+                return Ok(());
+            }
+            return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
         }
 
         let missing_required_workspace_progress = plan.as_ref().is_some_and(|plan| {
@@ -10048,7 +10770,82 @@ async fn run_chat_request_stream(
                     )?;
                     return Ok(());
                 }
-                continue;
+                persisted_blocks.push(MessageBlock::Verification {
+                    report: report.clone(),
+                });
+                sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
+                for checkpoint in &checkpoints {
+                    push_runtime_checkpoint(
+                        &state,
+                        &session_id,
+                        checkpoint.clone(),
+                        turn_language,
+                    );
+                }
+                for note in &branch_notes {
+                    push_runtime_branch_note(&state, &session_id, note.clone(), turn_language);
+                }
+                emit_verifier_update(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &persisted_blocks,
+                    stream_mode,
+                    &report,
+                    &checkpoints,
+                    &branch_notes,
+                    turn_language,
+                );
+                if hard_verifier_repair_attempts < max_hard_verifier_repair_attempts {
+                    hard_verifier_repair_attempts =
+                        hard_verifier_repair_attempts.saturating_add(1);
+                    let repair_actions = if report.next_actions.is_empty() {
+                        report.issues.clone()
+                    } else {
+                        report.next_actions.clone()
+                    };
+                    let repair_hint = repair_actions
+                        .iter()
+                        .map(|item| format!("- {}", item))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    dynamic_system_prompt.push_str(&format!(
+                        "\n\nHard-verifier repair pass {}/{}:\n{}\n- Make only a materially different repair or check that addresses the evidence above.\n- Reuse successful results already present; do not restart completed work or repeat unchanged reads/checks.",
+                        hard_verifier_repair_attempts,
+                        max_hard_verifier_repair_attempts,
+                        repair_hint
+                    ));
+                    emit_activity(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &persisted_blocks,
+                        stream_mode,
+                        workflow_activity_event(
+                            "repair",
+                            Some(report.summary.clone()),
+                            Some("repair".to_string()),
+                            Some("running".to_string()),
+                            Some(format!(
+                                "hard-verifier pass {}/{}",
+                                hard_verifier_repair_attempts,
+                                max_hard_verifier_repair_attempts
+                            )),
+                            Some("verifier".to_string()),
+                        ),
+                    );
+                    continue;
+                }
+                return Err(anyhow!(
+                    "{}",
+                    verification_repair_exhausted_message(
+                        turn_language,
+                        hard_verifier_repair_attempts,
+                        &report.summary,
+                    )
+                ));
             }
             emit_activity(
                 &tx,
@@ -10149,6 +10946,7 @@ async fn run_chat_request_stream(
             }
             match run_parallel_analysis_subagents(
                 provider.clone(),
+                reviewer_provider.clone(),
                 &runtime,
                 plan,
                 &persisted_blocks,
@@ -10411,6 +11209,19 @@ async fn run_chat_request_stream(
         return Ok(());
     }
 
+    if try_finalize_readonly_workspace_analysis_fallback(
+        &tx,
+        &state,
+        &session_id,
+        &runtime,
+        &mut persisted_blocks,
+        stream_mode,
+        turn_language,
+        readonly_workspace_analysis,
+    )? {
+        return Ok(());
+    }
+
     if let Some(plan) = &plan {
         if try_finalize_current_turn_with_hard_verifier(
             &tx,
@@ -10467,21 +11278,31 @@ async fn run_chat_request_stream(
                 Some("main".to_string()),
             ),
         );
-        let extra_rounds = if structured_workflow {
-            240usize
-        } else {
-            96usize
-        };
+        let extra_rounds = if structured_workflow { 32usize } else { 12usize };
         for _ in 0..extra_rounds {
             let turn_start = persisted_blocks.len();
+            let active_tool_definitions: &[Value] = if force_final_answer_mode {
+                &[]
+            } else {
+                tool_definitions.as_slice()
+            };
             let mut request = build_stream_chat_request_with_prompt(
                 &persisted_blocks,
                 &runtime,
                 &dynamic_system_prompt,
                 turn_language,
-                &tool_definitions,
+                active_tool_definitions,
                 state.host.base_dir(),
             )?;
+            if force_final_answer_mode {
+                request.tools = None;
+                request
+                    .messages
+                    .push(Message::user(&final_answer_only_instruction(
+                        turn_language,
+                        readonly_workspace_analysis,
+                    )));
+            }
             if prepared_attachments.has_images {
                 request.model = "qwen3.7-plus".to_string();
                 if !multimodal_sent {
@@ -10565,6 +11386,18 @@ async fn run_chat_request_stream(
                 || (turn.finish_reason.is_some() && turn.tool_calls.is_some());
             if needs_tools {
                 let tool_calls = turn.tool_calls.unwrap_or_default();
+                if force_final_answer_mode && !tool_calls.is_empty() {
+                    if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                        missing_final_answer_repair_attempts =
+                            missing_final_answer_repair_attempts.saturating_add(1);
+                        dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                            turn_language,
+                            readonly_workspace_analysis,
+                        ));
+                        continue;
+                    }
+                    return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
+                }
                 if !tool_calls.is_empty() {
                     execute_tool_calls(
                         &state,
@@ -10579,6 +11412,13 @@ async fn run_chat_request_stream(
                     )
                     .await?;
                     sync_stream_runtime_messages(&state, &session_id, &persisted_blocks);
+                    let readonly_successful_tool_results = if readonly_workspace_analysis {
+                        count_successful_readonly_tool_results(current_turn_messages(
+                            &persisted_blocks,
+                        ))
+                    } else {
+                        0
+                    };
                     if try_finalize_current_turn_with_hard_verifier(
                         &tx,
                         &state,
@@ -10597,6 +11437,16 @@ async fn run_chat_request_stream(
                         false,
                     )? {
                         return Ok(());
+                    }
+                    if readonly_workspace_analysis
+                        && readonly_workspace_evidence_is_sufficient(
+                            current_turn_messages(&persisted_blocks),
+                            readonly_successful_tool_results,
+                        )
+                    {
+                        force_final_answer_mode = true;
+                        dynamic_system_prompt
+                            .push_str(&final_answer_only_system_directive(turn_language, true));
                     }
                 }
             }
@@ -10641,10 +11491,33 @@ async fn run_chat_request_stream(
                     "model emitted XML-style tool payload in assistant text instead of native tool calls"
                 ));
             }
-            if structured_workflow
-                && !needs_tools
+            if !needs_tools
                 && final_turn_ends_with_unfinished_progress(&persisted_blocks[turn_start..])
             {
+                if force_final_answer_mode {
+                    if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                        missing_final_answer_repair_attempts =
+                            missing_final_answer_repair_attempts.saturating_add(1);
+                        dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                            turn_language,
+                            readonly_workspace_analysis,
+                        ));
+                        continue;
+                    }
+                    if try_finalize_readonly_workspace_analysis_fallback(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &mut persisted_blocks,
+                        stream_mode,
+                        turn_language,
+                        readonly_workspace_analysis,
+                    )? {
+                        return Ok(());
+                    }
+                    return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
+                }
                 if premature_finish_repair_attempts < max_protocol_repair_attempts {
                     premature_finish_repair_attempts =
                         premature_finish_repair_attempts.saturating_add(1);
@@ -10674,9 +11547,92 @@ async fn run_chat_request_stream(
                     );
                     continue;
                 }
+                if try_finalize_readonly_workspace_analysis_fallback(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &mut persisted_blocks,
+                    stream_mode,
+                    turn_language,
+                    readonly_workspace_analysis,
+                )? {
+                    return Ok(());
+                }
                 return Err(anyhow!(
                     "model repeatedly ended with unfinished progress narration"
                 ));
+            }
+            if !needs_tools
+                && !final_turn_has_acceptable_assistant_completion(
+                    current_turn_messages(&persisted_blocks),
+                    turn_language,
+                )
+            {
+                if missing_final_answer_repair_attempts < max_protocol_repair_attempts {
+                    missing_final_answer_repair_attempts =
+                        missing_final_answer_repair_attempts.saturating_add(1);
+                    dynamic_system_prompt = format!(
+                        "{}\n\nMissing-final-answer repair directive:\n- The previous model turn stopped without a substantive user-facing final answer after the available tool results.\n- Continue this same user turn immediately. Use more native tools only if evidence is still missing.\n- Otherwise provide the complete answer now, based on the tool results already present.\n- Do not repeat earlier progress narration, do not return an empty response, and do not stop after merely reporting that a tool completed.",
+                        dynamic_system_prompt
+                    );
+                    emit_activity(
+                        &tx,
+                        &state,
+                        &session_id,
+                        &runtime,
+                        &persisted_blocks,
+                        stream_mode,
+                        workflow_activity_event(
+                            "repair",
+                            Some(localized_text(
+                                turn_language,
+                                "工具执行后没有形成最终答复，正在同一轮自动续写",
+                                "No final answer followed the tool results; continuing automatically in the same turn",
+                            )),
+                            Some("repair".to_string()),
+                            Some("running".to_string()),
+                            Some("missing_final_answer".to_string()),
+                            Some("main".to_string()),
+                        ),
+                    );
+                    force_final_answer_mode =
+                        current_turn_messages(&persisted_blocks)
+                            .iter()
+                            .any(|block| {
+                                matches!(
+                                    block,
+                                    MessageBlock::ToolResult { .. } | MessageBlock::Diff { .. }
+                                )
+                            })
+                            && workflow_is_ready_for_forced_final_answer(
+                                plan.as_ref(),
+                                &persisted_blocks,
+                                state.host.base_dir(),
+                                &runtime,
+                                &required_path_snapshots,
+                            );
+                    if force_final_answer_mode {
+                        dynamic_system_prompt.push_str(&final_answer_only_system_directive(
+                            turn_language,
+                            readonly_workspace_analysis,
+                        ));
+                    }
+                    continue;
+                }
+                if try_finalize_readonly_workspace_analysis_fallback(
+                    &tx,
+                    &state,
+                    &session_id,
+                    &runtime,
+                    &mut persisted_blocks,
+                    stream_mode,
+                    turn_language,
+                    readonly_workspace_analysis,
+                )? {
+                    return Ok(());
+                }
+                return Err(anyhow!("{}", missing_final_answer_message(turn_language)));
             }
             if let Some(plan) = &plan {
                 if try_finalize_current_turn_with_hard_verifier(
@@ -10799,6 +11755,18 @@ async fn run_chat_request_stream(
     if rounds_with_real_progress == 0 {
         return Err(anyhow!("{}", no_verifiable_progress_message(turn_language)));
     }
+    if try_finalize_readonly_workspace_analysis_fallback(
+        &tx,
+        &state,
+        &session_id,
+        &runtime,
+        &mut persisted_blocks,
+        stream_mode,
+        turn_language,
+        readonly_workspace_analysis,
+    )? {
+        return Ok(());
+    }
     Err(anyhow!(
         "{}",
         round_limit_without_completion_message(turn_language, incomplete_required_paths)
@@ -10815,7 +11783,6 @@ fn finalize_stream_success(
     language: TurnLanguage,
     completion_detail: &str,
 ) -> Result<()> {
-    mark_stream_terminal_emitted(state, session_id);
     let runtime_files = lock_stream_runtime(state)
         .ok()
         .and_then(|sessions| {
@@ -10840,6 +11807,12 @@ fn finalize_stream_success(
         merge_runtime_thinking_into_messages(&finalized_blocks, &runtime_files.2);
     let finalized_blocks =
         ensure_final_turn_assistant_summary(&finalized_blocks, stream_mode, language);
+    if !final_turn_has_acceptable_assistant_completion(
+        current_turn_messages(&finalized_blocks),
+        language,
+    ) {
+        return Err(anyhow!("{}", missing_final_answer_message(language)));
+    }
     {
         emit_activity(
             tx,
@@ -10877,7 +11850,7 @@ fn finalize_stream_success(
             Some("main".to_string()),
         ),
     );
-    let final_messages = messages_to_web(&finalized_blocks);
+    let final_messages = messages_to_stream_web(&finalized_blocks);
     emit_activity(
         tx,
         state,
@@ -10894,42 +11867,47 @@ fn finalize_stream_success(
             Some("main".to_string()),
         ),
     );
-    let _ = tx.send(StreamEnvelope {
-        r#type: "complete".to_string(),
-        session_id: Some(session_id.to_string()),
-        messages: Some(final_messages),
-        delta: None,
-        thinking_delta: None,
-        error: None,
-        activity: Some(workflow_activity_event(
-            "complete",
-            Some(completion_detail.to_string()),
-            Some("finalize".to_string()),
-            Some("complete".to_string()),
-            None,
-            Some("main".to_string()),
-        )),
-        tool: None,
-        permission: None,
-        edited_files: None,
-        research: current_research_payload(
-            state,
-            Some(session_id),
-            runtime,
-            &finalized_blocks,
-            stream_mode,
-        ),
-        subagents: None,
-        verifier: None,
-        auto_skills: lock_stream_runtime(state)
-            .ok()
-            .and_then(|sessions| {
-                sessions
-                    .get(session_id)
-                    .map(|session| session.auto_skills.clone())
-            })
-            .filter(|items| !items.is_empty()),
-    });
+    let terminal_sent = tx
+        .send(StreamEnvelope {
+            r#type: "complete".to_string(),
+            session_id: Some(session_id.to_string()),
+            messages: Some(final_messages),
+            delta: None,
+            thinking_delta: None,
+            error: None,
+            activity: Some(workflow_activity_event(
+                "complete",
+                Some(completion_detail.to_string()),
+                Some("finalize".to_string()),
+                Some("complete".to_string()),
+                None,
+                Some("main".to_string()),
+            )),
+            tool: None,
+            permission: None,
+            edited_files: None,
+            research: current_research_payload(
+                state,
+                Some(session_id),
+                runtime,
+                &finalized_blocks,
+                stream_mode,
+            ),
+            subagents: None,
+            verifier: None,
+            auto_skills: lock_stream_runtime(state)
+                .ok()
+                .and_then(|sessions| {
+                    sessions
+                        .get(session_id)
+                        .map(|session| session.auto_skills.clone())
+                })
+                .filter(|items| !items.is_empty()),
+        })
+        .is_ok();
+    if terminal_sent {
+        mark_stream_terminal_emitted(state, session_id);
+    }
     schedule_server_side_paper_workflow(state, Some(session_id), "auto_finalize");
 
     ingest_chat_turn_into_research_os(
@@ -11051,7 +12029,6 @@ fn finalize_stream_failure(
     language: TurnLanguage,
     err: &str,
 ) {
-    mark_stream_terminal_emitted(state, session_id);
     let mut final_messages = None;
     if let Ok((runtime, persisted_blocks)) = recover_stream_finalize_context(state, session_id) {
         let runtime_files = lock_stream_runtime(state)
@@ -11080,25 +12057,30 @@ fn finalize_stream_failure(
         if let Ok(mut session_manager) = lock_session_manager(state) {
             let _ = session_manager.save_messages_for(session_id, &merged_messages);
         }
-        final_messages = Some(messages_to_web(&merged_messages));
+        final_messages = Some(messages_to_stream_web(&merged_messages));
+    }
+    let terminal_sent = tx
+        .send(StreamEnvelope {
+            r#type: "error".to_string(),
+            session_id: Some(session_id.to_string()),
+            messages: final_messages,
+            delta: None,
+            thinking_delta: None,
+            error: Some(err.to_string()),
+            activity: None,
+            tool: None,
+            permission: None,
+            edited_files: None,
+            research: None,
+            subagents: None,
+            verifier: None,
+            auto_skills: None,
+        })
+        .is_ok();
+    if terminal_sent {
+        mark_stream_terminal_emitted(state, session_id);
     }
     clear_stream_runtime_session(state, session_id);
-    let _ = tx.send(StreamEnvelope {
-        r#type: "error".to_string(),
-        session_id: Some(session_id.to_string()),
-        messages: final_messages,
-        delta: None,
-        thinking_delta: None,
-        error: Some(err.to_string()),
-        activity: None,
-        tool: None,
-        permission: None,
-        edited_files: None,
-        research: None,
-        subagents: None,
-        verifier: None,
-        auto_skills: None,
-    });
 }
 
 fn merge_required_paths_into_plan(
@@ -11146,9 +12128,9 @@ fn append_stream_failure_message(
     }
 
     let already_recorded = messages.iter().rev().any(|block| match block {
-        MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
-            content.contains(trimmed)
-        }
+        MessageBlock::Assistant { content }
+        | MessageBlock::AssistantStreaming { content }
+        | MessageBlock::Error { content } => content.contains(trimmed),
         _ => false,
     });
     if already_recorded {
@@ -11172,13 +12154,14 @@ fn append_stream_failure_message(
     };
 
     if completion_gate_error {
-        push_assistant_message_blocks(messages, public_detail);
+        messages.push(MessageBlock::Error {
+            content: public_detail,
+        });
         return;
     }
 
-    push_assistant_message_blocks(
-        messages,
-        localized_string(
+    messages.push(MessageBlock::Error {
+        content: localized_string(
             language,
             format!(
                 "\u{8fd9}\u{8f6e}\u{6267}\u{884c}\u{88ab}\u{5916}\u{90e8}\u{670d}\u{52a1}\u{6253}\u{65ad}\u{4e86}\u{ff1a}{}\u{3002}\u{6211}\u{5df2}\u{7ecf}\u{4fdd}\u{7559}\u{5f53}\u{524d}\u{5de5}\u{4f5c}\u{533a}\u{6539}\u{52a8}\u{548c}\u{6267}\u{884c}\u{75d5}\u{8ff9}\u{ff0c}\u{7ee7}\u{7eed}\u{672c}\u{8f6e}\u{540e}\u{4f1a}\u{4ece}\u{8fd9}\u{91cc}\u{63a5}\u{7740}\u{5b8c}\u{6210}\u{5269}\u{4f59}\u{5199}\u{5165}\u{4e0e}\u{9a8c}\u{8bc1}\u{3002}",
@@ -11189,11 +12172,19 @@ fn append_stream_failure_message(
                 public_detail
             ),
         ),
-    );
+    });
 }
 
 fn is_completion_gate_error(err: &str) -> bool {
     err.starts_with("[completion-gate]")
+}
+
+fn missing_final_answer_message(language: TurnLanguage) -> String {
+    localized_text(
+        language,
+        "[completion-gate] 工具执行已经结束，但模型在自动续写后仍未给出面向用户的完整答复。工具结果和当前进度已保留；本轮不会被伪装成成功。",
+        "[completion-gate] Tool execution finished, but the model still did not produce a complete user-facing answer after automatic continuation. Tool results and current progress were preserved; the turn will not masquerade as success.",
+    )
 }
 
 fn verification_repair_exhausted_message(
@@ -11382,7 +12373,138 @@ fn provider_supports_streaming_tools(runtime: &RuntimeSettings) -> bool {
         return true;
     }
 
+    if is_ollama_api_url(&api_url) {
+        return true;
+    }
+
     false
+}
+
+fn is_ollama_api_url(api_url: &str) -> bool {
+    let normalized = api_url.trim().to_ascii_lowercase();
+    normalized.contains("ollama")
+        || normalized.contains("127.0.0.1:11434")
+        || normalized.contains("localhost:11434")
+}
+
+fn provider_api_key(runtime: &RuntimeSettings, fallback: Option<String>) -> Option<String> {
+    if is_ollama_api_url(&runtime.api_url) {
+        None
+    } else {
+        runtime.api_key.clone().or(fallback)
+    }
+}
+
+fn update_provider_api_key(runtime: &mut RuntimeSettings, requested: Option<String>) {
+    if is_ollama_api_url(&runtime.api_url) {
+        return;
+    }
+    if let Some(key) = requested {
+        let key = key.trim();
+        if !key.is_empty() {
+            runtime.api_key = Some(key.to_string());
+        }
+    }
+}
+
+fn normalize_ollama_api_url(input: &str) -> String {
+    let trimmed = input.trim().trim_end_matches('/');
+    let base = if trimmed.is_empty() {
+        "http://127.0.0.1:11434"
+    } else if let Some(prefix) = trimmed.strip_suffix("/v1/chat/completions") {
+        prefix
+    } else if let Some(prefix) = trimmed.strip_suffix("/v1") {
+        // The OpenAI-compatible Ollama endpoint is frequently configured as
+        // `http://host:11434/v1`.  Discovery belongs to the native service
+        // root (`/api/tags`), not under that compatibility prefix.
+        prefix
+    } else if let Some(prefix) = trimmed.strip_suffix("/api/chat") {
+        prefix
+    } else if let Some(prefix) = trimmed.strip_suffix("/api/tags") {
+        prefix
+    } else {
+        trimmed
+    };
+    format!("{}/api/tags", base.trim_end_matches('/'))
+}
+
+async fn fetch_ollama_models(api_url: &str) -> Result<OllamaModelsPayload> {
+    #[derive(Debug, Deserialize)]
+    struct OllamaTagsResponse {
+        #[serde(default)]
+        models: Vec<OllamaTagModel>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OllamaTagModel {
+        name: String,
+        #[serde(default)]
+        size: Option<u64>,
+        #[serde(default)]
+        details: Option<OllamaModelDetails>,
+        #[serde(default)]
+        capabilities: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OllamaModelDetails {
+        #[serde(default)]
+        parameter_size: Option<String>,
+        #[serde(default)]
+        context_length: Option<u64>,
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|err| anyhow!("failed to create Ollama client: {}", err))?;
+    let response = match client.get(api_url).send().await {
+        Ok(response) => response,
+        Err(err) => {
+            return Ok(OllamaModelsPayload {
+                available: false,
+                api_url: api_url.to_string(),
+                models: Vec::new(),
+                error: Some(format!("Ollama is unavailable at {}: {}", api_url, err)),
+            })
+        }
+    };
+    if !response.status().is_success() {
+        return Ok(OllamaModelsPayload {
+            available: false,
+            api_url: api_url.to_string(),
+            models: Vec::new(),
+            error: Some(format!("Ollama returned HTTP {}", response.status())),
+        });
+    }
+    let payload: OllamaTagsResponse = response
+        .json()
+        .await
+        .map_err(|err| anyhow!("failed to parse Ollama model list: {}", err))?;
+    let models = payload
+        .models
+        .into_iter()
+        .map(|model| OllamaModelInfo {
+            name: model.name,
+            size_bytes: model.size,
+            parameter_size: model
+                .details
+                .as_ref()
+                .and_then(|details| details.parameter_size.clone()),
+            context_length: model
+                .details
+                .as_ref()
+                .and_then(|details| details.context_length),
+            capabilities: model.capabilities,
+        })
+        .collect();
+    Ok(OllamaModelsPayload {
+        available: true,
+        api_url: api_url.to_string(),
+        models,
+        error: None,
+    })
 }
 
 fn provider_supports_native_tool_history(runtime: &RuntimeSettings) -> bool {
@@ -11461,16 +12583,29 @@ fn build_streaming_provider(
     } else {
         runtime.api_url.clone()
     };
-    let api_key = runtime
-        .api_key
-        .clone()
-        .or_else(|| state.assistant_api_key.clone())
-        .unwrap_or_default();
+    let api_key = provider_api_key(runtime, state.assistant_api_key.clone()).unwrap_or_default();
 
     Ok(Arc::new(OpenAIProvider::with_base_url(
         api_key,
         api_url,
         Some(runtime.model.clone()),
+    )))
+}
+
+fn build_reviewer_provider(
+    state: &WebAppState,
+    runtime: &RuntimeSettings,
+) -> Result<Arc<dyn LLMProvider>> {
+    let api_url = if runtime.api_url.trim().is_empty() {
+        state.assistant_api_url.clone()
+    } else {
+        runtime.api_url.clone()
+    };
+    let api_key = provider_api_key(runtime, state.assistant_api_key.clone()).unwrap_or_default();
+    Ok(Arc::new(OpenAIProvider::with_base_url(
+        api_key,
+        api_url,
+        Some(REVIEW_MODEL.to_string()),
     )))
 }
 
@@ -11755,6 +12890,12 @@ fn should_compress_context(messages: &[MessageBlock], model: &str) -> bool {
 
 fn model_context_window(model: &str) -> usize {
     let normalized = model.trim().to_ascii_lowercase();
+    if normalized.starts_with("qwen3.5:") {
+        return 262_144;
+    }
+    if normalized.starts_with("gpt-oss:") {
+        return 131_072;
+    }
     if normalized.contains("qwen3.7")
         || normalized.contains("qwen3.6")
         || normalized.contains("qwen3.5-plus")
@@ -12277,7 +13418,9 @@ fn upsert_diff_block(persisted_blocks: &mut Vec<MessageBlock>, diff: FileDiff) {
 fn system_prompt_for_mode(mode: Option<&str>) -> String {
     match mode.unwrap_or("chat").trim().to_ascii_lowercase().as_str() {
         "research" => research_mode_system_prompt(),
-        "agent" => agent_mode_system_prompt(),
+        "agent" | "goal" | "plan" | "review" | "status" | "compact" => {
+            agent_mode_system_prompt()
+        }
         _ => chat_mode_system_prompt(),
     }
 }
@@ -12389,13 +13532,19 @@ fn append_research_os_context_prompt(
             (item.similarity_score * 1000.0) as usize,
         ))
     });
-    let mut memories = list_memory_entries(&workspace).unwrap_or_default();
-    memories.sort_by_key(|item| {
-        std::cmp::Reverse((
-            relevance(&item.content),
-            (item.importance * 1000.0) as usize,
-        ))
-    });
+    let memories_all = list_memory_entries(&workspace).unwrap_or_default();
+    let ranked_memory_texts = knowledge_base::rank_memory_texts(
+        user_content,
+        &memories_all
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<Vec<_>>(),
+        5,
+    );
+    let memories = ranked_memory_texts
+        .iter()
+        .filter_map(|content| memories_all.iter().find(|item| item.content == *content))
+        .collect::<Vec<_>>();
     if hypotheses.is_empty() && failures.is_empty() && memories.is_empty() {
         return;
     }
@@ -12631,6 +13780,16 @@ fn deepseek_supports_reasoning_controls(runtime: &RuntimeSettings) -> bool {
 }
 
 fn provider_thinking_mode(runtime: &RuntimeSettings, has_tools: bool) -> Option<String> {
+    if is_ollama_api_url(&runtime.api_url) {
+        return Some(
+            if runtime.deep_think {
+                "enabled"
+            } else {
+                "disabled"
+            }
+            .to_string(),
+        );
+    }
     if !deepseek_supports_reasoning_controls(runtime) {
         return None;
     }
@@ -12650,6 +13809,9 @@ fn provider_thinking_mode(runtime: &RuntimeSettings, has_tools: bool) -> Option<
 }
 
 fn provider_reasoning_effort(runtime: &RuntimeSettings) -> Option<String> {
+    if is_ollama_api_url(&runtime.api_url) {
+        return None;
+    }
     if !deepseek_supports_reasoning_controls(runtime) {
         return None;
     }
@@ -12673,7 +13835,10 @@ fn provider_reasoning_effort(runtime: &RuntimeSettings) -> Option<String> {
 fn workflow_mode(mode: Option<&str>) -> &'static str {
     match mode.unwrap_or("chat").trim().to_ascii_lowercase().as_str() {
         "research" | "spec" => "research",
+        "goal" => "goal",
+        "plan" => "plan",
         "agent" => "agent",
+        "review" | "status" | "compact" => "agent",
         _ => "chat",
     }
 }
@@ -12685,21 +13850,99 @@ fn is_spec_request(content: &str) -> bool {
         .starts_with("/spec")
 }
 
-fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
-    if is_spec_request(content) {
-        return true;
-    }
-
-    if is_readonly_workspace_analysis_request(content) {
-        return false;
-    }
-
+fn turn_execution_policy(mode: Option<&str>, content: &str) -> TurnExecutionPolicy {
     let normalized_mode = workflow_mode(mode);
-    if matches!(normalized_mode, "agent" | "research") {
-        return true;
+    if matches!(normalized_mode, "research" | "goal" | "plan") || is_spec_request(content) {
+        return TurnExecutionPolicy::Strict;
+    }
+    if is_readonly_workspace_analysis_request(content) {
+        return TurnExecutionPolicy::Direct;
+    }
+    if normalized_mode != "agent" {
+        return TurnExecutionPolicy::Direct;
     }
 
-    false
+    let trimmed = content.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    let strict_signal = [
+        "security audit",
+        "security review",
+        "threat model",
+        "vulnerability",
+        "penetration test",
+        "benchmark",
+        "load test",
+        "stress test",
+        "database migration",
+        "schema migration",
+        "production migration",
+        "production deploy",
+        "release audit",
+        "exhaustive verification",
+        "formally verify",
+        "compliance audit",
+        "data loss",
+        "credential rotation",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || [
+            "\u{5b89}\u{5168}\u{5ba1}\u{8ba1}",
+            "\u{5a01}\u{80c1}\u{5efa}\u{6a21}",
+            "\u{6f0f}\u{6d1e}\u{626b}\u{63cf}",
+            "\u{6027}\u{80fd}\u{57fa}\u{51c6}",
+            "\u{538b}\u{529b}\u{6d4b}\u{8bd5}",
+            "\u{6570}\u{636e}\u{5e93}\u{8fc1}\u{79fb}",
+            "\u{751f}\u{4ea7}\u{8fc1}\u{79fb}",
+            "\u{751f}\u{4ea7}\u{90e8}\u{7f72}",
+            "\u{5168}\u{9762}\u{5ba1}\u{8ba1}",
+            "\u{5f62}\u{5f0f}\u{5316}\u{9a8c}\u{8bc1}",
+            "\u{6570}\u{636e}\u{4e22}\u{5931}",
+        ]
+        .iter()
+        .any(|needle| trimmed.contains(needle));
+    if strict_signal {
+        return TurnExecutionPolicy::Strict;
+    }
+
+    let adaptive_signal = trimmed.chars().count() > 320
+        || trimmed.lines().filter(|line| !line.trim().is_empty()).count() >= 5
+        || [
+            "across the project",
+            "across the repository",
+            "multiple files",
+            "multi-file",
+            "refactor the project",
+            "large refactor",
+            "breaking change",
+            "backward compatibility",
+            "integration test",
+            "end-to-end test",
+            "verify all",
+        ]
+        .iter()
+        .any(|needle| lowered.contains(needle))
+        || [
+            "\u{6574}\u{4e2a}\u{9879}\u{76ee}",
+            "\u{6574}\u{4e2a}\u{4ed3}\u{5e93}",
+            "\u{591a}\u{6587}\u{4ef6}",
+            "\u{5927}\u{89c4}\u{6a21}\u{91cd}\u{6784}",
+            "\u{7834}\u{574f}\u{6027}\u{53d8}\u{66f4}",
+            "\u{5411}\u{540e}\u{517c}\u{5bb9}",
+            "\u{96c6}\u{6210}\u{6d4b}\u{8bd5}",
+            "\u{7aef}\u{5230}\u{7aef}\u{6d4b}\u{8bd5}",
+        ]
+        .iter()
+        .any(|needle| trimmed.contains(needle));
+    if adaptive_signal {
+        TurnExecutionPolicy::Adaptive
+    } else {
+        TurnExecutionPolicy::Direct
+    }
+}
+
+fn should_run_structured_workflow(mode: Option<&str>, content: &str) -> bool {
+    turn_execution_policy(mode, content).uses_structured_workflow()
 }
 
 fn is_readonly_workspace_analysis_request(content: &str) -> bool {
@@ -12757,6 +14000,333 @@ fn is_readonly_workspace_analysis_request(content: &str) -> bool {
             .iter()
             .any(|needle| trimmed.contains(needle));
     asks_for_workspace && asks_for_analysis && !asks_for_mutation
+}
+
+fn final_answer_only_instruction(
+    language: TurnLanguage,
+    readonly_workspace_analysis: bool,
+) -> String {
+    localized_string(
+        language,
+        if readonly_workspace_analysis {
+            "现在停止调用工具，直接根据本轮已经取得的工作区证据给出最终分析。正文必须包含：项目用途或架构、关键模块、主要代码质量或构建风险，以及建议的下一步。不要再说“让我检查”“接下来读取”，不要输出工具语法，也不要要求用户继续。".to_string()
+        } else {
+            "现在停止调用工具，直接根据本轮已有证据给出完整的面向用户最终答复。说明已完成的结果、关键证据或验证、仍存在的真实限制。不要再输出过程旁白、工具语法、空答复或“请继续”。".to_string()
+        },
+        if readonly_workspace_analysis {
+            "Stop calling tools now and provide the final workspace analysis from the evidence already collected in this turn. Cover the project's purpose or architecture, key modules, important code-quality or build risks, and recommended next steps. Do not narrate another inspection, emit tool syntax, or ask the user to continue.".to_string()
+        } else {
+            "Stop calling tools now and provide the complete user-facing final answer from the evidence already collected in this turn. State the completed outcome, key evidence or verification, and any genuine remaining limitations. Do not emit progress narration, tool syntax, an empty answer, or ask the user to continue.".to_string()
+        },
+    )
+}
+
+fn final_answer_only_system_directive(
+    language: TurnLanguage,
+    readonly_workspace_analysis: bool,
+) -> String {
+    format!(
+        "\n\nFinal-answer-only mode (irreversible for this turn):\n- No tools are available from this point onward. Never request, describe, or simulate another tool call.\n- {}\n- Return substantive user-facing prose in the requested language. A progress sentence, empty response, tool-completion notice, or request to continue is invalid.",
+        final_answer_only_instruction(language, readonly_workspace_analysis)
+    )
+}
+
+fn count_successful_readonly_tool_results(recent_blocks: &[MessageBlock]) -> usize {
+    recent_blocks
+        .iter()
+        .filter_map(|block| match block {
+            MessageBlock::ToolResult {
+                call_id,
+                result,
+                success,
+            } => Some((call_id, result, *success)),
+            _ => None,
+        })
+        .filter(|(call_id, result, success)| {
+            let tool_name =
+                tool_name_by_call_id(recent_blocks, call_id).unwrap_or_else(|| "tool".to_string());
+            if !is_native_readonly_workspace_tool(&tool_name) {
+                return false;
+            }
+            let parsed = parse_tool_result_evidence(&tool_name, result, *success);
+            parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out
+        })
+        .count()
+}
+
+fn readonly_workspace_evidence_is_sufficient(
+    recent_blocks: &[MessageBlock],
+    successful_tool_results: usize,
+) -> bool {
+    let has_successful_overview = recent_blocks.iter().any(|block| {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success,
+        } = block
+        else {
+            return false;
+        };
+        if tool_name_by_call_id(recent_blocks, call_id).as_deref() != Some("workspace_overview") {
+            return false;
+        }
+        let parsed = parse_tool_result_evidence("workspace_overview", result, *success);
+        parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out
+    });
+    let successful_direct_reads = recent_blocks
+        .iter()
+        .filter(|block| {
+            let MessageBlock::ToolResult {
+                call_id,
+                result,
+                success,
+            } = block
+            else {
+                return false;
+            };
+            let Some(tool_name) = tool_name_by_call_id(recent_blocks, call_id) else {
+                return false;
+            };
+            if !matches!(
+                tool_name.as_str(),
+                "read_file" | "read_file_head" | "read_file_range"
+            ) {
+                return false;
+            }
+            let parsed = parse_tool_result_evidence(&tool_name, result, *success);
+            parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out
+        })
+        .count();
+
+    has_successful_overview && (successful_direct_reads >= 2 || successful_tool_results >= 4)
+}
+
+fn workflow_is_ready_for_forced_final_answer(
+    plan: Option<&AgentWorkflowPlan>,
+    messages: &[MessageBlock],
+    base_dir: &Path,
+    runtime: &RuntimeSettings,
+    required_path_snapshots: &[RequiredPathSnapshot],
+) -> bool {
+    let Some(plan) = plan else {
+        return true;
+    };
+    let required_paths_ready = plan.required_paths.is_empty()
+        || required_paths_ready_for_review(base_dir, runtime, plan)
+        || required_paths_likely_satisfied_by_evidence(
+            plan,
+            messages,
+            base_dir,
+            &runtime.workspace_root,
+            required_path_snapshots,
+        );
+    if !required_paths_ready {
+        return false;
+    }
+    let (report, _, _) = build_hard_verifier_report(
+        plan,
+        messages,
+        base_dir,
+        &runtime.workspace_root,
+        required_path_snapshots,
+        TurnLanguage::En,
+    );
+    report.status.eq_ignore_ascii_case("pass")
+}
+
+fn synthesize_readonly_workspace_analysis(
+    recent_blocks: &[MessageBlock],
+    language: TurnLanguage,
+) -> Option<String> {
+    let overview = recent_blocks.iter().rev().find_map(|block| {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success: true,
+        } = block
+        else {
+            return None;
+        };
+        (tool_name_by_call_id(recent_blocks, call_id).as_deref() == Some("workspace_overview"))
+            .then(|| serde_json::from_str::<Value>(result).ok())
+            .flatten()
+    })?;
+
+    let files = overview.pointer("/counts/files").and_then(Value::as_u64);
+    let directories = overview
+        .pointer("/counts/directories")
+        .and_then(Value::as_u64);
+    let mut file_types = overview
+        .pointer("/counts/file_types")
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(name, count)| count.as_u64().map(|count| (name.clone(), count)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    file_types.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let technology_summary = file_types
+        .iter()
+        .take(6)
+        .map(|(name, count)| format!("{} ({})", name, count))
+        .collect::<Vec<_>>()
+        .join("、");
+    let manifests = overview
+        .get("manifests")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .take(8)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let representative_sources = overview
+        .get("representative_sources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("path").and_then(Value::as_str))
+        .take(8)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let directly_read = recent_blocks
+        .iter()
+        .filter_map(|block| {
+            let MessageBlock::ToolResult {
+                call_id,
+                success: true,
+                ..
+            } = block
+            else {
+                return None;
+            };
+            let name = tool_name_by_call_id(recent_blocks, call_id)?;
+            matches!(
+                name.as_str(),
+                "read_file" | "read_file_head" | "read_file_range"
+            )
+            .then(|| tool_args_by_call_id(recent_blocks, call_id))
+            .flatten()
+            .and_then(|args| extract_tool_path(&name, &args))
+        })
+        .fold(Vec::<String>::new(), |mut paths, path| {
+            if !paths
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&path))
+            {
+                paths.push(path);
+            }
+            paths
+        });
+    let key_paths = if directly_read.is_empty() {
+        representative_sources
+    } else {
+        directly_read
+    };
+    let git_branch = overview
+        .pointer("/git/branch")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let changed_paths = overview
+        .pointer("/git/changed_paths")
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let untracked_paths = overview
+        .pointer("/git/changed_paths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|path| path.trim_start().starts_with("??"))
+        .count();
+    let scope = match (files, directories) {
+        (Some(files), Some(directories)) => {
+            format!("{} files / {} directories", files, directories)
+        }
+        (Some(files), None) => format!("{} files", files),
+        _ => "a bounded workspace snapshot".to_string(),
+    };
+    let manifest_text = if manifests.is_empty() {
+        "no recognized build manifest in the bounded scan".to_string()
+    } else {
+        manifests.join("、")
+    };
+    let path_text = if key_paths.is_empty() {
+        "the representative sources returned by the workspace overview".to_string()
+    } else {
+        key_paths
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("、")
+    };
+
+    Some(match language {
+        TurnLanguage::Zh => format!(
+            "## 工作区分析\n\n已完成只读检查，覆盖 {scope}。主要文件类型为：{technology}。构建或项目入口包括：{manifests}。\n\n## 结构与关键模块\n\n工作区采用按源码、头文件/接口、测试与构建配置分层的常规工程结构。本轮已重点取得这些关键路径的证据：{paths}。这些文件应作为后续定位架构边界、数据流和公共接口的首要入口。\n\n## 主要风险\n\n- 构建与依赖约束集中在上述清单文件中，版本、编译标准和平台依赖需要通过真实构建进一步验证。\n- 当前 Git 分支为 `{branch}`，扫描到 {changed} 个变更路径，其中 {untracked} 个为未跟踪路径；在修改前应先确认这些内容是否都应纳入版本控制。\n- 本次是静态只读分析，没有执行编译或测试，因此运行时行为和性能结论仍需以实际验证为准。\n\n## 建议的下一步\n\n先从已读取的关键路径梳理调用关系，再运行项目对应的最小构建与测试；若要继续改进代码，优先处理构建可复现性、公共接口一致性和错误处理。",
+            scope = scope,
+            technology = if technology_summary.is_empty() { "未能从快照中可靠归类" } else { technology_summary.as_str() },
+            manifests = manifest_text,
+            paths = path_text,
+            branch = if git_branch.is_empty() { "unknown" } else { git_branch },
+            changed = changed_paths,
+            untracked = untracked_paths,
+        ),
+        TurnLanguage::En => format!(
+            "## Workspace analysis\n\nThe read-only inspection covered {scope}. The main file types are: {technology}. Recognized build or project entry points include: {manifests}.\n\n## Structure and key modules\n\nThe workspace follows a conventional separation between sources, headers/interfaces, tests, and build configuration. This turn obtained concrete evidence for these key paths: {paths}. They are the best starting points for tracing architecture boundaries, data flow, and public interfaces.\n\n## Main risks\n\n- Build and dependency constraints are concentrated in the listed manifests; versions, language standards, and platform assumptions still need a real build.\n- The current Git branch is `{branch}` with {changed} changed paths in the snapshot, including {untracked} untracked paths; confirm which should be versioned before editing.\n- This was a static read-only analysis, so runtime behavior and performance claims still require compilation and tests.\n\n## Recommended next step\n\nTrace call relationships from the inspected paths, then run the project's smallest deterministic build and test target. Prioritize reproducible builds, consistent public interfaces, and explicit error handling before broader refactors.",
+            scope = scope,
+            technology = if technology_summary.is_empty() { "not reliably classified in the snapshot" } else { technology_summary.as_str() },
+            manifests = manifest_text,
+            paths = path_text,
+            branch = if git_branch.is_empty() { "unknown" } else { git_branch },
+            changed = changed_paths,
+            untracked = untracked_paths,
+        ),
+    })
+}
+
+fn try_finalize_readonly_workspace_analysis_fallback(
+    tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
+    state: &WebAppState,
+    session_id: &str,
+    runtime: &RuntimeSettings,
+    persisted_blocks: &mut Vec<MessageBlock>,
+    stream_mode: Option<&str>,
+    language: TurnLanguage,
+    enabled: bool,
+) -> Result<bool> {
+    if !enabled {
+        return Ok(false);
+    }
+    let turn_blocks = current_turn_messages(persisted_blocks);
+    let successful_tool_results = count_successful_readonly_tool_results(turn_blocks);
+    if !readonly_workspace_evidence_is_sufficient(turn_blocks, successful_tool_results) {
+        return Ok(false);
+    }
+    let Some(summary) = synthesize_readonly_workspace_analysis(turn_blocks, language) else {
+        return Ok(false);
+    };
+    push_assistant_message_blocks(persisted_blocks, summary);
+    sync_stream_runtime_messages(state, session_id, persisted_blocks);
+    finalize_stream_success(
+        tx,
+        state,
+        session_id,
+        runtime,
+        persisted_blocks,
+        stream_mode,
+        language,
+        &localized_text(
+            language,
+            "工作区分析已根据已取得的只读证据完成",
+            "Workspace analysis completed from collected read-only evidence",
+        ),
+    )?;
+    Ok(true)
 }
 
 fn infer_session_research_state(messages: &[MessageBlock]) -> SessionResearchState {
@@ -13185,6 +14755,35 @@ fn progress_key_with_target(base: &str, target: &str) -> String {
     format!("{}:{}", trimmed_base, trimmed_target.to_ascii_lowercase())
 }
 
+fn workspace_stage_target(path: Option<&str>) -> String {
+    let normalized = path.unwrap_or_default().trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return String::new();
+    }
+    let parts = normalized
+        .split('/')
+        .filter(|part| !part.trim().is_empty() && *part != ".")
+        .collect::<Vec<_>>();
+    let file_name = parts.last().copied().unwrap_or_default();
+    let parent = parts
+        .get(parts.len().saturating_sub(2))
+        .copied()
+        .unwrap_or_default();
+    if !parent.is_empty()
+        && !matches!(
+            parent.to_ascii_lowercase().as_str(),
+            "src" | "include" | "lib"
+        )
+    {
+        return parent.to_string();
+    }
+    Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(file_name)
+        .to_string()
+}
+
 fn normalize_progress_fingerprint(text: &str) -> String {
     text.to_ascii_lowercase()
         .chars()
@@ -13218,11 +14817,9 @@ fn tool_progress_narration(
         "pending" | "approved" | "executing" | "running"
     );
     let failed = matches!(normalized_status.as_str(), "failed" | "error" | "denied");
-    let file_name = file_path
-        .map(Path::new)
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
+    let target = file_path
+        .map(|path| path.replace('\\', "/"))
+        .filter(|path| !path.trim().is_empty())
         .unwrap_or_default();
     let is_inspection = matches!(
         normalized_name.as_str(),
@@ -13259,6 +14856,7 @@ fn tool_progress_narration(
             | "run_safe_command"
             | "run_python"
     );
+    let stage_target = workspace_stage_target(file_path);
     let base = match (
         is_inspection,
         is_edit,
@@ -13299,6 +14897,17 @@ fn tool_progress_narration(
         (_, _, _, _, false, true, TurnLanguage::En) => "Tool failed",
         (_, _, _, _, false, false, TurnLanguage::En) => "Tool complete",
     };
+    let base = if running && !stage_target.is_empty() {
+        match (is_inspection, is_edit, language) {
+            (true, _, TurnLanguage::Zh) => format!("正在分析 {} 部分", stage_target),
+            (_, true, TurnLanguage::Zh) => format!("现在实现 {} 部分", stage_target),
+            (true, _, TurnLanguage::En) => format!("Analyzing the {} module", stage_target),
+            (_, true, TurnLanguage::En) => format!("Implementing the {} module", stage_target),
+            _ => base.to_string(),
+        }
+    } else {
+        base.to_string()
+    };
     let result_detail = if failed {
         result
             .map(str::trim)
@@ -13308,20 +14917,20 @@ fn tool_progress_narration(
     } else {
         String::new()
     };
-    let detail = if !file_name.is_empty() {
-        file_name.to_string()
+    let detail = if !target.is_empty() {
+        target.clone()
     } else {
         result_detail
     };
     let text = if detail.is_empty() {
-        base.to_string()
+        base
     } else {
         format!("{} · {}", base, detail)
     };
     Some(ProgressNarration {
         text,
         dedupe_key: format!(
-            "tool:{}:{}",
+            "tool:{}:{}:{}",
             normalized_name,
             if running {
                 "run"
@@ -13329,7 +14938,8 @@ fn tool_progress_narration(
                 "fail"
             } else {
                 "done"
-            }
+            },
+            target.to_ascii_lowercase(),
         ),
     })
 }
@@ -14689,6 +16299,10 @@ fn current_turn_start_index(messages: &[MessageBlock]) -> usize {
         .unwrap_or(0)
 }
 
+fn current_turn_messages(messages: &[MessageBlock]) -> &[MessageBlock] {
+    &messages[current_turn_start_index(messages)..]
+}
+
 fn current_turn_blocks(messages: &[MessageBlock]) -> &[MessageBlock] {
     &messages[current_turn_start_index(messages)..]
 }
@@ -14721,6 +16335,64 @@ fn tool_result_identity(messages: &[MessageBlock], call_id: &str) -> (String, Op
         .and_then(|args| extract_tool_path(&tool_name, &args))
         .map(|path| path.to_ascii_lowercase());
     (tool_name, tool_path)
+}
+
+fn tool_recovery_family(tool_name: &str) -> Option<&'static str> {
+    match tool_name.trim().to_ascii_lowercase().as_str() {
+        "write_file"
+        | "edit_file"
+        | "apply_patch"
+        | "search_and_replace"
+        | "search_and_replace_multi" => Some("workspace-write"),
+        "read_file"
+        | "read_file_head"
+        | "read_file_range"
+        | "grep"
+        | "search_content"
+        | "search_files"
+        | "search_workspace_text"
+        | "symbol_search"
+        | "document_symbols"
+        | "workspace_symbols"
+        | "references_search" => Some("workspace-read"),
+        "inspect_path" | "get_file_info" => Some("workspace-inspect"),
+        _ => None,
+    }
+}
+
+fn successful_tool_result_supersedes_failure(
+    failed_name: &str,
+    failed_path: Option<&str>,
+    successful_name: &str,
+    successful_path: Option<&str>,
+) -> bool {
+    let same_path = matches!((failed_path, successful_path), (Some(left), Some(right)) if left == right);
+    if !same_path {
+        return false;
+    }
+    failed_name.eq_ignore_ascii_case(successful_name)
+        || matches!(
+            (tool_recovery_family(failed_name), tool_recovery_family(successful_name)),
+            (Some(left), Some(right)) if left == right
+        )
+}
+
+fn is_unsupported_tool_failure(evidence: &VerificationEvidence) -> bool {
+    let corpus = format!(
+        "{}\n{}\n{}",
+        evidence.stdout, evidence.stderr, evidence.summary
+    )
+    .to_ascii_lowercase();
+    [
+        "unknown tool",
+        "unsupported tool",
+        "tool is not available",
+        "tool not available",
+        "unrecognized tool",
+        "no such tool",
+    ]
+    .iter()
+    .any(|needle| corpus.contains(needle))
 }
 
 fn collect_runtime_artifact_paths_for_turn(
@@ -15236,6 +16908,14 @@ fn research_execution_contract_prompt(language: TurnLanguage) -> String {
         language,
         "研究执行契约（研究任务必须满足）：\n- 先定义可证伪问题、主要指标、停止条件和资源预算。\n- 数据驱动任务必须先检索合适的官方数据集/任务集/benchmark 入口，再冻结带 provider、source_url、retrieval_entrypoint、版本/哈希、许可和 task_hint 的 manifest；不得在看到结果后换数据。\n- 在首次运行前记录 environment manifest：OS、运行时版本、依赖或锁文件、CPU/GPU/内存，以及可复现命令。\n- 固定随机种子和 train/validation/test 或等价切分，保存 split manifest；防止数据泄漏。\n- 至少执行一个可解释 baseline 和一个当前方法/变体；适用时做消融或多次运行，报告方差或运行间变化。\n- 失败是研究证据：保留失败原因，做有依据的修复，然后复测；不要静默丢弃失败运行。\n- 交付 metrics、误差/失败分析、运行日志、产物路径、lineage，以及可从干净环境执行的复现命令。\n- reviewer 和 hard verifier 未逐项通过前不得声称研究完成或论文就绪。",
         "Research execution contract (mandatory for research turns):\n- Define a falsifiable question, primary metric, stopping criteria, and resource budget first.\n- For data-driven work, discover a suitable official dataset/task-suite/benchmark entrypoint, then freeze a manifest with provider, source_url, retrieval_entrypoint, version/hash, license, and task_hint; never switch data after seeing results.\n- Before the first run, record an environment manifest covering OS, runtime versions, dependencies or lockfiles, CPU/GPU/memory, and the exact reproduction command.\n- Fix random seeds and train/validation/test or equivalent splits in a split manifest and check for leakage.\n- Run at least one interpretable baseline and one current method/variant; add ablations or repeated runs where applicable and report variance or run-to-run changes.\n- Treat failures as research evidence: preserve the cause, make an evidence-based repair, and re-test instead of silently discarding failed runs.\n- Deliver metrics, error/failure analysis, logs, artifact paths, lineage, and a clean-environment reproduction command.\n- Do not claim the research or paper is complete until reviewer and hard-verifier checks pass item by item.",
+    )
+}
+
+fn goal_execution_contract_prompt(language: TurnLanguage) -> String {
+    localized_text(
+        language,
+        "目标持续执行契约（/goal 必须满足）：\n- 把用户给出的目标作为本轮唯一完成条件；在确定性验证通过前，不得用阶段性进展、计划或‘下一步’作为最终答复，也不得要求用户输入‘继续’。\n- 先建立 2–6 步计划、可观察验收条件、精确目标路径（如有）和安全边界；每轮只执行能产生新证据的最小动作。\n- 复用已成功的读取、工具结果、差异和测试证据。相同工具+相同参数成功后不得重复；失败后不得原样重试，必须改变参数、工具或路径，并说明新证据来源。\n- 无新进展时依次切换查询/工具、隔离阻塞步骤、推进独立步骤；达到停滞阈值后以真实阻塞安全退出，不得无限空转。\n- /goal 不扩大权限。文件删除、递归移动、Git 写入/推送、远程执行、进程终止、外部副作用、凭据或高风险命令始终需要现有审批；不得为了达成目标拆分、伪装或批量触发危险操作。\n- 单轮高风险调用被拒绝、限流或连续失败后，停止同类调用并改用安全替代方案；没有安全替代时报告准确阻塞。\n- 只有硬验证逐项通过，或同一真实阻塞经不同安全路径验证后，才可结束。成功答复必须给出目标、完成证据、验证结果和剩余风险。",
+        "Persistent goal contract (mandatory for /goal):\n- Treat the user's goal as the only completion condition for this turn. Before deterministic verification passes, do not finalize with progress, a plan, or a next step, and never ask the user to type continue.\n- First establish a 2–6 step plan, observable acceptance criteria, exact target paths when supplied, and explicit safety boundaries. Each round must take the smallest action that can produce new evidence.\n- Reuse successful reads, tool results, diffs, and tests. Never repeat an identical successful tool+argument call. After failure, do not retry unchanged; change the parameters, tool, or path and identify the new evidence source.\n- On stagnation, switch query/tool strategy, isolate the blocked step, then advance independent work. At the stagnation threshold, exit safely with a concrete blocker instead of looping.\n- /goal does not broaden authority. Deletion, recursive moves, Git writes/pushes, remote execution, process termination, external side effects, credentials, and high-risk commands remain behind existing approval gates. Never split, disguise, or batch dangerous actions to reach the goal.\n- After a high-risk action is denied, rate-limited, or repeatedly fails, stop that action class and use a safer alternative; if none exists, report the exact blocker.\n- End only after every hard-verifier check passes, or after the same genuine blocker is confirmed through materially different safe paths. A success response must state the goal, completion evidence, verification, and residual risk.",
     )
 }
 
@@ -15774,34 +17454,46 @@ fn required_paths_ready_for_review(
         .all(|snapshot| snapshot.absolute_path.exists())
 }
 
-fn dynamic_turn_round_limit(plan: Option<&AgentWorkflowPlan>, structured_workflow: bool) -> usize {
-    let base = if structured_workflow {
-        180usize
-    } else {
-        96usize
+fn dynamic_turn_round_limit(
+    plan: Option<&AgentWorkflowPlan>,
+    policy: TurnExecutionPolicy,
+    runtime: &RuntimeSettings,
+) -> usize {
+    let base = match policy {
+        TurnExecutionPolicy::Direct => 16usize,
+        TurnExecutionPolicy::Adaptive => 40usize,
+        TurnExecutionPolicy::Strict => 120usize,
     };
     let Some(plan) = plan else {
-        return base;
+        return if runtime.long_task_enabled {
+            base.min(runtime.max_autonomous_rounds)
+        } else {
+            base.min(24)
+        };
     };
 
     let step_bonus = plan
         .steps
         .len()
-        .saturating_sub(if structured_workflow { 4 } else { 3 })
-        * 12;
-    let required_path_bonus = plan.required_paths.len().min(10) * 18;
-    let verification_bonus = plan.verification.len().min(12) * 10;
+        .saturating_sub(if policy == TurnExecutionPolicy::Strict {
+            4
+        } else {
+            3
+        })
+        * 6;
+    let required_path_bonus = plan.required_paths.len().min(10) * 8;
+    let verification_bonus = plan.verification.len().min(12) * 4;
     let workflow_bonus = if plan.workflow_kind.eq_ignore_ascii_case("research") {
-        180
+        48
     } else {
         0
     };
     let long_plan_bonus =
         if plan.steps.len() + plan.verification.len() + plan.required_paths.len() >= 12 {
-            if structured_workflow {
-                180
-            } else {
-                96
+            match policy {
+                TurnExecutionPolicy::Direct => 8,
+                TurnExecutionPolicy::Adaptive => 24,
+                TurnExecutionPolicy::Strict => 48,
             }
         } else {
             0
@@ -15814,9 +17506,19 @@ fn dynamic_turn_round_limit(plan: Option<&AgentWorkflowPlan>, structured_workflo
         + workflow_bonus
         + long_plan_bonus;
     if plan.workflow_kind.eq_ignore_ascii_case("research") {
-        limit = limit.max(if structured_workflow { 720 } else { 420 });
+        limit = limit.max(180);
     }
-    limit.clamp(base, if structured_workflow { 1800 } else { 900 })
+    let ceiling = match policy {
+        TurnExecutionPolicy::Direct => 24,
+        TurnExecutionPolicy::Adaptive => 72,
+        TurnExecutionPolicy::Strict => 360,
+    };
+    let configured_ceiling = if runtime.long_task_enabled {
+        runtime.max_autonomous_rounds.clamp(16, 360)
+    } else {
+        24
+    };
+    limit.clamp(base.min(configured_ceiling), ceiling.min(configured_ceiling))
 }
 
 fn verifier_report_has_only_soft_evidence_gaps(report: &AgentVerifierReport) -> bool {
@@ -16018,7 +17720,7 @@ fn build_hard_verifier_report(
     let mut saw_missing_failure_recovery = false;
     let mut target_evidence_pool = Vec::new();
     let mut changed_file_lookup = BTreeSet::new();
-    let mut successful_tool_targets = BTreeSet::new();
+    let mut successful_tool_targets = Vec::new();
     let runtime_artifact_paths =
         collect_runtime_artifact_paths_for_turn(messages, base_dir, workspace_root);
     let plan_has_runtime_step = plan
@@ -16037,7 +17739,7 @@ fn build_hard_verifier_report(
             )
         });
 
-    for block in turn_blocks {
+    for (block_index, block) in turn_blocks.iter().enumerate() {
         if let MessageBlock::ToolResult {
             call_id,
             result,
@@ -16048,12 +17750,12 @@ fn build_hard_verifier_report(
             let parsed = parse_tool_result_evidence(&tool_name, result, *success);
             let passed = parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
             if passed {
-                successful_tool_targets.insert((tool_name, tool_path));
+                successful_tool_targets.push((block_index, tool_name, tool_path));
             }
         }
     }
 
-    for block in turn_blocks {
+    for (block_index, block) in turn_blocks.iter().enumerate() {
         match block {
             MessageBlock::ToolResult {
                 call_id,
@@ -16066,7 +17768,24 @@ fn build_hard_verifier_report(
                 let passed =
                     parsed.success && parsed.exit_code.unwrap_or(0) == 0 && !parsed.timed_out;
                 let is_superseded_failure = !passed
-                    && successful_tool_targets.contains(&(tool_name.clone(), tool_path.clone()));
+                    && successful_tool_targets.iter().any(
+                        |(successful_index, successful_name, successful_path)| {
+                            *successful_index > block_index
+                                && successful_tool_result_supersedes_failure(
+                                    &tool_name,
+                                    tool_path.as_deref(),
+                                    successful_name,
+                                    successful_path.as_deref(),
+                                )
+                        },
+                    );
+                let is_capability_probe_failure = !passed
+                    && is_unsupported_tool_failure(&parsed)
+                    && matches!(
+                        tool_recovery_family(&tool_name),
+                        Some("workspace-read" | "workspace-inspect")
+                    );
+                let is_recovered_failure = is_superseded_failure || is_capability_probe_failure;
                 if matches!(
                     tool_name.as_str(),
                     "run_command"
@@ -16080,7 +17799,7 @@ fn build_hard_verifier_report(
                 ) {
                     if passed {
                         has_successful_runtime = true;
-                    } else if !is_superseded_failure {
+                    } else if !is_recovered_failure {
                         has_failed_runtime = true;
                     }
                 }
@@ -16138,11 +17857,11 @@ fn build_hard_verifier_report(
                         "failed",
                     ],
                 ) && !passed
-                    && !is_superseded_failure
+                    && !is_recovered_failure
                 {
                     saw_test_failure = true;
                 }
-                if !passed && !is_superseded_failure {
+                if !passed && !is_recovered_failure {
                     let detail = if parsed.timed_out {
                         match language {
                             TurnLanguage::Zh => format!("{} 执行超时", tool_name),
@@ -16175,16 +17894,24 @@ fn build_hard_verifier_report(
                         .filter(|item| !item.trim().is_empty())
                         .collect(),
                     });
-                } else if is_superseded_failure {
+                } else if is_recovered_failure {
                     checks.push(AgentVerifierCheck {
                         id: format!("tool-{}", call_id),
                         title: tool_name.clone(),
                         status: "skipped".to_string(),
-                        detail: localized_text(
-                            language,
-                            "同一工具目标后续已成功重试，因此更早的失败已被覆盖",
-                            "Earlier failure was superseded by a later successful retry for the same tool target",
-                        ),
+                        detail: if is_capability_probe_failure {
+                            localized_text(
+                                language,
+                                "不可用工具的能力探测不算任务失败，可以继续使用替代证据",
+                                "Unavailable-tool capability probe does not count as a task failure; alternative evidence may be used",
+                            )
+                        } else {
+                            localized_text(
+                                language,
+                                "同一工作区目标后续已由等价工具成功完成，因此更早的失败已被覆盖",
+                                "Earlier failure was superseded by a later successful equivalent tool for the same workspace target",
+                            )
+                        },
                         evidence: vec![
                             tail_string(&parsed.stderr, 180),
                             tail_string(&parsed.summary, 180),
@@ -16537,7 +18264,7 @@ fn build_hard_verifier_report(
             }
         }
 
-        let tool_path_hit = successful_tool_targets.iter().any(|(_, path)| {
+        let tool_path_hit = successful_tool_targets.iter().any(|(_, _, path)| {
             path.as_ref().is_some_and(|candidate| {
                 candidate.contains(&lowered)
                     || absolute_path.as_ref().is_some_and(|resolved| {
@@ -16979,9 +18706,18 @@ async fn provider_completion(
     runtime: &RuntimeSettings,
     messages: Vec<Message>,
 ) -> Result<String> {
+    provider_completion_with_model(provider, runtime, &runtime.model, messages).await
+}
+
+async fn provider_completion_with_model(
+    provider: Arc<dyn LLMProvider>,
+    runtime: &RuntimeSettings,
+    model: &str,
+    messages: Vec<Message>,
+) -> Result<String> {
     let response = provider
         .chat(ChatRequest {
-            model: runtime.model.clone(),
+            model: model.to_string(),
             messages,
             multimodal_content: None,
             temperature: 0.2,
@@ -16995,6 +18731,53 @@ async fn provider_completion(
         })
         .await?;
     Ok(strip_emoji(&response.content))
+}
+
+async fn build_subagent_context_for_call(
+    provider: Arc<dyn LLMProvider>,
+    runtime: &RuntimeSettings,
+    messages: &[MessageBlock],
+    task: &str,
+) -> SubagentContextObject {
+    build_subagent_context_for_model(provider, runtime, messages, task, &runtime.model).await
+}
+
+async fn build_subagent_context_for_model(
+    provider: Arc<dyn LLMProvider>,
+    runtime: &RuntimeSettings,
+    messages: &[MessageBlock],
+    task: &str,
+    model: &str,
+) -> SubagentContextObject {
+    let fallback = deterministic_context(&runtime.subagent_context, messages, task);
+    if runtime.subagent_context.mode != SubagentContextMode::LlmGenerated {
+        return fallback;
+    }
+
+    let prompt = format!(
+        "Generate a compact structured context object for a subagent. Return JSON only.\n\
+         Preserve the schema keys task, shared_facts, recent_dialogue, relevant_tool_results, and privacy_applied.\n\
+         Never add information absent from the redacted fallback. Apply these business/privacy rules:\n{}\n\
+         Subagent task:\n{}\n\nRedacted fallback context:\n{}",
+        runtime.subagent_context.privacy_rules,
+        fallback.task,
+        fallback.to_prompt(),
+    );
+    let generated = provider_completion_with_model(
+        provider,
+        runtime,
+        model,
+        vec![
+            Message::system(
+                "You generate privacy-preserving subagent context. Return one JSON object only.",
+            ),
+            Message::user(&prompt),
+        ],
+    )
+    .await;
+    generated
+        .map(|raw| parse_llm_context(&raw, fallback.clone()))
+        .unwrap_or(fallback)
 }
 
 async fn generate_agent_plan(
@@ -17012,18 +18795,17 @@ async fn generate_agent_plan(
         mode_name.to_string()
     };
     let required_paths = collect_required_workspace_paths_from_user_content(user_content);
-    let conversation = build_conversation(messages, Some(system_prompt_for_mode(mode).as_str()));
-    let transcript = conversation
-        .iter()
-        .rev()
-        .take(8)
-        .rev()
-        .map(|message| format!("{}: {}", message.role, message.content))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let context = build_subagent_context_for_call(
+        provider.clone(),
+        runtime,
+        messages,
+        user_content,
+    )
+    .await;
+    let delegated_context = context.to_prompt();
     let planner_prompt = match language {
         TurnLanguage::Zh => format!(
-            "你是面向代码与科研 IDE 的规划子代理。只返回 JSON。\n\n任务模式：{mode_name}\n研究轮廓提示：{workflow_profile}\n用户请求：\n{user_content}\n\n最近对话：\n{transcript}\n\n明确要求的工作区路径：\n{required_paths}\n\n输出 schema：\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\n规则：\n- 该 IDE 仅面向计算机科学研究与工程，不要设计生物、化学、医学、湿实验等非计算机科学工作流。\n- 如果用户请求跨出计算机科学范围，要把可执行部分重述为算法、数据、系统、代码、评测、形式化分析或文献综述任务；无法重述的部分在 summary 和 verification 中明确标出范围边界。\n- 如果研究轮廓提示是 classical_ml、deep_learning、systems_evaluation、agent_evaluation、security_analysis、theory 或 literature_review，就优先采用对应的计算机科学评测与验证路径，而不是泛化的“做实验”表述。\n- 保持 2-6 个步骤。\n- 只要任务可能编辑文件或运行代码，就优先安排 reviewer 和 verifier。\n- 如果只是轻量对话，计划要短。\n- 研究计划必须显式覆盖：问题/指标与停止条件；官方数据集或 benchmark 发现和固定 manifest；environment manifest 与精确复现命令；seed/split；baseline 与当前变体；真实运行；失败记录、修复与复测；metrics/误差分析；最终 verifier。把这些合并到 4-6 个可执行步骤，并逐项写入 verification。\n- 如果用户明确给出了工作区路径，必须保留在 required_paths 中，并围绕这些精确目标设计步骤和验证。\n- 不要把这些路径替换成别的相似文件或目录。\n- 不要输出 markdown 代码块。",
+            "你是面向代码与科研 IDE 的规划子代理。只返回 JSON。\n\n任务模式：{mode_name}\n研究轮廓提示：{workflow_profile}\n委派上下文（这是完整的信息边界，不得假设还存在其他对话历史）：\n{delegated_context}\n\n明确要求的工作区路径：\n{required_paths}\n\n输出 schema：\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\n规则：\n- 该 IDE 仅面向计算机科学研究与工程，不要设计生物、化学、医学、湿实验等非计算机科学工作流。\n- 如果用户请求跨出计算机科学范围，要把可执行部分重述为算法、数据、系统、代码、评测、形式化分析或文献综述任务；无法重述的部分在 summary 和 verification 中明确标出范围边界。\n- 如果研究轮廓提示是 classical_ml、deep_learning、systems_evaluation、agent_evaluation、security_analysis、theory 或 literature_review，就优先采用对应的计算机科学评测与验证路径，而不是泛化的“做实验”表述。\n- 保持 2-6 个步骤。\n- 只要任务可能编辑文件或运行代码，就优先安排 reviewer 和 verifier。\n- 如果只是轻量对话，计划要短。\n- 研究计划必须显式覆盖：问题/指标与停止条件；官方数据集或 benchmark 发现和固定 manifest；environment manifest 与精确复现命令；seed/split；baseline 与当前变体；真实运行；失败记录、修复与复测；metrics/误差分析；最终 verifier。把这些合并到 4-6 个可执行步骤，并逐项写入 verification。\n- 如果用户明确给出了工作区路径，必须保留在 required_paths 中，并围绕这些精确目标设计步骤和验证。\n- 不要把这些路径替换成别的相似文件或目录。\n- 不要输出 markdown 代码块。",
             required_paths = if required_paths.is_empty() {
                 "无".to_string()
             } else {
@@ -17031,7 +18813,7 @@ async fn generate_agent_plan(
             }
         ),
         TurnLanguage::En => format!(
-            "You are the planner subagent for a coding and research IDE agent.\nReturn only JSON.\n\nTask mode: {mode_name}\nResearch profile hint: {workflow_profile}\nUser request:\n{user_content}\n\nRecent conversation:\n{transcript}\n\nExplicit required workspace paths:\n{required_paths}\n\nOutput schema:\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\nRules:\n- This IDE is scoped to computer science research and engineering only. Do not plan biology, chemistry, medicine, wet-lab, or other non-computer-science workflows.\n- When a request crosses scope, restate the executable portion as an algorithms, data, systems, code, evaluation, formal-analysis, or literature-review task, and explicitly mark the out-of-scope part in the summary and verification targets.\n- When the research profile hint is classical_ml, deep_learning, systems_evaluation, agent_evaluation, security_analysis, theory, or literature_review, prefer the matching computer-science evaluation workflow instead of a generic experiment template.\n- Keep 2-6 steps.\n- Choose reviewer and verifier delegates whenever the task may edit files or run code.\n- For lightweight chat, keep the plan short.\n- A research plan must explicitly cover: question/metric and stopping criteria; official dataset or benchmark discovery plus a frozen manifest; environment manifest and exact reproduction command; seed/split; baseline and current variant; real execution; retained failure, repair, and re-test evidence; metrics/error analysis; final verifier. Consolidate these into 4-6 executable steps and list each as a verification target.\n- If explicit required workspace paths are listed, keep them in required_paths and build steps and verification around those exact targets.\n- Do not replace required paths with semantically similar files in another directory.\n- No markdown fences.",
+            "You are the planner subagent for a coding and research IDE agent.\nReturn only JSON.\n\nTask mode: {mode_name}\nResearch profile hint: {workflow_profile}\nDelegated context (this is the complete information boundary; do not assume other conversation history):\n{delegated_context}\n\nExplicit required workspace paths:\n{required_paths}\n\nOutput schema:\n{{\"workflow_kind\":\"chat|implementation|research\",\"goal\":\"...\",\"summary\":\"...\",\"steps\":[{{\"title\":\"...\",\"purpose\":\"...\",\"owner\":\"main|planner|reviewer|verifier|repairer\",\"kind\":\"inspect|edit|run|verify|summarize|research\"}}],\"delegates\":[{{\"name\":\"planner|reviewer|verifier|repairer\",\"purpose\":\"...\"}}],\"verification\":[\"...\"],\"repair_strategy\":\"...\",\"required_paths\":[\"...\"]}}\n\nRules:\n- This IDE is scoped to computer science research and engineering only. Do not plan biology, chemistry, medicine, wet-lab, or other non-computer-science workflows.\n- When a request crosses scope, restate the executable portion as an algorithms, data, systems, code, evaluation, formal-analysis, or literature-review task, and explicitly mark the out-of-scope part in the summary and verification targets.\n- When the research profile hint is classical_ml, deep_learning, systems_evaluation, agent_evaluation, security_analysis, theory, or literature_review, prefer the matching computer-science evaluation workflow instead of a generic experiment template.\n- Keep 2-6 steps.\n- Choose reviewer and verifier delegates whenever the task may edit files or run code.\n- For lightweight chat, keep the plan short.\n- A research plan must explicitly cover: question/metric and stopping criteria; official dataset or benchmark discovery plus a frozen manifest; environment manifest and exact reproduction command; seed/split; baseline and current variant; real execution; retained failure, repair, and re-test evidence; metrics/error analysis; final verifier. Consolidate these into 4-6 executable steps and list each as a verification target.\n- If explicit required workspace paths are listed, keep them in required_paths and build steps and verification around those exact targets.\n- Do not replace required paths with semantically similar files in another directory.\n- No markdown fences.",
             required_paths = if required_paths.is_empty() {
                 "none".to_string()
             } else {
@@ -17311,9 +19093,10 @@ async fn review_agent_progress(
             transcript = transcript,
         ),
     };
-    let content = provider_completion(
+    let content = provider_completion_with_model(
         provider,
         runtime,
+        REVIEW_MODEL,
         vec![
             Message::system(&localized_text(
                 language,
@@ -17339,8 +19122,24 @@ async fn run_reviewer_subagent(
     user_content: &str,
     language: TurnLanguage,
 ) -> Result<(AgentCritiqueReport, AgentSubagentRecord)> {
-    let report =
-        review_agent_progress(provider, runtime, plan, messages, user_content, language).await?;
+    let context = build_subagent_context_for_model(
+        provider.clone(),
+        runtime,
+        messages,
+        user_content,
+        REVIEW_MODEL,
+    )
+    .await;
+    let scoped_context = context.to_prompt();
+    let report = review_agent_progress(
+        provider,
+        runtime,
+        plan,
+        &[],
+        &scoped_context,
+        language,
+    )
+    .await?;
     let record = AgentSubagentRecord {
         id: "reviewer".to_string(),
         name: "reviewer".to_string(),
@@ -17349,7 +19148,11 @@ async fn run_reviewer_subagent(
             "检查本轮结果是否完整，以及是否满足用户请求。",
             "Review the turn for completeness and whether the result satisfies the request.",
         ),
-        input: tail_string(user_content.trim(), 280),
+        input: format!(
+            "context_mode={} task={}",
+            context.mode.as_str(),
+            tail_string(&context.task, 240)
+        ),
         output: report.summary.clone(),
         status: report.status.clone(),
         kind: "review".to_string(),
@@ -17900,7 +19703,15 @@ async fn run_specialist_subagent(
     user_content: &str,
     language: TurnLanguage,
 ) -> Result<(AgentCritiqueReport, AgentSubagentRecord)> {
-    let prompt = build_subagent_prompt(&spec, plan, messages, user_content, language);
+    let context = build_subagent_context_for_call(
+        provider.clone(),
+        runtime,
+        messages,
+        user_content,
+    )
+    .await;
+    let scoped_context = context.to_prompt();
+    let prompt = build_subagent_prompt(&spec, plan, &[], &scoped_context, language);
     let content = provider_completion(
         provider,
         runtime,
@@ -17933,7 +19744,11 @@ async fn run_specialist_subagent(
             },
             spec.purpose.to_string(),
         ),
-        input: tail_string(user_content.trim(), 280),
+        input: format!(
+            "context_mode={} task={}",
+            context.mode.as_str(),
+            tail_string(&context.task, 240)
+        ),
         output: report.summary.clone(),
         status: report.status.clone(),
         kind: spec.kind.to_string(),
@@ -18049,6 +19864,7 @@ fn merge_parallel_analysis(
 
 async fn run_parallel_analysis_subagents(
     provider: Arc<dyn LLMProvider>,
+    reviewer_provider: Arc<dyn LLMProvider>,
     runtime: &RuntimeSettings,
     plan: &AgentWorkflowPlan,
     messages: &[MessageBlock],
@@ -18097,7 +19913,7 @@ async fn run_parallel_analysis_subagents(
     let mut join_set = JoinSet::new();
 
     {
-        let provider = provider.clone();
+        let provider = reviewer_provider.clone();
         let runtime = runtime_owned.clone();
         let plan = plan_owned.clone();
         let messages = messages_owned.clone();
@@ -18208,35 +20024,6 @@ async fn stream_provider_turn(
     tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
 ) -> Result<StreamTurnResult> {
     let request_model = request.model.clone();
-    let mut last_connect_error = None;
-    let mut opened_stream = None;
-    for attempt in 0..2 {
-        match tokio::time::timeout(
-            Duration::from_secs(45),
-            provider.chat_stream(request.clone()),
-        )
-        .await
-        {
-            Ok(Ok(stream)) => {
-                opened_stream = Some(stream);
-                break;
-            }
-            Ok(Err(error)) => last_connect_error = Some(error.to_string()),
-            Err(_) => {
-                last_connect_error =
-                    Some("model stream connection timed out after 45 seconds".to_string())
-            }
-        }
-        if attempt == 0 {
-            tokio::time::sleep(Duration::from_millis(750)).await;
-        }
-    }
-    let mut stream = opened_stream.ok_or_else(|| {
-        anyhow!(
-            "failed to open model stream after 2 attempts: {}",
-            last_connect_error.unwrap_or_else(|| "unknown transport error".to_string())
-        )
-    })?;
     let mut raw_text = String::new();
     let mut text = String::new();
     let mut thinking = String::new();
@@ -18246,130 +20033,89 @@ async fn stream_provider_turn(
     let mut tool_calls = None;
     let mut announced_tool_names = BTreeSet::new();
     let mut pseudo_tool_names = Vec::new();
+    let mut last_stream_error = None;
+    let mut stream_completed = false;
+    const MAX_STREAM_ATTEMPTS: usize = 4;
 
-    loop {
-        let next = tokio::time::timeout(Duration::from_secs(120), stream.next())
-            .await
-            .map_err(|_| anyhow!("model stream was idle for 120 seconds"))?;
-        let Some(chunk_result) = next else { break };
-        let chunk = chunk_result?;
-        if let Some(usage) = chunk.usage.as_ref() {
-            let context_window = model_context_window(&request_model);
-            update_runtime_context_usage(
-                state,
-                session_id,
-                usage.prompt_tokens,
-                context_window,
-                false,
-                &request_model,
-            );
-            let _ = tx.send(StreamEnvelope {
-                r#type: "activity".to_string(),
-                session_id: Some(session_id.to_string()),
-                messages: None,
-                delta: None,
-                thinking_delta: None,
-                error: None,
-                activity: Some(workflow_activity_event(
-                    "context_usage",
-                    Some(format!("{}", usage.prompt_tokens)),
-                    Some("context".to_string()),
-                    Some("complete".to_string()),
-                    Some(format!("{}|{}", context_window, request_model)),
-                    Some("main".to_string()),
-                )),
-                tool: None,
-                permission: None,
-                edited_files: None,
-                research: None,
-                subagents: None,
-                verifier: None,
-                auto_skills: None,
-            });
-        }
-        if !chunk.content.is_empty() {
-            raw_text = merge_stream_text(&raw_text, &chunk.content);
-            let sanitized_text =
-                stream_visible_workspace_text(&raw_text, has_workspace_edits, mode, language);
-            if sanitized_text != text {
-                text = sanitized_text;
-                let current_text = strip_emoji(&text);
-                if let Ok(mut sessions) = lock_stream_runtime(state) {
-                    if let Some(session) = sessions.get_mut(session_id) {
-                        session.partial_text =
-                            combine_assistant_segments(visible_assistant_prefix, &current_text);
-                    }
-                }
-                let combined = combine_assistant_segments(visible_assistant_prefix, &current_text);
-                let delta = if combined.starts_with(&emitted_combined) {
-                    combined[emitted_combined.len()..].to_string()
-                } else {
-                    current_text.clone()
-                };
-                emitted_combined = combined;
-                if !delta.is_empty() {
-                    let _ = tx.send(StreamEnvelope {
-                        r#type: "assistant_delta".to_string(),
-                        session_id: Some(session_id.to_string()),
-                        messages: None,
-                        delta: Some(delta),
-                        thinking_delta: None,
-                        error: None,
-                        activity: None,
-                        tool: None,
-                        permission: None,
-                        edited_files: None,
-                        research: None,
-                        subagents: None,
-                        verifier: None,
-                        auto_skills: None,
-                    });
-                }
-            }
-        }
-        if let Some(next_tool_calls) = chunk.tool_calls.clone() {
-            for call in &next_tool_calls {
-                let name = call
-                    .pointer("/function/name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty());
-                let Some(name) = name else { continue };
-                if !announced_tool_names.insert(name.to_string()) {
+    for attempt in 0..MAX_STREAM_ATTEMPTS {
+        let mut stream = match tokio::time::timeout(
+            Duration::from_secs(60),
+            provider.chat_stream(request.clone()),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => {
+                let error = error.to_string();
+                last_stream_error = Some(error.clone());
+                if attempt + 1 < MAX_STREAM_ATTEMPTS && is_retryable_stream_error(&error) {
+                    emit_stream_retry_activity(tx, state, session_id, attempt + 1, language);
+                    tokio::time::sleep(stream_retry_delay(attempt)).await;
                     continue;
                 }
-                let file_path = call
-                    .pointer("/function/arguments")
-                    .and_then(Value::as_str)
-                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                    .and_then(|args| extract_tool_path(name, &args));
-                let preview = timed_web_tool_event(WebToolEvent {
-                    call_id: call
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|call_id| !call_id.is_empty())
-                        .map(str::to_string)
-                        .unwrap_or_else(|| format!("streaming-{}", name)),
-                    name: name.to_string(),
-                    status: "running".to_string(),
-                    risk: "low".to_string(),
-                    args: None,
-                    result: None,
-                    success: None,
-                    file_path,
-                    updated_at: None,
-                });
-                push_runtime_tool_event(state, session_id, &preview);
+                break;
+            }
+            Err(_) => {
+                last_stream_error =
+                    Some("model stream connection timed out after 60 seconds".to_string());
+                if attempt + 1 < MAX_STREAM_ATTEMPTS {
+                    emit_stream_retry_activity(tx, state, session_id, attempt + 1, language);
+                    tokio::time::sleep(stream_retry_delay(attempt)).await;
+                    continue;
+                }
+                break;
+            }
+        };
+
+        let mut attempt_error = None;
+        let mut attempt_finish_reason = None;
+        let mut attempt_tool_calls = None;
+        let raw_text_before_attempt = raw_text.clone();
+        let thinking_before_attempt = thinking.clone();
+        let mut attempt_raw_text = String::new();
+        let mut attempt_thinking = String::new();
+        loop {
+            let next = match tokio::time::timeout(Duration::from_secs(300), stream.next()).await {
+                Ok(next) => next,
+                Err(_) => {
+                    attempt_error = Some("model stream was idle for 300 seconds".to_string());
+                    break;
+                }
+            };
+            let Some(chunk_result) = next else { break };
+            let chunk = match chunk_result {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    attempt_error = Some(error.to_string());
+                    break;
+                }
+            };
+            if let Some(usage) = chunk.usage.as_ref() {
+                let context_window = model_context_window(&request_model);
+                update_runtime_context_usage(
+                    state,
+                    session_id,
+                    usage.prompt_tokens,
+                    context_window,
+                    false,
+                    &request_model,
+                );
                 let _ = tx.send(StreamEnvelope {
-                    r#type: "tool".to_string(),
+                    r#type: "activity".to_string(),
                     session_id: Some(session_id.to_string()),
                     messages: None,
                     delta: None,
                     thinking_delta: None,
                     error: None,
-                    activity: None,
-                    tool: Some(preview),
+                    activity: Some(workflow_activity_event(
+                        "context_usage",
+                        Some(format!("{}", usage.prompt_tokens)),
+                        Some("context".to_string()),
+                        Some("complete".to_string()),
+                        Some(format!("{}|{}", context_window, request_model)),
+                        Some("main".to_string()),
+                    )),
+                    tool: None,
                     permission: None,
                     edited_files: None,
                     research: None,
@@ -18378,39 +20124,94 @@ async fn stream_provider_turn(
                     auto_skills: None,
                 });
             }
-            tool_calls = Some(next_tool_calls);
-        }
-        if let Some(reason) = chunk.finish_reason.clone() {
-            finish_reason = Some(reason);
-        }
-
-        if let Some(chunk_thinking) = chunk.thinking.as_ref() {
-            let merged_thinking = merge_stream_text(&thinking, chunk_thinking);
-            if merged_thinking != thinking {
-                thinking = merged_thinking;
-                if !suppress_thinking {
+            if !chunk.content.is_empty() {
+                // Provider StreamChunk.content is an SSE delta.  Append it verbatim:
+                // treating equal/overlapping neighboring deltas as snapshots drops
+                // legitimate repeated tokens (for example "ha" + "ha").
+                append_stream_delta(&mut attempt_raw_text, &chunk.content);
+                raw_text = restarted_stream_preview(&raw_text_before_attempt, &attempt_raw_text);
+                let sanitized_text =
+                    stream_visible_workspace_text(&raw_text, has_workspace_edits, mode, language);
+                if sanitized_text != text {
+                    text = sanitized_text;
+                    let current_text = strip_emoji(&text);
                     if let Ok(mut sessions) = lock_stream_runtime(state) {
                         if let Some(session) = sessions.get_mut(session_id) {
-                            session.partial_thinking = thinking.clone();
+                            session.partial_text =
+                                combine_assistant_segments(visible_assistant_prefix, &current_text);
                         }
                     }
+                    let combined =
+                        combine_assistant_segments(visible_assistant_prefix, &current_text);
+                    let delta = if combined.starts_with(&emitted_combined) {
+                        combined[emitted_combined.len()..].to_string()
+                    } else {
+                        String::new()
+                    };
+                    if !delta.is_empty() {
+                        emitted_combined = combined;
+                        let _ = tx.send(StreamEnvelope {
+                            r#type: "assistant_delta".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            messages: None,
+                            delta: Some(delta),
+                            thinking_delta: None,
+                            error: None,
+                            activity: None,
+                            tool: None,
+                            permission: None,
+                            edited_files: None,
+                            research: None,
+                            subagents: None,
+                            verifier: None,
+                            auto_skills: None,
+                        });
+                    }
                 }
-                let delta = if thinking.starts_with(&emitted_thinking) {
-                    thinking[emitted_thinking.len()..].to_string()
-                } else {
-                    thinking.clone()
-                };
-                emitted_thinking = thinking.clone();
-                if !suppress_thinking && !delta.trim().is_empty() {
+            }
+            if let Some(next_tool_calls) = chunk.tool_calls.clone() {
+                for call in &next_tool_calls {
+                    let name = call
+                        .pointer("/function/name")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty());
+                    let Some(name) = name else { continue };
+                    if !announced_tool_names.insert(name.to_string()) {
+                        continue;
+                    }
+                    let file_path = call
+                        .pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                        .and_then(|args| extract_tool_path(name, &args));
+                    let preview = timed_web_tool_event(WebToolEvent {
+                        call_id: call
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|call_id| !call_id.is_empty())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| format!("streaming-{}", name)),
+                        name: name.to_string(),
+                        status: "running".to_string(),
+                        risk: "low".to_string(),
+                        args: None,
+                        result: None,
+                        success: None,
+                        file_path,
+                        updated_at: None,
+                    });
+                    push_runtime_tool_event(state, session_id, &preview);
                     let _ = tx.send(StreamEnvelope {
-                        r#type: "thinking_delta".to_string(),
+                        r#type: "tool".to_string(),
                         session_id: Some(session_id.to_string()),
                         messages: None,
                         delta: None,
-                        thinking_delta: Some(delta),
+                        thinking_delta: None,
                         error: None,
                         activity: None,
-                        tool: None,
+                        tool: Some(preview),
                         permission: None,
                         edited_files: None,
                         research: None,
@@ -18419,11 +20220,111 @@ async fn stream_provider_turn(
                         auto_skills: None,
                     });
                 }
+                attempt_tool_calls = Some(next_tool_calls);
+            }
+            if let Some(reason) = chunk.finish_reason.clone() {
+                attempt_finish_reason = Some(reason);
+            }
+
+            if let Some(chunk_thinking) = chunk.thinking.as_ref() {
+                append_stream_delta(&mut attempt_thinking, chunk_thinking);
+                let merged_thinking =
+                    restarted_stream_preview(&thinking_before_attempt, &attempt_thinking);
+                if merged_thinking != thinking {
+                    thinking = merged_thinking;
+                    if !suppress_thinking {
+                        if let Ok(mut sessions) = lock_stream_runtime(state) {
+                            if let Some(session) = sessions.get_mut(session_id) {
+                                session.partial_thinking = thinking.clone();
+                            }
+                        }
+                    }
+                    let delta = if thinking.starts_with(&emitted_thinking) {
+                        thinking[emitted_thinking.len()..].to_string()
+                    } else {
+                        String::new()
+                    };
+                    if !suppress_thinking && !delta.trim().is_empty() {
+                        emitted_thinking = thinking.clone();
+                        let _ = tx.send(StreamEnvelope {
+                            r#type: "thinking_delta".to_string(),
+                            session_id: Some(session_id.to_string()),
+                            messages: None,
+                            delta: None,
+                            thinking_delta: Some(delta),
+                            error: None,
+                            activity: None,
+                            tool: None,
+                            permission: None,
+                            edited_files: None,
+                            research: None,
+                            subagents: None,
+                            verifier: None,
+                            auto_skills: None,
+                        });
+                    }
+                }
             }
         }
+
+        if validate_stream_finish_reason(attempt_finish_reason.as_deref()).is_ok() {
+            raw_text = attempt_raw_text;
+            text = stream_visible_workspace_text(&raw_text, has_workspace_edits, mode, language);
+            let current_text = strip_emoji(&text);
+            let combined = combine_assistant_segments(visible_assistant_prefix, &current_text);
+            if let Ok(mut sessions) = lock_stream_runtime(state) {
+                if let Some(session) = sessions.get_mut(session_id) {
+                    session.partial_text = combined.clone();
+                }
+            }
+            // Reconcile the completed answer with exactly what the client has seen.
+            // A normal extension remains a delta; a retry that diverged from a failed
+            // attempt is a replace snapshot so stale partial text is not concatenated.
+            if let Some((event_type, event_text)) =
+                stream_completion_event(&emitted_combined, &combined)
+            {
+                let _ = tx.send(StreamEnvelope {
+                    r#type: event_type.to_string(),
+                    session_id: Some(session_id.to_string()),
+                    messages: None,
+                    delta: Some(event_text),
+                    thinking_delta: None,
+                    error: None,
+                    activity: None,
+                    tool: None,
+                    permission: None,
+                    edited_files: None,
+                    research: None,
+                    subagents: None,
+                    verifier: None,
+                    auto_skills: None,
+                });
+            }
+            finish_reason = attempt_finish_reason;
+            tool_calls = attempt_tool_calls;
+            stream_completed = true;
+            break;
+        }
+        if let Err(error) = validate_stream_finish_reason(attempt_finish_reason.as_deref()) {
+            attempt_error.get_or_insert_with(|| error.to_string());
+        }
+        let Some(error) = attempt_error else { break };
+        last_stream_error = Some(error.clone());
+        if attempt + 1 >= MAX_STREAM_ATTEMPTS || !is_retryable_stream_error(&error) {
+            break;
+        }
+        emit_stream_retry_activity(tx, state, session_id, attempt + 1, language);
+        tokio::time::sleep(stream_retry_delay(attempt)).await;
     }
 
-    validate_stream_finish_reason(finish_reason.as_deref())?;
+    if !stream_completed {
+        return Err(anyhow!(
+            "model stream did not recover after {} attempts: {}",
+            MAX_STREAM_ATTEMPTS,
+            last_stream_error
+                .unwrap_or_else(|| "stream ended without a terminal frame".to_string())
+        ));
+    }
 
     if tool_calls.as_ref().is_none_or(|calls| calls.is_empty()) {
         let dsml_tool_calls = extract_dsml_tool_calls(&raw_text);
@@ -18455,6 +20356,104 @@ async fn stream_provider_turn(
         tool_calls,
         pseudo_tool_names,
     })
+}
+
+fn stream_retry_delay(attempt: usize) -> Duration {
+    Duration::from_millis(match attempt {
+        0 => 750,
+        1 => 1_500,
+        _ => 3_000,
+    })
+}
+
+fn restarted_stream_preview(existing: &str, restarted: &str) -> String {
+    if existing.is_empty() || restarted.starts_with(existing) {
+        return restarted.to_string();
+    }
+    if restarted.is_empty() || existing.starts_with(restarted) {
+        return existing.to_string();
+    }
+    existing.to_string()
+}
+
+fn append_stream_delta(existing: &mut String, delta: &str) {
+    existing.push_str(delta);
+}
+
+fn stream_completion_event(emitted: &str, completed: &str) -> Option<(&'static str, String)> {
+    if completed == emitted {
+        return None;
+    }
+    if completed.starts_with(emitted) {
+        return Some(("assistant_delta", completed[emitted.len()..].to_string()));
+    }
+    Some(("assistant_snapshot", completed.to_string()))
+}
+
+fn is_retryable_stream_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    ![
+        "content filter",
+        "content_filter",
+        "authentication",
+        "unauthorized",
+        "forbidden",
+        "invalid api key",
+        "invalid request",
+        "output token limit",
+        "max_tokens",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+fn emit_stream_retry_activity(
+    tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
+    state: &WebAppState,
+    session_id: &str,
+    attempt: usize,
+    language: TurnLanguage,
+) {
+    push_runtime_timeline_event(
+        state,
+        session_id,
+        "transport_retry",
+        localized_text(
+            language,
+            "模型连接短暂中断，正在自动恢复",
+            "Model connection was interrupted; recovering automatically",
+        ),
+        format!("retry={}", attempt),
+        "running",
+        "main",
+    );
+    let _ = tx.send(StreamEnvelope {
+        r#type: "activity".to_string(),
+        session_id: Some(session_id.to_string()),
+        messages: None,
+        delta: None,
+        thinking_delta: None,
+        error: None,
+        activity: Some(workflow_activity_event(
+            "transport_retry",
+            Some(localized_text(
+                language,
+                "模型连接短暂中断，正在自动恢复",
+                "Model connection was interrupted; recovering automatically",
+            )),
+            Some("recover".to_string()),
+            Some("running".to_string()),
+            Some(format!("retry={}", attempt)),
+            Some("main".to_string()),
+        )),
+        tool: None,
+        permission: None,
+        edited_files: None,
+        research: None,
+        subagents: None,
+        verifier: None,
+        auto_skills: None,
+    });
 }
 
 fn sanitize_visible_stream_text(input: &str) -> String {
@@ -18892,8 +20891,16 @@ fn summarize_workspace_turn_for_chat(
 ) -> Option<String> {
     let original = text.trim();
     let write_notice = workspace_write_notice(language);
+    let last_execution_index = recent_blocks.iter().rposition(|block| {
+        matches!(
+            block,
+            MessageBlock::ToolResult { .. } | MessageBlock::Diff { .. }
+        )
+    });
+    let assistant_scan_start = last_execution_index.map_or(0, |index| index + 1);
     let meaningful_assistant_texts = recent_blocks
         .iter()
+        .skip(assistant_scan_start)
         .filter_map(|block| match block {
             MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
                 let cleaned = sanitize_visible_stream_text(content);
@@ -18901,6 +20908,7 @@ fn summarize_workspace_turn_for_chat(
                 if trimmed.is_empty()
                     || trimmed == write_notice.trim()
                     || looks_like_large_inline_code(trimmed)
+                    || looks_like_unfinished_progress_text(trimmed)
                 {
                     None
                 } else {
@@ -19067,11 +21075,32 @@ fn looks_like_unfinished_progress_text(input: &str) -> bool {
         "verifying the ",
     ];
     let chinese_markers = [
+        "\u{8ba9}\u{6211}\u{68c0}\u{67e5}",
+        "\u{8ba9}\u{6211}\u{67e5}\u{770b}",
+        "\u{8ba9}\u{6211}\u{4fee}\u{590d}",
+        "\u{8ba9}\u{6211}\u{8fd0}\u{884c}",
+        "\u{8ba9}\u{6211}\u{7ee7}\u{7eed}",
+        "\u{8ba9}\u{6211}\u{518d}\u{68c0}\u{67e5}",
+        "\u{8ba9}\u{6211}\u{518d}\u{67e5}\u{770b}",
+        "\u{6211}\u{6765}\u{68c0}\u{67e5}",
+        "\u{6211}\u{6765}\u{67e5}\u{770b}",
+        "\u{6211}\u{5c06}\u{68c0}\u{67e5}",
+        "\u{6211}\u{5c06}\u{7ee7}\u{7eed}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{68c0}\u{67e5}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{6df1}\u{5165}\u{9605}\u{8bfb}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{9605}\u{8bfb}",
+        "\u{63a5}\u{4e0b}\u{6765}\u{5206}\u{6790}",
+        "\u{7136}\u{540e}\u{7ee7}\u{7eed}",
         "让我检查",
         "让我查看",
         "让我修复",
         "让我运行",
         "让我继续",
+        "让我再检查",
+        "让我再查看",
+        "让我先获取",
+        "让我先读取",
+        "让我先分析",
         "我来检查",
         "我来查看",
         "我来修复",
@@ -19082,10 +21111,16 @@ fn looks_like_unfinished_progress_text(input: &str) -> bool {
         "我将修复",
         "我将运行",
         "我将继续",
+        "我先获取",
+        "我先读取",
+        "我先分析",
         "现在我来",
         "现在进行",
         "现在运行",
         "接下来检查",
+        "接下来深入阅读",
+        "接下来阅读",
+        "接下来分析",
         "接下来运行",
         "接下来修复",
         "先定位原因",
@@ -19185,6 +21220,39 @@ fn final_turn_has_post_execution_assistant_text(
                 !trimmed.is_empty()
                     && trimmed != write_notice.trim()
                     && !looks_like_unfinished_progress_text(trimmed)
+            }
+            _ => false,
+        })
+}
+
+fn final_turn_has_acceptable_assistant_completion(
+    recent_blocks: &[MessageBlock],
+    language: TurnLanguage,
+) -> bool {
+    let last_execution_index = recent_blocks.iter().rposition(|block| {
+        matches!(
+            block,
+            MessageBlock::ToolResult { .. } | MessageBlock::Diff { .. }
+        )
+    });
+    let start_index = last_execution_index.map_or(0, |index| index + 1);
+    let write_notice = workspace_write_notice(language);
+
+    recent_blocks
+        .iter()
+        .skip(start_index)
+        .any(|block| match block {
+            MessageBlock::Assistant { content } | MessageBlock::AssistantStreaming { content } => {
+                let cleaned = sanitize_visible_stream_text(content);
+                let trimmed = cleaned.trim();
+                !trimmed.is_empty()
+                    && trimmed != write_notice.trim()
+                    && !looks_like_unfinished_progress_text(trimmed)
+                    && !looks_like_tool_payload_dump(trimmed)
+                    && !looks_like_runtime_json_dump(trimmed)
+            }
+            MessageBlock::AssistantChoices { title, options } => {
+                assistant_choices_are_explicit(title, options)
             }
             _ => false,
         })
@@ -20146,16 +22214,14 @@ async fn assistant_tool_definitions(
     state: &WebAppState,
     runtime: &RuntimeSettings,
 ) -> Result<Vec<Value>> {
+    let mcp_tools = state.mcp_client.read().await.tool_definitions();
     let assistant_state = state.assistant.clone();
     let assistant_api_url = if runtime.api_url.trim().is_empty() {
         state.assistant_api_url.clone()
     } else {
         runtime.api_url.clone()
     };
-    let assistant_api_key = runtime
-        .api_key
-        .clone()
-        .or_else(|| state.assistant_api_key.clone());
+    let assistant_api_key = provider_api_key(runtime, state.assistant_api_key.clone());
     let runtime_for_task = runtime.clone();
     let base_security = state.base_security_config.clone();
     let host_base_dir = state.host.base_dir().to_path_buf();
@@ -20190,6 +22256,8 @@ async fn assistant_tool_definitions(
         tools.extend(scientific_infrastructure_tool_definitions());
         tools.push(wan_image_tool_definition());
         tools.push(browser_computer_tool_definition());
+        tools.extend(mcp_tools);
+        tool_governance::enrich_definitions(&mut tools);
         Ok(tools)
     })
     .await
@@ -20220,6 +22288,7 @@ fn project_knowledge_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"workspace_overview","description":"Return one bounded, native, read-only overview of the current workspace: filtered project tree, file-type counts, key manifests, representative source previews, and Git metadata. Use this first when the user asks to analyze or understand the workspace; do not replace it with shell directory enumeration.","parameters":{"type":"object","properties":{"max_depth":{"type":"integer","minimum":1,"maximum":6},"max_files":{"type":"integer","minimum":20,"maximum":800},"preview_files":{"type":"integer","minimum":0,"maximum":12},"preview_chars":{"type":"integer","minimum":200,"maximum":1600}},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"index_workspace","description":"Incrementally parse and index supported local PDF, DOCX, spreadsheet, document, and code files. Unchanged files are reused.","parameters":{"type":"object","properties":{},"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"search_workspace_index","description":"Search the durable local project index before loading many uploaded files or scanning the whole repository.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"kind":{"type":"string","enum":["pdf","docx","spreadsheet","code","document"]}},"required":["query"],"additionalProperties":false}}}),
+        json!({"type":"function","function":{"name":"search_knowledge_base","description":"Search active or stale knowledge-base documents with hybrid lexical and semantic retrieval. Results include source, version, location, structured headings, and freshness; archived and expired material is excluded.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"required":["query"],"additionalProperties":false}}}),
         json!({"type":"function","function":{"name":"enqueue_background_task","description":"Queue a long experiment, training, or batch command with persistent logs and manual crash recovery.","parameters":{"type":"object","properties":{"title":{"type":"string"},"kind":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"},"start":{"type":"boolean"}},"required":["title","command"],"additionalProperties":false}}}),
     ]
 }
@@ -20343,6 +22412,196 @@ fn web_terminal_tool_definitions() -> Vec<Value> {
     ]
 }
 
+fn can_parallelize_readonly_tool_calls(
+    state: &WebAppState,
+    runtime: &RuntimeSettings,
+    tool_calls: &[Value],
+) -> bool {
+    tool_calls.len() > 1
+        && tool_calls.iter().all(|tool_call| {
+            let name = tool_call
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let risk = default_tool_risk_map()
+                .get(name)
+                .cloned()
+                .unwrap_or(RiskLevel::Moderate);
+            tool_governance::parallel_safe_readonly(name)
+                && tool_call_is_allowed(state, runtime, name, &risk)
+        })
+}
+
+async fn execute_parallel_readonly_tool_calls(
+    state: &WebAppState,
+    runtime: &RuntimeSettings,
+    session_id: &str,
+    tool_calls: &[Value],
+    persisted_blocks: &mut Vec<MessageBlock>,
+    tx: &tokio::sync::mpsc::UnboundedSender<StreamEnvelope>,
+    mode: Option<&str>,
+    language: TurnLanguage,
+) -> Result<()> {
+    let existing_tool_count = persisted_blocks
+        .iter()
+        .filter(|block| matches!(block, MessageBlock::ToolCall { .. }))
+        .count();
+    let mut prepared = Vec::new();
+
+    for (index, tool_call) in tool_calls.iter().enumerate() {
+        let name = tool_call
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let args = tool_call
+            .get("function")
+            .and_then(|function| function.get("arguments"))
+            .and_then(Value::as_str)
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .unwrap_or_else(|| json!({}));
+        let args = bind_tool_args_to_workspace(runtime, &normalize_web_tool_args(&name, args));
+        let call_id = tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("tool-{}-{}", existing_tool_count + index + 1, name));
+        let risk = default_tool_risk_map()
+            .get(&name)
+            .cloned()
+            .unwrap_or(RiskLevel::Moderate);
+        let risk_name = risk_level_name(&risk).to_string();
+
+        upsert_tool_call_block(
+            persisted_blocks,
+            &call_id,
+            &name,
+            &args,
+            ToolCallStatus::Executing,
+        );
+        let event = WebToolEvent {
+            call_id: call_id.clone(),
+            name: name.clone(),
+            status: "executing".to_string(),
+            risk: risk_name.clone(),
+            args: Some(args.clone()),
+            result: None,
+            success: None,
+            file_path: extract_tool_path(&name, &args),
+            updated_at: None,
+        };
+        let _ = tx.send(StreamEnvelope {
+            r#type: "tool".to_string(),
+            session_id: Some(session_id.to_string()),
+            messages: None,
+            delta: None,
+            thinking_delta: None,
+            error: None,
+            activity: Some(activity_event(
+                "tool_executing_parallel",
+                Some(localized_string(
+                    language,
+                    format!("并行执行 {}", name),
+                    format!("Running {} in parallel", name),
+                )),
+            )),
+            tool: Some(event.clone()),
+            permission: None,
+            edited_files: None,
+            research: None,
+            subagents: None,
+            verifier: None,
+            auto_skills: None,
+        });
+        push_runtime_tool_event(state, session_id, &event);
+        prepared.push((index, call_id, name, args, risk_name));
+    }
+    sync_stream_runtime_messages(state, session_id, persisted_blocks);
+
+    let mut join_set = JoinSet::new();
+    for (index, call_id, name, args, risk_name) in prepared {
+        let state = state.clone();
+        let runtime = runtime.clone();
+        let session_id = session_id.to_string();
+        join_set.spawn(async move {
+            let validation = tool_governance::validate_arguments(&name, &args)
+                .map_err(|error| anyhow!(error));
+            let result = match validation {
+                Ok(()) => assistant_call_tool(&state, &runtime, &session_id, &call_id, &name, args.clone()).await,
+                Err(error) => Err(error),
+            };
+            (index, call_id, name, args, risk_name, result)
+        });
+    }
+
+    let mut outcomes = Vec::new();
+    while let Some(joined) = join_set.join_next().await {
+        outcomes.push(joined.map_err(|error| anyhow!("parallel read-only tool join failed: {}", error))?);
+    }
+    outcomes.sort_by_key(|outcome| outcome.0);
+    for (_, call_id, name, args, risk_name, result) in outcomes {
+        let (result, success) = match result {
+            Ok(result) => {
+                let success = tool_result_semantically_succeeded(&name, &result, true);
+                (result, success)
+            }
+            Err(error) => (error.to_string(), false),
+        };
+        upsert_tool_call_block(
+            persisted_blocks,
+            &call_id,
+            &name,
+            &args,
+            if success {
+                ToolCallStatus::Complete
+            } else {
+                ToolCallStatus::Failed(tail_string(&result, 240))
+            },
+        );
+        persisted_blocks.push(MessageBlock::ToolResult {
+            call_id: call_id.clone(),
+            result: result.clone(),
+            success,
+        });
+        let event = WebToolEvent {
+            call_id: call_id.clone(),
+            name: name.clone(),
+            status: if success { "complete" } else { "failed" }.to_string(),
+            risk: risk_name,
+            args: Some(args.clone()),
+            result: Some(result.clone()),
+            success: Some(success),
+            file_path: extract_tool_path(&name, &args),
+            updated_at: None,
+        };
+        let _ = tx.send(StreamEnvelope {
+            r#type: "tool".to_string(),
+            session_id: Some(session_id.to_string()),
+            messages: None,
+            delta: None,
+            thinking_delta: None,
+            error: None,
+            activity: Some(activity_event(
+                if success { "tool_complete" } else { "tool_failed" },
+                None,
+            )),
+            tool: Some(event.clone()),
+            permission: None,
+            edited_files: None,
+            research: None,
+            subagents: None,
+            verifier: None,
+            auto_skills: None,
+        });
+        push_runtime_tool_event(state, session_id, &event);
+    }
+    sync_stream_runtime_messages(state, session_id, persisted_blocks);
+    Ok(())
+}
+
 async fn execute_tool_calls(
     state: &WebAppState,
     runtime: &RuntimeSettings,
@@ -20354,6 +22613,38 @@ async fn execute_tool_calls(
     language: TurnLanguage,
     abort_after_first_workspace_edit: bool,
 ) -> Result<()> {
+    let contains_guarded_repeat = tool_calls.iter().any(|tool_call| {
+        let name = tool_call
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let args = tool_call
+            .get("function")
+            .and_then(|function| function.get("arguments"))
+            .and_then(Value::as_str)
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .unwrap_or_else(|| json!({}));
+        let args = bind_tool_args_to_workspace(runtime, &normalize_web_tool_args(name, args));
+        let risk = default_tool_risk_map()
+            .get(name)
+            .cloned()
+            .unwrap_or(RiskLevel::Moderate);
+        repeated_tool_call_guard(persisted_blocks, mode, name, &args, &risk).is_some()
+    });
+    if !contains_guarded_repeat && can_parallelize_readonly_tool_calls(state, runtime, tool_calls) {
+        return execute_parallel_readonly_tool_calls(
+            state,
+            runtime,
+            session_id,
+            tool_calls,
+            persisted_blocks,
+            tx,
+            mode,
+            language,
+        )
+        .await;
+    }
     let existing_tool_count = persisted_blocks
         .iter()
         .filter(|block| matches!(block, MessageBlock::ToolCall { .. }))
@@ -20390,6 +22681,33 @@ async fn execute_tool_calls(
         let risk_name = risk_level_name(&risk).to_string();
         let pending_file_snapshot =
             capture_pending_file_snapshot(state.host.base_dir(), runtime, &name, &args);
+
+        if let Some((success, result)) = repeated_tool_call_guard(
+            persisted_blocks,
+            mode,
+            &name,
+            &args,
+            &risk,
+        ) {
+            upsert_tool_call_block(
+                persisted_blocks,
+                &call_id,
+                &name,
+                &args,
+                if success {
+                    ToolCallStatus::Complete
+                } else {
+                    ToolCallStatus::Denied(result.clone())
+                },
+            );
+            persisted_blocks.push(MessageBlock::ToolResult {
+                call_id: call_id.clone(),
+                result,
+                success,
+            });
+            sync_stream_runtime_messages(state, session_id, persisted_blocks);
+            continue;
+        }
 
         upsert_tool_call_block(
             persisted_blocks,
@@ -21084,6 +23402,110 @@ async fn execute_tool_calls(
     Ok(())
 }
 
+fn repeated_tool_call_guard(
+    messages: &[MessageBlock],
+    mode: Option<&str>,
+    name: &str,
+    args: &Value,
+    risk: &RiskLevel,
+) -> Option<(bool, String)> {
+    let messages = current_turn_messages(messages);
+    let mut matching_call_ids = Vec::new();
+    let mut dangerous_calls = 0usize;
+    let mut state_changed_after_latest_match = false;
+    let mut latest_match_seen = false;
+    for block in messages.iter().rev().take(160) {
+        if !latest_match_seen
+            && matches!(block, MessageBlock::Diff { .. })
+        {
+            state_changed_after_latest_match = true;
+        }
+        let MessageBlock::ToolCall {
+            name: previous_name,
+            args: previous_args,
+            call_id,
+            ..
+        } = block
+        else {
+            continue;
+        };
+        if default_tool_risk_map()
+            .get(previous_name)
+            .is_some_and(|value| value == &RiskLevel::Low)
+        {
+            dangerous_calls = dangerous_calls.saturating_add(1);
+        }
+        if previous_name == name && previous_args == args {
+            latest_match_seen = true;
+            matching_call_ids.push(call_id.clone());
+        }
+    }
+    if matching_call_ids.is_empty()
+        && !(mode.is_some_and(|value| value.eq_ignore_ascii_case("goal"))
+            && risk == &RiskLevel::Low
+            && dangerous_calls >= 3)
+    {
+        return None;
+    }
+
+    let mut successful_result = None;
+    let mut failed_attempts = 0usize;
+    for block in messages.iter().rev().take(200) {
+        let MessageBlock::ToolResult {
+            call_id,
+            result,
+            success,
+        } = block
+        else {
+            continue;
+        };
+        if !matching_call_ids.contains(call_id) {
+            continue;
+        }
+        if *success && successful_result.is_none() {
+            successful_result = Some(result.clone());
+        } else if !*success {
+            failed_attempts = failed_attempts.saturating_add(1);
+        }
+    }
+
+    if is_native_readonly_workspace_tool(name) && !state_changed_after_latest_match {
+        if let Some(result) = successful_result {
+            return Some((
+                true,
+                format!(
+                    "Reused the prior successful result for identical read-only call `{}`; the tool was not executed again.\n{}",
+                    name, result
+                ),
+            ));
+        }
+    }
+    if failed_attempts >= 1 && !state_changed_after_latest_match {
+        return Some((
+            false,
+            format!(
+                "Safety guard blocked an unchanged retry of failed `{}` with identical arguments and no intervening evidence. Change the tool, parameters, or evidence path before retrying.",
+                name
+            ),
+        ));
+    }
+    if mode.is_some_and(|value| value.eq_ignore_ascii_case("goal")) && risk == &RiskLevel::Low {
+        let reason = if !matching_call_ids.is_empty() {
+            format!(
+                "Goal safety boundary blocked a repeated high-risk `{}` call. /goal never broadens authority; use existing evidence or a safer alternative.",
+                name
+            )
+        } else {
+            format!(
+                "Goal safety boundary reached its per-turn budget of 3 high-risk calls before `{}`. Continue with safe/read-only alternatives or report the concrete approval blocker.",
+                name
+            )
+        };
+        return Some((false, reason));
+    }
+    None
+}
+
 fn normalize_web_tool_args(tool_name: &str, args: Value) -> Value {
     let mut object = match args {
         Value::Object(map) => map,
@@ -21214,6 +23636,11 @@ async fn assistant_call_tool(
     name: &str,
     args: Value,
 ) -> Result<String> {
+    tool_governance::validate_arguments(name, &args).map_err(|error| anyhow!(error))?;
+    if name.starts_with("mcp__") {
+        let result = state.mcp_client.read().await.call_tool(name, args).await?;
+        return Ok(serde_json::to_string(&result)?);
+    }
     if name.starts_with("remote_ssh_") {
         return execute_remote_ssh_tool(state, name, &args);
     }
@@ -21278,6 +23705,19 @@ async fn assistant_call_tool(
             args.get("kind").and_then(Value::as_str),
         )?)?);
     }
+    if name == "search_knowledge_base" {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("search_knowledge_base requires query"))?;
+        let workspace =
+            canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)?;
+        return Ok(serde_json::to_string(&knowledge_base::search(
+            &workspace,
+            query,
+            args.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize,
+        )?)?);
+    }
     if name == "enqueue_background_task" {
         let workspace =
             canonical_workspace_dir_from(state.host.base_dir(), &runtime.workspace_root)?;
@@ -21313,10 +23753,7 @@ async fn assistant_call_tool(
     } else {
         runtime.api_url.clone()
     };
-    let assistant_api_key = runtime
-        .api_key
-        .clone()
-        .or_else(|| state.assistant_api_key.clone());
+    let assistant_api_key = provider_api_key(runtime, state.assistant_api_key.clone());
     let runtime_for_task = runtime.clone();
     let base_security = state.base_security_config.clone();
     let tool_name = name.to_string();
@@ -23358,43 +25795,6 @@ fn combine_assistant_segments(existing: &str, next: &str) -> String {
     combined
 }
 
-fn merge_stream_text(existing: &str, incoming: &str) -> String {
-    if existing.is_empty() {
-        return incoming.to_string();
-    }
-    if incoming.is_empty() {
-        return existing.to_string();
-    }
-    if incoming.starts_with(existing) {
-        return incoming.to_string();
-    }
-    if existing.ends_with(incoming) {
-        return existing.to_string();
-    }
-
-    let max_overlap = existing.len().min(incoming.len());
-    let mut overlap_points = incoming
-        .char_indices()
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    overlap_points.push(incoming.len());
-
-    for overlap in overlap_points.into_iter().rev() {
-        if overlap == 0 || overlap > max_overlap {
-            continue;
-        }
-        if existing.ends_with(&incoming[..overlap]) {
-            let mut merged = existing.to_string();
-            merged.push_str(&incoming[overlap..]);
-            return merged;
-        }
-    }
-
-    let mut merged = existing.to_string();
-    merged.push_str(incoming);
-    merged
-}
-
 fn validate_stream_finish_reason(finish_reason: Option<&str>) -> Result<()> {
     let reason = finish_reason
         .map(str::trim)
@@ -23829,7 +26229,7 @@ async fn build_bootstrap(state: &WebAppState) -> Result<WebBootstrap> {
             downloads_root: sandbox_bootstrap.manifest.downloads_root,
             sessions_root: sandbox_bootstrap.manifest.sessions_root,
         },
-        config: runtime_to_payload(&runtime),
+        config: runtime_to_payload(&runtime, state.mcp_client.read().await.snapshot()),
         research: bootstrap_research,
         review,
         git: build_git_payload(state.host.base_dir(), &runtime.workspace_root, false, false)
@@ -29535,8 +31935,11 @@ fn initial_runtime_settings(
     paths: &AppPaths,
 ) -> RuntimeSettings {
     let persisted_state = load_persisted_web_state(persisted_state_path);
-    let model = effective_model_name(config);
-    let providers = effective_providers(config);
+    let model = normalize_primary_model(&effective_model_name(config));
+    let providers = vec![
+        "Qwen Cloud".to_string(),
+        format!("Reviewer ({})", REVIEW_MODEL),
+    ];
     let config_workspace_root = default_workspace_root(config, paths);
     let workspace_root = persisted_state
         .as_ref()
@@ -29549,16 +31952,12 @@ fn initial_runtime_settings(
         .and_then(|state| state.toolchains.clone())
         .map(normalize_toolchain_paths)
         .unwrap_or_else(auto_detect_toolchain_paths);
-    let api_url = persisted_state
-        .as_ref()
-        .and_then(|state| state.api_url.clone())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| assistant_config.api_url.clone());
-    let model = persisted_state
+    let api_url = QWEN_API_URL.to_string();
+    let model = normalize_primary_model(&persisted_state
         .as_ref()
         .and_then(|state| state.model.clone())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or(model);
+        .unwrap_or(model));
     let reasoning_effort = persisted_state
         .as_ref()
         .and_then(|state| state.reasoning_effort.clone())
@@ -29581,6 +31980,48 @@ fn initial_runtime_settings(
         .as_ref()
         .and_then(|state| state.burst_limit)
         .unwrap_or(security.tool_call_burst_limit);
+    let default_subagent_context = SubagentContextConfig::default();
+    let subagent_context = SubagentContextConfig {
+        mode: persisted_state
+            .as_ref()
+            .and_then(|state| state.subagent_context_mode.as_deref())
+            .map(SubagentContextMode::parse)
+            .unwrap_or(default_subagent_context.mode),
+        manual_context: persisted_state
+            .as_ref()
+            .and_then(|state| state.subagent_manual_context.clone())
+            .unwrap_or_default(),
+        recent_turns: persisted_state
+            .as_ref()
+            .and_then(|state| state.subagent_recent_turns)
+            .unwrap_or(default_subagent_context.recent_turns)
+            .clamp(1, 10),
+        privacy_rules: persisted_state
+            .as_ref()
+            .and_then(|state| state.subagent_privacy_rules.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(default_subagent_context.privacy_rules),
+    };
+    let long_task_enabled = persisted_state
+        .as_ref()
+        .and_then(|state| state.long_task_enabled)
+        .unwrap_or(true);
+    let max_autonomous_rounds = persisted_state
+        .as_ref()
+        .and_then(|state| state.max_autonomous_rounds)
+        .unwrap_or(180)
+        .clamp(16, 360);
+    let auto_generate_paper = persisted_state
+        .as_ref()
+        .and_then(|state| state.auto_generate_paper)
+        .unwrap_or(true);
+    let mcp_servers = persisted_state
+        .as_ref()
+        .and_then(|state| state.mcp_servers.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|server| server.normalized().ok())
+        .collect();
     RuntimeSettings {
         api_url,
         model,
@@ -29599,6 +32040,11 @@ fn initial_runtime_settings(
         max_tool_calls_per_minute,
         burst_limit,
         toolchains,
+        subagent_context,
+        long_task_enabled,
+        max_autonomous_rounds,
+        auto_generate_paper,
+        mcp_servers,
     }
 }
 
@@ -29721,6 +32167,14 @@ fn persist_web_state(
         max_tool_calls_per_minute: Some(runtime.max_tool_calls_per_minute),
         burst_limit: Some(runtime.burst_limit),
         toolchains: Some(runtime.toolchains.clone()),
+        subagent_context_mode: Some(runtime.subagent_context.mode.as_str().to_string()),
+        subagent_manual_context: Some(runtime.subagent_context.manual_context.clone()),
+        subagent_recent_turns: Some(runtime.subagent_context.recent_turns),
+        subagent_privacy_rules: Some(runtime.subagent_context.privacy_rules.clone()),
+        long_task_enabled: Some(runtime.long_task_enabled),
+        max_autonomous_rounds: Some(runtime.max_autonomous_rounds),
+        auto_generate_paper: Some(runtime.auto_generate_paper),
+        mcp_servers: Some(runtime.mcp_servers.clone()),
     };
     let content = serde_json::to_string_pretty(&payload)?;
     let tmp_path = state.persisted_state_path.with_extension("json.tmp");
@@ -29729,10 +32183,13 @@ fn persist_web_state(
     Ok(())
 }
 
-fn runtime_to_payload(runtime: &RuntimeSettings) -> WebConfigPayload {
+fn runtime_to_payload(runtime: &RuntimeSettings, mcp: McpSnapshot) -> WebConfigPayload {
     WebConfigPayload {
         api_url: runtime.api_url.clone(),
         model: runtime.model.clone(),
+        review_model: REVIEW_MODEL.to_string(),
+        primary_model_minimum: "qwen3.6".to_string(),
+        primary_model_ids: PRIMARY_MODEL_IDS.iter().map(|model| (*model).to_string()).collect(),
         deep_think: runtime.deep_think,
         reasoning_effort: runtime.reasoning_effort.clone(),
         competition_mode: runtime.competition_mode,
@@ -29745,6 +32202,14 @@ fn runtime_to_payload(runtime: &RuntimeSettings) -> WebConfigPayload {
         auto_approve_tools: runtime.auto_approve_tools,
         max_auto_approve_risk: risk_level_name(&runtime.max_auto_approve_risk).to_string(),
         toolchains: runtime.toolchains.clone(),
+        subagent_context_mode: runtime.subagent_context.mode.as_str().to_string(),
+        subagent_manual_context: runtime.subagent_context.manual_context.clone(),
+        subagent_recent_turns: runtime.subagent_context.recent_turns,
+        subagent_privacy_rules: runtime.subagent_context.privacy_rules.clone(),
+        long_task_enabled: runtime.long_task_enabled,
+        max_autonomous_rounds: runtime.max_autonomous_rounds,
+        auto_generate_paper: runtime.auto_generate_paper,
+        mcp,
     }
 }
 
@@ -29855,21 +32320,56 @@ fn effective_model_name(config: &Config) -> String {
     config.ai.model.clone()
 }
 
-fn effective_providers(config: &Config) -> Vec<String> {
-    if let Ok(provider_manager) = ProviderManager::from_env_file(None) {
-        return provider_manager
-            .providers()
-            .iter()
-            .map(|provider| provider.name.clone())
-            .collect();
-    }
+fn is_allowed_primary_model(model: &str) -> bool {
+    PRIMARY_MODEL_IDS.contains(&model.trim()) && model.trim() != REVIEW_MODEL
+}
 
-    let providers: Vec<String> = config.ai.providers.keys().cloned().collect();
-    if providers.is_empty() {
-        vec!["default".to_string()]
+fn normalize_primary_model(model: &str) -> String {
+    let model = model.trim();
+    if is_allowed_primary_model(model) {
+        model.to_string()
     } else {
-        providers
+        DEFAULT_PRIMARY_MODEL.to_string()
     }
+}
+
+fn validate_primary_model(model: &str) -> Result<String> {
+    let model = model.trim();
+    if model.is_empty() {
+        bail!("主模型不能为空；请选择 Qwen 3.6 或更高版本");
+    }
+    if model == REVIEW_MODEL {
+        bail!("主模型必须与固定审查模型 {} 不同", REVIEW_MODEL);
+    }
+    if !is_allowed_primary_model(model) {
+        bail!(
+            "不支持的主模型 '{}'; 只能选择 Qwen 3.6 或更高版本：{}",
+            model,
+            PRIMARY_MODEL_IDS.join(", ")
+        );
+    }
+    Ok(model.to_string())
+}
+
+fn normalize_mcp_servers(
+    servers: Option<Vec<McpServerDescription>>,
+) -> Result<Option<Vec<McpServerDescription>>> {
+    let Some(servers) = servers else {
+        return Ok(None);
+    };
+    if servers.len() > 32 {
+        bail!("MCP 服务器数量不能超过 32 个");
+    }
+    let mut normalized = Vec::with_capacity(servers.len());
+    let mut ids = HashSet::new();
+    for server in servers {
+        let server = server.normalized()?;
+        if !ids.insert(server.id.clone()) {
+            bail!("MCP 服务器 id 重复：{}", server.id);
+        }
+        normalized.push(server);
+    }
+    Ok(Some(normalized))
 }
 
 fn parse_risk_level(value: &str) -> Result<RiskLevel> {
@@ -29915,6 +32415,24 @@ fn lock_stream_runtime(
         .map_err(|_| anyhow!("stream runtime lock poisoned"))
 }
 
+fn lock_sync_chat_runtime(
+    state: &WebAppState,
+) -> Result<std::sync::MutexGuard<'_, HashMap<String, SyncChatRuntime>>> {
+    state
+        .sync_chat_runtime
+        .lock()
+        .map_err(|_| anyhow!("synchronous chat runtime lock poisoned"))
+}
+
+fn stop_sync_chat_session(state: &WebAppState, session_id: &str) -> Result<bool> {
+    let active = lock_sync_chat_runtime(state)?.remove(session_id);
+    if let Some(active) = active {
+        active.abort.abort();
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 fn resolve_stream_session_id(state: &WebAppState, session_id: Option<String>) -> Result<String> {
     if let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) {
         return Ok(session_id);
@@ -29928,12 +32446,14 @@ fn resolve_stream_session_id(state: &WebAppState, session_id: Option<String>) ->
 }
 
 fn stop_stream_session(state: &WebAppState, session_id: &str) -> Result<()> {
+    let _sync_cancelled = stop_sync_chat_session(state, session_id)?;
     let runtime_settings = {
         let runtime = lock_runtime_settings(state)?;
         runtime.clone()
     };
     let mut runtime = lock_stream_runtime(state)?;
     if let Some(session) = runtime.remove(session_id) {
+        session.cancelled.store(true, Ordering::Release);
         session.terminal_emitted.store(true, Ordering::Release);
         session.worker_abort.abort();
         let event_tx = session.event_tx.clone();
@@ -30415,8 +32935,90 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+const EXPLICIT_DECISION_TITLE: &str = "explicit_decision";
+const EXPLICIT_DECISION_TITLE_V2: &str = "explicit_decision_v2";
+
+fn assistant_choice_option_has_explicit_marker(option: &str) -> bool {
+    let trimmed = option.trim_start();
+    let lowered = trimmed.to_ascii_lowercase();
+    [
+        "方向",
+        "方案",
+        "选项",
+        "路线",
+        "数据集",
+        "语料",
+        "指标",
+        "基线",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+        || [
+            "direction",
+            "approach",
+            "strategy",
+            "option",
+            "dataset",
+            "corpus",
+            "metric",
+            "baseline",
+        ]
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix))
+}
+
+fn assistant_choices_are_explicit(title: &str, options: &[String]) -> bool {
+    if options
+        .iter()
+        .filter(|option| !option.trim().is_empty())
+        .count()
+        < 2
+    {
+        return false;
+    }
+    if title.trim() == EXPLICIT_DECISION_TITLE_V2 {
+        return true;
+    }
+    title.trim() == EXPLICIT_DECISION_TITLE
+        && options
+            .iter()
+            .filter(|option| assistant_choice_option_has_explicit_marker(option))
+            .count()
+            >= 2
+}
+
+fn assistant_choices_as_markdown(options: &[String]) -> String {
+    options
+        .iter()
+        .map(|option| option.trim())
+        .filter(|option| !option.is_empty())
+        .map(|option| format!("- {}", option))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn append_recovered_assistant_choices(rendered: &mut [WebMessage], options: &[String]) -> bool {
+    let recovered = assistant_choices_as_markdown(options);
+    if recovered.is_empty() {
+        return false;
+    }
+    for message in rendered.iter_mut().rev() {
+        if message.kind == "message" && message.role == "user" {
+            break;
+        }
+        if message.kind == "message"
+            && message.role == "assistant"
+            && !message.content.trim().is_empty()
+        {
+            message.content = combine_assistant_segments(&message.content, &recovered);
+            return true;
+        }
+    }
+    false
+}
+
 fn messages_to_web(messages: &[MessageBlock]) -> Vec<WebMessage> {
-    let mut rendered = Vec::new();
+    let mut rendered: Vec<WebMessage> = Vec::new();
     let mut last_user_content: Option<String> = None;
     for message in messages {
         let is_assistant_like = matches!(
@@ -30439,6 +33041,22 @@ fn messages_to_web(messages: &[MessageBlock]) -> Vec<WebMessage> {
         } else {
             Vec::new()
         };
+        if let MessageBlock::AssistantChoices { title, options } = message {
+            if !assistant_choices_are_explicit(title, options) {
+                if append_recovered_assistant_choices(&mut rendered, options) {
+                    continue;
+                }
+                let recovered = assistant_choices_as_markdown(options);
+                if !recovered.is_empty() {
+                    if let Some(web_message) =
+                        message_to_web(&MessageBlock::Assistant { content: recovered }, auto_skills)
+                    {
+                        rendered.push(web_message);
+                    }
+                }
+                continue;
+            }
+        }
         if let Some(web_message) = message_to_web(message, auto_skills) {
             rendered.push(web_message);
         }
@@ -30449,35 +33067,113 @@ fn messages_to_web(messages: &[MessageBlock]) -> Vec<WebMessage> {
     rendered
 }
 
-fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
-    fn contains_any(text: &str, keywords: &[&str]) -> bool {
-        keywords.iter().any(|keyword| text.contains(keyword))
-    }
+fn messages_to_stream_web(messages: &[MessageBlock]) -> Vec<WebMessage> {
+    let tool_names = messages
+        .iter()
+        .filter_map(|block| match block {
+            MessageBlock::ToolCall { name, call_id, .. } => Some((call_id.clone(), name.clone())),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    messages_to_web(messages)
+        .into_iter()
+        .map(|mut message| {
+            if message.kind == "tool_result" {
+                let tool_name = message
+                    .call_id
+                    .as_ref()
+                    .and_then(|call_id| tool_names.get(call_id))
+                    .map(String::as_str)
+                    .unwrap_or("tool");
+                message.content = compact_tool_result_for_request(
+                    tool_name,
+                    &message.content,
+                    message.success.unwrap_or(false),
+                );
+            }
+            // The review API owns full before/after source. Terminal stream
+            // payloads need only the path and line counts for the edit capsule.
+            if message.kind == "diff" {
+                message.before_content = None;
+            }
+            message
+        })
+        .collect()
+}
 
+fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
     fn is_choice_prompt_line(line: &str) -> bool {
         let trimmed = line.trim();
-        trimmed.starts_with("请确认")
-            || trimmed.starts_with("Please confirm")
-            || trimmed.starts_with("如果您同意")
-            || trimmed.starts_with("If you agree")
-            || trimmed.starts_with("正在准备最终消息载荷")
-            || trimmed.starts_with("Preparing final message payload")
+        let lowered = trimmed.to_ascii_lowercase();
+        [
+            "请选择",
+            "请从",
+            "请确认你倾向",
+            "请确认您倾向",
+            "你倾向哪个",
+            "您倾向哪个",
+            "你更倾向",
+            "您更倾向",
+            "需要你选择",
+            "需要您选择",
+            "由你选择",
+            "由您选择",
+        ]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+            || [
+                "please choose",
+                "please select",
+                "please confirm which",
+                "which direction do you prefer",
+                "which direction you prefer",
+                "which option do you prefer",
+                "choose next step",
+                "pick one",
+                "select one",
+                "confirm your choice",
+            ]
+            .iter()
+            .any(|phrase| lowered.contains(phrase))
     }
 
     fn is_alternative_option_line(line: &str) -> bool {
         let trimmed = line.trim();
         trimmed.starts_with("- ")
             || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
             || trimmed.starts_with("• ")
             || trimmed.starts_with("### 方向")
             || trimmed.starts_with("## 方向")
-            || trimmed.starts_with("## 方向 ")
-            || trimmed.starts_with("### 方向 ")
             || trimmed.starts_with("### 方案")
             || trimmed.starts_with("## 方案")
+            || trimmed.starts_with("### 选项")
+            || trimmed.starts_with("## 选项")
             || trimmed.starts_with("### Direction")
             || trimmed.starts_with("## Direction")
-            || trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit()) && trimmed.contains('.')
+            || trimmed.starts_with("### Option")
+            || trimmed.starts_with("## Option")
+            || is_numbered_option_line(trimmed)
+    }
+
+    fn is_explicit_heading_option_line(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("### 方向")
+            || trimmed.starts_with("## 方向")
+            || trimmed.starts_with("### 方案")
+            || trimmed.starts_with("## 方案")
+            || trimmed.starts_with("### 选项")
+            || trimmed.starts_with("## 选项")
+            || trimmed.starts_with("### Direction")
+            || trimmed.starts_with("## Direction")
+            || trimmed.starts_with("### Option")
+            || trimmed.starts_with("## Option")
+    }
+
+    fn is_numbered_option_line(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        let digit_count = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+        digit_count > 0 && trimmed[digit_count..].starts_with('.')
     }
 
     fn clean_choice_option(line: &str) -> String {
@@ -30489,6 +33185,7 @@ fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
                     || ch == '.'
                     || ch == '-'
                     || ch == '*'
+                    || ch == '+'
                     || ch == '•'
                     || ch.is_whitespace()
             })
@@ -30506,169 +33203,60 @@ fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
             || lowered.contains("compare")
     }
 
-    fn is_low_level_execution_choice(text: &str) -> bool {
-        let lowered = text.to_ascii_lowercase();
-        let has_file_target = contains_any(
-            text,
-            &[
-                "文件",
-                "目录",
-                "文件夹",
-                "脚本",
-                "路径",
-                "file",
-                "folder",
-                "directory",
-                "script",
-                "path",
-            ],
-        ) || lowered.contains(".rs")
-            || lowered.contains(".py")
-            || lowered.contains(".js")
-            || lowered.contains(".ts")
-            || lowered.contains(".tsx")
-            || lowered.contains(".jsx")
-            || lowered.contains(".toml")
-            || lowered.contains(".json")
-            || lowered.contains(".yaml")
-            || lowered.contains(".yml")
-            || lowered.contains(".md");
-        let has_action = contains_any(
-            text,
-            &[
-                "创建",
-                "新建",
-                "生成",
-                "改这个",
-                "改动这个",
-                "修改这个",
-                "添加这个",
-                "create",
-                "add",
-                "generate",
-            ],
-        );
-        has_file_target && has_action
-    }
-
-    fn is_high_level_choice_context(text: &str) -> bool {
-        contains_any(
-            text,
-            &[
-                "设计方向",
-                "实现方向",
-                "研究方向",
-                "研究范围",
-                "数据集选择",
-                "语料选择",
-                "评价指标",
-                "基线选择",
-                "资源预算",
-                "隐私约束",
-                "许可约束",
-                "不同的实现方向",
-                "三个不同的实现方向",
-                "倾向的方向",
-                "方案",
-                "思路",
-                "路线",
-                "路径",
-                "架构",
-                "优先实现哪个模块",
-                "先实现哪个模块",
-                "Please confirm which direction",
-                "which direction you prefer",
-                "different implementation direction",
-                "implementation direction",
-                "design direction",
-                "research direction",
-                "research scope",
-                "dataset choice",
-                "corpus choice",
-                "metric choice",
-                "baseline choice",
-                "resource budget",
-                "privacy constraint",
-                "licensing constraint",
-                "architecture",
-                "approach",
-                "strategy",
-            ],
-        )
-    }
-
-    fn is_explicit_strategic_option(text: &str) -> bool {
-        contains_any(
-            text,
-            &[
-                "方向",
-                "方案",
-                "思路",
-                "路线",
-                "路径",
-                "Direction",
-                "Approach",
-                "Strategy",
-                "Option",
-            ],
-        )
-    }
-
     let normalized = text.replace("\r\n", "\n");
-    let lines = normalized
-        .lines()
-        .map(|line| line.trim().to_string())
-        .collect::<Vec<_>>();
-    let high_level_context = is_high_level_choice_context(&normalized);
-    let explicit_choice_prompt = lines.iter().any(|line| is_choice_prompt_line(line))
-        || contains_any(
-            &normalized,
-            &[
-                "which direction do you prefer",
-                "which direction you prefer",
-                "choose next step",
-                "pick one",
-                "select one",
-                "confirm your choice",
-            ],
-        );
-    let strategic_option_marker_count = lines
+    let lines = normalized.lines().map(str::to_string).collect::<Vec<_>>();
+    let prompt_indices = lines
         .iter()
-        .filter(|line| is_alternative_option_line(line) && is_explicit_strategic_option(line))
-        .count();
-
-    if !explicit_choice_prompt && strategic_option_marker_count < 2 {
+        .enumerate()
+        .filter_map(|(index, line)| is_choice_prompt_line(line).then_some(index))
+        .collect::<Vec<_>>();
+    let mut option_blocks: Vec<Vec<usize>> = Vec::new();
+    let mut current_block: Vec<usize> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if is_alternative_option_line(line) {
+            current_block.push(index);
+        } else if !line.trim().is_empty() && !current_block.is_empty() {
+            option_blocks.push(std::mem::take(&mut current_block));
+        }
+    }
+    if !current_block.is_empty() {
+        option_blocks.push(current_block);
+    }
+    let option_indices = option_blocks.into_iter().find(|block| {
+        if block.len() < 2 {
+            return false;
+        }
+        let heading_block = block
+            .iter()
+            .all(|index| is_explicit_heading_option_line(&lines[*index]));
+        if heading_block {
+            return true;
+        }
+        let first_option = block[0];
+        let last_option = *block.last().unwrap_or(&first_option);
+        prompt_indices.iter().any(|prompt_index| {
+            let (start, end) = if *prompt_index < first_option {
+                (*prompt_index + 1, first_option)
+            } else if *prompt_index > last_option {
+                (last_option + 1, *prompt_index)
+            } else {
+                return true;
+            };
+            lines[start..end].iter().all(|line| line.trim().is_empty())
+        })
+    });
+    let Some(option_indices) = option_indices else {
         return AssistantChoicePayload {
             body: normalized,
             choices: None,
         };
-    }
-
-    let mut alternative_options = Vec::new();
-    for line in &lines {
-        if line.is_empty() || is_choice_prompt_line(line) {
-            continue;
-        }
-
-        if is_alternative_option_line(line) {
-            let cleaned = clean_choice_option(line);
-            if cleaned.is_empty() || is_summary_like_choice(&cleaned) {
-                continue;
-            }
-            if ((explicit_choice_prompt && high_level_context)
-                || is_explicit_strategic_option(&cleaned))
-                && !is_low_level_execution_choice(&cleaned)
-            {
-                alternative_options.push(cleaned);
-            }
-        }
-    }
-
-    let mut options = if alternative_options.len() >= 2 {
-        alternative_options
-    } else {
-        Vec::new()
     };
+
+    let mut options = option_indices
+        .iter()
+        .map(|index| clean_choice_option(&lines[*index]))
+        .filter(|option| !option.is_empty() && !is_summary_like_choice(option))
+        .collect::<Vec<_>>();
 
     options.dedup();
 
@@ -30679,29 +33267,18 @@ fn extract_assistant_choice_payload(text: &str) -> AssistantChoicePayload {
         };
     }
 
-    let mut body_lines = Vec::new();
-    for line in &lines {
-        if line.is_empty() {
-            continue;
-        }
-        if is_choice_prompt_line(line) {
-            continue;
-        }
-
-        if is_alternative_option_line(line) {
-            let cleaned = clean_choice_option(line);
-            if options.iter().any(|option| option == &cleaned) {
-                continue;
-            }
-        }
-
-        body_lines.push(line.clone());
-    }
+    let option_index_set = option_indices.into_iter().collect::<HashSet<_>>();
+    let body_lines = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, line)| !option_index_set.contains(index) && !is_choice_prompt_line(line))
+        .map(|(_, line)| line.clone())
+        .collect::<Vec<_>>();
 
     AssistantChoicePayload {
         body: body_lines.join("\n").trim().to_string(),
         choices: Some(WebAssistantChoices {
-            title: "explicit_decision".to_string(),
+            title: EXPLICIT_DECISION_TITLE_V2.to_string(),
             options,
         }),
     }
@@ -30725,10 +33302,10 @@ fn push_assistant_message_blocks(messages: &mut Vec<MessageBlock>, content: impl
             .iter()
             .rev()
             .take(12)
-            .any(|block| matches!(block, MessageBlock::AssistantChoices { .. }));
+            .any(|block| matches!(block, MessageBlock::AssistantChoices { title, options } if assistant_choices_are_explicit(title, options)));
         let total_choices = messages
             .iter()
-            .filter(|block| matches!(block, MessageBlock::AssistantChoices { .. }))
+            .filter(|block| matches!(block, MessageBlock::AssistantChoices { title, options } if assistant_choices_are_explicit(title, options)))
             .count();
         if !choices.options.is_empty() && !recent_choice && total_choices < 2 {
             messages.push(MessageBlock::AssistantChoices {
@@ -30744,7 +33321,7 @@ fn turn_is_waiting_for_research_choice(messages: &[MessageBlock], turn_start: us
         .get(turn_start..)
         .unwrap_or_default()
         .iter()
-        .any(|block| matches!(block, MessageBlock::AssistantChoices { options, .. } if options.len() >= 2))
+        .any(|block| matches!(block, MessageBlock::AssistantChoices { title, options } if assistant_choices_are_explicit(title, options)))
 }
 
 fn message_to_web(message: &MessageBlock, auto_skills: Vec<WebAutoSkill>) -> Option<WebMessage> {
@@ -30794,7 +33371,11 @@ fn message_to_web(message: &MessageBlock, auto_skills: Vec<WebAutoSkill>) -> Opt
         MessageBlock::AssistantChoices { title, options } => Some(WebMessage {
             kind: "message".to_string(),
             role: "assistant".to_string(),
-            content: String::new(),
+            content: if assistant_choices_are_explicit(title, options) {
+                String::new()
+            } else {
+                assistant_choices_as_markdown(options)
+            },
             call_id: None,
             success: None,
             collapsed: None,
@@ -30807,9 +33388,11 @@ fn message_to_web(message: &MessageBlock, auto_skills: Vec<WebAutoSkill>) -> Opt
             before_content: None,
             subagent: None,
             verifier: None,
-            assistant_choices: Some(WebAssistantChoices {
-                title: title.clone(),
-                options: options.clone(),
+            assistant_choices: assistant_choices_are_explicit(title, options).then(|| {
+                WebAssistantChoices {
+                    title: title.clone(),
+                    options: options.clone(),
+                }
             }),
             auto_skills,
         }),
@@ -31043,8 +33626,130 @@ fn internal_error(err: anyhow::Error) -> (StatusCode, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::{ChatResponse, ProviderType, StreamChunk};
+    use futures::stream;
     use serde_json::json;
     use std::net::SocketAddr;
+
+    struct RecordingProvider {
+        model: Arc<Mutex<Option<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMProvider for RecordingProvider {
+        fn provider_type(&self) -> &ProviderType {
+            static PROVIDER: ProviderType = ProviderType::OpenAI;
+            &PROVIDER
+        }
+
+        fn name(&self) -> &str {
+            "recording"
+        }
+
+        fn default_model(&self) -> &str {
+            "recording"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
+            *self.model.lock().unwrap() = Some(request.model.clone());
+            Ok(ChatResponse {
+                content: "{}".to_string(),
+                model: request.model,
+                usage: None,
+                finish_reason: Some("stop".to_string()),
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _request: ChatRequest,
+        ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>>
+        {
+            Ok(Box::pin(stream::empty()))
+        }
+
+        async fn health_check(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn primary_model_policy_rejects_old_and_review_models() {
+        assert!(validate_primary_model("qwen3.6-plus").is_ok());
+        assert!(validate_primary_model("qwen3.7-max").is_ok());
+        assert!(validate_primary_model("qwen3.5-plus").is_err());
+        assert!(validate_primary_model(REVIEW_MODEL).is_err());
+    }
+
+    #[tokio::test]
+    async fn reviewer_completion_always_uses_fixed_model() {
+        let recorded = Arc::new(Mutex::new(None));
+        let provider: Arc<dyn LLMProvider> = Arc::new(RecordingProvider {
+            model: recorded.clone(),
+        });
+        let runtime = test_runtime_settings(".".to_string());
+        provider_completion_with_model(
+            provider,
+            &runtime,
+            REVIEW_MODEL,
+            vec![Message::user("review")],
+        )
+        .await
+        .unwrap();
+        assert_eq!(recorded.lock().unwrap().as_deref(), Some("qwen3-max"));
+    }
+
+    #[tokio::test]
+    async fn reviewer_generated_context_uses_fixed_model() {
+        let recorded = Arc::new(Mutex::new(None));
+        let provider: Arc<dyn LLMProvider> = Arc::new(RecordingProvider {
+            model: recorded.clone(),
+        });
+        let mut runtime = test_runtime_settings(".".to_string());
+        runtime.subagent_context.mode = SubagentContextMode::LlmGenerated;
+        build_subagent_context_for_model(provider, &runtime, &[], "review", REVIEW_MODEL).await;
+        assert_eq!(recorded.lock().unwrap().as_deref(), Some("qwen3-max"));
+    }
+
+    #[test]
+    fn settings_endpoint_rejects_disallowed_primary_model() {
+        let (state, _temp_dir) = test_web_state("settings_model_policy");
+        let config = {
+            let runtime = lock_runtime_settings(&state).unwrap().clone();
+            runtime_to_payload(&runtime, McpSnapshot::default())
+        };
+        let payload = json!({
+            "api_url": config.api_url,
+            "model": "qwen3.5-plus",
+            "deep_think": config.deep_think,
+            "reasoning_effort": config.reasoning_effort,
+            "competition_mode": config.competition_mode,
+            "privacy_mode": config.privacy_mode,
+            "workspace_root": config.workspace_root,
+            "api_key": null,
+            "auto_approve_tools": config.auto_approve_tools,
+            "max_auto_approve_risk": config.max_auto_approve_risk,
+            "max_tool_calls_per_minute": config.max_tool_calls_per_minute,
+            "burst_limit": config.burst_limit,
+            "mcp_servers": []
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let response = runtime.block_on(
+            build_web_router(state, PathBuf::from("frontend")).oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/settings")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            ),
+        ).unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = runtime
+            .block_on(to_bytes(response.into_body(), 64 * 1024))
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Qwen 3.6"));
+    }
 
     fn user(content: &str) -> MessageBlock {
         MessageBlock::User {
@@ -31330,13 +34035,43 @@ mod tests {
     }
 
     #[test]
-    fn agent_mode_always_uses_structured_workflow_including_continue() {
-        assert!(should_run_structured_workflow(
-            Some("agent"),
-            "提高追踪效率，准确率"
-        ));
-        assert!(should_run_structured_workflow(Some("agent"), "继续"));
-        assert!(!should_run_structured_workflow(Some("chat"), "继续"));
+    fn agent_execution_policy_scales_with_scope_and_risk() {
+        assert_eq!(
+            turn_execution_policy(
+                Some("agent"),
+                "Fix GPUFrame move semantics in the existing implementation"
+            ),
+            TurnExecutionPolicy::Direct
+        );
+        assert_eq!(
+            turn_execution_policy(Some("agent"), "Implement a simple code architecture"),
+            TurnExecutionPolicy::Direct
+        );
+        assert_eq!(
+            turn_execution_policy(
+                Some("agent"),
+                "Refactor multiple files across the project and add integration tests"
+            ),
+            TurnExecutionPolicy::Adaptive
+        );
+        assert_eq!(
+            turn_execution_policy(Some("agent"), "Run a security audit and threat model"),
+            TurnExecutionPolicy::Strict
+        );
+        assert_eq!(
+            turn_execution_policy(Some("research"), "compare tracking methods"),
+            TurnExecutionPolicy::Strict
+        );
+        assert!(!should_run_structured_workflow(Some("agent"), "continue"));
+        assert!(!should_run_structured_workflow(Some("chat"), "continue"));
+        assert!(
+            dynamic_turn_round_limit(None, TurnExecutionPolicy::Direct, &test_runtime_settings(".".into()))
+                < dynamic_turn_round_limit(None, TurnExecutionPolicy::Adaptive, &test_runtime_settings(".".into()))
+        );
+        assert!(
+            dynamic_turn_round_limit(None, TurnExecutionPolicy::Adaptive, &test_runtime_settings(".".into()))
+                < dynamic_turn_round_limit(None, TurnExecutionPolicy::Strict, &test_runtime_settings(".".into()))
+        );
     }
 
     #[test]
@@ -31351,6 +34086,72 @@ mod tests {
         let plan = fallback_agent_plan(&messages, "继续", Some("agent"), TurnLanguage::Zh);
         assert!(plan.goal.contains("ByteTrack"));
         assert!(plan.steps.iter().any(|step| step.kind == "verify"));
+    }
+
+    #[test]
+    fn goal_mode_uses_strict_multi_round_execution() {
+        assert_eq!(workflow_mode(Some("goal")), "goal");
+        assert_eq!(
+            turn_execution_policy(Some("goal"), "finish the requested implementation"),
+            TurnExecutionPolicy::Strict
+        );
+        let contract = goal_execution_contract_prompt(TurnLanguage::En);
+        assert!(contract.contains("does not broaden authority"));
+        assert!(contract.contains("Never repeat an identical successful tool+argument call"));
+    }
+
+    #[test]
+    fn repeated_tool_guard_reuses_reads_and_blocks_unchanged_failures() {
+        let args = json!({"path":"src/lib.rs"});
+        let read_messages = vec![
+            user("inspect the file"),
+            MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: args.clone(),
+                call_id: "read-1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "read-1".to_string(),
+                result: "existing content".to_string(),
+                success: true,
+            },
+        ];
+        let reused = repeated_tool_call_guard(
+            &read_messages,
+            Some("goal"),
+            "read_file",
+            &args,
+            &RiskLevel::Safe,
+        )
+        .expect("identical read is reused");
+        assert!(reused.0);
+        assert!(reused.1.contains("not executed again"));
+
+        let mut failed_messages = vec![user("remove the generated file")];
+        for index in 1..=2 {
+            failed_messages.push(MessageBlock::ToolCall {
+                name: "delete_file".to_string(),
+                args: json!({"path":"generated.tmp"}),
+                call_id: format!("delete-{index}"),
+                status: ToolCallStatus::Failed("denied".to_string()),
+            });
+            failed_messages.push(MessageBlock::ToolResult {
+                call_id: format!("delete-{index}"),
+                result: "denied".to_string(),
+                success: false,
+            });
+        }
+        let blocked = repeated_tool_call_guard(
+            &failed_messages,
+            Some("goal"),
+            "delete_file",
+            &json!({"path":"generated.tmp"}),
+            &RiskLevel::Low,
+        )
+        .expect("unchanged failure retry is blocked");
+        assert!(!blocked.0);
+        assert!(blocked.1.contains("unchanged retry"));
     }
 
     #[test]
@@ -31424,10 +34225,129 @@ mod tests {
     }
 
     #[test]
-    fn stream_text_merge_is_idempotent_for_repeated_and_cumulative_chunks() {
-        assert_eq!(merge_stream_text("hello", "hello"), "hello");
-        assert_eq!(merge_stream_text("hello", "hello world"), "hello world");
-        assert_eq!(merge_stream_text("hello wor", "world"), "hello world");
+    fn stream_deltas_preserve_equal_adjacent_chunks() {
+        let mut latin = "ha".to_string();
+        append_stream_delta(&mut latin, "ha");
+        assert_eq!(latin, "haha");
+
+        let mut chinese = "的".to_string();
+        append_stream_delta(&mut chinese, "的");
+        assert_eq!(chinese, "的的");
+    }
+
+    #[test]
+    fn completed_stream_reconciles_extension_and_retry_divergence() {
+        assert_eq!(stream_completion_event("hello", "hello"), None);
+        assert_eq!(
+            stream_completion_event("hello", "hello world"),
+            Some(("assistant_delta", " world".to_string()))
+        );
+        assert_eq!(
+            stream_completion_event("old partial", "new final answer"),
+            Some(("assistant_snapshot", "new final answer".to_string()))
+        );
+    }
+
+    #[test]
+    fn stream_terminal_payload_compacts_read_results_and_diff_bodies() {
+        let large_source = "source line\n".repeat(20_000);
+        let read_result = json!({
+            "data": {"path": "src/tracker/pipeline.cpp", "content": large_source},
+            "operation": "read_file",
+            "status": "success"
+        })
+        .to_string();
+        let messages = vec![
+            MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: json!({"path": "src/tracker/pipeline.cpp"}),
+                call_id: "read-1".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "read-1".to_string(),
+                result: read_result,
+                success: true,
+            },
+            MessageBlock::Diff {
+                diff: FileDiff::compute(
+                    "src/tracker/pipeline.cpp",
+                    &"old\n".repeat(20_000),
+                    &"new\n".repeat(20_000),
+                ),
+            },
+        ];
+
+        let streamed = messages_to_stream_web(&messages);
+        let result = streamed
+            .iter()
+            .find(|message| message.kind == "tool_result")
+            .expect("stream tool result");
+        assert!(result.content.len() < 20_000);
+        let diff = streamed
+            .iter()
+            .find(|message| message.kind == "diff")
+            .expect("stream diff");
+        assert!(diff.before_content.is_none());
+    }
+
+    #[test]
+    fn tool_progress_names_the_file_module_and_dedupes_per_target() {
+        let tracker = tool_progress_narration(
+            TurnLanguage::Zh,
+            "edit_file",
+            "executing",
+            Some("src/tracker/pipeline.cpp"),
+            None,
+        )
+        .expect("tracker progress");
+        let detector = tool_progress_narration(
+            TurnLanguage::Zh,
+            "edit_file",
+            "executing",
+            Some("src/detector/model.cpp"),
+            None,
+        )
+        .expect("detector progress");
+        assert!(tracker.text.contains("tracker"));
+        assert!(tracker.text.contains("现在实现"));
+        assert_ne!(tracker.dedupe_key, detector.dedupe_key);
+    }
+
+    #[test]
+    fn restarted_stream_preview_waits_for_the_replayed_prefix() {
+        assert_eq!(restarted_stream_preview("hello wor", "hello"), "hello wor");
+        assert_eq!(
+            restarted_stream_preview("hello wor", "hello world"),
+            "hello world"
+        );
+        assert_eq!(
+            restarted_stream_preview("old answer", "new answer"),
+            "old answer"
+        );
+    }
+
+    #[test]
+    fn stream_retry_classification_preserves_explicit_terminal_errors() {
+        assert!(is_retryable_stream_error("SSE connection reset by peer"));
+        assert!(is_retryable_stream_error(
+            "model stream was idle for 300 seconds"
+        ));
+        assert!(is_retryable_stream_error(
+            "stream ended unexpectedly before finish_reason"
+        ));
+        assert!(!is_retryable_stream_error(
+            "content_filter blocked the response"
+        ));
+        assert!(!is_retryable_stream_error("401 Unauthorized"));
+        assert!(!is_retryable_stream_error("output token limit reached"));
+    }
+
+    #[test]
+    fn unfinished_chinese_progress_is_not_accepted_as_a_final_answer() {
+        assert!(looks_like_unfinished_progress_text(
+            "让我再检查几个关键文件"
+        ));
     }
 
     #[test]
@@ -31657,6 +34577,53 @@ mod tests {
     }
 
     #[test]
+    fn initial_runtime_settings_restore_long_task_and_paper_policy() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "atlas_long_task_restore_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let base_dir = temp_dir.join("base");
+        let frontend_dir = base_dir.join("frontend");
+        let state_dir = temp_dir.join("state");
+        fs::create_dir_all(&frontend_dir).unwrap();
+        fs::create_dir_all(&state_dir).unwrap();
+        let paths = AppPaths::for_desktop(base_dir, frontend_dir, state_dir);
+        let persisted_state_path = paths.web_runtime_state_path();
+        let persisted = PersistedWebState {
+            long_task_enabled: Some(true),
+            max_autonomous_rounds: Some(240),
+            auto_generate_paper: Some(false),
+            ..PersistedWebState::default()
+        };
+        fs::write(
+            &persisted_state_path,
+            serde_json::to_string_pretty(&persisted).unwrap(),
+        )
+        .unwrap();
+        let assistant_config = AssistantConfig::new_with_runtime(
+            "http://127.0.0.1:11434/v1".to_string(),
+            None,
+            "test-model".to_string(),
+            0.7,
+            4096,
+        );
+        let runtime = initial_runtime_settings(
+            &Config::default(),
+            &SecurityConfig::default(),
+            &assistant_config,
+            &persisted_state_path,
+            &paths,
+        );
+        assert!(runtime.long_task_enabled);
+        assert_eq!(runtime.max_autonomous_rounds, 240);
+        assert!(!runtime.auto_generate_paper);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn runtime_thinking_is_inserted_before_final_assistant_summary() {
         let messages = vec![
             MessageBlock::User {
@@ -31809,6 +34776,173 @@ mod tests {
     }
 
     #[test]
+    fn tool_completion_without_a_post_tool_answer_cannot_finalize() {
+        let blocks = vec![
+            MessageBlock::Assistant {
+                content: "让我先获取工作区的整体结构和代码概览。".to_string(),
+            },
+            MessageBlock::ToolCall {
+                name: "workspace_overview".to_string(),
+                args: json!({"max_depth": 5}),
+                call_id: "overview".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "overview".to_string(),
+                result: r#"{"files":14}"#.to_string(),
+                success: true,
+            },
+            MessageBlock::Assistant {
+                content: "接下来深入阅读几个关键文件，分析架构细节和代码质量。".to_string(),
+            },
+            MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: json!({"path":"CMakeLists.txt"}),
+                call_id: "read".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "read".to_string(),
+                result: "cmake file contents".to_string(),
+                success: true,
+            },
+        ];
+        assert!(looks_like_unfinished_progress_text(
+            "接下来深入阅读几个关键文件，分析架构细节和代码质量。"
+        ));
+        assert!(!final_turn_has_acceptable_assistant_completion(
+            &blocks,
+            TurnLanguage::Zh
+        ));
+        assert!(
+            summarize_workspace_turn_for_chat("", &blocks, Some("chat"), TurnLanguage::Zh)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn substantive_post_tool_answer_satisfies_completion_gate() {
+        let blocks = vec![
+            MessageBlock::ToolResult {
+                call_id: "read".to_string(),
+                result: "workspace evidence".to_string(),
+                success: true,
+            },
+            MessageBlock::Assistant {
+                content: "代码采用分阶段流水线架构，核心风险是头文件中存在重复类型声明，并且构建配置对 CUDA 与 TensorRT 版本耦合较强。".to_string(),
+            },
+        ];
+        assert!(final_turn_has_acceptable_assistant_completion(
+            &blocks,
+            TurnLanguage::Zh
+        ));
+    }
+
+    #[test]
+    fn recent_workspace_analysis_trace_enters_final_answer_mode_and_has_fallback() {
+        let overview = json!({
+            "counts": {
+                "files": 14,
+                "directories": 10,
+                "file_types": {"cpp": 7, "cu": 1, "hpp": 1, "txt": 1}
+            },
+            "manifests": ["CMakeLists.txt", "tests/README.md"],
+            "representative_sources": [
+                {"path": "src/tracker/data_association.cpp"},
+                {"path": "include/tracker/pipeline.hpp"}
+            ],
+            "git": {
+                "branch": "main",
+                "changed_paths": ["?? CMakeLists.txt", "?? include/", "?? src/"]
+            }
+        })
+        .to_string();
+        let mut blocks = vec![
+            MessageBlock::User {
+                content: "分析当前工作区代码".to_string(),
+                branch_id: "main".to_string(),
+            },
+            MessageBlock::Assistant {
+                content: "让我先获取工作区的整体结构和代码概览。".to_string(),
+            },
+            MessageBlock::ToolCall {
+                name: "workspace_overview".to_string(),
+                args: json!({"max_depth": 4}),
+                call_id: "overview".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "overview".to_string(),
+                result: overview,
+                success: true,
+            },
+        ];
+        for (index, path) in [
+            "CMakeLists.txt",
+            "include/tracker/pipeline.hpp",
+            "src/tracker/pipeline.cpp",
+            "src/tracker/tensorrt_detector.cpp",
+            "src/preprocessor/cuda_resize.cu",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let call_id = format!("read-{index}");
+            blocks.push(MessageBlock::Assistant {
+                content: "接下来深入阅读几个关键文件，分析架构细节和代码质量。".to_string(),
+            });
+            blocks.push(MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: json!({"path": path}),
+                call_id: call_id.clone(),
+                status: ToolCallStatus::Complete,
+            });
+            blocks.push(MessageBlock::ToolResult {
+                call_id,
+                result: json!({"data": {"path": path, "content": format!("source evidence for {path}")}}).to_string(),
+                success: true,
+            });
+        }
+
+        let successful = count_successful_readonly_tool_results(&blocks);
+        assert_eq!(successful, 6);
+        assert!(readonly_workspace_evidence_is_sufficient(
+            &blocks, successful
+        ));
+        assert!(!final_turn_has_acceptable_assistant_completion(
+            &blocks,
+            TurnLanguage::Zh
+        ));
+        let fallback = synthesize_readonly_workspace_analysis(&blocks, TurnLanguage::Zh)
+            .expect("real trace should have a deterministic workspace-analysis fallback");
+        assert!(fallback.contains("工作区分析"));
+        assert!(fallback.contains("CMakeLists.txt"));
+        assert!(fallback.contains("14 files / 10 directories"));
+        assert!(!looks_like_unfinished_progress_text(&fallback));
+    }
+
+    #[test]
+    fn stream_failure_is_persisted_as_error_not_successful_assistant_text() {
+        let mut blocks = vec![MessageBlock::ToolResult {
+            call_id: "read".to_string(),
+            result: "workspace evidence".to_string(),
+            success: true,
+        }];
+        append_stream_failure_message(
+            &mut blocks,
+            TurnLanguage::Zh,
+            &missing_final_answer_message(TurnLanguage::Zh),
+        );
+        assert!(
+            matches!(blocks.last(), Some(MessageBlock::Error { content }) if content.starts_with("[completion-gate]"))
+        );
+        assert!(!final_turn_has_acceptable_assistant_completion(
+            &blocks,
+            TurnLanguage::Zh
+        ));
+    }
+
+    #[test]
     fn transport_success_does_not_hide_process_failure() {
         let raw = r#"{"operation":"run_python_file","result":{"exit_code":1,"status":"error","stderr":"Traceback","stdout":"","timed_out":false}}"#;
         let parsed = parse_tool_result_evidence("run_python_file", raw, true);
@@ -31870,14 +35004,12 @@ mod tests {
         let mut messages = vec![user("finish and verify the implementation")];
         let error = round_limit_without_completion_message(TurnLanguage::En, false);
         append_stream_failure_message(&mut messages, TurnLanguage::En, &error);
-        let assistant = messages.iter().rev().find_map(|block| match block {
-            MessageBlock::Assistant { content } => Some(content.as_str()),
+        let failure = messages.iter().rev().find_map(|block| match block {
+            MessageBlock::Error { content } => Some(content.as_str()),
             _ => None,
         });
-        assert_eq!(assistant, Some(error.as_str()));
-        assert!(!assistant
-            .unwrap()
-            .contains("continuing the turn will resume"));
+        assert_eq!(failure, Some(error.as_str()));
+        assert!(!failure.unwrap().contains("continuing the turn will resume"));
     }
 
     #[test]
@@ -31886,7 +35018,13 @@ mod tests {
             "research video tracking methods and verify the report",
             true,
         ));
-        assert!(dynamic_turn_round_limit(None, true) > 100);
+        assert!(
+            dynamic_turn_round_limit(
+                None,
+                TurnExecutionPolicy::Strict,
+                &test_runtime_settings(".".into())
+            ) > 100
+        );
     }
 
     fn test_web_state(name: &str) -> (WebAppState, PathBuf) {
@@ -31949,8 +35087,14 @@ mod tests {
             max_tool_calls_per_minute: 120,
             burst_limit: 12,
             toolchains: BTreeMap::new(),
+            subagent_context: SubagentContextConfig::default(),
+            long_task_enabled: true,
+            max_autonomous_rounds: 180,
+            auto_generate_paper: true,
+            mcp_servers: Vec::new(),
         }
     }
+
 
     #[test]
     fn visualization_http_catalog_and_snapshot_follow_shared_schema() {
@@ -32151,6 +35295,7 @@ mod tests {
                     task_handle,
                     worker_abort,
                     terminal_emitted: Arc::new(AtomicBool::new(false)),
+                    cancelled: Arc::new(AtomicBool::new(false)),
                     event_tx: tx,
                     pending_approvals: HashMap::new(),
                     latest_activity: None,
@@ -32204,6 +35349,33 @@ mod tests {
             _ => false,
         }));
 
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn stop_sync_chat_session_aborts_registered_request() {
+        let (state, temp_dir) = test_web_state("stop_sync_chat");
+        let session_id = ensure_current_session(&state).unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let task = runtime.spawn(async { std::future::pending::<()>().await });
+        let abort = task.abort_handle();
+        lock_sync_chat_runtime(&state)
+            .unwrap()
+            .insert(
+                session_id.clone(),
+                SyncChatRuntime {
+                    call_id: "test-sync-call".to_string(),
+                    abort,
+                },
+            );
+
+        assert!(stop_sync_chat_session(&state, &session_id).unwrap());
+        let outcome = runtime.block_on(task);
+        assert!(outcome.unwrap_err().is_cancelled());
+        assert!(lock_sync_chat_runtime(&state)
+            .unwrap()
+            .get(&session_id)
+            .is_none());
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
@@ -32666,6 +35838,58 @@ mod tests {
     }
 
     #[test]
+    fn ollama_url_normalization_preserves_local_endpoint() {
+        assert_eq!(
+            normalize_ollama_api_url("http://127.0.0.1:11434/v1/chat/completions"),
+            "http://127.0.0.1:11434/api/tags"
+        );
+        assert_eq!(
+            normalize_ollama_api_url("http://localhost:11434"),
+            "http://localhost:11434/api/tags"
+        );
+        assert_eq!(
+            normalize_ollama_api_url("http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434/api/tags"
+        );
+        assert!(is_ollama_api_url("http://127.0.0.1:11434/v1/chat/completions"));
+        assert!(is_ollama_api_url("http://localhost:11434"));
+        assert!(!is_ollama_api_url("https://api.openai.com/v1/chat/completions"));
+    }
+
+    #[tokio::test]
+    async fn ollama_model_discovery_reads_local_service() {
+        let payload = fetch_ollama_models("http://127.0.0.1:11434/api/tags")
+            .await
+            .unwrap();
+        assert!(payload.available, "{:?}", payload.error);
+        assert!(payload.models.iter().any(|model| model.name == "qwen3.5:9b"));
+    }
+
+    #[test]
+    fn ollama_thinking_mode_obeys_the_saved_setting() {
+        let mut runtime = test_runtime_settings(".".to_string());
+        runtime.api_url = "http://127.0.0.1:11434/v1/chat/completions".to_string();
+        runtime.deep_think = true;
+        assert_eq!(provider_thinking_mode(&runtime, true), Some("enabled".to_string()));
+        runtime.deep_think = false;
+        assert_eq!(provider_thinking_mode(&runtime, false), Some("disabled".to_string()));
+    }
+
+    #[test]
+    fn switching_through_ollama_preserves_cloud_api_key_without_sending_it_locally() {
+        let mut runtime = test_runtime_settings(".".to_string());
+        runtime.api_key = Some("cloud-secret".to_string());
+        runtime.api_url = "http://127.0.0.1:11434/v1/chat/completions".to_string();
+
+        update_provider_api_key(&mut runtime, None);
+        assert_eq!(runtime.api_key.as_deref(), Some("cloud-secret"));
+        assert_eq!(provider_api_key(&runtime, None), None);
+
+        runtime.api_url = "https://example.com/compatible-mode/v1/chat/completions".to_string();
+        assert_eq!(provider_api_key(&runtime, None).as_deref(), Some("cloud-secret"));
+    }
+
+    #[test]
     fn readonly_workspace_analysis_uses_fast_path_in_agent_mode() {
         let content = "分析当前工作区代码";
         assert!(is_readonly_workspace_analysis_request(content));
@@ -33018,6 +36242,145 @@ mod tests {
         }));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_accepts_equivalent_write_tool_recovery_for_same_path() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "atlas_equivalent_write_recovery_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let artifact_rel = "src/gpu_frame.cpp";
+        let artifact_abs = temp_dir.join("src").join("gpu_frame.cpp");
+        fs::create_dir_all(artifact_abs.parent().unwrap()).unwrap();
+        fs::write(&artifact_abs, "GPUFrame(GPUFrame&&) = default;\n").unwrap();
+
+        let runtime = test_runtime_settings(temp_dir.to_string_lossy().to_string());
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "agent".to_string(),
+            goal: "Fix GPUFrame move semantics".to_string(),
+            summary: "Fix GPUFrame move semantics".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Edit GPUFrame".to_string(),
+                purpose: "Implement move semantics".to_string(),
+                owner: "main".to_string(),
+                kind: "edit".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: Vec::new(),
+            repair_strategy: String::new(),
+            required_paths: vec![artifact_rel.to_string()],
+        };
+        let messages = vec![
+            user("Fix GPUFrame move semantics"),
+            MessageBlock::ToolCall {
+                name: "edit_file".to_string(),
+                args: json!({"path": artifact_rel}),
+                call_id: "edit-failed".to_string(),
+                status: ToolCallStatus::Failed("file did not exist yet".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "edit-failed".to_string(),
+                result: json!({"error":"file did not exist yet"}).to_string(),
+                success: false,
+            },
+            MessageBlock::ToolCall {
+                name: "write_file".to_string(),
+                args: json!({"path": artifact_rel, "content":"GPUFrame(GPUFrame&&) = default;"}),
+                call_id: "write-ok".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "write-ok".to_string(),
+                result: json!({"success":true,"path":artifact_rel}).to_string(),
+                success: true,
+            },
+            MessageBlock::Diff {
+                diff: FileDiff::compute(
+                    artifact_rel,
+                    "",
+                    "GPUFrame(GPUFrame&&) = default;\n",
+                ),
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            &runtime.workspace_root,
+            &[],
+            TurnLanguage::En,
+        );
+        assert_eq!(report.status, "pass", "{report:#?}");
+        assert!(report.checks.iter().any(|check| {
+            check.title == "edit_file" && check.status.eq_ignore_ascii_case("skipped")
+        }));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hard_verifier_ignores_unavailable_read_tool_capability_probe() {
+        let plan = AgentWorkflowPlan {
+            workflow_kind: "agent".to_string(),
+            goal: "Inspect GPUFrame".to_string(),
+            summary: "Inspect GPUFrame".to_string(),
+            steps: vec![AgentWorkflowStep {
+                title: "Inspect implementation".to_string(),
+                purpose: "Read the relevant source".to_string(),
+                owner: "main".to_string(),
+                kind: "inspect".to_string(),
+            }],
+            delegates: Vec::new(),
+            verification: Vec::new(),
+            repair_strategy: String::new(),
+            required_paths: Vec::new(),
+        };
+        let path = "src/gpu_frame.cpp";
+        let messages = vec![
+            user("Inspect GPUFrame"),
+            MessageBlock::ToolCall {
+                name: "document_symbols".to_string(),
+                args: json!({"path": path}),
+                call_id: "symbols-unsupported".to_string(),
+                status: ToolCallStatus::Failed("unknown tool".to_string()),
+            },
+            MessageBlock::ToolResult {
+                call_id: "symbols-unsupported".to_string(),
+                result: json!({"error":"unknown tool: document_symbols"}).to_string(),
+                success: false,
+            },
+            MessageBlock::ToolCall {
+                name: "read_file".to_string(),
+                args: json!({"path": path}),
+                call_id: "read-ok".to_string(),
+                status: ToolCallStatus::Complete,
+            },
+            MessageBlock::ToolResult {
+                call_id: "read-ok".to_string(),
+                result: json!({"success":true,"content":"GPUFrame(GPUFrame&&) = default;"}).to_string(),
+                success: true,
+            },
+        ];
+
+        let (report, _, _) = build_hard_verifier_report(
+            &plan,
+            &messages,
+            Path::new("."),
+            ".",
+            &[],
+            TurnLanguage::En,
+        );
+        assert_eq!(report.status, "pass", "{report:#?}");
+        assert!(report.checks.iter().any(|check| {
+            check.title == "document_symbols"
+                && check.status.eq_ignore_ascii_case("skipped")
+        }));
     }
 
     #[test]
@@ -35296,6 +38659,7 @@ mod tests {
 
         let web = message_to_web(&message, Vec::new()).expect("web message");
         let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.title, "explicit_decision_v2");
         assert_eq!(choices.options.len(), 3);
         assert!(choices.options[0].contains("方向一：增强型单流编码器"));
         assert!(choices.options[1].contains("方向二：自回归时序解码器"));
@@ -35310,6 +38674,7 @@ mod tests {
 
         let web = message_to_web(&message, Vec::new()).expect("web message");
         let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.title, "explicit_decision_v2");
         assert_eq!(choices.options.len(), 3);
         assert!(choices.options[0].contains("方向 A：保持 MOT"));
         assert!(choices.options[1].contains("方向 B：完全转向 SOT"));
@@ -35333,7 +38698,7 @@ mod tests {
         }
         match &blocks[1] {
             MessageBlock::AssistantChoices { title, options } => {
-                assert_eq!(title, "explicit_decision");
+                assert_eq!(title, "explicit_decision_v2");
                 assert_eq!(options.len(), 3);
             }
             other => panic!("expected AssistantChoices block, got {:?}", other),
@@ -35361,6 +38726,44 @@ mod tests {
         let web = message_to_web(&message, Vec::new()).expect("web message");
         assert!(web.assistant_choices.is_none());
         assert!(web.content.contains("Architecture"));
+    }
+
+    #[test]
+    fn messages_to_web_recovers_recent_malformed_workspace_analysis_choices() {
+        let analysis = "### 项目用途与整体架构\n完整分析正文。";
+        let messages = vec![
+            MessageBlock::Assistant {
+                content: analysis.to_string(),
+            },
+            MessageBlock::AssistantChoices {
+                title: "explicit_decision".to_string(),
+                options: vec![
+                    "硬件感知优化**：已有代码亮点。".to_string(),
+                    "依赖查找路径硬编码了 Linux 目录。".to_string(),
+                    "修复 CMake 跨平台支持**：建议项。".to_string(),
+                ],
+            },
+        ];
+
+        let rendered = messages_to_web(&messages);
+        assert_eq!(rendered.len(), 1);
+        assert!(rendered[0].content.contains(analysis));
+        assert!(rendered[0].content.contains("硬件感知优化"));
+        assert!(rendered[0].content.contains("依赖查找路径硬编码"));
+        assert!(rendered[0].assistant_choices.is_none());
+    }
+
+    #[test]
+    fn prompted_natural_language_choices_use_trusted_v2_marker() {
+        let message = MessageBlock::Assistant {
+            content: "请选择下一步：\n- 保留现状并仅修复稳定性\n- 重构消息状态机\n- 先增加诊断日志"
+                .to_string(),
+        };
+
+        let web = message_to_web(&message, Vec::new()).expect("web message");
+        let choices = web.assistant_choices.expect("assistant choices");
+        assert_eq!(choices.title, "explicit_decision_v2");
+        assert_eq!(choices.options.len(), 3);
     }
 
     #[test]

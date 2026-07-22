@@ -10,7 +10,7 @@ use std::time::UNIX_EPOCH;
 use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
 const CHUNK_CHARS: usize = 4_000;
 const MAX_INDEX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -280,11 +280,12 @@ fn eligible_entry(entry: &DirEntry) -> bool {
     )
 }
 
-fn supported_kind(path: &Path) -> Option<&'static str> {
+pub fn supported_kind(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     match ext.as_str() {
         "pdf" => Some("pdf"),
         "docx" => Some("docx"),
+        "pptx" => Some("presentation"),
         "xlsx" => Some("spreadsheet"),
         "csv" | "tsv" => Some("spreadsheet"),
         "rs" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx" | "java" | "kt" | "go" | "c"
@@ -297,6 +298,12 @@ fn supported_kind(path: &Path) -> Option<&'static str> {
     }
 }
 
+pub fn parse_document(path: &Path) -> Result<Vec<IndexChunk>> {
+    let kind = supported_kind(path)
+        .ok_or_else(|| anyhow!("unsupported document format: {}", path.display()))?;
+    parse_file(path, kind)
+}
+
 fn parse_file(path: &Path, kind: &str) -> Result<Vec<IndexChunk>> {
     match path
         .extension()
@@ -307,11 +314,40 @@ fn parse_file(path: &Path, kind: &str) -> Result<Vec<IndexChunk>> {
     {
         "pdf" => parse_pdf(path),
         "docx" => parse_docx(path),
+        "pptx" => parse_pptx(path),
         "xlsx" => parse_xlsx(path),
         "csv" => parse_delimited(path, ','),
         "tsv" => parse_delimited(path, '\t'),
         _ => parse_text(path, kind),
     }
+}
+
+fn parse_pptx(path: &Path) -> Result<Vec<IndexChunk>> {
+    let mut archive = ZipArchive::new(File::open(path)?)?;
+    let mut names = Vec::new();
+    for index in 0..archive.len() {
+        let name = archive.by_index(index)?.name().to_string();
+        if name.starts_with("ppt/slides/slide") && name.ends_with(".xml") {
+            names.push(name);
+        }
+    }
+    names.sort_by_key(|name| {
+        name.trim_start_matches("ppt/slides/slide")
+            .trim_end_matches(".xml")
+            .parse::<usize>()
+            .unwrap_or(usize::MAX)
+    });
+    let mut output = Vec::new();
+    for name in names {
+        let mut xml = String::new();
+        archive.by_name(&name)?.read_to_string(&mut xml)?;
+        let text = xml_text(&xml, &["</a:p>", "</a:tr>", "</a:tc>"]);
+        let slide = name
+            .trim_start_matches("ppt/slides/slide")
+            .trim_end_matches(".xml");
+        push_chunks(&mut output, format!("slide {}", slide), &text);
+    }
+    Ok(output)
 }
 
 fn parse_pdf(path: &Path) -> Result<Vec<IndexChunk>> {

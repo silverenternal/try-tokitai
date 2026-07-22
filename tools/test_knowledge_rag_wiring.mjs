@@ -1,0 +1,41 @@
+import fs from "node:fs";
+import assert from "node:assert/strict";
+
+const app = fs.readFileSync("frontend/app.js", "utf8");
+const html = fs.readFileSync("frontend/index.html", "utf8");
+const web = fs.readFileSync("src/web.rs", "utf8");
+const governance = fs.readFileSync("src/tool_governance.rs", "utf8");
+
+assert.match(html, /data-activity-panel="knowledge"/);
+assert.match(html, /id="knowledge-upload-button"/);
+assert.match(html, /id="rag-toggle"/);
+assert.match(html, /id="subagent-context-mode"/);
+assert.match(html, /id="settings-memory-viewer"/);
+assert.match(html, /data-subagent-mode="automatic"/);
+assert.match(html, /id="long-task-enabled"/);
+assert.match(html, /id="max-autonomous-rounds"/);
+assert.match(html, /id="auto-generate-paper"/);
+assert.match(app, /knowledgeBaseUpload: "knowledge_base\.upload"/);
+assert.match(app, /rag_enabled: Boolean\(clientPreferences\.ragEnabled\)/);
+assert.match(app, /subagent_context_mode:/);
+assert.match(app, /hostClient\.knowledge\.govern/);
+assert.match(app, /if \(panel === "knowledge"\)/);
+assert.match(app, /syncSubagentContextControls/);
+assert.match(app, /refreshSettingsMemory/);
+assert.match(app, /max_autonomous_rounds:/);
+assert.match(app, /auto_generate_paper:/);
+assert.match(web, /route\("\/api\/knowledge-base"/);
+assert.match(web, /append_knowledge_base_context_prompt/);
+assert.match(web, /build_subagent_context_for_call/);
+assert.match(web, /execute_parallel_readonly_tool_calls/);
+assert.match(web, /session\.cancelled\.store\(true, Ordering::Release\)/);
+assert.match(web, /session\.worker_abort\.abort\(\)/);
+assert.match(web, /run_chat_request_cancellable/);
+assert.match(web, /stop_sync_chat_session/);
+assert.match(web, /search_knowledge_base/);
+assert.match(web, /runtime\.max_autonomous_rounds/);
+assert.match(web, /if !runtime\.auto_generate_paper/);
+assert.match(governance, /parallel_safe_readonly/);
+assert.match(governance, /x-atlas-governance/);
+
+console.log("Knowledge, RAG, subagent-context, and governance wiring checks passed");

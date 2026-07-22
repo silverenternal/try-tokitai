@@ -667,7 +667,6 @@ fn auto_title(messages: &[MessageBlock]) -> Option<String> {
 fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
     let preferred = messages.iter().rev().find_map(|message| match message {
         MessageBlock::Assistant { content }
-        | MessageBlock::AssistantChoices { title: content, .. }
         | MessageBlock::AssistantStreaming { content }
         | MessageBlock::Error { content }
         | MessageBlock::System { content } => {
@@ -692,8 +691,8 @@ fn auto_summary(messages: &[MessageBlock]) -> Option<String> {
                 compact_message_text(content, 42)
             }
         }
-        MessageBlock::AssistantChoices { title, options } => {
-            let combined = format!("{} {}", title, options.join(" "));
+        MessageBlock::AssistantChoices { options, .. } => {
+            let combined = options.join(" ");
             if is_low_value_summary_text(&combined) {
                 None
             } else {

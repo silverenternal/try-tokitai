@@ -23,6 +23,8 @@ pub mod desktop_host;
 mod domain_prompt;
 pub mod host;
 pub mod image_generation;
+pub mod agent_context;
+pub mod knowledge_base;
 pub mod notebook;
 mod path_resolver;
 pub mod project_index;
@@ -36,6 +38,7 @@ pub mod security;
 pub mod task_queue;
 pub mod text_encoding;
 pub mod toolchain;
+pub mod tool_governance;
 mod tools;
 pub mod visualization;
 // Context is now a separate crate: tokitai-context
